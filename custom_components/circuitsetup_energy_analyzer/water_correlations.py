@@ -46,6 +46,8 @@ class FlowCorrelationInput:
     threshold_minutes: float
     expects_water_flow: bool
     comparable_window_count: int
+    mapped_appliance_runtime_minutes: float = 0.0
+    flow_source_configured: bool = True
 
 
 def evaluate_rain_pump_correlation(inputs: RainPumpCorrelationInput) -> dict[str, Any]:
@@ -144,6 +146,24 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
     threshold_minutes = _round_minutes(inputs.threshold_minutes)
     comparable_window_count = max(int(inputs.comparable_window_count), 0)
     mapped_appliance_count = max(int(inputs.mapped_appliance_count), 0)
+    mapped_appliance_runtime = _round_minutes(
+        inputs.mapped_appliance_runtime_minutes
+    )
+
+    if not inputs.flow_source_configured:
+        return _flow_result(
+            inputs,
+            status="unconfigured",
+            flow_active_minutes=flow_active,
+            appliance_runtime_minutes=appliance_runtime,
+            recent_related_runtime_minutes=recent_related_runtime,
+            mismatch_minutes=0.0,
+            mapped_appliance_count=mapped_appliance_count,
+            mapped_appliance_runtime_minutes=mapped_appliance_runtime,
+            recent_flow_explains_activity=False,
+            friendly_summary="No water-flow sensor is configured for this appliance.",
+            confidence=0.3,
+        )
 
     if profile not in SUPPORTED_FLOW_PROFILES or not inputs.expects_water_flow:
         return _flow_result(
@@ -153,9 +173,17 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
             appliance_runtime_minutes=appliance_runtime,
             recent_related_runtime_minutes=recent_related_runtime,
             mismatch_minutes=_round_minutes(
-                max(flow_active - (appliance_runtime + recent_related_runtime), 0.0)
+                max(
+                    flow_active
+                    - (
+                        max(appliance_runtime, mapped_appliance_runtime)
+                        + recent_related_runtime
+                    ),
+                    0.0,
+                )
             ),
             mapped_appliance_count=mapped_appliance_count,
+            mapped_appliance_runtime_minutes=mapped_appliance_runtime,
             recent_flow_explains_activity=False,
             friendly_summary=_generic_flow_summary(flow_active, profile),
             confidence=0.3,
@@ -169,9 +197,17 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
             appliance_runtime_minutes=appliance_runtime,
             recent_related_runtime_minutes=recent_related_runtime,
             mismatch_minutes=_round_minutes(
-                max(flow_active - (appliance_runtime + recent_related_runtime), 0.0)
+                max(
+                    flow_active
+                    - (
+                        max(appliance_runtime, mapped_appliance_runtime)
+                        + recent_related_runtime
+                    ),
+                    0.0,
+                )
             ),
             mapped_appliance_count=mapped_appliance_count,
+            mapped_appliance_runtime_minutes=mapped_appliance_runtime,
             recent_flow_explains_activity=False,
             friendly_summary=_generic_flow_summary(flow_active, profile),
             confidence=0.35,
@@ -184,7 +220,14 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
         threshold_minutes=threshold_minutes,
     )
     mismatch_minutes = _round_minutes(
-        max(flow_active - (appliance_runtime + recent_related_runtime), 0.0)
+        max(
+            flow_active
+            - (
+                max(appliance_runtime, mapped_appliance_runtime)
+                + recent_related_runtime
+            ),
+            0.0,
+        )
     )
     load_without_flow_minutes = _round_minutes(
         max(appliance_runtime - (flow_active + recent_related_runtime), 0.0)
@@ -193,8 +236,7 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
 
     if (
         flow_active >= threshold_minutes
-        and appliance_runtime <= 0.0
-        and recent_related_runtime <= 0.0
+        and mapped_appliance_runtime <= 0.0
     ):
         status = "possible_flow_without_load"
     elif (
@@ -243,6 +285,7 @@ def evaluate_flow_correlation(inputs: FlowCorrelationInput) -> dict[str, Any]:
         recent_related_runtime_minutes=recent_related_runtime,
         mismatch_minutes=mismatch_minutes,
         mapped_appliance_count=mapped_appliance_count,
+        mapped_appliance_runtime_minutes=mapped_appliance_runtime,
         recent_flow_explains_activity=recent_flow_explains_activity,
         friendly_summary=friendly_summary,
         confidence=confidence,
@@ -296,6 +339,7 @@ def _flow_result(
     recent_related_runtime_minutes: float,
     mismatch_minutes: float,
     mapped_appliance_count: int,
+    mapped_appliance_runtime_minutes: float,
     recent_flow_explains_activity: bool,
     friendly_summary: str,
     confidence: float,
@@ -312,6 +356,9 @@ def _flow_result(
         "mismatch_minutes": _round_minutes(mismatch_minutes),
         "comparable_window_count": inputs.comparable_window_count,
         "mapped_appliance_count": mapped_appliance_count,
+        "mapped_appliance_runtime_minutes": _round_minutes(
+            mapped_appliance_runtime_minutes
+        ),
         "recent_flow_explains_activity": bool(recent_flow_explains_activity),
         "friendly_summary": friendly_summary,
         "confidence": round(float(confidence), 2),

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 from typing import Any
 
 from ..const import (
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -20,7 +21,8 @@ from ..const import (
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
 )
-from ..context_sources import flow_entities_for_settings
+from ..context_sources import flow_entities_for_settings, strings_from_any
+from ..contextual_baseline import rain_context
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
 from ..water_correlations import (
@@ -277,6 +279,30 @@ class EnvironmentalContextManager:
         rain_intensity_unit = coordinator.context_builder.entity_unit_of_measurement(
             rain_intensity_entity
         )
+        response_window_minutes = max(
+            int(
+                advanced_settings.get(
+                    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+                    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
+                )
+            ),
+            0,
+        )
+        (
+            effective_rain_active,
+            rain_response_active,
+            rain_last_active_at,
+            rain_response_expires_at,
+        ) = self._rain_response_context(
+            config.circuit_id,
+            now,
+            rain_entity,
+            rain_intensity_entity,
+            rain_active,
+            rain_intensity,
+            rain_intensity_unit,
+            response_window_minutes,
+        )
         compressor_context = self.hvac_compressor_context()
         runtime_minutes = self.runtime_minutes_for_circuit(config.circuit_id)
         baseline = self.dry_weather_pump_baseline(config.circuit_id, now)
@@ -287,7 +313,7 @@ class EnvironmentalContextManager:
                 pump_runtime_minutes=runtime_minutes,
                 dry_baseline_minutes=baseline["dry_baseline_minutes"],
                 comparable_window_count=baseline["comparable_window_count"],
-                rain_active=rain_active,
+                rain_active=effective_rain_active,
                 rain_intensity_per_hour=rain_intensity,
                 rain_intensity_unit=rain_intensity_unit,
                 compressor_runtime_minutes=compressor_context["runtime_minutes"],
@@ -307,11 +333,13 @@ class EnvironmentalContextManager:
         evidence["rain_intensity_entity"] = rain_intensity_entity
         evidence["rain_intensity_per_hour"] = rain_intensity
         evidence["rain_intensity_unit"] = rain_intensity_unit
-        evidence["rain_response_window_minutes"] = int(
-            advanced_settings.get(
-                CONF_RAIN_RESPONSE_WINDOW_MINUTES,
-                DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
-            )
+        evidence["rain_response_window_minutes"] = response_window_minutes
+        evidence["rain_response_active"] = rain_response_active
+        evidence["rain_last_active_at"] = _isoformat_or_none(
+            rain_last_active_at
+        )
+        evidence["rain_response_expires_at"] = _isoformat_or_none(
+            rain_response_expires_at
         )
         evidence["hvac_compressor_runtime_minutes"] = compressor_context[
             "runtime_minutes"
@@ -321,6 +349,86 @@ class EnvironmentalContextManager:
         ]
         evidence["hvac_compressor_circuits"] = compressor_context["circuit_ids"]
         return evidence
+
+    def _rain_response_context(
+        self,
+        circuit_id: str,
+        now: datetime,
+        rain_entity: str,
+        rain_intensity_entity: str,
+        rain_active: bool | None,
+        rain_intensity: float | None,
+        rain_intensity_unit: str | None,
+        response_window_minutes: int,
+    ) -> tuple[bool | None, bool, datetime | None, datetime | None]:
+        rain_info = rain_context(
+            rain_active,
+            rain_intensity,
+            unit=rain_intensity_unit,
+        )
+        current_rain = rain_info.state in {"raining", "heavy_rain"}
+        confirmed_dry = rain_info.state == "dry"
+        previous = self._coordinator.state.rain_pump_context_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        previous_was_current_rain = (
+            str(previous.get("rain_state") or "")
+            in {"raining", "heavy_rain"}
+            and not bool(previous.get("rain_response_active"))
+        )
+        rain_stopped_at = self._latest_context_state_change(
+            rain_entity,
+            rain_intensity_entity,
+        )
+        last_active_at = (
+            now
+            if current_rain
+            else rain_stopped_at
+            if (
+                previous_was_current_rain
+                and confirmed_dry
+                and rain_stopped_at is not None
+            )
+            else _datetime_or_none(previous.get("rain_last_active_at"))
+        )
+        expires_at = (
+            last_active_at + timedelta(minutes=response_window_minutes)
+            if last_active_at is not None
+            else None
+        )
+        rain_response_active = bool(
+            not current_rain
+            and confirmed_dry
+            and expires_at is not None
+            and now <= expires_at
+        )
+        return (
+            True if current_rain or rain_response_active else rain_active,
+            rain_response_active,
+            last_active_at,
+            expires_at,
+        )
+
+    def _latest_context_state_change(
+        self,
+        *entity_ids: str,
+    ) -> datetime | None:
+        changes = [
+            _datetime_or_none(getattr(raw_state, "last_changed", None))
+            for entity_id in entity_ids
+            if entity_id
+            and (
+                raw_state := self._coordinator.context_builder.raw_state_for_entity(
+                    entity_id
+                )
+            )
+            is not None
+        ]
+        return max(
+            (changed for changed in changes if changed is not None),
+            default=None,
+        )
 
     def water_flow_context_evidence(
         self,
@@ -344,8 +452,15 @@ class EnvironmentalContextManager:
             flow_entities,
             now,
         )
-        appliance_runtime_minutes = self.runtime_minutes_for_circuit(
+        appliance_runtime_minutes = self.active_runtime_minutes_for_circuit(
             config.circuit_id
+        )
+        mapped_appliance_count, mapped_appliance_runtime_minutes = (
+            self.mapped_water_appliance_context(
+                config,
+                advanced_settings,
+                flow_entities,
+            )
         )
         recent_related_runtime_minutes = (
             coordinator.context_builder.recent_flow_context_minutes(
@@ -369,19 +484,19 @@ class EnvironmentalContextManager:
                 flow_active_minutes=flow_active_minutes,
                 appliance_runtime_minutes=appliance_runtime_minutes,
                 recent_related_runtime_minutes=recent_related_runtime_minutes,
-                mapped_appliance_count=self.mapped_water_appliance_count(
-                    flow_entities
-                ),
+                mapped_appliance_count=mapped_appliance_count,
+                mapped_appliance_runtime_minutes=mapped_appliance_runtime_minutes,
                 threshold_minutes=threshold_minutes,
                 expects_water_flow=bool(
                     advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)
                 ),
                 comparable_window_count=history_count,
+                flow_source_configured=bool(flow_entities),
             )
         )
         evidence["flow_sensor_entities"] = list(flow_entities)
         evidence["flow_sensor_active"] = any(
-            coordinator.context_builder.binary_entity_active(entity_id) is True
+            coordinator.context_builder.flow_entity_active(entity_id) is True
             for entity_id in flow_entities
         )
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
@@ -394,6 +509,18 @@ class EnvironmentalContextManager:
                 0.0,
             )
             / 60.0,
+            3,
+        )
+
+    def active_runtime_minutes_for_circuit(self, circuit_id: str) -> float:
+        evidence = self._coordinator.state.run_cycle_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if not isinstance(evidence, Mapping) or evidence.get("status") != "running":
+            return 0.0
+        return round(
+            float(evidence.get("active_cycle_seconds", 0.0)) / 60.0,
             3,
         )
 
@@ -459,14 +586,55 @@ class EnvironmentalContextManager:
             "comparable_window_count": len(dry_samples),
         }
 
-    def mapped_water_appliance_count(self, flow_entities: Iterable[str]) -> int:
-        if not tuple(flow_entities):
-            return 0
+    def mapped_water_appliance_context(
+        self,
+        current_config: CircuitConfig,
+        current_settings: Mapping[str, Any],
+        flow_entities: Iterable[str],
+    ) -> tuple[int, float]:
+        source_entities = set(flow_entities)
+        if not source_entities:
+            return 0, 0.0
+        if strings_from_any(
+            current_settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
+        ):
+            return 1, self.active_runtime_minutes_for_circuit(
+                current_config.circuit_id
+            )
         count = 0
+        runtime_minutes = 0.0
         for config in self._coordinator.circuit_configs:
-            if config.appliance_profile in FLOW_WATER_CONTEXT_PROFILES:
-                count += 1
-        return count
+            if config.appliance_profile not in FLOW_WATER_CONTEXT_PROFILES:
+                continue
+            settings_controller = self._coordinator.settings_controller
+            settings = settings_controller.advanced_settings_for_circuit(
+                config.circuit_id
+            )
+            flow_correlation_enabled = bool(
+                settings.get(
+                    CONF_WATER_FLOW_CORRELATION_ENABLED,
+                    DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+                )
+            )
+            expects_water_flow = bool(
+                settings.get(CONF_EXPECTS_WATER_FLOW, True)
+            )
+            if not flow_correlation_enabled or not expects_water_flow:
+                continue
+            if strings_from_any(settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)):
+                continue
+            configured_entities = flow_entities_for_settings(
+                self._coordinator.entry_data,
+                self._coordinator.options,
+                settings,
+            )
+            if not source_entities.intersection(configured_entities):
+                continue
+            count += 1
+            runtime_minutes += self.active_runtime_minutes_for_circuit(
+                config.circuit_id
+            )
+        return count, round(runtime_minutes, 3)
 
     def append_water_context_history(
         self,
@@ -629,6 +797,10 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _isoformat_or_none(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
