@@ -23,6 +23,13 @@ def test_effective_electricity_rate_prefers_opower_then_fallback() -> None:
     assert effective_electricity_rate({}, 0.19) == 0.19
 
 
+def test_effective_electricity_rate_rejects_conflicting_utility_rates() -> None:
+    assert effective_electricity_rate(
+        {"main_panel": 0.25, "garage_panel": 0.31},
+        0.19,
+    ) == 0.19
+
+
 def test_compare_utility_energy_flags_mismatch_above_tolerance() -> None:
     result = compare_utility_energy(
         settings=UtilityComparisonSettings(

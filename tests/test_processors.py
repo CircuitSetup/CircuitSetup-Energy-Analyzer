@@ -4641,3 +4641,39 @@ async def test_utility_comparison_processor_updates_state_and_returns_alert() ->
         "tolerance_percent": 10.0,
     }
     assert updates[("utility_cost_rate_by_circuit", "mains")] == 0.25
+
+
+def test_utility_rate_uses_matching_entity_usage_not_comparison_statistic(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        utility_comparison as utility_processor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
+        compare_utility_energy,
+    )
+
+    settings = UtilityComparisonSettings(
+        utility_energy_entity="sensor.opower_current_bill_usage",
+        utility_cost_entity="sensor.opower_current_bill_cost",
+        utility_statistic_id="opower:daily_usage",
+        utility_source_type="statistics",
+    )
+    result = compare_utility_energy(
+        settings=settings,
+        utility_kwh=10.0,
+        measured_kwh=10.0,
+        measured_entity_ids=("sensor.panel_import_energy",),
+        comparison_source="explicit_entities",
+        utility_source_type="statistics",
+    )
+
+    updates = utility_processor.utility_comparison_state_updates(
+        "mains",
+        result,
+        utility_cost=30.0,
+        utility_cost_entity=settings.utility_cost_entity,
+        utility_rate_kwh=120.0,
+    )
+    values = {update.path: update.value for update in updates}
+
+    assert values[("utility_cost_rate_by_circuit", "mains")] == 0.25
