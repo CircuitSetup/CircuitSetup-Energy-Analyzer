@@ -529,7 +529,7 @@ Add an outdoor temperature entity during setup or later from **Configure**. Use 
 
 ### Rain and pump correlation
 
-Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares recent pump runtime with the learned dry-weather baseline, current rain state, optional rain intensity, and recent HVAC compressor activity.
+Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares the current day's pump runtime with the learned dry-weather baseline, current rain state or the configured response window after rain stops, optional rain intensity, and the current day's HVAC compressor runtime.
 
 This matters because a sump pump may run more during rain, and it may also run more when an AC compressor is removing humidity and sending condensate to a drain or sump. When both rain and AC activity are present, higher pump activity can be expected instead of automatically becoming a possible issue.
 
