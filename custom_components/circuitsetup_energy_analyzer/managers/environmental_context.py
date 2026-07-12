@@ -372,9 +372,9 @@ class EnvironmentalContextManager:
             circuit_id,
             {},
         )
-        previous_was_current_rain = (
+        previous_waiting_for_dry = (
             str(previous.get("rain_state") or "")
-            in {"raining", "heavy_rain"}
+            in {"raining", "heavy_rain", "ambiguous"}
             and not bool(previous.get("rain_response_active"))
         )
         rain_stopped_at = self._latest_context_state_change(
@@ -386,7 +386,7 @@ class EnvironmentalContextManager:
             if current_rain
             else rain_stopped_at
             if (
-                previous_was_current_rain
+                previous_waiting_for_dry
                 and confirmed_dry
                 and rain_stopped_at is not None
             )
@@ -471,11 +471,15 @@ class EnvironmentalContextManager:
             if appliance_runtime_minutes > 0
             else 0.0
         )
-        history_count = len(
-            coordinator.store_data.water_context_history_by_circuit.get(
+        history_count = sum(
+            1
+            for sample in coordinator.store_data.water_context_history_by_circuit.get(
                 config.circuit_id,
                 [],
             )
+            if isinstance(sample, Mapping)
+            and isinstance(sample.get("flow_status"), str)
+            and sample["flow_status"] != "unconfigured"
         )
         evidence = evaluate_flow_correlation(
             FlowCorrelationInput(
