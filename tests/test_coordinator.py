@@ -493,7 +493,17 @@ def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["rain_sensor_active"] is False
     assert evidence["rain_response_active"] is True
+    assert evidence["rain_last_active_at"] == now.isoformat()
     assert evidence["status"] == "rain_explained"
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now + timedelta(minutes=59),
+    )
+
+    assert coordinator.state.rain_pump_context_by_circuit["sump_pump"][
+        "rain_response_active"
+    ] is True
 
     coordinator.environment_context.refresh_water_context_state(
         coordinator.circuit_configs[0],

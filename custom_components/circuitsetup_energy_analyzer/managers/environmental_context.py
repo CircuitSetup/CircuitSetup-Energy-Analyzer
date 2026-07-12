@@ -295,6 +295,8 @@ class EnvironmentalContextManager:
         ) = self._rain_response_context(
             config.circuit_id,
             now,
+            rain_entity,
+            rain_intensity_entity,
             rain_active,
             rain_intensity,
             rain_intensity_unit,
@@ -351,6 +353,8 @@ class EnvironmentalContextManager:
         self,
         circuit_id: str,
         now: datetime,
+        rain_entity: str,
+        rain_intensity_entity: str,
         rain_active: bool | None,
         rain_intensity: float | None,
         rain_intensity_unit: str | None,
@@ -366,9 +370,20 @@ class EnvironmentalContextManager:
             circuit_id,
             {},
         )
+        previous_was_current_rain = (
+            str(previous.get("rain_state") or "")
+            in {"raining", "heavy_rain"}
+            and not bool(previous.get("rain_response_active"))
+        )
+        rain_stopped_at = self._latest_context_state_change(
+            rain_entity,
+            rain_intensity_entity,
+        )
         last_active_at = (
             now
             if current_rain
+            else rain_stopped_at
+            if previous_was_current_rain and rain_stopped_at is not None
             else _datetime_or_none(previous.get("rain_last_active_at"))
         )
         expires_at = (
@@ -386,6 +401,26 @@ class EnvironmentalContextManager:
             rain_response_active,
             last_active_at,
             expires_at,
+        )
+
+    def _latest_context_state_change(
+        self,
+        *entity_ids: str,
+    ) -> datetime | None:
+        changes = [
+            _datetime_or_none(getattr(raw_state, "last_changed", None))
+            for entity_id in entity_ids
+            if entity_id
+            and (
+                raw_state := self._coordinator.context_builder.raw_state_for_entity(
+                    entity_id
+                )
+            )
+            is not None
+        ]
+        return max(
+            (changed for changed in changes if changed is not None),
+            default=None,
         )
 
     def water_flow_context_evidence(
