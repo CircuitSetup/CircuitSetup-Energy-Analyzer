@@ -608,6 +608,7 @@ def test_coordinator_treats_positive_numeric_flow_sensor_as_active() -> None:
     assert evidence["flow_active_minutes"] == 9.0
     assert evidence["mismatch_minutes"] == 9.0
     assert evidence["flow_sensor_entities"] == ["sensor.water_flow_rate"]
+    assert evidence["flow_sensor_active"] is True
 
 
 def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
@@ -660,6 +661,110 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["flow_active_minutes"] == 0.0
     assert evidence["status"] == "normal"
+
+
+def test_coordinator_uses_active_cycle_not_daily_runtime_for_water_flow() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({"sensor.water_flow_rate": ("0", 9)}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_WATER_FLOW_CORRELATION_ENABLED: True,
+                    CONF_FLOW_MISMATCH_THRESHOLD_MINUTES: 5,
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {"timestamp": (now - timedelta(days=index + 1)).isoformat()}
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["washer"] = 120 * 60
+    coordinator.state.run_cycle_evidence_by_circuit["washer"] = {
+        "status": "idle",
+        "active_cycle_seconds": 0.0,
+    }
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.water_flow_context_by_circuit["washer"]
+    assert evidence["appliance_runtime_minutes"] == 0.0
+
+
+def test_coordinator_shared_flow_uses_another_active_appliance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({"binary_sensor.water_flow": ("on", 6)}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                },
+                {
+                    "circuit_id": "water_heater",
+                    "name": "Water Heater",
+                    "appliance_profile": "water_heater",
+                    "mode": "single_phase",
+                },
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+                "water_heater": {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {"timestamp": (now - timedelta(days=index + 1)).isoformat()}
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_evidence_by_circuit["water_heater"] = {
+        "status": "running",
+        "active_cycle_seconds": 6 * 60,
+    }
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.water_flow_context_by_circuit["washer"]
+    assert evidence["status"] == "normal"
+    assert evidence["mismatch_minutes"] == 0.0
 
 
 def test_coordinator_exposes_source_update_manager() -> None:

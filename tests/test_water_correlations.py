@@ -239,6 +239,45 @@ def test_flow_correlation_is_unconfigured_when_appliance_does_not_expect_flow() 
     assert evidence["confidence"] == 0.3
 
 
+def test_flow_correlation_is_unconfigured_without_a_configured_sensor() -> None:
+    evidence = evaluate_flow_correlation(
+        FlowCorrelationInput(
+            circuit_id="well_pump",
+            appliance_profile="well_pump",
+            flow_active_minutes=0.0,
+            appliance_runtime_minutes=12.0,
+            recent_related_runtime_minutes=0.0,
+            mapped_appliance_count=0,
+            threshold_minutes=5,
+            expects_water_flow=True,
+            comparable_window_count=12,
+            flow_source_configured=False,
+        )
+    )
+
+    assert evidence["status"] == "unconfigured"
+
+
+def test_shared_flow_is_explained_by_another_mapped_load() -> None:
+    evidence = evaluate_flow_correlation(
+        FlowCorrelationInput(
+            circuit_id="washer",
+            appliance_profile="washer",
+            flow_active_minutes=8.0,
+            appliance_runtime_minutes=0.0,
+            recent_related_runtime_minutes=0.0,
+            mapped_appliance_count=2,
+            threshold_minutes=5,
+            expects_water_flow=True,
+            comparable_window_count=12,
+            mapped_appliance_runtime_minutes=8.0,
+        )
+    )
+
+    assert evidence["status"] == "normal"
+    assert evidence["mismatch_minutes"] == 0.0
+
+
 def test_appliance_runtime_without_any_mapped_flow_sensor_is_sensor_problem() -> None:
     evidence = evaluate_flow_correlation(
         FlowCorrelationInput(

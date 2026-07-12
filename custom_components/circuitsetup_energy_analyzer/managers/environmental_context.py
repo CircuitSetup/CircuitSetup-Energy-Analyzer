@@ -344,8 +344,11 @@ class EnvironmentalContextManager:
             flow_entities,
             now,
         )
-        appliance_runtime_minutes = self.runtime_minutes_for_circuit(
+        appliance_runtime_minutes = self.active_runtime_minutes_for_circuit(
             config.circuit_id
+        )
+        mapped_appliance_count, mapped_appliance_runtime_minutes = (
+            self.mapped_water_appliance_context(flow_entities)
         )
         recent_related_runtime_minutes = (
             coordinator.context_builder.recent_flow_context_minutes(
@@ -369,19 +372,19 @@ class EnvironmentalContextManager:
                 flow_active_minutes=flow_active_minutes,
                 appliance_runtime_minutes=appliance_runtime_minutes,
                 recent_related_runtime_minutes=recent_related_runtime_minutes,
-                mapped_appliance_count=self.mapped_water_appliance_count(
-                    flow_entities
-                ),
+                mapped_appliance_count=mapped_appliance_count,
+                mapped_appliance_runtime_minutes=mapped_appliance_runtime_minutes,
                 threshold_minutes=threshold_minutes,
                 expects_water_flow=bool(
                     advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)
                 ),
                 comparable_window_count=history_count,
+                flow_source_configured=bool(flow_entities),
             )
         )
         evidence["flow_sensor_entities"] = list(flow_entities)
         evidence["flow_sensor_active"] = any(
-            coordinator.context_builder.binary_entity_active(entity_id) is True
+            coordinator.context_builder.flow_entity_active(entity_id) is True
             for entity_id in flow_entities
         )
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
@@ -394,6 +397,18 @@ class EnvironmentalContextManager:
                 0.0,
             )
             / 60.0,
+            3,
+        )
+
+    def active_runtime_minutes_for_circuit(self, circuit_id: str) -> float:
+        evidence = self._coordinator.state.run_cycle_evidence_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if not isinstance(evidence, Mapping) or evidence.get("status") != "running":
+            return 0.0
+        return round(
+            float(evidence.get("active_cycle_seconds", 0.0)) / 60.0,
             3,
         )
 
@@ -459,14 +474,45 @@ class EnvironmentalContextManager:
             "comparable_window_count": len(dry_samples),
         }
 
-    def mapped_water_appliance_count(self, flow_entities: Iterable[str]) -> int:
-        if not tuple(flow_entities):
-            return 0
+    def mapped_water_appliance_context(
+        self,
+        flow_entities: Iterable[str],
+    ) -> tuple[int, float]:
+        source_entities = set(flow_entities)
+        if not source_entities:
+            return 0, 0.0
         count = 0
+        runtime_minutes = 0.0
         for config in self._coordinator.circuit_configs:
-            if config.appliance_profile in FLOW_WATER_CONTEXT_PROFILES:
-                count += 1
-        return count
+            if config.appliance_profile not in FLOW_WATER_CONTEXT_PROFILES:
+                continue
+            settings_controller = self._coordinator.settings_controller
+            settings = settings_controller.advanced_settings_for_circuit(
+                config.circuit_id
+            )
+            flow_correlation_enabled = bool(
+                settings.get(
+                    CONF_WATER_FLOW_CORRELATION_ENABLED,
+                    DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
+                )
+            )
+            expects_water_flow = bool(
+                settings.get(CONF_EXPECTS_WATER_FLOW, True)
+            )
+            if not flow_correlation_enabled or not expects_water_flow:
+                continue
+            configured_entities = flow_entities_for_settings(
+                self._coordinator.entry_data,
+                self._coordinator.options,
+                settings,
+            )
+            if not source_entities.intersection(configured_entities):
+                continue
+            count += 1
+            runtime_minutes += self.active_runtime_minutes_for_circuit(
+                config.circuit_id
+            )
+        return count, round(runtime_minutes, 3)
 
     def append_water_context_history(
         self,
