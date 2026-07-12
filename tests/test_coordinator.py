@@ -21,6 +21,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
+    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
@@ -432,6 +433,76 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
     assert evidence["rain_intensity_bin"] == "heavy"
     assert evidence["baseline_context"] == "heavy_rain, heavy"
     assert evidence["rain_context_issues"] == []
+
+
+def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    states = {"binary_sensor.rain": "on"}
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(states, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {
+                    CONF_RAIN_PUMP_CORRELATION_ENABLED: True,
+                    CONF_RAIN_RESPONSE_WINDOW_MINUTES: 60,
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 18 * 60
+    started_at = now - timedelta(minutes=30)
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        started_at,
+    )
+    states["binary_sensor.rain"] = "off"
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_sensor_active"] is False
+    assert evidence["rain_response_active"] is True
+    assert evidence["status"] == "rain_explained"
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now + timedelta(minutes=61),
+    )
+
+    assert coordinator.state.rain_pump_context_by_circuit["sump_pump"][
+        "rain_response_active"
+    ] is False
 
 
 def test_coordinator_marks_positive_rain_intensity_with_missing_unit_unknown() -> None:

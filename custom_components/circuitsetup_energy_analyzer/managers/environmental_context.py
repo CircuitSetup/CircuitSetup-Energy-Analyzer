@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -21,6 +21,7 @@ from ..const import (
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
 )
 from ..context_sources import flow_entities_for_settings
+from ..contextual_baseline import rain_context
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
 from ..water_correlations import (
@@ -277,6 +278,28 @@ class EnvironmentalContextManager:
         rain_intensity_unit = coordinator.context_builder.entity_unit_of_measurement(
             rain_intensity_entity
         )
+        response_window_minutes = max(
+            int(
+                advanced_settings.get(
+                    CONF_RAIN_RESPONSE_WINDOW_MINUTES,
+                    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
+                )
+            ),
+            0,
+        )
+        (
+            effective_rain_active,
+            rain_response_active,
+            rain_last_active_at,
+            rain_response_expires_at,
+        ) = self._rain_response_context(
+            config.circuit_id,
+            now,
+            rain_active,
+            rain_intensity,
+            rain_intensity_unit,
+            response_window_minutes,
+        )
         compressor_context = self.hvac_compressor_context()
         runtime_minutes = self.runtime_minutes_for_circuit(config.circuit_id)
         baseline = self.dry_weather_pump_baseline(config.circuit_id, now)
@@ -287,7 +310,7 @@ class EnvironmentalContextManager:
                 pump_runtime_minutes=runtime_minutes,
                 dry_baseline_minutes=baseline["dry_baseline_minutes"],
                 comparable_window_count=baseline["comparable_window_count"],
-                rain_active=rain_active,
+                rain_active=effective_rain_active,
                 rain_intensity_per_hour=rain_intensity,
                 rain_intensity_unit=rain_intensity_unit,
                 compressor_runtime_minutes=compressor_context["runtime_minutes"],
@@ -307,11 +330,13 @@ class EnvironmentalContextManager:
         evidence["rain_intensity_entity"] = rain_intensity_entity
         evidence["rain_intensity_per_hour"] = rain_intensity
         evidence["rain_intensity_unit"] = rain_intensity_unit
-        evidence["rain_response_window_minutes"] = int(
-            advanced_settings.get(
-                CONF_RAIN_RESPONSE_WINDOW_MINUTES,
-                DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
-            )
+        evidence["rain_response_window_minutes"] = response_window_minutes
+        evidence["rain_response_active"] = rain_response_active
+        evidence["rain_last_active_at"] = _isoformat_or_none(
+            rain_last_active_at
+        )
+        evidence["rain_response_expires_at"] = _isoformat_or_none(
+            rain_response_expires_at
         )
         evidence["hvac_compressor_runtime_minutes"] = compressor_context[
             "runtime_minutes"
@@ -321,6 +346,47 @@ class EnvironmentalContextManager:
         ]
         evidence["hvac_compressor_circuits"] = compressor_context["circuit_ids"]
         return evidence
+
+    def _rain_response_context(
+        self,
+        circuit_id: str,
+        now: datetime,
+        rain_active: bool | None,
+        rain_intensity: float | None,
+        rain_intensity_unit: str | None,
+        response_window_minutes: int,
+    ) -> tuple[bool | None, bool, datetime | None, datetime | None]:
+        rain_info = rain_context(
+            rain_active,
+            rain_intensity,
+            unit=rain_intensity_unit,
+        )
+        current_rain = rain_info.state in {"raining", "heavy_rain"}
+        previous = self._coordinator.state.rain_pump_context_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        last_active_at = (
+            now
+            if current_rain
+            else _datetime_or_none(previous.get("rain_last_active_at"))
+        )
+        expires_at = (
+            last_active_at + timedelta(minutes=response_window_minutes)
+            if last_active_at is not None
+            else None
+        )
+        rain_response_active = bool(
+            not current_rain
+            and expires_at is not None
+            and now <= expires_at
+        )
+        return (
+            True if current_rain or rain_response_active else rain_active,
+            rain_response_active,
+            last_active_at,
+            expires_at,
+        )
 
     def water_flow_context_evidence(
         self,
@@ -675,6 +741,10 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _isoformat_or_none(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _ha_local_date(value: datetime, time_zone: str | None) -> Any:
