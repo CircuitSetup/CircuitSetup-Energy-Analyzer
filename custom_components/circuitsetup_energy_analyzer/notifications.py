@@ -12,6 +12,25 @@ from .localized_text import translation_text
 from .models import AlertEvidence, CircuitConfig
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
+_POWER_QUALITY_ALERT_FEATURES = frozenset(
+    {
+        "reactive_shift_under_stable_real_power",
+        "power_factor_shift_under_load",
+        "apparent_power_shift",
+        "motor_relationship_changed",
+        "split_phase_relationship_changed",
+        "resistive_load_became_reactive",
+    }
+)
+_POWER_QUALITY_VALUE_FORMATS = {
+    "reactive_to_real_ratio": ("Reactive-to-real power ratio", "%", "percentage"),
+    "apparent_to_real_ratio": ("Apparent-to-real power ratio", "%", "percentage"),
+    "power_factor": ("Power factor", "", "decimal"),
+    "power_factor_deficit": ("Power factor deficit", "", "decimal"),
+    "reactive_power": ("Reactive power", "VAR", "number"),
+    "apparent_power": ("Apparent power", "VA", "number"),
+}
+
 
 def notification_id_for_alert(alert: AlertEvidence) -> str:
     """Return a stable persistent-notification id for alert evidence."""
@@ -47,13 +66,17 @@ def alert_notification_message(
         config.name if config is not None and config.name else alert.circuit_id
     )
     lines = [f"**{display_name}**", "", alert.message]
+    lines.extend(_power_quality_notice_lines(alert))
     lines.extend(_nilm_source_lines(alert))
     lines.extend(
         [
             "",
-            f"- {_notification_text('alert', 'observed_value')}: "
-            f"{alert.observed_value}",
-            f"- {_comparison_value_label(alert)}: {alert.baseline_value}",
+            f"- {_notification_value_label(
+                alert, _notification_text('alert', 'observed_value')
+            )}: "
+            f"{_format_notification_value(alert, alert.observed_value)}",
+            f"- {_notification_value_label(alert, _comparison_value_label(alert))}: "
+            f"{_format_notification_value(alert, alert.baseline_value)}",
             f"- {_notification_text('alert', 'repeated_observations')}: "
             f"{alert.repeated_count}",
         ]
@@ -74,6 +97,34 @@ def alert_notification_message(
         ]
     )
     return "\n".join(lines)
+
+
+def _power_quality_notice_lines(alert: AlertEvidence) -> list[str]:
+    if alert.feature not in _POWER_QUALITY_ALERT_FEATURES:
+        return []
+    return [
+        "",
+        "This is a repeated change from the learned electrical pattern, not an "
+        "electrical safety diagnosis.",
+    ]
+
+
+def _notification_value_label(alert: AlertEvidence, label: str) -> str:
+    value_format = _POWER_QUALITY_VALUE_FORMATS.get(alert.value_metric)
+    if value_format is None:
+        return label
+    return f"{label} ({value_format[0]})"
+
+
+def _format_notification_value(alert: AlertEvidence, value: float) -> str:
+    value_format = _POWER_QUALITY_VALUE_FORMATS.get(alert.value_metric)
+    if value_format is None:
+        return str(value)
+    _, unit, format_kind = value_format
+    if format_kind == "percentage":
+        return f"{value * 100.0:.3f}%"
+    formatted = f"{value:.3f}".rstrip("0").rstrip(".")
+    return f"{formatted}{f' {unit}' if unit else ''}"
 
 
 def _nilm_source_lines(alert: AlertEvidence) -> list[str]:

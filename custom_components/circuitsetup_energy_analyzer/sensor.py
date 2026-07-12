@@ -336,6 +336,25 @@ def power_quality_evidence_value(state: Any, circuit_id: str) -> str:
     )
 
 
+_POWER_QUALITY_ALERT_FEATURES = frozenset(
+    {
+        "reactive_shift_under_stable_real_power",
+        "power_factor_shift_under_load",
+        "apparent_power_shift",
+        "motor_relationship_changed",
+        "split_phase_relationship_changed",
+        "resistive_load_became_reactive",
+    }
+)
+
+
+def _power_quality_alert_confirmed(state: Any, circuit_id: str) -> bool:
+    return any(
+        getattr(alert, "feature", "") in _POWER_QUALITY_ALERT_FEATURES
+        for alert in getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ())
+    )
+
+
 def reactive_power_drift_value(state: Any, circuit_id: str) -> float:
     """Return the current reactive-power drift ratio for a circuit."""
     return float(
@@ -979,6 +998,10 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "leg_imbalance_percent": leg_imbalance_value(state, circuit_id),
         "power_quality_score": power_quality_score_value(state, circuit_id),
         "power_quality_evidence": power_quality_evidence_value(state, circuit_id),
+        "power_quality_alert_confirmed": _power_quality_alert_confirmed(
+            state,
+            circuit_id,
+        ),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
         "leg_status_explanation": _status_explanation(leg_status),

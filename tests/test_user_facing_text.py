@@ -1185,7 +1185,9 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "selector:" in blueprint_text
     assert "entity:" in blueprint_text
     assert "action:" in blueprint_text
-    assert "possible issue" in blueprint_text.lower()
+    assert "default: CircuitSetup Energy Analyzer alert" in blueprint_text
+    assert "{{ alert_entity_name }} reports: {{ alert_state }}." in blueprint_text
+    assert "reports a possible issue" not in blueprint_text
     assert "alert_entities:" in blueprint_text
     assert "alert_actions:" in blueprint_text
     assert "evidence_path" in blueprint_text
@@ -1271,8 +1273,20 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     state_template = Template(blueprint["variables"]["alert_state_normalized"])
     condition_template = Template(blueprint["condition"][0]["value_template"])
 
-    def condition_matches(state: str, selected_states: list[str]) -> bool:
-        trigger = {"to_state": {"state": state}}
+    def condition_matches(
+        state: str,
+        selected_states: list[str],
+        *,
+        power_quality_alert_confirmed: bool = False,
+    ) -> bool:
+        trigger = {
+            "to_state": {
+                "state": state,
+                "attributes": {
+                    "power_quality_alert_confirmed": power_quality_alert_confirmed,
+                },
+            }
+        }
         alert_state_normalized = state_template.render(trigger=trigger).strip()
         rendered = condition_template.render(
             trigger=trigger,
@@ -1285,6 +1299,12 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     assert condition_matches("Possible issue: Cycle Duration", defaults)
     assert condition_matches("High Usage", defaults)
     assert condition_matches("Watch", defaults)
+    assert not condition_matches("Possible Power Quality Change", defaults)
+    assert condition_matches(
+        "Possible Power Quality Change",
+        defaults,
+        power_quality_alert_confirmed=True,
+    )
     assert not condition_matches("Needs data", defaults)
     assert condition_matches("Needs data", ["needs_data"])
     assert condition_matches("Needs Metrics", ["needs_metrics"])
