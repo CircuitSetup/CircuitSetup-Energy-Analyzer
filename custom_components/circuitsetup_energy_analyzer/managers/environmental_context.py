@@ -8,6 +8,7 @@ from typing import Any
 from ..const import (
     CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -20,7 +21,7 @@ from ..const import (
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
 )
-from ..context_sources import flow_entities_for_settings
+from ..context_sources import flow_entities_for_settings, strings_from_any
 from ..contextual_baseline import rain_context
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
@@ -366,6 +367,7 @@ class EnvironmentalContextManager:
             unit=rain_intensity_unit,
         )
         current_rain = rain_info.state in {"raining", "heavy_rain"}
+        confirmed_dry = rain_info.state == "dry"
         previous = self._coordinator.state.rain_pump_context_by_circuit.get(
             circuit_id,
             {},
@@ -383,7 +385,11 @@ class EnvironmentalContextManager:
             now
             if current_rain
             else rain_stopped_at
-            if previous_was_current_rain and rain_stopped_at is not None
+            if (
+                previous_was_current_rain
+                and confirmed_dry
+                and rain_stopped_at is not None
+            )
             else _datetime_or_none(previous.get("rain_last_active_at"))
         )
         expires_at = (
@@ -449,7 +455,11 @@ class EnvironmentalContextManager:
             config.circuit_id
         )
         mapped_appliance_count, mapped_appliance_runtime_minutes = (
-            self.mapped_water_appliance_context(flow_entities)
+            self.mapped_water_appliance_context(
+                config,
+                advanced_settings,
+                flow_entities,
+            )
         )
         recent_related_runtime_minutes = (
             coordinator.context_builder.recent_flow_context_minutes(
@@ -577,11 +587,19 @@ class EnvironmentalContextManager:
 
     def mapped_water_appliance_context(
         self,
+        current_config: CircuitConfig,
+        current_settings: Mapping[str, Any],
         flow_entities: Iterable[str],
     ) -> tuple[int, float]:
         source_entities = set(flow_entities)
         if not source_entities:
             return 0, 0.0
+        if strings_from_any(
+            current_settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
+        ):
+            return 1, self.active_runtime_minutes_for_circuit(
+                current_config.circuit_id
+            )
         count = 0
         runtime_minutes = 0.0
         for config in self._coordinator.circuit_configs:
@@ -601,6 +619,8 @@ class EnvironmentalContextManager:
                 settings.get(CONF_EXPECTS_WATER_FLOW, True)
             )
             if not flow_correlation_enabled or not expects_water_flow:
+                continue
+            if strings_from_any(settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)):
                 continue
             configured_entities = flow_entities_for_settings(
                 self._coordinator.entry_data,
