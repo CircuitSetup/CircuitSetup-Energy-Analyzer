@@ -2,7 +2,7 @@ blueprint:
   name: CircuitSetup Energy Analyzer Alerts
   description: >-
     Create friendly notifications and optional follow-up actions when selected
-    CircuitSetup Energy Analyzer alert entities report a possible issue. Companion
+    CircuitSetup Energy Analyzer alert entities report a selected alert state. Companion
     App mobile notifications can use data.url and data.clickAction with the
     evidence_path template variable.
   domain: automation
@@ -85,7 +85,7 @@ blueprint:
     notification_title:
       name: Notification Title
       description: Title used for the persistent notification.
-      default: CircuitSetup Energy Analyzer possible issue
+      default: CircuitSetup Energy Analyzer alert
       selector:
         text:
     persistent_notification:
@@ -166,7 +166,7 @@ action:
             data:
               title: "{{ notification_title }}"
               message: >-
-                {{ alert_entity_name }} reports a possible issue.
+                {{ alert_entity_name }} reports: {{ alert_state }}.
 
                 State: {{ alert_state }}
 

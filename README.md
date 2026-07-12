@@ -754,7 +754,7 @@ The repository includes a Home Assistant automation blueprint:
 blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml
 ```
 
-Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report possible issue states.
+Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states. Electrical Health's **Possible Power Quality Change** waits for confirmed repeated alert evidence before the blueprint notifies.
 
 Companion App mobile notifications can use the `evidence_path` template variable for `data.url` and Android `data.clickAction`, so tapping the notification opens the same Home Assistant evidence view.
 

@@ -1185,7 +1185,9 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "selector:" in blueprint_text
     assert "entity:" in blueprint_text
     assert "action:" in blueprint_text
-    assert "possible issue" in blueprint_text.lower()
+    assert "default: CircuitSetup Energy Analyzer alert" in blueprint_text
+    assert "{{ alert_entity_name }} reports: {{ alert_state }}." in blueprint_text
+    assert "reports a possible issue" not in blueprint_text
     assert "alert_entities:" in blueprint_text
     assert "alert_actions:" in blueprint_text
     assert "evidence_path" in blueprint_text
