@@ -81,6 +81,7 @@ ALERT_VALUE_METADATA = {
         "kWh",
         "number",
     ),
+    "nilm_appliance_confidence": ("NILM confidence", "%", "percentage"),
     "nilm_appliance_unusual_runtime": (
         "NILM appliance unusual runtime",
         "min",

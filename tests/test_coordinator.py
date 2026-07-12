@@ -6732,6 +6732,9 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert finished_alert is not None
     assert finished_alert.feature == "nilm_appliance_finished"
     assert finished_alert.circuit_id == "mains"
+    assert finished_alert.value_metric == "nilm_appliance_confidence"
+    assert finished_alert.observed_value == pytest.approx(0.82)
+    assert finished_alert.baseline_value == pytest.approx(0.8)
     assert "Estimated from mains power by NILM" in finished_alert.message
     assert "Confidence: 82%" in finished_alert.message
     assert finished_alert.features["source_type"] == "nilm_estimate"
