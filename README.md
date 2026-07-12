@@ -398,7 +398,6 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 - Energy-usage spike thresholds
 - Daily energy goals
 - Billing-cycle settings
-- Cost and Time-of-Use estimates
 - Demand settings
 - Circuit capacity limits
 - Dual-phase leg-imbalance settings
@@ -565,11 +564,11 @@ Configure per-circuit billing settings from:
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
-Configure the shared fallback rate and Time-of-Use rate, start/end times, weekdays, and label from the **CircuitSetup Energy Analyzer** device entities.
+Configure the shared fallback rate and Time-of-Use rate, start/end times, seven weekday switches, and label from the **CircuitSetup Energy Analyzer** device entities. These controls are global and do not appear in an appliance's Advanced Circuit Settings.
 
 Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
-Time-of-use settings use a time picker for the peak start/end times and a weekday selector for peak days, so normal setup does not require typing comma-separated weekday numbers.
+Time-of-use settings use time controls for the peak start/end times and one switch for each weekday, so normal setup does not require typing comma-separated weekday numbers.
 
 ### Demand and capacity
 
@@ -653,7 +652,7 @@ Configure it on a mains or aggregate circuit. You can use a utility/Opower entit
 
 Utility comparison settings are available from:
 
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Utility / Opower Comparison**
 
 Before acting on a mismatch, verify that the utility and measured sources cover the same time period. Utility integrations can update late.
 

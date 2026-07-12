@@ -177,10 +177,13 @@ def effective_electricity_rate(
 ) -> float:
     """Return the Opower rate when available, otherwise the fallback rate."""
     if isinstance(utility_cost_rate_by_circuit, Mapping):
-        for rate in utility_cost_rate_by_circuit.values():
-            value = _positive_electricity_rate(rate)
-            if value > 0.0:
-                return value
+        rates = {
+            value
+            for rate in utility_cost_rate_by_circuit.values()
+            if (value := _positive_electricity_rate(rate)) > 0.0
+        }
+        if len(rates) == 1:
+            return rates.pop()
     return _positive_electricity_rate(fallback_rate)
 
 

@@ -192,6 +192,57 @@ def test_alert_evidence_detail_labels_known_and_fallback_metrics() -> None:
         "reactive_power": ("Reactive power", "VAR", "number"),
         "apparent_power": ("Apparent power", "VA", "number"),
         "power_factor": ("Power factor", "", "decimal"),
+        "activity_inactive_too_long": (
+            "Activity inactive too long",
+            "min",
+            "number",
+        ),
+        "always_on_power": ("Always on power", "W", "number"),
+        "circuit_capacity": ("Circuit capacity", "A", "number"),
+        "billing_cycle_budget": ("Billing cycle budget", "kWh", "number"),
+        "daily_energy_goal": ("Daily energy goal", "kWh", "number"),
+        "daily_energy_usage_spike": (
+            "Daily energy usage spike",
+            "kWh",
+            "number",
+        ),
+        "demand_limit": ("Demand limit", "W", "number"),
+        "demand_monthly_peak": ("Demand monthly peak", "W", "number"),
+        "dual_phase_leg_imbalance": (
+            "Dual phase leg imbalance",
+            "%",
+            "percentage",
+        ),
+        "nilm_appliance_unusual_energy": (
+            "NILM appliance unusual energy",
+            "kWh",
+            "number",
+        ),
+        "nilm_appliance_confidence": ("NILM confidence", "%", "percentage"),
+        "nilm_appliance_unusual_runtime": (
+            "NILM appliance unusual runtime",
+            "min",
+            "number",
+        ),
+        "rain_pump_correlation": ("Rain pump correlation", "min", "number"),
+        "run_cycle_daily_duty_cycle_percent": (
+            "Run cycle daily duty cycle",
+            "%",
+            "number",
+        ),
+        "run_cycle_daily_start_count": (
+            "Run cycle daily start count",
+            "starts",
+            "number",
+        ),
+        "run_cycle_duration_s": ("Run cycle duration", "s", "number"),
+        "utility_energy_mismatch": (
+            "Utility energy mismatch",
+            "kWh",
+            "number",
+        ),
+        "water_flow_correlation": ("Water flow correlation", "min", "number"),
+        "activity_left_on": ("Activity left on", "min", "number"),
         "unknown_metric": ("Unknown Metric", "", "number"),
     }
     for metric, metadata in expected.items():

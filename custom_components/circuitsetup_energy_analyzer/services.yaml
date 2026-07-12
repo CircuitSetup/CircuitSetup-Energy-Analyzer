@@ -1395,7 +1395,7 @@ set_billing_cycle_settings:
           mode: box
 set_cost_settings:
   name: Set cost settings
-  description: "Advanced/script action: set flat-rate and Time-of-Use cost tracking for one circuit. The normal user path is Advanced Circuit Settings."
+  description: "Advanced/script action: set per-circuit billing and legacy Time-of-Use values. The normal user path uses shared entities on the CircuitSetup Energy Analyzer device."
   fields:
     circuit_id:
       name: Circuit ID
@@ -1428,7 +1428,7 @@ set_cost_settings:
           mode: box
     default_rate_per_kwh:
       name: Default Rate Per kWh
-      description: Default electricity cost rate applied outside TOU periods.
+      description: Legacy per-circuit fallback rate. Normal editing uses the global Fallback Electricity Rate number on the analyzer device.
       required: false
       example: 0.20
       selector:
@@ -1439,7 +1439,7 @@ set_cost_settings:
           mode: box
     tou_rate_per_kwh:
       name: TOU Rate Per kWh
-      description: Optional Time-of-Use cost rate for the configured period.
+      description: Legacy per-circuit Time-of-Use rate. Normal editing uses the global TOU Rate number on the analyzer device.
       required: false
       example: 0.30
       selector:
@@ -1450,28 +1450,28 @@ set_cost_settings:
           mode: box
     tou_start:
       name: TOU Start
-      description: Time-of-Use period start time in 24-hour HH:MM format.
+      description: Legacy per-circuit Time-of-Use start in 24-hour HH:MM format.
       required: false
       example: "17:00"
       selector:
         text:
     tou_end:
       name: TOU End
-      description: Time-of-Use period end time in 24-hour HH:MM format.
+      description: Legacy per-circuit Time-of-Use end in 24-hour HH:MM format.
       required: false
       example: "21:00"
       selector:
         text:
     tou_weekdays:
       name: TOU Weekdays
-      description: Optional comma-separated weekdays where Monday is 0.
+      description: Legacy per-circuit comma-separated weekdays where Monday is 0.
       required: false
       example: "0,1,2,3,4"
       selector:
         text:
     tou_name:
       name: TOU Name
-      description: Friendly name for the Time-of-Use rate period.
+      description: Legacy per-circuit friendly name for the Time-of-Use rate period.
       required: false
       example: Peak
       selector:
@@ -1531,7 +1531,7 @@ set_standby_settings:
           mode: box
 set_utility_comparison_settings:
   name: Set utility comparison settings
-  description: "Advanced/script action: compare utility-reported kWh with mains or summed circuit kWh sensors. The normal user path is Advanced Circuit Settings."
+  description: "Advanced/script action: compare utility-reported kWh with mains or summed circuit kWh sensors. The normal user path is Configure > Utility / Opower Comparison."
   fields:
     circuit_id:
       name: Circuit ID

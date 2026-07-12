@@ -111,6 +111,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspace = null;
     this._applianceDetail = null;
     this._applianceDetailHistorySeries = [];
+    this._applianceDetailChartSeries = [];
+    this._applianceDetailHistoryParsed = false;
     this._applianceDetailHistoryHours = 0;
     this._applianceDetailHistoryBounds = null;
     this._applianceDetailHistoryWindow = null;
@@ -410,7 +412,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   async _loadApplianceDetailHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     const history = this._applianceDetail && this._applianceDetail.history;
     const entities = Array.isArray(history && history.entities) ? history.entities.filter(Boolean) : [];
-    if (!entities.length) {
+    const embeddedSeries = Array.isArray(history && history.embedded_series) ? history.embedded_series : [];
+    if (!entities.length && !embeddedSeries.length) {
       return;
     }
     const periods = Array.isArray(history.period_hours) ? history.period_hours.map(Number).filter(Number.isFinite) : [];
@@ -431,7 +434,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._applianceDetailHistoryLoading = true;
     this._applianceDetailHistoryError = "";
     this._applianceDetailHistorySeries = [];
+    this._applianceDetailChartSeries = [];
+    this._applianceDetailHistoryParsed = false;
     this._render();
+
+    if (embeddedSeries.length) {
+      this._applianceDetailHistorySeries = embeddedSeries;
+      this._applianceDetailChartSeries = this._chartSeries(
+        embeddedSeries,
+        history.entity_series,
+      );
+      this._applianceDetailHistoryParsed = true;
+      this._applianceDetailHistoryLoading = false;
+      this._render();
+      return;
+    }
 
     const apiPath = this._historyApiPathForEntities(
       entities,
@@ -445,6 +462,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._applianceDetailHistorySeries = Array.isArray(historyRows) ? historyRows : [];
+      this._applianceDetailChartSeries = this._chartSeries(
+        this._applianceDetailHistorySeries,
+        history.entity_series,
+      );
+      this._applianceDetailHistoryParsed = true;
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -3055,16 +3077,24 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const periodHours = Array.isArray(history.period_hours) ? history.period_hours.map(Number).filter(Number.isFinite) : [];
     const window = this._applianceDetailHistoryGraphWindow();
-    const series = window ? this._visibleChartSeries(this._applianceDetailHistorySeries, window) : [];
+    const parsedSeries = this._applianceDetailHistoryParsed
+      ? this._applianceDetailChartSeries
+      : this._chartSeries(this._applianceDetailHistorySeries, history.entity_series);
+    const series = window ? this._visibleParsedChartSeries(parsedSeries, window) : [];
+    const groupedSeries = this._chartSeriesByUnit(series);
+    const chartOptions = {
+      graph_window_start: window ? new Date(window.start).toISOString() : "",
+      graph_window_end: window ? new Date(window.end).toISOString() : "",
+    };
     const graph = this._applianceDetailHistoryLoading
       ? `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div>`
       : this._applianceDetailHistoryError
         ? `<div data-appliance-history-error><p class="muted">${this._escape(this._applianceDetailHistoryError)}</p><button type="button" class="secondary" data-retry-appliance-history>${this._escape(this._panelText("common.retry"))}</button></div>`
-        : window && series.length
-          ? this._chartSvg(series, {
-            graph_window_start: new Date(window.start).toISOString(),
-            graph_window_end: new Date(window.end).toISOString(),
-          })
+        : window && groupedSeries.length
+          ? groupedSeries.map(({ unit, series: unitSeries }) => this._chartSvg(
+            unitSeries,
+            Object.assign({}, chartOptions, { y_axis_label: unit }),
+          )).join("")
           : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_history"))}</p>`;
     return `
       <section class="panel" data-appliance-detail-history>
@@ -5128,7 +5158,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return { start, end, min, max };
   }
 
-  _chartSeries(historySeries = this._historySeries) {
+  _chartSeries(historySeries = this._historySeries, entitySeries = []) {
+    const units = new Map((Array.isArray(entitySeries) ? entitySeries : []).map((item) => [
+      item.entity_id,
+      String(item.unit || ""),
+    ]));
     const parsed = [];
     for (const series of historySeries || []) {
       if (!Array.isArray(series) || !series.length) {
@@ -5147,6 +5181,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         parsed.push({
           entity_id: entityId,
           name: this._friendlyEntityName(entityId),
+          unit: units.get(entityId) || this._friendlyEntityUnit(entityId),
           points: this._boundedChartPoints(points),
         });
       }
@@ -5169,7 +5204,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _visibleChartSeries(historySeries, graphWindow) {
-    return this._chartSeries(historySeries).map((item) => {
+    return this._visibleParsedChartSeries(this._chartSeries(historySeries), graphWindow);
+  }
+
+  _visibleParsedChartSeries(parsedSeries, graphWindow) {
+    return parsedSeries.map((item) => {
       if (!graphWindow) {
         return item;
       }
@@ -5177,6 +5216,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         points: item.points.filter((point) => point.time >= graphWindow.start && point.time <= graphWindow.end),
       });
     }).filter((item) => item.points.length);
+  }
+
+  _chartSeriesByUnit(series) {
+    const groups = new Map();
+    for (const item of series) {
+      const unit = String(item.unit || "");
+      if (!groups.has(unit)) groups.set(unit, []);
+      groups.get(unit).push(item);
+    }
+    return Array.from(groups, ([unit, unitSeries]) => ({ unit, series: unitSeries }));
   }
 
   _boundedChartPoints(points) {
@@ -5197,6 +5246,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       .replace(/^[^.]+\./, "")
       .replace(/^(cs|circuitsetup)_energy_analyzer_/, "");
     return this._friendlyFeature(objectId || entityId);
+  }
+
+  _friendlyEntityUnit(entityId) {
+    const state = this._hass && this._hass.states && this._hass.states[entityId];
+    return String(state && state.attributes && state.attributes.unit_of_measurement || "");
   }
 
   _historyApiPath(alert) {
@@ -5398,36 +5452,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _alertMetricUnit(alert) {
-    const explicit = String(alert && alert.value_unit || "").trim();
-    if (explicit) {
-      return explicit;
-    }
-    const label = String(alert && (alert.value_label || alert.value_metric || alert.feature) || "").toLowerCase();
-    if (/factor/.test(label)) {
-      return "PF";
-    }
-    if (/ratio|percent/.test(label)) {
-      return "%";
-    }
-    if (/runtime|duration|active|idle|time/.test(label)) {
-      return "min";
-    }
-    if (/energy|usage/.test(label)) {
-      return "kWh";
-    }
-    if (/current/.test(label)) {
-      return "A";
-    }
-    if (/voltage/.test(label)) {
-      return "V";
-    }
-    if (/frequency/.test(label)) {
-      return "Hz";
-    }
-    if (/power|demand|watt/.test(label)) {
-      return "W";
-    }
-    return "";
+    return String(alert && alert.value_unit || "").trim();
   }
 
   _renderActionGroup(title, description, buttons) {

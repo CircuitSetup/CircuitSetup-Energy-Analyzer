@@ -114,12 +114,17 @@ class UtilityComparisonProcessor:
             utility_data_lag_hours=utility_data_lag_hours,
         )
         utility_cost = self._numeric_value_for_entity(settings.utility_cost_entity)
+        utility_rate_kwh = self._energy_kwh_for_entity(
+            settings.utility_energy_entity,
+            context.now,
+        )
         feature_result = FeatureResult(
             state_updates=utility_comparison_state_updates(
                 circuit_config.circuit_id,
                 result,
                 utility_cost=utility_cost,
                 utility_cost_entity=settings.utility_cost_entity,
+                utility_rate_kwh=utility_rate_kwh,
             ),
         )
         if result.status == "mismatch":
@@ -230,9 +235,10 @@ def utility_comparison_state_updates(
     *,
     utility_cost: float | None = None,
     utility_cost_entity: str = "",
+    utility_rate_kwh: float | None = None,
 ) -> list[StateUpdate]:
     """Build analyzer state updates for one utility comparison result."""
-    rate_per_kwh = utility_rate_per_kwh(utility_cost, result.utility_kwh)
+    rate_per_kwh = utility_rate_per_kwh(utility_cost, utility_rate_kwh)
     return [
         StateUpdate(
             ("utility_comparison_difference_kwh_by_circuit", circuit_id),
