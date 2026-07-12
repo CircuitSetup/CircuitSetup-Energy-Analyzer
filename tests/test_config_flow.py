@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -5505,6 +5506,30 @@ def test_options_source_entities_override_setup_source_entities() -> None:
     coordinator = SimpleNamespace(circuit_configs=())
 
     assert _source_entities_for_entry(entry, coordinator) == ("sensor.option_power",)
+
+
+def test_source_entities_for_entry_includes_linked_flow_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES: [
+                        "binary_sensor.washer_flow"
+                    ]
+                }
+            }
+        },
+        options={},
+    )
+    coordinator = SimpleNamespace(circuit_configs=())
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "binary_sensor.washer_flow",
+    )
 
 
 def test_source_entities_for_entry_uses_registered_demo_entity_ids() -> None:

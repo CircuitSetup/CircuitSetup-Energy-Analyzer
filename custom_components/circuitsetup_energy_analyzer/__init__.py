@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from . import repairs
 from .const import (
+    CONF_ADVANCED_SETTINGS,
     CONF_ENTITY_MODEL_VERSION,
+    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
@@ -15,6 +18,7 @@ from .const import (
     ENTITY_MODEL_LEGACY,
     PLATFORMS,
 )
+from .context_sources import strings_from_any
 from .coordinator import EnergyAnalyzerCoordinator
 from .entity_catalog import legacy_entity_registry_entries_for_hass
 from .panel import async_setup_panel, async_unload_panel
@@ -158,6 +162,18 @@ def _source_entities_for_entry(
         entity_ids.extend(
             entity_id for entity_id in flow_entities if isinstance(entity_id, str)
         )
+    advanced_settings = entry_options.get(
+        CONF_ADVANCED_SETTINGS,
+        entry_data.get(CONF_ADVANCED_SETTINGS, {}),
+    )
+    if isinstance(advanced_settings, Mapping):
+        for settings in advanced_settings.values():
+            if isinstance(settings, Mapping):
+                entity_ids.extend(
+                    strings_from_any(
+                        settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
+                    )
+                )
     entity_ids.extend(
         sensor.entity_id
         for config in getattr(coordinator, "circuit_configs", ())
