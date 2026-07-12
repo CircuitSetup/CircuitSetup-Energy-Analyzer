@@ -713,6 +713,21 @@ def test_readme_documents_normal_user_action_paths() -> None:
         assert phrase in normalized_text
 
 
+def test_readme_explains_environmental_sensor_learning_and_scope() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "HVAC, HVAC compressor, HVAC blower, and electric heat",
+        "three distinct prior local dates",
+        "ten dry, compressor-free context samples",
+        "does not create a rain-specific missing-pump alert",
+        "Global flow sources are shared",
+        "linked source stays scoped to that appliance",
+        "marked Unconfigured instead of creating a flow mismatch alert",
+    ):
+        assert phrase in readme_text
+
+
 def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     translations = _translations()

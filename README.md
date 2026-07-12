@@ -527,6 +527,8 @@ HVAC runtime depends strongly on outdoor temperature. A compressor running longe
 
 Add an outdoor temperature entity during setup or later from **Configure**. Use a real outdoor sensor, weather-station sensor, or reliable outdoor helper. Indoor thermostat temperature is usually not a good source for this feature.
 
+This context applies only to HVAC, HVAC compressor, HVAC blower, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
+
 ### Rain and pump correlation
 
 Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares the current day's pump runtime with the learned dry-weather baseline, current rain state or the configured response window after rain stops, optional rain intensity, and the current day's HVAC compressor runtime.
@@ -537,7 +539,9 @@ Configure the global rain source during setup or later from **Configure**. Tune 
 
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
-The analyzer can report weather-explained pump activity, possible excess pump activity, or possible missing pump activity. Treat those as prompts to inspect the pump, sensor mapping, discharge path, or recent weather conditions.
+The dry-weather baseline requires at least ten dry, compressor-free context samples. Wet, conflicting, or current-day samples do not count toward it, so a wetter-than-usual learning period can remain **Learning** until enough dry history exists. The response window begins only after a confirmed dry reading; unavailable or conflicting rain data does not extend it.
+
+The analyzer can report weather-explained pump activity, possible excess pump activity, or possible missing pump activity. It does not create a rain-specific missing-pump alert simply because a pump has not run during active rain or the confirmed post-rain response window. Treat all of these as prompts to inspect the pump, sensor mapping, discharge path, and local weather conditions, not as diagnoses or safety controls.
 
 ### Water-flow correlation
 
@@ -548,6 +552,8 @@ The analyzer compares how long the water-flow sensor has been active with recent
 - Flow without a matching water-using appliance, which can point to an unmapped load, leak, running faucet, irrigation, or sensor mapping problem.
 - Appliance activity without expected flow, which can point to a stuck sensor, closed valve, dry-running pump, or assignment problem.
 - A likely sensor problem when both mismatch directions repeat.
+
+It needs at least ten retained context samples before issuing flow-mismatch evidence. Global flow sources are shared: an active compatible appliance using the same global source explains that flow. When a source is linked in **Advanced Circuit Settings**, that linked source stays scoped to that appliance. Water-heater activity can also use recent flow because heating can begin after a draw has ended. When no applicable flow source is configured, the correlation is marked Unconfigured instead of creating a flow mismatch alert.
 
 Configure global flow sensors during setup or later from **Configure**. Use **Advanced Circuit Settings** to link specific flow sensors to a specific appliance, turn off flow expectations for an appliance, or adjust the mismatch-minute threshold.
 
