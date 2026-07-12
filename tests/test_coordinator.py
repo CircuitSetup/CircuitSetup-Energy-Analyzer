@@ -577,6 +577,7 @@ def test_coordinator_does_not_extend_rain_window_for_ambiguous_rain() -> None:
 
     evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
     assert evidence["rain_last_active_at"] == started_at.isoformat()
+    assert evidence["rain_response_active"] is False
 
 
 def test_coordinator_marks_positive_rain_intensity_with_missing_unit_unknown() -> None:

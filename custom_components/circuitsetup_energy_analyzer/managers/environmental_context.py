@@ -399,6 +399,7 @@ class EnvironmentalContextManager:
         )
         rain_response_active = bool(
             not current_rain
+            and confirmed_dry
             and expires_at is not None
             and now <= expires_at
         )
