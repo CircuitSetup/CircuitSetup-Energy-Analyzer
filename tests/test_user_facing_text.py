@@ -1688,6 +1688,10 @@ panel._applianceDetail = {
   status: "ok",
   history: {
     entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+    entity_series: [
+      { entity_id: "sensor.fridge_power", unit: "W" },
+      { entity_id: "sensor.fridge_energy", unit: "kWh" },
+    ],
     default_hours: 168,
     period_hours: [24, 168, 720],
   },
@@ -1715,6 +1719,9 @@ panel._applianceDetail = {
 panel._applianceDetailHistorySeries = [[
   { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
+], [
+  { entity_id: "sensor.fridge_energy", state: "1.2", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_energy", state: "1.4", last_changed: "2026-07-10T13:00:00Z" },
 ]];
 panel._applianceDetailHistoryBounds = {
   min: Date.parse("2026-07-10T00:00:00Z"),
@@ -1731,11 +1738,15 @@ for (const expected of [
   'data-appliance-history-period',
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
-  "<title>Fridge Power: 128",
+  "<title>Fridge Power: 128 W",
+  "<title>Fridge Energy: 1.2 kWh",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
+}
+if ((html.match(/class="chart"/g) || []).length !== 2) {
+  throw new Error(`expected separate power and energy charts: ${html}`);
 }
 """
     )
@@ -1768,6 +1779,7 @@ def test_appliance_detail_history_requests_the_selected_period() -> None:
   assert.match(requests[0].apiPath, /filter_entity_id=sensor.fridge_power%2Csensor.fridge_energy/);
   assert.equal(panel._applianceDetailHistoryHours, 24);
   assert.equal(panel._applianceDetailHistorySeries.length, 1);
+  assert.equal(panel._applianceDetailChartSeries.length, 1);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -21,7 +22,13 @@ from .entities.setup_health import (
     setup_health_value,
 )
 from .localized_text import translation_section, translation_text
-from .models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from .models import (
+    AlertEvidence,
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    SensorRole,
+)
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
 from .recommendation_guidance import (
@@ -112,7 +119,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260711-2"
+PANEL_MODULE_VERSION = "20260712-1"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -128,6 +135,16 @@ MAX_NILM_WORKSPACE_SESSIONS = 20
 MAX_NILM_WORKSPACE_LABEL_INTERVALS = 40
 DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
 APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS = (24, 168, 720)
+_HISTORY_UNIT_BY_ROLE = {
+    SensorRole.VOLTAGE: "V",
+    SensorRole.CURRENT: "A",
+    SensorRole.REAL_POWER: "W",
+    SensorRole.REACTIVE_POWER: "var",
+    SensorRole.APPARENT_POWER: "VA",
+    SensorRole.POWER_FACTOR: "PF",
+    SensorRole.FREQUENCY: "Hz",
+    SensorRole.ENERGY: "kWh",
+}
 
 _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
@@ -660,15 +677,158 @@ def _appliance_detail_history_payload(
     detail: ApplianceDetail,
 ) -> dict[str, Any]:
     config = _config_for_circuit(coordinator, detail.circuit_id)
-    entities = (
-        _sensor_entity_ids(config)
+    entity_series = (
+        _source_history_series(config)
         if config is not None and detail.source_type != "nilm_estimate"
+        else _nilm_history_series(coordinator, detail.assignment_id)
+    )
+    embedded_series = (
+        _nilm_embedded_history_series(coordinator, detail)
+        if detail.source_type == "nilm_estimate" and not entity_series
         else []
     )
-    return {
-        "entities": entities,
+    if embedded_series:
+        entity_series = [
+            {"entity_id": embedded_series[0][0]["entity_id"], "unit": "W"}
+        ]
+    payload = {
+        "entities": [item["entity_id"] for item in entity_series],
+        "entity_series": entity_series,
         "default_hours": DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS,
         "period_hours": list(APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS),
+    }
+    if embedded_series:
+        payload["embedded_series"] = embedded_series
+    return payload
+
+
+def _source_history_series(config: Any) -> list[dict[str, str]]:
+    series: list[dict[str, str]] = []
+    for sensor in getattr(config, "sensors", ()) or ():
+        entity_id = str(getattr(sensor, "entity_id", "") or "").strip()
+        if not entity_id:
+            continue
+        role = getattr(sensor, "role", None)
+        try:
+            role = role if isinstance(role, SensorRole) else SensorRole(role)
+        except (TypeError, ValueError):
+            role = None
+        unit = str(getattr(sensor, "unit", "") or _HISTORY_UNIT_BY_ROLE.get(role, ""))
+        series.append({"entity_id": entity_id, "unit": unit})
+    return series
+
+
+def _nilm_history_series(
+    coordinator: Any,
+    assignment_id: str | None,
+) -> list[dict[str, str]]:
+    if not assignment_id:
+        return []
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    async_all = getattr(states, "async_all", None)
+    if not callable(async_all):
+        return []
+    try:
+        entity_states = async_all("sensor")
+    except TypeError:
+        entity_states = async_all()
+    series: list[dict[str, str]] = []
+    for state in entity_states:
+        attributes = getattr(state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            continue
+        if str(attributes.get("assignment_id") or "") != assignment_id:
+            continue
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        entity_id = str(getattr(state, "entity_id", "") or "").strip()
+        if entity_id and unit:
+            series.append({"entity_id": entity_id, "unit": unit})
+    return series
+
+
+def _nilm_embedded_history_series(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> list[list[dict[str, str]]]:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    sessions_by_circuit = getattr(store_data, "nilm_session_history_by_circuit", {})
+    if not isinstance(assignments_by_circuit, Mapping) or not isinstance(
+        sessions_by_circuit,
+        Mapping,
+    ):
+        return []
+    assignment = next(
+        (
+            item
+            for item in _iter_items(assignments_by_circuit.get(detail.circuit_id))
+            if isinstance(item, Mapping)
+            and str(item.get("assignment_id") or "") == detail.assignment_id
+        ),
+        None,
+    )
+    if assignment is None:
+        return []
+    session_ids = {
+        str(value or "")
+        for key in ("session_ids", "confirmed_session_ids")
+        for value in _iter_items(assignment.get(key))
+        if str(value or "")
+    }
+    fingerprints = {
+        str(value or "")
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "")
+    }
+    appliance_id = re.sub(
+        r"[^a-z0-9_]+",
+        "_",
+        str(assignment.get("appliance_id") or detail.assignment_id).lower(),
+    ).strip("_")
+    entity_id = f"sensor.{appliance_id}_estimated_power"
+    rows: list[dict[str, str]] = []
+    for session in _iter_items(sessions_by_circuit.get(detail.circuit_id)):
+        if not isinstance(session, Mapping):
+            continue
+        matches = (
+            str(session.get("assignment_id") or "") == detail.assignment_id
+            or str(session.get("session_id") or "") in session_ids
+            or str(session.get("signature_fingerprint") or "") in fingerprints
+        )
+        start = _datetime_from_iso(session.get("start"))
+        if not matches or start is None:
+            continue
+        try:
+            power = max(float(session.get("median_power_w") or 0.0), 0.0)
+        except (TypeError, ValueError):
+            continue
+        end = _datetime_from_iso(session.get("end"))
+        rows.extend(
+            [
+                _history_row(entity_id, 0.0, start - timedelta(milliseconds=1)),
+                _history_row(entity_id, power, start),
+            ]
+        )
+        if end is not None:
+            rows.extend(
+                [
+                    _history_row(entity_id, power, end),
+                    _history_row(entity_id, 0.0, end + timedelta(milliseconds=1)),
+                ]
+            )
+    rows.sort(key=lambda row: row["last_changed"])
+    return [rows] if rows else []
+
+
+def _history_row(entity_id: str, value: float, timestamp: datetime) -> dict[str, str]:
+    return {
+        "entity_id": entity_id,
+        "state": f"{value:g}",
+        "last_changed": timestamp.isoformat(),
     }
 
 

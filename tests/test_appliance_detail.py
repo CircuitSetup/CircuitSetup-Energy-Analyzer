@@ -274,6 +274,10 @@ def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
 
     assert payload["history"] == {
         "entities": ["sensor.fridge_power", "sensor.fridge_energy"],
+        "entity_series": [
+            {"entity_id": "sensor.fridge_power", "unit": "W"},
+            {"entity_id": "sensor.fridge_energy", "unit": "kWh"},
+        ],
         "default_hours": 168,
         "period_hours": [24, 168, 720],
     }
@@ -342,8 +346,30 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
         appliance_detail_payload,
     )
 
+    coordinator = _nilm_coordinator()
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            async_all=lambda _domain: [
+                SimpleNamespace(
+                    entity_id="sensor.dishwasher_estimated_power",
+                    attributes={
+                        "assignment_id": "assignment-dishwasher",
+                        "unit_of_measurement": "W",
+                    },
+                ),
+                SimpleNamespace(
+                    entity_id="sensor.dishwasher_estimated_daily_energy",
+                    attributes={
+                        "assignment_id": "assignment-dishwasher",
+                        "unit_of_measurement": "kWh",
+                    },
+                ),
+            ]
+        )
+    )
+
     payload = appliance_detail_payload(
-        [_nilm_coordinator()],
+        [coordinator],
         assignment_id="assignment-dishwasher",
     )
 
@@ -389,6 +415,43 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
         },
     }
     assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
+    assert payload["history"]["entities"] == [
+        "sensor.dishwasher_estimated_power",
+        "sensor.dishwasher_estimated_daily_energy",
+    ]
+
+
+def test_unpublished_nilm_appliance_uses_retained_session_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assignment["publish_entities"] = False
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-07-11T12:00:00+00:00",
+                "end": "2026-07-11T12:30:00+00:00",
+                "median_power_w": 820.0,
+            }
+        ]
+    }
+
+    payload = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )
+
+    embedded = payload["history"]["embedded_series"]
+    assert len(embedded) == 1
+    assert {row["state"] for row in embedded[0]} == {"0", "820"}
+    assert embedded[0][0]["entity_id"] == "sensor.dishwasher_estimated_power"
 
 
 def test_appliance_detail_reports_stale_assignment_before_circuit_fallback() -> None:
