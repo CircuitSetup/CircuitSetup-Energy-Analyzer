@@ -5452,36 +5452,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _alertMetricUnit(alert) {
-    const explicit = String(alert && alert.value_unit || "").trim();
-    if (explicit) {
-      return explicit;
-    }
-    const label = String(alert && (alert.value_label || alert.value_metric || alert.feature) || "").toLowerCase();
-    if (/factor/.test(label)) {
-      return "PF";
-    }
-    if (/ratio|percent/.test(label)) {
-      return "%";
-    }
-    if (/runtime|duration|active|idle|time/.test(label)) {
-      return "min";
-    }
-    if (/energy|usage/.test(label)) {
-      return "kWh";
-    }
-    if (/current/.test(label)) {
-      return "A";
-    }
-    if (/voltage/.test(label)) {
-      return "V";
-    }
-    if (/frequency/.test(label)) {
-      return "Hz";
-    }
-    if (/power|demand|watt/.test(label)) {
-      return "W";
-    }
-    return "";
+    return String(alert && alert.value_unit || "").trim();
   }
 
   _renderActionGroup(title, description, buttons) {

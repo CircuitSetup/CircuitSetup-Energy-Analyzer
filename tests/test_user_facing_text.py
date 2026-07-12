@@ -5432,8 +5432,8 @@ def test_alert_evidence_render_contracts() -> None:
         [{ value_format: "number", value_unit: "W" }, 120, "120 W"],
         [{ value_format: "number", value_unit: "VAR" }, 42, "42 VAR"],
         [{ value_format: "number", value_unit: "VA" }, 128, "128 VA"],
-        [{ value_label: "Real power", value_format: "number", value_unit: "" }, 120, "120 W"],
-        [{ value_label: "Runtime today", value_format: "number", value_unit: "" }, 42, "42 min"],
+        [{ value_label: "Real power", value_format: "number", value_unit: "" }, 120, "120"],
+        [{ value_label: "Runtime today", value_format: "number", value_unit: "" }, 42, "42"],
       ]) assert.equal(panel._formatAlertMetricValue(alert, value), expected);
     }
 
