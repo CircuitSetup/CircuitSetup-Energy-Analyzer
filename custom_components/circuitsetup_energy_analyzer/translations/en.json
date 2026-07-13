@@ -1329,7 +1329,15 @@
         "no_evidence_summary": "No compact evidence summary is available for this recommendation.",
         "evidence_count": "{count} evidence fields were captured{omitted}.",
         "evidence_omitted": "; {count} are hidden from this compact preview",
-        "value_row": "{label}: {value}"
+        "value_row": "{label}: {value}",
+        "preview_history": "Preview historical impact",
+        "preview_window": "{count} retained observations from {start} to {end}.",
+        "preview_alerts": "alerts",
+        "preview_state_changes": "state changes",
+        "preview_count": "{label}: {count} {metric}",
+        "preview_removed": "Would no longer trigger: {examples}",
+        "preview_added": "Would newly trigger: {examples}",
+        "preview_limitations": "Limitations"
       },
       "nilm_workspace": {
         "loading": "Loading NILM workspace...",

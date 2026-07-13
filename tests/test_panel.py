@@ -749,6 +749,53 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     }
 
 
+def test_recommendation_payload_includes_historical_setting_impact() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    alert = _alert(circuit_id="ev", timestamp=now)
+    coordinator = _coordinator(alert, config=_config("ev"))
+    coordinator.current_time = lambda: now
+    coordinator.store_data.contextual_baseline_samples_by_circuit = {
+        "ev": [
+            {
+                "timestamp": (now - timedelta(days=2)).isoformat(),
+                "feature": "peak_demand_w",
+                "value": 1800.0,
+            },
+            {
+                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "feature": "peak_demand_w",
+                "value": 2400.0,
+            },
+        ]
+    }
+    coordinator.state.settings_recommendations_by_circuit = {
+        "ev": [
+            {
+                "recommendation_id": "ev:demand_limit_w:v1",
+                "circuit_id": "ev",
+                "setting_key": "demand_limit_w",
+                "current_value": 2000.0,
+                "suggested_value": 2500.0,
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    impact = payload["setting_recommendations"][0]["impact_preview"]
+    assert impact["observations_evaluated"] == 2
+    assert impact["current_alert_count"] == 1
+    assert impact["candidate_alert_count"] == 0
+    assert impact["history_start"].startswith("2026-07-11")
+
+
 def test_alert_evidence_payload_selects_requested_recommendation_preview() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

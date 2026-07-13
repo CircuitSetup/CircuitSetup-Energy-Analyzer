@@ -4160,6 +4160,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
               ${this._recommendationValueRows(recommendation)}
               ${recommendation.expected_effect ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.expected_effect", { effect: recommendation.expected_effect }))}</p>` : ""}
               ${recommendation.evidence_preview ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence", { evidence: recommendation.evidence_preview }))}</p>` : ""}
+              ${this._renderSettingImpactPreview(recommendation)}
                 <div class="actions">
                  ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", this._panelText("actions.labels.preview_evidence"), true) : ""}
                  ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
@@ -4219,6 +4220,47 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.suggested"), value: suggestedValue }))}</code>`);
     }
     return rows.length ? `<div class="entity-list">${rows.join("")}</div>` : "";
+  }
+
+  _renderSettingImpactPreview(recommendation) {
+    const preview = recommendation && recommendation.impact_preview;
+    if (!preview) {
+      return "";
+    }
+    const stateChanges = preview.current_state_change_count !== null && preview.current_state_change_count !== undefined;
+    const currentCount = stateChanges ? preview.current_state_change_count : preview.current_alert_count;
+    const candidateCount = stateChanges ? preview.candidate_state_change_count : preview.candidate_alert_count;
+    const countLabel = stateChanges
+      ? this._panelText("recommendations.preview_state_changes")
+      : this._panelText("recommendations.preview_alerts");
+    const window = Number(preview.observations_evaluated || 0) > 0
+      ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_window", {
+        count: preview.observations_evaluated,
+        start: this._formatDateTime(new Date(preview.history_start)),
+        end: this._formatDateTime(new Date(preview.history_end)),
+      }))}</p>`
+      : "";
+    const examples = [
+      preview.examples_removed && preview.examples_removed.length
+        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_removed", { examples: preview.examples_removed.join(", ") }))}</p>`
+        : "",
+      preview.examples_added && preview.examples_added.length
+        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_added", { examples: preview.examples_added.join(", ") }))}</p>`
+        : "",
+    ].join("");
+    const limitations = Array.isArray(preview.limitations) && preview.limitations.length
+      ? `<p class="muted"><strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong> ${this._escape(preview.limitations.join(" "))}</p>`
+      : "";
+    return `<details class="disclosure setting-impact-preview">
+      <summary>${this._escape(this._panelText("recommendations.preview_history"))}</summary>
+      <div class="disclosure-content">
+        ${window}
+        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
+        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
+        ${examples}
+        ${limitations}
+      </div>
+    </details>`;
   }
 
   _renderNilmMergeTarget(signature, index) {

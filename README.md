@@ -163,7 +163,10 @@ questions instead of raw diagnostic entity lists:
   maintenance or alert markers remain visible with a text detail fallback.
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
-  and reset/apply/dismiss actions.
+  and reset/apply/dismiss actions. Supported threshold suggestions also include
+  a bounded, non-mutating preview of the alerts or operating-state changes the
+  candidate would have produced from up to 14 days and 500 retained samples.
+  The preview is historical guidance, not a prediction of future behavior.
 - **Alert Evidence** starts with a visual comparison, then keeps graph-first
   evidence beside the plain-language explanation and moves technical details
   into a disclosure for deeper review.

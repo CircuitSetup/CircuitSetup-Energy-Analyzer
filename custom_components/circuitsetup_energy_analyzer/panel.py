@@ -90,6 +90,10 @@ from .services import (
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
 )
+from .settings_preview import (
+    build_setting_impact_preview,
+    setting_preview_observations,
+)
 from .ux import alert_evidence_detail, friendly_feature_name
 
 PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
@@ -123,7 +127,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-4"
+PANEL_MODULE_VERSION = "20260713-5"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -1285,6 +1289,7 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
     payload["display_label"] = _recommendation_display_label(payload)
+    _add_setting_impact_preview(payload, coordinator)
     _add_recommendation_guidance(payload)
     if isinstance(recommendation_id, str) and recommendation_id:
         payload["actions"] = _recommendation_actions(
@@ -2047,6 +2052,32 @@ def _nilm_assignment_payload(
     if actions:
         payload["actions"] = actions
     return payload
+
+
+def _add_setting_impact_preview(payload: dict[str, Any], coordinator: Any) -> None:
+    setting_key = str(payload.get("setting_key") or "").strip()
+    circuit_id = str(payload.get("circuit_id") or "").strip()
+    if (
+        not setting_key
+        or not circuit_id
+        or "current_value" not in payload
+        or "suggested_value" not in payload
+    ):
+        return
+    clock = getattr(coordinator, "current_time", None)
+    now = clock() if callable(clock) else datetime.now(UTC)
+    preview = build_setting_impact_preview(
+        setting_key,
+        payload["current_value"],
+        payload["suggested_value"],
+        setting_preview_observations(
+            getattr(coordinator, "store_data", None),
+            circuit_id,
+            setting_key,
+        ),
+        now=now,
+    )
+    payload["impact_preview"] = preview.as_dict()
 
 
 def _nilm_direct_circuit_options(
