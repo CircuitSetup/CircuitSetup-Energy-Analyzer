@@ -4,6 +4,8 @@ const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspac
 const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
 const APPLIANCE_DETAIL_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_detail";
 const APPLIANCE_DETAIL_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_detail";
+const APPLIANCE_INSIGHTS_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_insights";
+const APPLIANCE_INSIGHTS_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_insights";
 const SETUP_HEALTH_API_PATH = "/api/circuitsetup_energy_analyzer/setup_health";
 const SETUP_HEALTH_CALL_API_PATH = "circuitsetup_energy_analyzer/setup_health";
 const HISTORY_CALL_API_PREFIX = "history/period";
@@ -12,6 +14,7 @@ const NILM_LOW_CONFIDENCE_THRESHOLD = 0.8;
 const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
+const APPLIANCE_INSIGHTS_QUERY_PARAM = "appliance_insights";
 const SETUP_HEALTH_QUERY_PARAM = "setup_health";
 const PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence";
 const REVIEW_SUGGESTED_SETTINGS_QUERY_PARAM = "review_suggested_settings";
@@ -85,6 +88,12 @@ class CircuitSetupApplianceDetail extends CircuitSetupPanelComponent {
   }
 }
 
+class CircuitSetupApplianceInsights extends CircuitSetupPanelComponent {
+  render() {
+    return this.host._renderApplianceInsightsContent();
+  }
+}
+
 class CircuitSetupSetupHealth extends CircuitSetupPanelComponent {
   render() {
     return this.host._renderSetupHealthContent();
@@ -104,6 +113,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceSummary = new CircuitSetupEvidenceSummary(this);
     this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);
     this._applianceDetailComponent = new CircuitSetupApplianceDetail(this);
+    this._applianceInsightsComponent = new CircuitSetupApplianceInsights(this);
     this._setupHealthComponent = new CircuitSetupSetupHealth(this);
     this._recommendationCards = new CircuitSetupRecommendationCards(this);
     this._hass = null;
@@ -111,6 +121,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historySeries = [];
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._applianceInsights = null;
+    this._applianceInsights = null;
+    this._applianceInsightsFilters = {
+      running: false,
+      needs_attention: false,
+      nilm_estimated: false,
+      learning: false,
+      data_problem: false,
+    };
+    this._applianceInsightsSort = "default";
     this._expectedScheduleDraft = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailChartSeries = [];
@@ -125,6 +145,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceLoading = false;
     this._nilmWorkspaceHistoryLoading = false;
     this._applianceDetailLoading = false;
+    this._applianceInsightsLoading = false;
     this._applianceDetailHistoryLoading = false;
     this._setupHealthLoading = false;
     this._error = "";
@@ -133,6 +154,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
+    this._applianceInsightsError = "";
+    this._applianceInsightsLoading = false;
+    this._applianceInsightsError = "";
     this._applianceDetailHistoryError = "";
     this._setupHealthError = "";
     this._busyAction = "";
@@ -283,6 +307,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (this._routeRequestsApplianceDetail(routeKey)) {
         await this._loadApplianceDetail(requestId, routeKey);
       }
+      if (this._routeRequestsApplianceInsights(routeKey)) {
+        await this._loadApplianceInsights(requestId, routeKey);
+      }
       if (this._routeRequestsSetupHealth(routeKey)) {
         await this._loadSetupHealth(requestId, routeKey);
       }
@@ -386,11 +413,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const circuit = this._payload && this._payload.circuit;
     const circuitId = routeUrl.searchParams.get("circuit_id") || (circuit && circuit.circuit_id) || "";
     const assignmentId = routeUrl.searchParams.get("assignment_id") || "";
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
     if (circuitId) {
       params.set("circuit_id", circuitId);
     }
     if (assignmentId) {
       params.set("assignment_id", assignmentId);
+    }
+    if (entryId) {
+      params.set("entry_id", entryId);
     }
     const query = params.toString();
     const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
@@ -487,6 +518,39 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     } finally {
       if (this._isCurrentRequest(requestId, routeKey)) {
         this._applianceDetailHistoryLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _loadApplianceInsights(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    if (!this._routeRequestsApplianceInsights(routeKey)) {
+      return;
+    }
+    this._applianceInsightsLoading = true;
+    this._applianceInsightsError = "";
+    this._render();
+    try {
+      const payload = await this._requestJson(
+        APPLIANCE_INSIGHTS_CALL_API_PATH,
+        APPLIANCE_INSIGHTS_API_PATH,
+      );
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceInsights = payload;
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
+      this._applianceInsights = null;
+      this._applianceInsightsError = this._panelTextFormat(
+        "errors.load_appliance_insights",
+        { message: error.message },
+      );
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._applianceInsightsLoading = false;
         this._render();
       }
     }
@@ -627,7 +691,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const routeUrl = new URL(routeKey, window.location.origin);
     const circuit = this._payload && this._payload.circuit;
     const circuitId = (circuit && circuit.circuit_id) || routeUrl.searchParams.get("circuit_id") || "";
-    const query = circuitId ? new URLSearchParams({ circuit_id: circuitId }).toString() : "";
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    const params = new URLSearchParams();
+    if (circuitId) {
+      params.set("circuit_id", circuitId);
+    }
+    if (entryId) {
+      params.set("entry_id", entryId);
+    }
+    const query = params.toString();
     const routeApiPath = routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1" && query
       ? `${NILM_WORKSPACE_CALL_API_PATH}?${query}`
       : "";
@@ -1502,6 +1574,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       && routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) !== "1";
   }
 
+  _routeRequestsApplianceInsights(routeKey = this._routeKey()) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    if (routeUrl.searchParams.get(APPLIANCE_INSIGHTS_QUERY_PARAM) === "1") {
+      return true;
+    }
+    return routeUrl.pathname.endsWith(`/${PANEL_URL_PATH}`)
+      && routeUrl.searchParams.size === 0;
+  }
+
   _routeRequestsSetupHealth(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
     return routeUrl.searchParams.get(SETUP_HEALTH_QUERY_PARAM) === "1";
@@ -1729,6 +1810,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const circuit = payload && payload.circuit;
     const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
     const applianceDetailRoute = this._routeRequestsApplianceDetail();
+    const applianceInsightsRoute = this._routeRequestsApplianceInsights();
     const setupHealthRoute = this._routeRequestsSetupHealth();
     const suggestedSettingsRoute = this._routeRequestsSuggestedSettings();
     const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
@@ -1736,6 +1818,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._setupHealthText("heading")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights")
       : applianceDetailRoute
       ? this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
@@ -1745,6 +1829,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._setupHealthText("heading")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.display_name) || this._panelText("headers.appliance_detail")
       : nilmWorkspaceRoute
@@ -1754,6 +1840,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._setupHealthText("header_message")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings_message")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights_message")
       : applianceDetailRoute
       ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
       : nilmWorkspaceRoute
@@ -1761,7 +1849,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ? this._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: circuit.name })
         : this._panelText("headers.nilm_workspace_message")
       : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? this._evidenceText("fallbacks.current_circuit_message") : this._evidenceText("fallbacks.historical_heading"));
-    const loadingText = setupHealthRoute ? this._setupHealthText("loading") : this._evidenceText("loading");
+    const loadingText = setupHealthRoute
+      ? this._setupHealthText("loading")
+      : applianceInsightsRoute
+      ? this._panelText("appliance_insights.loading")
+      : this._evidenceText("loading");
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -2245,6 +2337,85 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         [data-expected-schedule] select {
           min-width: 0;
         }
+        .appliance-insights-controls {
+          align-items: end;
+          display: grid;
+          gap: 12px 24px;
+          grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+        }
+        .appliance-insights-filters {
+          border: 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px 18px;
+          margin: 0;
+          padding: 0;
+        }
+        .appliance-insights-filters legend {
+          font-weight: 700;
+          margin-bottom: 8px;
+          padding: 0;
+          width: 100%;
+        }
+        .appliance-insights-filters label {
+          align-items: center;
+          display: inline-flex;
+          gap: 6px;
+          min-height: 32px;
+        }
+        .appliance-insights-sort {
+          display: grid;
+          gap: 6px;
+        }
+        .appliance-insights-sort select {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          min-height: 44px;
+          padding: 8px 10px;
+          width: 100%;
+        }
+        .appliance-insights-table-wrap {
+          overflow-x: auto;
+        }
+        .appliance-insights-table {
+          border-collapse: collapse;
+          min-width: 920px;
+          width: 100%;
+        }
+        .appliance-insights-table th,
+        .appliance-insights-table td {
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          padding: 12px 10px;
+          text-align: left;
+          vertical-align: top;
+        }
+        .appliance-insights-table th {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .appliance-insights-table td:first-child {
+          font-weight: 700;
+        }
+        .appliance-insights-table a {
+          color: var(--primary-color, #0b6bcb);
+          overflow-wrap: anywhere;
+        }
+        .appliance-insights-table small {
+          color: var(--secondary-text-color, #5f6b7a);
+          display: block;
+          line-height: 1.35;
+          margin-top: 4px;
+        }
+        .energy-change-list {
+          display: grid;
+          gap: 6px;
+          margin: 12px 0 0;
+          padding-left: 20px;
+        }
         .appliance-comparison-grid {
           display: grid;
           gap: 12px;
@@ -2695,6 +2866,45 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           .workspace-progress {
             grid-column: 1 / -1;
           }
+          .appliance-insights-controls {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .appliance-insights-table {
+            min-width: 0;
+          }
+          .appliance-insights-table thead {
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            height: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: nowrap;
+            width: 1px;
+          }
+          .appliance-insights-table tbody,
+          .appliance-insights-table tr,
+          .appliance-insights-table td {
+            display: block;
+            width: 100%;
+          }
+          .appliance-insights-table tr {
+            border-bottom: 1px solid var(--divider-color, #d8dde6);
+            padding: 10px 0;
+          }
+          .appliance-insights-table td {
+            border: 0;
+            box-sizing: border-box;
+            display: grid;
+            gap: 12px;
+            grid-template-columns: minmax(112px, 0.7fr) minmax(0, 1fr);
+            padding: 7px 0;
+          }
+          .appliance-insights-table td::before {
+            color: var(--secondary-text-color, #5f6b7a);
+            content: attr(data-label);
+            font-size: 12px;
+            font-weight: 700;
+          }
           .schedule-window {
             grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
           }
@@ -2714,13 +2924,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
-          ${!setupHealthRoute && !suggestedSettingsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
+          ${!setupHealthRoute && !suggestedSettingsRoute && !applianceInsightsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
         </section>
       ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
       ${this._renderSelectedRecommendationEvidence()}
-      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit))))}
+      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceInsights() ? this._renderApplianceInsightsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))))}
       </main>
     `;
 
@@ -2982,6 +3192,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._navigate(button.dataset.nilmApplianceDetailPath);
       });
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-appliance-insights-filter]")) {
+      input.addEventListener("change", () => {
+        this._applianceInsightsFilters[input.dataset.applianceInsightsFilter] = input.checked;
+        this._render();
+      });
+    }
+    const applianceInsightsSort = this.shadowRoot.querySelector("[data-appliance-insights-sort]");
+    if (applianceInsightsSort) {
+      applianceInsightsSort.addEventListener("change", () => {
+        this._applianceInsightsSort = applianceInsightsSort.value;
+        this._render();
+      });
+    }
+    for (const link of this.shadowRoot.querySelectorAll("[data-appliance-insights-detail-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.dataset.applianceInsightsDetailPath);
+      });
+    }
+    for (const link of this.shadowRoot.querySelectorAll("[data-appliance-insights-source-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.dataset.applianceInsightsSourcePath);
+      });
+    }
     for (const link of this.shadowRoot.querySelectorAll("[data-setup-health-path]")) {
       link.addEventListener("click", (event) => {
         event.preventDefault();
@@ -2989,6 +3224,119 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       });
     }
     this._restoreNilmFocus(nilmFocus);
+  }
+
+  _renderApplianceInsightsBody() {
+    return this._applianceInsightsComponent.render();
+  }
+
+  _renderApplianceInsightsContent() {
+    if (this._applianceInsightsLoading) {
+      return `<section class="panel"><p>${this._escape(this._panelText("appliance_insights.loading"))}</p></section>`;
+    }
+    if (this._applianceInsightsError) {
+      return `<section class="panel error"><p>${this._escape(this._applianceInsightsError)}</p></section>`;
+    }
+    const items = this._visibleApplianceInsights();
+    return `
+      <section class="panel appliance-insights-controls">
+        <fieldset class="appliance-insights-filters">
+          <legend>${this._escape(this._panelText("appliance_insights.filters.heading"))}</legend>
+          ${[
+            ["running", this._panelText("appliance_insights.filters.running")],
+            ["needs_attention", this._panelText("appliance_insights.filters.needs_attention")],
+            ["nilm_estimated", this._panelText("appliance_insights.filters.nilm_estimated")],
+            ["learning", this._panelText("appliance_insights.filters.learning")],
+            ["data_problem", this._panelText("appliance_insights.filters.data_problem")],
+          ].map(([key, label]) => `<label><input type="checkbox" data-appliance-insights-filter="${key}" ${this._applianceInsightsFilters[key] ? "checked" : ""}> ${this._escape(label)}</label>`).join("")}
+        </fieldset>
+        <label class="appliance-insights-sort">
+          ${this._escape(this._panelText("appliance_insights.sorts.heading"))}
+          <select data-appliance-insights-sort>
+            ${[
+              ["default", this._panelText("appliance_insights.sorts.default")],
+              ["highest_energy", this._panelText("appliance_insights.sorts.highest_energy")],
+              ["largest_change", this._panelText("appliance_insights.sorts.largest_change")],
+              ["name", this._panelText("appliance_insights.sorts.name")],
+            ].map(([value, label]) => `<option value="${value}" ${this._applianceInsightsSort === value ? "selected" : ""}>${this._escape(label)}</option>`).join("")}
+          </select>
+        </label>
+      </section>
+      <section class="panel">
+        ${items.length ? this._renderApplianceInsightsTable(items) : `<p class="muted">${this._escape(this._panelText("appliance_insights.empty"))}</p>`}
+      </section>
+    `;
+  }
+
+  _visibleApplianceInsights() {
+    const payloadItems = this._applianceInsights && this._applianceInsights.items;
+    const filters = this._applianceInsightsFilters;
+    const items = (Array.isArray(payloadItems) ? payloadItems : []).filter((item) => (
+      (!filters.running || item.is_running)
+      && (!filters.needs_attention || item.needs_attention)
+      && (!filters.nilm_estimated || item.is_nilm)
+      && (!filters.learning || item.is_learning)
+      && (!filters.data_problem || item.has_data_problem)
+    ));
+    if (this._applianceInsightsSort === "highest_energy") {
+      items.sort((left, right) => this._descendingNullableSortNumber(
+        left.daily_energy_kwh,
+        right.daily_energy_kwh,
+      ));
+    } else if (this._applianceInsightsSort === "largest_change") {
+      items.sort((left, right) => this._descendingNullableSortNumber(
+        left.today_vs_normal_percent === null || left.today_vs_normal_percent === undefined
+          ? null
+          : Math.abs(left.today_vs_normal_percent),
+        right.today_vs_normal_percent === null || right.today_vs_normal_percent === undefined
+          ? null
+          : Math.abs(right.today_vs_normal_percent),
+      ));
+    } else if (this._applianceInsightsSort === "name") {
+      items.sort((left, right) => String(left.display_name || "").localeCompare(String(right.display_name || "")));
+    }
+    return items;
+  }
+
+  _descendingNullableSortNumber(left, right) {
+    const leftNumber = Number(left);
+    const rightNumber = Number(right);
+    const leftValid = left !== null && left !== undefined && Number.isFinite(leftNumber);
+    const rightValid = right !== null && right !== undefined && Number.isFinite(rightNumber);
+    if (!leftValid) return rightValid ? 1 : 0;
+    if (!rightValid) return -1;
+    return rightNumber - leftNumber;
+  }
+
+  _renderApplianceInsightsTable(items) {
+    const columns = {
+      appliance: this._panelText("appliance_insights.columns.appliance"),
+      now: this._panelText("appliance_insights.columns.now"),
+      energy: this._panelText("appliance_insights.columns.energy_today"),
+      change: this._panelText("appliance_insights.columns.today_vs_normal"),
+      source: this._panelText("appliance_insights.columns.source"),
+      readiness: this._panelText("appliance_insights.columns.readiness_confidence"),
+      attention: this._panelText("appliance_insights.columns.needs_attention"),
+    };
+    return `<div class="appliance-insights-table-wrap"><table class="appliance-insights-table">
+      <thead><tr>${Object.values(columns).map((label) => `<th scope="col">${this._escape(label)}</th>`).join("")}</tr></thead>
+      <tbody>${items.map((item) => {
+        const quality = item.source_quality || {};
+        const readiness = item.learning_readiness || {};
+        const confidence = item.confidence !== null && item.confidence !== undefined
+          ? this._formatConfidence(item.confidence)
+          : "";
+        return `<tr>
+          <td data-label="${this._escape(columns.appliance)}"><a href="${this._escape(item.detail_path)}" data-appliance-insights-detail-path="${this._escape(item.detail_path)}">${this._escape(item.display_name || item.appliance_key)}</a></td>
+          <td data-label="${this._escape(columns.now)}">${this._escape(item.activity_state || this._panelText("common.unknown"))}${item.current_power_w !== null && item.current_power_w !== undefined ? `<small>${this._escape(this._formatPower(item.current_power_w))}</small>` : ""}</td>
+          <td data-label="${this._escape(columns.energy)}">${this._escape(this._formatKwh(item.daily_energy_kwh))}</td>
+          <td data-label="${this._escape(columns.change)}">${this._escape(this._formatChangePercent(item.today_vs_normal_percent))}${item.energy_change_explanation ? `<small>${this._escape(item.energy_change_explanation.explanation)}</small>` : ""}</td>
+          <td data-label="${this._escape(columns.source)}"><a href="${this._escape(item.source_path)}" data-appliance-insights-source-path="${this._escape(item.source_path)}">${this._escape(this._sourceLabel(item.source_type))}</a><small>${this._escape(quality.label || this._friendlyFeature(quality.status || "unknown"))}</small></td>
+          <td data-label="${this._escape(columns.readiness)}">${this._escape(readiness.label || this._friendlyFeature(readiness.status || "unknown"))}${confidence ? `<small>${this._escape(this._panelTextFormat("appliance_insights.confidence", { confidence }))}</small>` : ""}</td>
+          <td data-label="${this._escape(columns.attention)}">${this._escape(this._panelText(item.needs_attention ? "appliance_insights.yes" : "appliance_insights.no"))}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>`;
   }
 
   _renderApplianceDetailBody() {
@@ -3286,6 +3634,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
         ${this._renderApplianceComparisons(detail.today_vs_normal)}
       </section>
+      ${this._renderWhyEnergyChanged(detail.energy_change_explanation)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
@@ -3305,6 +3654,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._renderApplianceActions(payload.actions)}
       </section>
     `;
+  }
+
+  _renderWhyEnergyChanged(energy_change_explanation) {
+    const heading = this._panelText("appliance_detail.why_energy_changed");
+    if (!energy_change_explanation) {
+      return `<section class="panel"><h2>${this._escape(heading)}</h2><p class="muted">${this._escape(this._panelText("appliance_detail.energy_change_insufficient"))}</p></section>`;
+    }
+    const contributions = [
+      ["runtime", energy_change_explanation.runtime_contribution_percent],
+      ["running_power", energy_change_explanation.running_power_contribution_percent],
+      ["cycle_count", energy_change_explanation.cycle_count_contribution_percent],
+      ["unexplained", energy_change_explanation.unexplained_percent],
+    ].filter(([, value]) => value !== null && value !== undefined && Math.abs(Number(value)) >= 0.05);
+    return `<section class="panel" data-energy-change-explanation>
+      <h2>${this._escape(heading)}</h2>
+      <p>${this._escape(energy_change_explanation.explanation || "")}</p>
+      ${contributions.length ? `<ul class="energy-change-list">${contributions.map(([key, value]) => `<li>${this._escape(this._panelTextFormat("appliance_detail.energy_change_contribution", {
+        factor: this._panelText(`appliance_detail.energy_change_factors.${key}`),
+        percent: this._formatChangePercent(value),
+      }))}</li>`).join("")}</ul>` : ""}
+    </section>`;
   }
 
   _renderApplianceNotificationPreferences(preferences) {
@@ -3353,7 +3723,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     body.quiet_hours_end = panel.querySelector("[data-notification-quiet-end]").value || null;
     const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
     const params = new URLSearchParams();
-    for (const key of ["circuit_id", "assignment_id"]) {
+    for (const key of ["circuit_id", "assignment_id", "entry_id"]) {
       if (route.searchParams.get(key)) {
         params.set(key, route.searchParams.get(key));
       }
@@ -3467,7 +3837,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const body = this._readExpectedScheduleForm();
     const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
     const params = new URLSearchParams();
-    for (const key of ["circuit_id", "assignment_id"]) {
+    for (const key of ["circuit_id", "assignment_id", "entry_id"]) {
       if (route.searchParams.get(key)) {
         params.set(key, route.searchParams.get(key));
       }
@@ -6120,6 +6490,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     const normalized = confidence <= 1 ? confidence * 100 : confidence;
     return `${Math.round(normalized)}%`;
+  }
+
+  _formatChangePercent(value) {
+    const number = Number(value);
+    if (value === null || value === undefined || !Number.isFinite(number)) {
+      return this._panelText("common.unknown");
+    }
+    const prefix = number > 0 ? "+" : "";
+    return `${prefix}${this._formatNumber(number)}%`;
   }
 
   _isLowNilmConfidence(value) {

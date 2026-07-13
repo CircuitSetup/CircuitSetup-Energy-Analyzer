@@ -180,6 +180,18 @@ questions instead of raw diagnostic entity lists:
   pool pump or EV charger. One missed window stays in learning; outside-window
   or missed-window findings require repeated evidence, fresh source data, and
   no active maintenance before an alert is promoted.
+- **Appliance Insights** is the evidence panel's integration-level appliance
+  index. It lists direct-meter and NILM appliances together, defaults to
+  needs-attention and running appliances first, and supports running,
+  attention, NILM, learning, and data-problem filters plus energy/change
+  sorting. Appliance and source links open Appliance Detail, source setup, or
+  the matching NILM assignment without losing the stable appliance identity.
+- **Why Energy Changed** conservatively separates same-time energy change into
+  runtime, running-power, and cycle-count contributions when those baselines
+  are available. Contributions stay bounded to the observed change; missing
+  history and low-confidence NILM remain explicitly unexplained. Source
+  quality, learning readiness, and NILM evidence confidence stay separate
+  rather than being collapsed into one score.
 - **Alert Evidence** starts with a visual comparison, then keeps graph-first
   evidence beside the plain-language explanation and moves technical details
   into a disclosure for deeper review.

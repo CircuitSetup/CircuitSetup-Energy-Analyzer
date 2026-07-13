@@ -1106,6 +1106,8 @@
       "headers": {
         "alert_evidence": "Alert Evidence",
         "appliance_detail": "Appliance Detail",
+        "appliance_insights": "Appliance Insights",
+        "appliance_insights_message": "Compare appliance activity, energy, source quality, and readiness.",
         "needs_attention": "Needs Attention",
         "appliance_detail_message": "Appliance behavior summary.",
         "suggested_settings": "Suggested Settings",
@@ -1126,6 +1128,7 @@
         "load_nilm_workspace": "Could not load NILM workspace: {message}",
         "load_nilm_workspace_history": "Could not load NILM workspace history: {message}",
         "load_appliance_detail": "Could not load Appliance Detail from {path}: {message}",
+        "load_appliance_insights": "Could not load Appliance Insights: {message}",
         "load_appliance_history": "Could not load appliance history from {path}: {message}",
         "run_service": "Could not run {service}: {message}",
         "alert_decision_required": "Choose a response before applying.",
@@ -1283,6 +1286,15 @@
         "running_now": "Running now",
         "maintenance_session": "Overlapped maintenance",
         "today_vs_normal": "Today vs Normal",
+        "why_energy_changed": "Why Energy Changed",
+        "energy_change_insufficient": "Not enough evidence is available to separate the causes of today's energy change.",
+        "energy_change_contribution": "{factor}: {percent}",
+        "energy_change_factors": {
+          "runtime": "Runtime",
+          "running_power": "Running power",
+          "cycle_count": "Cycle count",
+          "unexplained": "Not yet explained"
+        },
         "behavior_expectations": "Behavior Expectations",
         "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
@@ -1314,6 +1326,37 @@
         "history_30_days": "Past 30 days",
         "history_window": "Showing {start} to {end}.",
         "notifications": "Appliance Notifications"
+      },
+      "appliance_insights": {
+        "loading": "Loading Appliance Insights...",
+        "empty": "No appliances match the selected filters.",
+        "yes": "Yes",
+        "no": "No",
+        "confidence": "Evidence confidence {confidence}",
+        "filters": {
+          "heading": "Filters",
+          "running": "Running",
+          "needs_attention": "Needs Attention",
+          "nilm_estimated": "NILM Estimated",
+          "learning": "Learning",
+          "data_problem": "Data Problem"
+        },
+        "sorts": {
+          "heading": "Sort",
+          "default": "Needs attention, running, largest change",
+          "highest_energy": "Highest Energy",
+          "largest_change": "Largest Change",
+          "name": "Appliance Name"
+        },
+        "columns": {
+          "appliance": "Appliance",
+          "now": "Now",
+          "energy_today": "Energy Today",
+          "today_vs_normal": "Today vs Normal",
+          "source": "Source Quality",
+          "readiness_confidence": "Readiness and Confidence",
+          "needs_attention": "Needs Attention"
+        }
       },
       "notifications": {
         "delivery_mode": "Delivery mode",

@@ -3829,6 +3829,67 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     assert "_renderSetupHealthBody" in asset
 
 
+def test_appliance_insights_panel_route_and_api_contract() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        'const APPLIANCE_INSIGHTS_API_PATH = '
+        '"/api/circuitsetup_energy_analyzer/appliance_insights";',
+        'const APPLIANCE_INSIGHTS_CALL_API_PATH = '
+        '"circuitsetup_energy_analyzer/appliance_insights";',
+        'const APPLIANCE_INSIGHTS_QUERY_PARAM = "appliance_insights";',
+        "routeUrl.searchParams.get(APPLIANCE_INSIGHTS_QUERY_PARAM) === \"1\"",
+        "_routeRequestsApplianceInsights",
+        "_loadApplianceInsights",
+        "_renderApplianceInsightsBody",
+    ):
+        assert expected in asset
+
+
+def test_appliance_insights_panel_exposes_filter_and_sort_controls() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        "data-appliance-insights-filter",
+        'this._panelText("appliance_insights.filters.running")',
+        'this._panelText("appliance_insights.filters.needs_attention")',
+        'this._panelText("appliance_insights.filters.nilm_estimated")',
+        'this._panelText("appliance_insights.filters.learning")',
+        'this._panelText("appliance_insights.filters.data_problem")',
+        "data-appliance-insights-sort",
+        'this._panelText("appliance_insights.sorts.highest_energy")',
+        'this._panelText("appliance_insights.sorts.largest_change")',
+    ):
+        assert expected in asset
+
+
+def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        "data-appliance-insights-detail-path",
+        "data-appliance-insights-source-path",
+        'querySelectorAll("[data-appliance-insights-detail-path]")',
+        'querySelectorAll("[data-appliance-insights-source-path]")',
+    ):
+        assert expected in asset
+
+
+def test_appliance_detail_panel_renders_why_energy_changed() -> None:
+    asset = PANEL_ASSET.read_text(encoding="utf-8")
+
+    for expected in (
+        "_renderWhyEnergyChanged",
+        'this._panelText("appliance_detail.why_energy_changed")',
+        "energy_change_explanation",
+        "runtime_contribution_percent",
+        "running_power_contribution_percent",
+        "cycle_count_contribution_percent",
+        "unexplained_percent",
+    ):
+        assert expected in asset
+
+
 def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
     body = """
 const panel = new context.Panel();

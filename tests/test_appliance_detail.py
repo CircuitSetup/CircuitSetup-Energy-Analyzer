@@ -247,6 +247,61 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
 
 
+def test_appliance_detail_payload_includes_energy_change_explanation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.energy_usage_evidence_by_circuit["fridge"].update(
+        {
+            "contextual_expected_range": [1.0, 1.4],
+            "contextual_baseline_median_kwh": 1.2,
+            "contextual_baseline_confidence": 0.9,
+        }
+    )
+    coordinator.state.run_cycle_evidence_by_circuit["fridge"] = {
+        "runtime_today_contextual_expected_range_seconds": [5400.0, 6600.0],
+        "runtime_today_contextual_baseline_median_seconds": 6000.0,
+        "runtime_today_contextual_baseline_confidence": 0.9,
+        "run_count_contextual_expected_range": [10.0, 14.0],
+        "run_count_contextual_baseline_median": 12.0,
+        "run_count_contextual_baseline_confidence": 0.9,
+    }
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    explanation = payload["detail"]["energy_change_explanation"]
+    assert explanation["appliance_key"] == "circuit:fridge"
+    assert explanation["current_energy_kwh"] == pytest.approx(1.82)
+    assert explanation["normal_energy_kwh"] == pytest.approx(1.2)
+    assert explanation["total_change_percent"] == pytest.approx(51.6666667)
+    assert explanation["confidence"] == pytest.approx(0.9)
+    assert explanation["explanation"].startswith("Energy today is 52% above normal")
+
+
+def test_appliance_detail_payload_scopes_duplicate_circuit_to_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    upstairs = _direct_coordinator()
+    upstairs.circuit_configs = (_config(name="Upstairs Fridge"),)
+    downstairs = _direct_coordinator()
+    downstairs.entry_id = "entry-2"
+    downstairs.circuit_configs = (_config(name="Downstairs Fridge"),)
+
+    payload = appliance_detail_payload(
+        [upstairs, downstairs],
+        circuit_id="fridge",
+        entry_id="entry-2",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["requested_entry_id"] == "entry-2"
+    assert payload["detail"]["display_name"] == "Downstairs Fridge"
+
+
 def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
@@ -1019,9 +1074,10 @@ def test_nilm_appliance_detail_includes_assignment_alerts() -> None:
     assert alert["repeated_count"] == 1
 
 
-def test_appliance_detail_view_registers_with_panel_views() -> None:
+def test_appliance_views_register_with_panel_views() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         APPLIANCE_DETAIL_API_PATH,
+        APPLIANCE_INSIGHTS_API_PATH,
         _register_view,
     )
 
@@ -1032,9 +1088,13 @@ def test_appliance_detail_view_registers_with_panel_views() -> None:
 
     _register_view(hass)
 
-    assert APPLIANCE_DETAIL_API_PATH in {view.url for view in registered}
+    views_by_url = {view.url: view for view in registered}
+    assert APPLIANCE_DETAIL_API_PATH in views_by_url
+    assert APPLIANCE_INSIGHTS_API_PATH in views_by_url
+    assert views_by_url[APPLIANCE_INSIGHTS_API_PATH].requires_auth is True
     assert {view.name for view in registered} >= {
         f"api:{DOMAIN}:alert_evidence",
         f"api:{DOMAIN}:nilm_workspace",
         f"api:{DOMAIN}:appliance_detail",
+        f"api:{DOMAIN}:appliance_insights",
     }

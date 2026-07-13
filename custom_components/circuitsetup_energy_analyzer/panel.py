@@ -15,6 +15,10 @@ from .appliance_detail import (
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
 )
+from .appliance_insights import (
+    appliance_insights_for_coordinators,
+    energy_change_explanation,
+)
 from .appliance_notifications import preferences_from_dict
 from .attention import attention_items_for_coordinators
 from .const import DOMAIN
@@ -129,9 +133,10 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-7"
+PANEL_MODULE_VERSION = "20260713-8"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
+APPLIANCE_INSIGHTS_API_PATH = f"/api/{DOMAIN}/appliance_insights"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
 NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
 NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
@@ -221,6 +226,7 @@ class ApplianceDetailView(HomeAssistantView):
             _loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
         )
         return web.json_response(payload)
 
@@ -234,6 +240,7 @@ class ApplianceDetailView(HomeAssistantView):
                 circuit_id=request.query.get("circuit_id"),
                 assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
                 values=payload.get("expected_schedule"),
+                entry_id=request.query.get(ATTR_ENTRY_ID),
             )
         else:
             result = await async_set_appliance_notification_preferences(
@@ -241,8 +248,24 @@ class ApplianceDetailView(HomeAssistantView):
                 circuit_id=request.query.get("circuit_id"),
                 assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
                 values=payload,
+                entry_id=request.query.get(ATTR_ENTRY_ID),
             )
         return web.json_response(result)
+
+
+class ApplianceInsightsView(HomeAssistantView):
+    """Authenticated integration-level appliance index endpoint."""
+
+    url = APPLIANCE_INSIGHTS_API_PATH
+    name = f"api:{DOMAIN}:appliance_insights"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return bounded direct and NILM appliance insights."""
+        hass = request.app[KEY_HASS]
+        return web.json_response(
+            appliance_insights_payload(_loaded_coordinators(hass))
+        )
 
 
 class SetupHealthView(HomeAssistantView):
@@ -286,6 +309,7 @@ class NilmWorkspaceView(HomeAssistantView):
             _loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
         )
         return web.json_response(payload)
 
@@ -305,6 +329,7 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
             _loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
         )
         return web.json_response(payload)
 
@@ -523,11 +548,19 @@ def appliance_detail_payload(
     *,
     circuit_id: str | None = None,
     assignment_id: str | None = None,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Return one appliance-centered detail payload."""
     requested_circuit_id = str(circuit_id or "").strip() or None
     requested_assignment_id = str(assignment_id or "").strip() or None
+    requested_entry_id = str(entry_id or "").strip() or None
     coordinators = tuple(coordinators)
+    if requested_entry_id:
+        coordinators = tuple(
+            coordinator
+            for coordinator in coordinators
+            if str(getattr(coordinator, "entry_id", "")) == requested_entry_id
+        )
 
     if requested_assignment_id:
         for coordinator in coordinators:
@@ -541,11 +574,17 @@ def appliance_detail_payload(
                     detail,
                     requested_circuit_id=requested_circuit_id,
                     requested_assignment_id=requested_assignment_id,
+                    requested_entry_id=requested_entry_id,
                 )
         return {
             "status": "not_found",
             "requested_circuit_id": requested_circuit_id,
             "requested_assignment_id": requested_assignment_id,
+            **(
+                {"requested_entry_id": requested_entry_id}
+                if requested_entry_id
+                else {}
+            ),
             "detail": None,
             "actions": {},
             "message": _panel_text(
@@ -567,16 +606,34 @@ def appliance_detail_payload(
                     detail,
                     requested_circuit_id=requested_circuit_id,
                     requested_assignment_id=requested_assignment_id,
+                    requested_entry_id=requested_entry_id,
                 )
 
     return {
         "status": "not_found",
         "requested_circuit_id": requested_circuit_id,
         "requested_assignment_id": requested_assignment_id,
+        **(
+            {"requested_entry_id": requested_entry_id}
+            if requested_entry_id
+            else {}
+        ),
         "detail": None,
         "actions": {},
         "message": _panel_text("appliance_detail", "fallback_message"),
         "next_step": _panel_text("appliance_detail", "fallback_next_step"),
+    }
+
+
+def appliance_insights_payload(
+    coordinators: Iterable[Any],
+) -> dict[str, Any]:
+    """Return the integration-level appliance index payload."""
+    items = appliance_insights_for_coordinators(coordinators)
+    return {
+        "status": "ok",
+        "count": len(items),
+        "items": [item.as_dict() for item in items],
     }
 
 
@@ -656,8 +713,15 @@ async def async_set_appliance_notification_preferences(
     circuit_id: str | None,
     assignment_id: str | None,
     values: Any,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Save validated preferences using the backend-derived appliance key."""
+    if entry_id:
+        coordinators = (
+            coordinator
+            for coordinator in coordinators
+            if str(getattr(coordinator, "entry_id", "")) == str(entry_id)
+        )
     for coordinator in coordinators:
         detail = (
             appliance_detail_for_assignment(coordinator, str(assignment_id))
@@ -734,8 +798,15 @@ async def async_set_appliance_expected_schedule(
     circuit_id: str | None,
     assignment_id: str | None,
     values: Any,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Save bounded expected-schedule settings for a backend-resolved appliance."""
+    if entry_id:
+        coordinators = (
+            coordinator
+            for coordinator in coordinators
+            if str(getattr(coordinator, "entry_id", "")) == str(entry_id)
+        )
     for coordinator in coordinators:
         detail = (
             appliance_detail_for_assignment(coordinator, str(assignment_id))
@@ -794,6 +865,7 @@ def _appliance_detail_payload(
     *,
     requested_circuit_id: str | None,
     requested_assignment_id: str | None,
+    requested_entry_id: str | None,
 ) -> dict[str, Any]:
     appliance_key = detail.appliance_key or f"circuit:{detail.circuit_id}"
     preferences_by_appliance = getattr(
@@ -826,11 +898,17 @@ def _appliance_detail_payload(
         if isinstance(schedule_contexts, Mapping)
         else None
     )
+    detail_payload = detail.as_dict()
+    explanation = energy_change_explanation(detail)
+    detail_payload["energy_change_explanation"] = (
+        explanation.as_dict() if explanation is not None else None
+    )
     return {
         "status": "ok",
         "requested_circuit_id": requested_circuit_id,
         "requested_assignment_id": requested_assignment_id,
-        "detail": detail.as_dict(),
+        "requested_entry_id": requested_entry_id,
+        "detail": detail_payload,
         "history": _appliance_detail_history_payload(coordinator, detail),
         "notification_preferences": preferences_from_dict(
             raw_preferences,
@@ -1144,10 +1222,15 @@ def nilm_workspace_payload(
     *,
     circuit_id: str | None = None,
     hours: Any = None,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Return bounded NILM workspace data for one mains NILM circuit."""
 
-    target = _nilm_workspace_target(tuple(coordinators), circuit_id)
+    target = _nilm_workspace_target(
+        tuple(coordinators),
+        circuit_id,
+        entry_id=entry_id,
+    )
     if target is None:
         return {
             "status": "not_found",
@@ -1156,6 +1239,7 @@ def nilm_workspace_payload(
         }
 
     coordinator, config = target
+    selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
     edges = _nilm_edges_for_circuit(coordinator, config.circuit_id)
     recent_edges = sorted(edges, key=lambda edge: edge.timestamp)[
         -MAX_NILM_WORKSPACE_EDGES:
@@ -1241,6 +1325,7 @@ def nilm_workspace_payload(
             known_load_overlays,
             solar_overlays,
             hours=hours,
+            entry_id=selected_entry_id,
         ),
         "known_load_overlays": known_load_overlays,
         "solar_overlays": solar_overlays,
@@ -1937,10 +2022,17 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
 def _nilm_workspace_target(
     coordinators: Iterable[Any],
     circuit_id: str | None,
+    *,
+    entry_id: str | None = None,
 ) -> tuple[Any, Any] | None:
     requested_circuit_id = str(circuit_id or "").strip()
+    requested_entry_id = str(entry_id or "").strip()
     sensor_fallback: tuple[Any, Any] | None = None
     for coordinator in coordinators:
+        if requested_entry_id and str(
+            getattr(coordinator, "entry_id", "") or ""
+        ) != requested_entry_id:
+            continue
         for config in getattr(coordinator, "circuit_configs", ()) or ():
             config_circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
             if not config_circuit_id:
@@ -1978,10 +2070,15 @@ async def nilm_workspace_history_payload(
     *,
     circuit_id: str | None = None,
     hours: Any = None,
+    entry_id: str | None = None,
 ) -> list[list[dict[str, Any]]]:
     """Return capped HA history rows for the NILM workspace."""
 
-    target = _nilm_workspace_target(tuple(coordinators), circuit_id)
+    target = _nilm_workspace_target(
+        tuple(coordinators),
+        circuit_id,
+        entry_id=entry_id,
+    )
     if target is None:
         return []
     coordinator, config = target
@@ -1995,6 +2092,7 @@ async def nilm_workspace_history_payload(
         known_load_overlays,
         solar_overlays,
         hours=hours,
+        entry_id=str(getattr(coordinator, "entry_id", "") or ""),
     )
     return await _async_history_rows(
         hass,
@@ -2920,6 +3018,7 @@ def _nilm_workspace_history_payload(
     solar_overlays: list[dict[str, Any]],
     *,
     hours: Any,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     requested_hours = _bounded_float(
         hours,
@@ -2933,12 +3032,13 @@ def _nilm_workspace_history_payload(
         known_load_overlays,
         solar_overlays,
     )
-    history_query = urlencode(
-        {
-            "circuit_id": config.circuit_id,
-            "hours": str(requested_hours),
-        }
-    )
+    history_query_values = {
+        "circuit_id": config.circuit_id,
+        "hours": str(requested_hours),
+    }
+    if entry_id:
+        history_query_values[ATTR_ENTRY_ID] = entry_id
+    history_query = urlencode(history_query_values)
     recorder_query = urlencode(
         {
             "filter_entity_id": ",".join(entities),
@@ -3670,6 +3770,7 @@ def _register_view(hass: Any) -> None:
     if register_view is not None:
         register_view(AlertEvidenceView())
         register_view(ApplianceDetailView())
+        register_view(ApplianceInsightsView())
         register_view(SetupHealthView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceHistoryView())

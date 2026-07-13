@@ -43,6 +43,8 @@ class AttentionItem:
 
 def attention_items_for_coordinators(
     coordinators: Iterable[Any],
+    *,
+    limit: int = 50,
 ) -> tuple[AttentionItem, ...]:
     """Build a bounded, deduplicated Needs Attention list."""
     items: list[AttentionItem] = []
@@ -71,7 +73,7 @@ def attention_items_for_coordinators(
                 seen.add(item.appliance_key)
                 items.append(item)
     items.sort(key=_attention_sort_key)
-    return tuple(items[:50])
+    return tuple(items[: max(0, min(int(limit), 100))])
 
 
 def _attention_item(
