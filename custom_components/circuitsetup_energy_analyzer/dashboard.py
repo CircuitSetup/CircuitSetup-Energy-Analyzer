@@ -395,8 +395,9 @@ def _dashboard_section_titles(
     titles = [
         _section_title("household_overview"),
         _section_title("todays_energy"),
-        _section_title("appliance_status"),
     ]
+    if appliance_circuits:
+        titles.append(_section_title("appliance_status"))
     if mains_circuits:
         titles.append(_section_title("mains_solar_nilm"))
     titles.extend(

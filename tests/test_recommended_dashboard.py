@@ -520,10 +520,16 @@ def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
         (mains,),
         DASHBOARD_LAYOUT_STANDARD,
     )
+    preflight = dashboard_preflight_summary(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
 
     assert "Appliance Status" not in {
         section.get("title") for section in _dashboard_sections(dashboard)
     }
+    assert "Appliance Status" not in preflight["will_include"]
+    assert "Appliance Status" in preflight["will_skip"]
 
 
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
