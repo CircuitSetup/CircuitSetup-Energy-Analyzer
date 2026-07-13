@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).parents[1]
 INTEGRATION = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
@@ -59,3 +60,49 @@ def test_frontend_entrypoint_loads_versioned_modules() -> None:
     assert '"./energy-analyzer-dashboard-graphs.js"' in entry
     assert "registerEnergyAnalyzerPanel(registerDashboardGraphs)" in entry
     assert f'?v={PANEL_MODULE_VERSION}' not in entry
+
+
+def test_coordinator_facade_reexports_state_contracts() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator, state
+
+    assert coordinator.AnalyzerState is state.AnalyzerState
+    assert coordinator.process_events_into_state is state.process_events_into_state
+    assert coordinator._apply_state_update is state._apply_state_update
+
+
+def test_coordinator_facade_reexports_nilm_unmatched_edge_limit() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator,
+        runtime_factory,
+    )
+
+    assert (
+        coordinator.NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT
+        is runtime_factory.NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT
+    )
+
+
+def test_runtime_factory_preserves_processor_and_listener_wiring() -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
+        initialize_runtime,
+    )
+
+    assert callable(initialize_runtime)
+    instance = coordinator.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    assert instance.pipeline._coordinator is instance
+    assert instance.pipeline._event_processor is instance._event_processor
+    assert instance.nilm_controller._sample_processor is instance._nilm_sample_processor
+    assert (
+        instance.source_updates._track_state_change_event
+        is coordinator.async_track_state_change_event
+    )
+    assert (
+        instance.source_updates._debounce_seconds
+        == coordinator.SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS
+    )
+    assert (
+        instance.source_updates._max_batch_seconds
+        == coordinator.SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS
+    )
