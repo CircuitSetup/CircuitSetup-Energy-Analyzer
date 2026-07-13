@@ -175,13 +175,16 @@ def build_recommended_dashboard(
             hass=hass,
             entry_id=entry_id,
         ),
-        _appliance_status_section(
-            appliance_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        )
     ]
+    if appliance_circuits:
+        sections.append(
+            _appliance_status_section(
+                appliance_circuits,
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+        )
     if mains_circuits:
         sections.append(
             _mains_section(
@@ -412,15 +415,45 @@ def _dashboard_section_titles(
 
 
 def _balance_last_section_row(sections: Sequence[dict[str, Any]]) -> None:
-    spans = {
-        1: (DASHBOARD_COLUMNS,),
-        2: (2, 2),
-        3: (1, 2, 1),
-    }.get(len(sections) % DASHBOARD_COLUMNS)
-    if not spans:
+    row: list[dict[str, Any]] = []
+    used_columns = 0
+    for section in sections:
+        span = _section_column_span(section)
+        if row and used_columns + span > DASHBOARD_COLUMNS:
+            row = []
+            used_columns = 0
+        row.append(section)
+        used_columns += span
+        if used_columns == DASHBOARD_COLUMNS:
+            row = []
+            used_columns = 0
+
+    if not row:
         return
-    for section, span in zip(sections[-len(spans):], spans, strict=True):
+
+    spans = [_section_column_span(section) for section in row]
+    center = (len(row) - 1) / 2
+    for _ in range(DASHBOARD_COLUMNS - used_columns):
+        index = min(
+            range(len(row)),
+            key=lambda candidate: (
+                spans[candidate],
+                abs(candidate - center),
+                candidate,
+            ),
+        )
+        spans[index] += 1
+
+    for section, span in zip(row, spans, strict=True):
         section["column_span"] = span
+
+
+def _section_column_span(section: Mapping[str, Any]) -> int:
+    try:
+        span = int(section.get("column_span", 1))
+    except (TypeError, ValueError):
+        span = 1
+    return max(1, min(DASHBOARD_COLUMNS, span))
 
 
 def _household_overview_section(
