@@ -16,8 +16,27 @@ FRONTEND_DIR = INTEGRATION_DIR / "frontend"
 PANEL_ASSET = FRONTEND_DIR / "energy-analyzer-panel.js"
 PANEL_MAIN_ASSET = FRONTEND_DIR / "energy-analyzer-panel-main.js"
 DASHBOARD_GRAPHS_ASSET = FRONTEND_DIR / "energy-analyzer-dashboard-graphs.js"
-FRONTEND_ASSETS = (PANEL_MAIN_ASSET, DASHBOARD_GRAPHS_ASSET, PANEL_ASSET)
-PANEL_RUNTIME_ASSETS = (PANEL_MAIN_ASSET, DASHBOARD_GRAPHS_ASSET)
+PANEL_SHELL_ASSET = FRONTEND_DIR / "energy-analyzer-panel-shell.js"
+APPLIANCE_VIEWS_ASSET = FRONTEND_DIR / "energy-analyzer-appliance-views.js"
+NILM_WORKSPACE_ASSET = FRONTEND_DIR / "energy-analyzer-nilm-workspace.js"
+EVIDENCE_VIEWS_ASSET = FRONTEND_DIR / "energy-analyzer-evidence-views.js"
+PANEL_METHOD_ASSETS = (
+    PANEL_SHELL_ASSET,
+    APPLIANCE_VIEWS_ASSET,
+    NILM_WORKSPACE_ASSET,
+    EVIDENCE_VIEWS_ASSET,
+)
+FRONTEND_ASSETS = (
+    PANEL_MAIN_ASSET,
+    *PANEL_METHOD_ASSETS,
+    DASHBOARD_GRAPHS_ASSET,
+    PANEL_ASSET,
+)
+PANEL_RUNTIME_ASSETS = (
+    PANEL_MAIN_ASSET,
+    *PANEL_METHOD_ASSETS,
+    DASHBOARD_GRAPHS_ASSET,
+)
 
 
 def _frontend_source() -> str:
@@ -34,7 +53,10 @@ def _run_panel_node_script(body: str) -> None:
         ").config_panel.panel;\n"
     )
     panel_class_statement = json.dumps(
-        "const __registered = registerEnergyAnalyzerPanel(registerDashboardGraphs); "
+        "const __registered = registerEnergyAnalyzerPanel(registerDashboardGraphs, "
+        "[PanelShellMethods, createApplianceViewMethods(PANEL_METHOD_DEPENDENCIES), "
+        "createNilmWorkspaceMethods(PANEL_METHOD_DEPENDENCIES), "
+        "createEvidenceViewMethods(PANEL_METHOD_DEPENDENCIES)]); "
         "this.Panel = class TestPanel extends "
         "__registered.CircuitSetupEnergyAnalyzerPanel "
         "{ constructor() { super(); this.panel = { config: "
@@ -95,7 +117,9 @@ const context = {{
 }};
 vm.createContext(context);
 const source = {json.dumps([str(path) for path in PANEL_RUNTIME_ASSETS])}
-  .map((path) => fs.readFileSync(path, "utf8").replace(/^export /gm, ""))
+  .map((path) => fs.readFileSync(path, "utf8")
+    .replace(/^import .*;$/gm, "")
+    .replace(/^export /gm, ""))
   .join("\\n");
 vm.runInContext(
   `${{source}}\\n`

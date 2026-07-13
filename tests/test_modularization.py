@@ -58,8 +58,41 @@ def test_frontend_entrypoint_loads_versioned_modules() -> None:
     assert "new URL(import.meta.url).search" in entry
     assert '"./energy-analyzer-panel-main.js"' in entry
     assert '"./energy-analyzer-dashboard-graphs.js"' in entry
-    assert "registerEnergyAnalyzerPanel(registerDashboardGraphs)" in entry
+    assert '"./energy-analyzer-panel-shell.js"' in entry
+    assert '"./energy-analyzer-appliance-views.js"' in entry
+    assert '"./energy-analyzer-nilm-workspace.js"' in entry
+    assert '"./energy-analyzer-evidence-views.js"' in entry
+    assert "registerEnergyAnalyzerPanel(registerDashboardGraphs, [" in entry
     assert f'?v={PANEL_MODULE_VERSION}' not in entry
+
+
+def test_frontend_routes_are_split_into_responsibility_modules() -> None:
+    main = FRONTEND / "energy-analyzer-panel-main.js"
+    modules = {
+        "energy-analyzer-panel-shell.js": "_render()",
+        "energy-analyzer-appliance-views.js": "_renderApplianceDetailContent()",
+        "energy-analyzer-nilm-workspace.js": "_renderNilmWorkspaceContent()",
+        "energy-analyzer-evidence-views.js": "_renderAlertContent(",
+    }
+
+    assert len(main.read_text(encoding="utf-8").splitlines()) < 3_000
+    for filename, method in modules.items():
+        source = (FRONTEND / filename).read_text(encoding="utf-8")
+        assert method in source
+        assert 'from "./energy-analyzer-panel-main.js"' not in source
+
+
+def test_panel_facade_reexports_nilm_payload_builders() -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel, panel_nilm
+
+    assert len(Path(panel.__file__).read_text(encoding="utf-8").splitlines()) < 2_500
+    for name in (
+        "_nilm_payload_for_circuit",
+        "_nilm_assignment_payload",
+        "_nilm_workspace_sessions",
+        "_nilm_session_payload",
+    ):
+        assert getattr(panel, name) is getattr(panel_nilm, name)
 
 
 def test_coordinator_facade_reexports_state_contracts() -> None:

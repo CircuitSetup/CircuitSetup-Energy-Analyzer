@@ -250,13 +250,13 @@ def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
 
 def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-nilm-workspace.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
         "  async _saveNilmAssignmentChanges(index) {",
         1,
-    )[1].split("\n  async _callRecommendationAction", 1)[0]
+    )[1].split("\n  _routeRequestsNilmWorkspace", 1)[0]
     context_line = "const actionContext = this._nilmWorkspaceActionContext();"
     assert body.index(context_line) < body.index(
         "await this._hass.callService"
@@ -276,7 +276,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
 
 def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-nilm-workspace.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
