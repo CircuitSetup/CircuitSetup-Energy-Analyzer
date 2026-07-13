@@ -20,6 +20,8 @@ Before requesting review, the PR author should confirm:
 
 - `ruff check .`
 - `pytest -q`
+- `npm run test:e2e`
+- `python -m pytest tests_homeassistant/test_browser_e2e.py -q`
 - Home Assistant contract tests when entity/platform behavior changes.
 - HACS validation and hassfest are passing in GitHub Actions.
 
@@ -67,6 +69,7 @@ Configure branch protection for `master` with:
 - Require branches to be up to date before merging.
 - Required checks:
   - `Unit tests and lint`
+  - `Browser E2E and accessibility`
   - `Home Assistant control entity contract`
   - `validate-hacs`
   - `validate`
@@ -80,6 +83,10 @@ Use the same commands as CI before pushing a PR:
 ```powershell
 rtk ruff check .
 rtk pytest -q
+npm ci
+npx playwright install chromium
+npm run test:e2e
+.\.venv\Scripts\python.exe -m pytest tests_homeassistant\test_browser_e2e.py -q
 ```
 
 When platform/entity behavior depends on Home Assistant base classes, also run:
