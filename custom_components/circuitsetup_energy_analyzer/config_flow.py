@@ -1650,14 +1650,16 @@ def _utility_schema(
     settings = dict(current_settings or {})
     circuit_options = _circuit_options_from_config(config, include_mains=True)
     default_circuit = _default_circuit_id(circuit_options)
-    selectable_utility_entities = list(
-        dict.fromkeys(
+    selectable_utility_entities = [
+        entity_id
+        for entity_id in dict.fromkeys(
             [
                 *utility_energy_entities,
                 settings.get(FIELD_UTILITY_ENERGY_ENTITY, ""),
             ]
         )
-    )
+        if entity_id
+    ]
     selectable_measured_entities = list(
         dict.fromkeys(
             [
@@ -1693,16 +1695,16 @@ def _utility_schema(
                 FIELD_CIRCUIT_ID,
                 default=str(settings.get(FIELD_CIRCUIT_ID) or default_circuit),
             ): _select_selector(circuit_options),
-            vol.Optional(
+            _optional_entity_marker(
                 FIELD_UTILITY_ENERGY_ENTITY,
-                default=str(
+                str(
                     settings.get(FIELD_UTILITY_ENERGY_ENTITY)
                     or _first_or_empty(selectable_utility_entities)
                 ),
             ): _single_energy_kwh_entity_selector(selectable_utility_entities),
-            vol.Optional(
+            _optional_entity_marker(
                 FIELD_UTILITY_COST_ENTITY,
-                default=str(settings.get(FIELD_UTILITY_COST_ENTITY) or ""),
+                str(settings.get(FIELD_UTILITY_COST_ENTITY) or ""),
             ): _single_sensor_entity_selector(),
             vol.Optional(
                 FIELD_UTILITY_STATISTIC_ID,

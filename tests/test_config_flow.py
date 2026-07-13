@@ -1712,6 +1712,33 @@ async def test_options_flow_init_hides_compact_migration_without_legacy_entities
     ]
 
 
+def test_utility_schema_omits_blank_optional_entity_defaults() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _utility_schema,
+    )
+
+    schema = _utility_schema(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ]
+        }
+    )
+
+    assert _schema_default(schema, "utility_energy_entity") is vol.UNDEFINED
+    assert _schema_default(schema, "utility_cost_entity") is vol.UNDEFINED
+    energy_selector = _schema_validator(
+        schema, "utility_energy_entity"
+    ).serialize()["selector"]["entity"]
+    assert "" not in energy_selector.get("include_entities", [])
+
+
 @pytest.mark.asyncio
 async def test_options_utility_step_saves_opower_comparison_settings() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
