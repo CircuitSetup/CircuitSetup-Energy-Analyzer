@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1712,12 +1713,24 @@ async def test_options_flow_init_hides_compact_migration_without_legacy_entities
     ]
 
 
-def test_utility_schema_omits_blank_optional_entity_defaults() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        _utility_schema,
+def test_utility_schema_omits_blank_optional_entity_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import config_flow
+
+    included_entities: list[str] = []
+
+    def capture_energy_entities(entity_ids: Iterable[str]) -> type[str]:
+        included_entities.extend(entity_ids)
+        return str
+
+    monkeypatch.setattr(
+        config_flow,
+        "_single_energy_kwh_entity_selector",
+        capture_energy_entities,
     )
 
-    schema = _utility_schema(
+    schema = config_flow._utility_schema(
         {
             CONF_CIRCUITS: [
                 {
@@ -1733,10 +1746,7 @@ def test_utility_schema_omits_blank_optional_entity_defaults() -> None:
 
     assert _schema_default(schema, "utility_energy_entity") is vol.UNDEFINED
     assert _schema_default(schema, "utility_cost_entity") is vol.UNDEFINED
-    energy_selector = _schema_validator(
-        schema, "utility_energy_entity"
-    ).serialize()["selector"]["entity"]
-    assert "" not in energy_selector.get("include_entities", [])
+    assert included_entities == []
 
 
 @pytest.mark.asyncio
