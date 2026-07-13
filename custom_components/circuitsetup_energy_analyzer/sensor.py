@@ -3326,7 +3326,7 @@ class DemoSourceSensor(SensorEntity):
             )
         )
 
-    def _handle_demo_tick(self, _now: Any) -> None:
+    async def _handle_demo_tick(self, _now: Any) -> None:
         write_state = getattr(self, "async_write_ha_state", None)
         if write_state is not None:
             write_state()

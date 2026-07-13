@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1710,6 +1711,42 @@ async def test_options_flow_init_hides_compact_migration_without_legacy_entities
         "recommendations",
         "advanced",
     ]
+
+
+def test_utility_schema_omits_blank_optional_entity_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import config_flow
+
+    included_entities: list[str] = []
+
+    def capture_energy_entities(entity_ids: Iterable[str]) -> type[str]:
+        included_entities.extend(entity_ids)
+        return str
+
+    monkeypatch.setattr(
+        config_flow,
+        "_single_energy_kwh_entity_selector",
+        capture_energy_entities,
+    )
+
+    schema = config_flow._utility_schema(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ]
+        }
+    )
+
+    assert _schema_default(schema, "utility_energy_entity") is vol.UNDEFINED
+    assert _schema_default(schema, "utility_cost_entity") is vol.UNDEFINED
+    assert included_entities == []
 
 
 @pytest.mark.asyncio

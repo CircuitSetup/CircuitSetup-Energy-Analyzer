@@ -336,7 +336,7 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     assert dashboard["views"][0]["dense_section_placement"] is True
 
 
-def test_generated_dashboard_spreads_glance_cards_across_four_columns() -> None:
+def test_generated_dashboard_matches_glance_columns_to_visible_entities() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -347,39 +347,44 @@ def test_generated_dashboard_spreads_glance_cards_across_four_columns() -> None:
         for card in _dashboard_cards(dashboard)
         if card.get("type") == "glance"
     } == {
-        "Top appliances right now": 4,
-        "Top energy users today": 4,
-        "Solar-covered share": 4,
-        "Mains rollups": 4,
-        "Unknown load signals": 4,
-        "NILM review": 4,
+        "Top appliances right now": 2,
+        "Top energy users today": 2,
+        "Solar-covered share": 2,
+        "Mains rollups": 2,
+        "Unknown load signals": 2,
+        "NILM review": 2,
     }
 
 
 @pytest.mark.parametrize(
-    ("layout", "circuits", "expected_spans"),
+    ("layout", "circuits"),
     (
-        (DASHBOARD_LAYOUT_SIMPLE, _example_circuits(), [2, 2]),
-        (DASHBOARD_LAYOUT_STANDARD, _circuits(), [1, 2, 1]),
-        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:1], [2, 2]),
-        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:2], [1, 2, 1]),
-        (DASHBOARD_LAYOUT_EXPERT, _example_circuits(), [4]),
+        (DASHBOARD_LAYOUT_SIMPLE, _example_circuits()),
+        (DASHBOARD_LAYOUT_STANDARD, _circuits()),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:1]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()[:2]),
+        (DASHBOARD_LAYOUT_EXPERT, _example_circuits()),
     ),
 )
 def test_generated_dashboard_balances_last_four_column_row(
     layout: str,
     circuits: tuple[CircuitConfig, ...],
-    expected_spans: list[int],
 ) -> None:
     dashboard = build_recommended_dashboard(
         circuits,
         layout,
     )
-    sections = _dashboard_sections(dashboard)
-    last_row = sections[-len(expected_spans):]
+    used_columns = 0
+    for section in _dashboard_sections(dashboard):
+        span = int(section.get("column_span", 1))
+        if used_columns + span > 4:
+            assert used_columns == 4
+            used_columns = 0
+        used_columns += span
+        if used_columns == 4:
+            used_columns = 0
 
-    assert sum(section.get("column_span", 1) for section in last_row) == 4
-    assert [section.get("column_span", 1) for section in last_row] == expected_spans
+    assert used_columns == 0
 
 
 def test_generated_dashboard_omits_duplicate_appliance_summary_cards() -> None:
@@ -468,6 +473,63 @@ def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
             "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
         ),
     }
+    assert setup_health["grid_options"] == {"columns": "full", "rows": 1}
+
+
+def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    appliance_status = _dashboard_section(dashboard, "Appliance Status")
+    appliance = next(
+        card
+        for card in _dashboard_cards(appliance_status)
+        if card.get("type") == "entities"
+    )
+
+    assert appliance_status["column_span"] == 2
+    assert all(
+        card.get("type") != "markdown"
+        for card in _dashboard_cards(appliance_status)
+    )
+    assert appliance["grid_options"] == {"columns": "full", "rows": "auto"}
+
+
+def test_dashboard_balancing_accounts_for_wide_appliance_status_section() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    assert [
+        section.get("column_span", 1)
+        for section in _dashboard_sections(dashboard)
+    ] == [1, 1, 2, 1, 1, 1, 1, 4]
+
+
+def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
+    mains = next(
+        circuit
+        for circuit in _example_circuits()
+        if circuit.appliance_profile == ApplianceProfile.MAINS_NILM
+    )
+
+    dashboard = build_recommended_dashboard(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    preflight = dashboard_preflight_summary(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    assert "Appliance Status" not in {
+        section.get("title") for section in _dashboard_sections(dashboard)
+    }
+    assert "Appliance Status" not in preflight["will_include"]
+    assert "Appliance Status" in preflight["will_skip"]
 
 
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:

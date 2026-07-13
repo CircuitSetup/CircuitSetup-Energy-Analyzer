@@ -175,13 +175,16 @@ def build_recommended_dashboard(
             hass=hass,
             entry_id=entry_id,
         ),
-        _appliance_status_section(
-            appliance_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        )
     ]
+    if appliance_circuits:
+        sections.append(
+            _appliance_status_section(
+                appliance_circuits,
+                registry_lookup=registry_lookup,
+                hass=hass,
+                entry_id=entry_id,
+            )
+        )
     if mains_circuits:
         sections.append(
             _mains_section(
@@ -392,8 +395,9 @@ def _dashboard_section_titles(
     titles = [
         _section_title("household_overview"),
         _section_title("todays_energy"),
-        _section_title("appliance_status"),
     ]
+    if appliance_circuits:
+        titles.append(_section_title("appliance_status"))
     if mains_circuits:
         titles.append(_section_title("mains_solar_nilm"))
     titles.extend(
@@ -412,15 +416,45 @@ def _dashboard_section_titles(
 
 
 def _balance_last_section_row(sections: Sequence[dict[str, Any]]) -> None:
-    spans = {
-        1: (DASHBOARD_COLUMNS,),
-        2: (2, 2),
-        3: (1, 2, 1),
-    }.get(len(sections) % DASHBOARD_COLUMNS)
-    if not spans:
+    row: list[dict[str, Any]] = []
+    used_columns = 0
+    for section in sections:
+        span = _section_column_span(section)
+        if row and used_columns + span > DASHBOARD_COLUMNS:
+            row = []
+            used_columns = 0
+        row.append(section)
+        used_columns += span
+        if used_columns == DASHBOARD_COLUMNS:
+            row = []
+            used_columns = 0
+
+    if not row:
         return
-    for section, span in zip(sections[-len(spans):], spans, strict=True):
+
+    spans = [_section_column_span(section) for section in row]
+    center = (len(row) - 1) / 2
+    for _ in range(DASHBOARD_COLUMNS - used_columns):
+        index = min(
+            range(len(row)),
+            key=lambda candidate: (
+                spans[candidate],
+                abs(candidate - center),
+                candidate,
+            ),
+        )
+        spans[index] += 1
+
+    for section, span in zip(row, spans, strict=True):
         section["column_span"] = span
+
+
+def _section_column_span(section: Mapping[str, Any]) -> int:
+    try:
+        span = int(section.get("column_span", 1))
+    except (TypeError, ValueError):
+        span = 1
+    return max(1, min(DASHBOARD_COLUMNS, span))
 
 
 def _household_overview_section(
@@ -447,6 +481,7 @@ def _household_overview_section(
                 "entity": setup_health,
                 "name": _dashboard_text("cards", "setup_health"),
                 "vertical": False,
+                "grid_options": {"columns": "full", "rows": 1},
                 "tap_action": {
                     "action": "navigate",
                     "navigation_path": _setup_health_panel_path(entry_id),
@@ -512,7 +547,7 @@ def _household_overview_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "top_appliances_right_now"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(activity_rows),
                 "entities": activity_rows,
             }
         )
@@ -553,7 +588,7 @@ def _todays_energy_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "top_energy_users_today"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(daily_rows[:5]),
                 "entities": daily_rows[:5],
             }
         )
@@ -599,7 +634,7 @@ def _todays_energy_section(
                 {
                     "type": "glance",
                     "title": _dashboard_text("entity_labels", "solar_covered_share"),
-                    "columns": DASHBOARD_COLUMNS,
+                    "columns": _glance_columns(solar_rows[:5]),
                     "entities": solar_rows[:5],
                 }
             )
@@ -617,11 +652,7 @@ def _appliance_status_section(
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any]:
-    cards: list[dict[str, Any]] = [
-        _markdown_card(
-            _dashboard_text("notes", "appliance_status_summary")
-        )
-    ]
+    cards: list[dict[str, Any]] = []
     for circuit in circuits:
         circuit_id = _circuit_id(circuit)
         if not circuit_id:
@@ -642,6 +673,7 @@ def _appliance_status_section(
     return {
         "type": "grid",
         "title": _section_title("appliance_status"),
+        "column_span": 2,
         "cards": cards,
     }
 
@@ -670,7 +702,7 @@ def _mains_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "mains_rollups"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(rollup_rows),
                 "entities": rollup_rows,
             }
         )
@@ -747,7 +779,7 @@ def _mains_section(
                 {
                     "type": "glance",
                     "title": _dashboard_text("cards", "unknown_load_signals"),
-                    "columns": DASHBOARD_COLUMNS,
+                    "columns": _glance_columns(unknown_rows),
                     "entities": unknown_rows,
                 }
             )
@@ -941,7 +973,7 @@ def _nilm_review_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "nilm_review"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(rows),
                 "entities": rows,
             }
         )
@@ -1109,7 +1141,7 @@ def _water_flow_context_card(
         {
             "type": "glance",
             "title": _dashboard_text("cards", "water_flow_context"),
-            "columns": DASHBOARD_COLUMNS,
+            "columns": _glance_columns(rows),
             "entities": rows,
         },
     )
@@ -1185,6 +1217,7 @@ def _entities_card(title: str, rows: Iterable[dict[str, str]]) -> dict[str, Any]
         "type": "entities",
         "title": title,
         "show_header_toggle": False,
+        "grid_options": {"columns": "full", "rows": "auto"},
         "entities": list(_dedupe_entity_rows(rows)),
     }
 
@@ -1641,8 +1674,16 @@ def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> 
     return f"{entity_domain}.{circuit_id}_{entity_key}"
 
 
-def _markdown_card(content: str) -> dict[str, str]:
-    return {"type": "markdown", "content": content}
+def _glance_columns(rows: Sequence[Any]) -> int:
+    return max(1, min(2, len(rows)))
+
+
+def _markdown_card(content: str) -> dict[str, Any]:
+    return {
+        "type": "markdown",
+        "content": content,
+        "grid_options": {"columns": "full", "rows": "auto"},
+    }
 
 
 def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:

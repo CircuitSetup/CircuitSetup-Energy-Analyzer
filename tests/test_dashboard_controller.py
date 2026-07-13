@@ -25,9 +25,13 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 
 class _FakeBus:
     def __init__(self) -> None:
-        self.events: list[tuple[str, dict[str, object]]] = []
+        self.events: list[tuple[str, dict[str, object] | None]] = []
 
-    def async_fire(self, event_type: str, payload: dict[str, object]) -> None:
+    def async_fire(
+        self,
+        event_type: str,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         self.events.append((event_type, payload))
 
 
@@ -59,6 +63,7 @@ class _FakeDashboardCollection:
         self.stores = stores
         self.created: list[dict[str, object]] = []
         self.deleted: list[str] = []
+        self.updated: list[tuple[str, dict[str, object]]] = []
 
     async def async_items(self) -> list[dict[str, object]]:
         if DASHBOARD_URL_PATH not in self.stores:
@@ -70,6 +75,14 @@ class _FakeDashboardCollection:
         item = {"id": DASHBOARD_URL_PATH, **data}
         self.stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(item)
         return item
+
+    async def async_update_item(
+        self,
+        item_id: str,
+        data: dict[str, object],
+    ) -> dict[str, object]:
+        self.updated.append((item_id, data))
+        return {"id": item_id, "url_path": DASHBOARD_URL_PATH, **data}
 
     async def async_delete_item(self, item_id: str) -> None:
         self.deleted.append(item_id)
@@ -157,10 +170,34 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
     assert coordinator.store_data.dashboard_status == payload
     assert coordinator.dirty_count == 1
     assert coordinator.saved == ["now"]
-    assert coordinator.hass.bus.events == [
-        ("circuitsetup_energy_analyzer_create_dashboard", payload)
-    ]
+    assert (
+        "circuitsetup_energy_analyzer_create_dashboard",
+        payload,
+    ) in coordinator.hass.bus.events
     assert coordinator.updated_data == [coordinator.state]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_controller_reuses_runtime_dashboard_when_items_are_stale() -> (
+    None
+):
+    coordinator = _StorageDashboardCoordinator()
+    coordinator.dashboard_stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(
+        {
+            "id": "circuitsetup_energy_analyzer",
+            "url_path": DASHBOARD_URL_PATH,
+            "title": "CircuitSetup Energy Analyzer",
+        }
+    )
+    coordinator.collection.async_items = lambda: []
+    controller = dashboard_controller.DashboardController(coordinator)
+
+    payload = await controller.async_create_dashboard()
+
+    assert payload["action"] == "updated"
+    assert coordinator.collection.created == []
+    assert coordinator.collection.updated == []
+    assert coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved
 
 
 @pytest.mark.asyncio

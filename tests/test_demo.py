@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from inspect import iscoroutinefunction
 from pathlib import Path
 
 from custom_components.circuitsetup_energy_analyzer.models import SensorRef, SensorRole
@@ -87,6 +88,20 @@ def test_demo_source_sensor_advances_after_one_simulation_tick(monkeypatch) -> N
     monkeypatch.setattr(sensor_module, "monotonic", lambda: 110.0, raising=False)
 
     assert source.native_value != first
+
+
+def test_demo_source_refresh_runs_on_home_assistant_event_loop() -> None:
+    from custom_components.circuitsetup_energy_analyzer import sensor as sensor_module
+
+    source = sensor_module.DemoSourceSensor(
+        entry_id="demo",
+        sensor=SensorRef(
+            entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            role=SensorRole.REAL_POWER,
+        ),
+    )
+
+    assert iscoroutinefunction(source._handle_demo_tick)
 
 
 def test_demo_module_exposes_shared_source_metadata() -> None:
