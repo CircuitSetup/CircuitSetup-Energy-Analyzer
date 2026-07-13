@@ -38,6 +38,27 @@ from .models import (
 )
 from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
 from .notifications import notification_id_for_alert
+from .panel_contracts import (
+    APPLIANCE_DETAIL_API_PATH,
+    APPLIANCE_INSIGHTS_API_PATH,  # noqa: F401 - compatibility export
+    EVIDENCE_API_PATH,
+    NILM_WORKSPACE_API_PATH,
+    NILM_WORKSPACE_HISTORY_API_PATH,
+    PANEL_ELEMENT_NAME,
+    PANEL_MODULE_NAME,
+    PANEL_MODULE_VERSION,
+    PANEL_URL_PATH,
+    SETUP_HEALTH_API_PATH,  # noqa: F401 - compatibility export
+    STATIC_URL_PATH,
+)
+from .panel_views import (
+    AlertEvidenceView,
+    ApplianceDetailView,
+    ApplianceInsightsView,
+    NilmWorkspaceHistoryView,
+    NilmWorkspaceView,
+    SetupHealthView,
+)
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
@@ -102,7 +123,6 @@ from .settings_preview import (
 )
 from .ux import alert_evidence_detail, friendly_feature_name
 
-PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 MAX_NILM_PANEL_SIGNATURES = 5
 MAX_NILM_MERGE_TARGET_OPTIONS = 5
 NILM_SIGNATURE_PANEL_FIELDS = (
@@ -130,16 +150,6 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "feedback_fingerprint",
     "signature_fingerprint",
 )
-PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
-STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
-PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-8"
-EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
-APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
-APPLIANCE_INSIGHTS_API_PATH = f"/api/{DOMAIN}/appliance_insights"
-SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
-NILM_WORKSPACE_API_PATH = f"/api/{DOMAIN}/nilm_workspace"
-NILM_WORKSPACE_HISTORY_API_PATH = f"/api/{DOMAIN}/nilm_workspace_history"
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
 MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
 MAX_NILM_WORKSPACE_HISTORY_ENTITIES = 8
@@ -172,12 +182,9 @@ def _panel_text(*keys: str) -> str:
 
 try:
     from aiohttp import web
-    from homeassistant.components.http import KEY_HASS, HomeAssistantView
+    from homeassistant.components.http import KEY_HASS
 except ModuleNotFoundError:
     KEY_HASS = "hass"
-
-    class HomeAssistantView:  # type: ignore[no-redef]
-        """Fallback base class for unit tests without Home Assistant installed."""
 
     class _FallbackWeb:
         @staticmethod
@@ -185,153 +192,6 @@ except ModuleNotFoundError:
             return data
 
     web = _FallbackWeb()  # type: ignore[assignment]
-
-
-class AlertEvidenceView(HomeAssistantView):
-    """Authenticated API endpoint used by the dynamic alert evidence panel."""
-
-    url = EVIDENCE_API_PATH
-    name = f"api:{DOMAIN}:alert_evidence"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return alert evidence selected by query parameters."""
-        hass = request.app[KEY_HASS]
-        payload = alert_evidence_payload(
-            _loaded_coordinators(hass),
-            alert_id=request.query.get("alert_id"),
-            circuit_id=request.query.get("circuit_id"),
-            feature=request.query.get("feature"),
-            recommendation_id=request.query.get(ATTR_RECOMMENDATION_ID),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-            review_suggested_settings=_truthy_query(
-                request.query.get("review_suggested_settings")
-            ),
-            include_all_nilm=_truthy_query(request.query.get("include_all_nilm")),
-        )
-        return web.json_response(payload)
-
-
-class ApplianceDetailView(HomeAssistantView):
-    """Authenticated appliance-centered detail endpoint."""
-
-    url = APPLIANCE_DETAIL_API_PATH
-    name = f"api:{DOMAIN}:appliance_detail"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return appliance detail selected by circuit or NILM assignment."""
-        hass = request.app[KEY_HASS]
-        payload = appliance_detail_payload(
-            _loaded_coordinators(hass),
-            circuit_id=request.query.get("circuit_id"),
-            assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-        )
-        return web.json_response(payload)
-
-    async def post(self, request: Any) -> Any:
-        """Persist appliance notification or expected-schedule settings."""
-        hass = request.app[KEY_HASS]
-        payload = await request.json()
-        if isinstance(payload, Mapping) and "expected_schedule" in payload:
-            result = await async_set_appliance_expected_schedule(
-                _loaded_coordinators(hass),
-                circuit_id=request.query.get("circuit_id"),
-                assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
-                values=payload.get("expected_schedule"),
-                entry_id=request.query.get(ATTR_ENTRY_ID),
-            )
-        else:
-            result = await async_set_appliance_notification_preferences(
-                _loaded_coordinators(hass),
-                circuit_id=request.query.get("circuit_id"),
-                assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
-                values=payload,
-                entry_id=request.query.get(ATTR_ENTRY_ID),
-            )
-        return web.json_response(result)
-
-
-class ApplianceInsightsView(HomeAssistantView):
-    """Authenticated integration-level appliance index endpoint."""
-
-    url = APPLIANCE_INSIGHTS_API_PATH
-    name = f"api:{DOMAIN}:appliance_insights"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return bounded direct and NILM appliance insights."""
-        hass = request.app[KEY_HASS]
-        return web.json_response(
-            appliance_insights_payload(_loaded_coordinators(hass))
-        )
-
-
-class SetupHealthView(HomeAssistantView):
-    """Authenticated read-only Setup Health endpoint."""
-
-    url = SETUP_HEALTH_API_PATH
-    name = f"api:{DOMAIN}:setup_health"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return the current integration setup checklist."""
-        hass = request.app[KEY_HASS]
-        payload = setup_health_payload(
-            _loaded_coordinators(hass),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-        )
-        return web.json_response(payload)
-
-    async def post(self, request: Any) -> Any:
-        """Persist weekly digest opt-in and delivery settings."""
-        hass = request.app[KEY_HASS]
-        result = await async_set_weekly_digest_settings(
-            _loaded_coordinators(hass),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-            values=await request.json(),
-        )
-        return web.json_response(result)
-
-
-class NilmWorkspaceView(HomeAssistantView):
-    """Authenticated read-only NILM workspace payload."""
-
-    url = NILM_WORKSPACE_API_PATH
-    name = f"api:{DOMAIN}:nilm_workspace"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return bounded NILM workspace data selected by query parameters."""
-        hass = request.app[KEY_HASS]
-        payload = nilm_workspace_payload(
-            _loaded_coordinators(hass),
-            circuit_id=request.query.get("circuit_id"),
-            hours=request.query.get("hours"),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-        )
-        return web.json_response(payload)
-
-
-class NilmWorkspaceHistoryView(HomeAssistantView):
-    """Authenticated bounded history endpoint for the NILM workspace."""
-
-    url = NILM_WORKSPACE_HISTORY_API_PATH
-    name = f"api:{DOMAIN}:nilm_workspace_history"
-    requires_auth = True
-
-    async def get(self, request: Any) -> Any:
-        """Return capped recorder history for NILM workspace charting."""
-        hass = request.app[KEY_HASS]
-        payload = await nilm_workspace_history_payload(
-            hass,
-            _loaded_coordinators(hass),
-            circuit_id=request.query.get("circuit_id"),
-            hours=request.query.get("hours"),
-            entry_id=request.query.get(ATTR_ENTRY_ID),
-        )
-        return web.json_response(payload)
 
 
 async def async_setup_panel(hass: Any) -> bool:

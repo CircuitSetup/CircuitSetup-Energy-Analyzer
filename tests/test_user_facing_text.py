@@ -12,7 +12,16 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
-PANEL_ASSET = INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js"
+FRONTEND_DIR = INTEGRATION_DIR / "frontend"
+PANEL_ASSET = FRONTEND_DIR / "energy-analyzer-panel.js"
+PANEL_MAIN_ASSET = FRONTEND_DIR / "energy-analyzer-panel-main.js"
+DASHBOARD_GRAPHS_ASSET = FRONTEND_DIR / "energy-analyzer-dashboard-graphs.js"
+FRONTEND_ASSETS = (PANEL_MAIN_ASSET, DASHBOARD_GRAPHS_ASSET, PANEL_ASSET)
+PANEL_RUNTIME_ASSETS = (PANEL_MAIN_ASSET, DASHBOARD_GRAPHS_ASSET)
+
+
+def _frontend_source() -> str:
+    return "\n".join(path.read_text(encoding="utf-8") for path in FRONTEND_ASSETS)
 
 
 def _run_panel_node_script(body: str) -> None:
@@ -25,13 +34,15 @@ def _run_panel_node_script(body: str) -> None:
         ").config_panel.panel;\n"
     )
     panel_class_statement = json.dumps(
-        "this.Panel = class TestPanel extends CircuitSetupEnergyAnalyzerPanel "
+        "const __registered = registerEnergyAnalyzerPanel(registerDashboardGraphs); "
+        "this.Panel = class TestPanel extends "
+        "__registered.CircuitSetupEnergyAnalyzerPanel "
         "{ constructor() { super(); this.panel = { config: "
         "{ text: __panelText } }; } };\n"
     )
     dashboard_class_statement = json.dumps(
         "this.DashboardGraphs = class TestDashboardGraphs extends "
-        "CircuitSetupEnergyAnalyzerDashboardGraphs "
+        "__registered.CircuitSetupEnergyAnalyzerDashboardGraphs "
         "{ constructor() { super(); this.setConfig({ text: __panelText }); } "
         "setConfig(config) { super.setConfig(Object.assign("
         "{ text: __panelText }, config || {})); } };"
@@ -83,7 +94,9 @@ const context = {{
   }},
 }};
 vm.createContext(context);
-const source = fs.readFileSync({json.dumps(str(PANEL_ASSET))}, "utf8");
+const source = {json.dumps([str(path) for path in PANEL_RUNTIME_ASSETS])}
+  .map((path) => fs.readFileSync(path, "utf8").replace(/^export /gm, ""))
+  .join("\\n");
 vm.runInContext(
   `${{source}}\\n`
   + {json.dumps(panel_text_statement)}
@@ -1330,7 +1343,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
 
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert PANEL_ASSET.exists()
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     translated_text = json.dumps(_translations()["config_panel"]["panel"])
 
     for expected in (
@@ -1778,9 +1791,7 @@ for (const ambiguous of ["Open Evidence", "Mark Expected", "Not Helpful"]) {
 
 
 def test_alert_technical_details_keep_metric_boxes() -> None:
-    asset = (INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js").read_text(
-        encoding="utf-8"
-    )
+    asset = _frontend_source()
 
     assert "[data-evidence-technical] .metric" not in asset
 
@@ -2628,7 +2639,7 @@ def test_focused_nilm_history_request_contracts() -> None:
     )
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     graph = asset.index("_renderNilmGraph(workspace, graphWindow, graphBands)")
     lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
@@ -3004,7 +3015,7 @@ def test_nilm_lane_rendering_contracts() -> None:
     )
 
 def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     command_rule = re.search(r"button, a\.button\s*\{(?P<body>.*?)\}", asset, re.DOTALL)
 
     assert command_rule is not None
@@ -3214,7 +3225,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     )
 
 def test_nilm_lane_count_badge_respects_radius_limit() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     start = asset.index(".nilm-lane strong {")
     end = asset.index("\n        }", start)
     rule = asset[start:end]
@@ -3514,7 +3525,7 @@ if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
 
 
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         'customElements.get("circuitsetup-energy-analyzer-dashboard-graphs")',
@@ -3703,13 +3714,7 @@ for (const expected of [
 def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions() -> (
     None
 ):
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_shouldHideUnavailableRecommendationAction(actionKey, action)" in asset
     assert 'if (!action) {\n      return "";' in asset
@@ -3720,13 +3725,7 @@ def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions()
 
 
 def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_recommendationsByStatus(recommendations)" in asset
     assert "_renderRecommendationSection(" in asset
@@ -3744,7 +3743,7 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
 
 
 def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "class CircuitSetupPanelComponent",
@@ -3762,13 +3761,7 @@ def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> Non
 
 
 def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_recommendationValueRows(recommendation)" in asset
     assert 'String((recommendation && recommendation.status) || "pending")' in asset
@@ -3784,7 +3777,7 @@ def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> N
 
 
 def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     formatter_start = asset.index("_formatDuration(value) {")
     formatter_end = asset.index("\n  _formatConfidence(value)", formatter_start)
     formatter = asset[formatter_start:formatter_end]
@@ -3809,7 +3802,7 @@ if (rendered !== "74%") {
 
 
 def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     setup_health_api_path = (
         'const SETUP_HEALTH_API_PATH = '
         '"/api/circuitsetup_energy_analyzer/setup_health";'
@@ -3830,7 +3823,7 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
 
 
 def test_appliance_insights_panel_route_and_api_contract() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         'const APPLIANCE_INSIGHTS_API_PATH = '
@@ -3847,7 +3840,7 @@ def test_appliance_insights_panel_route_and_api_contract() -> None:
 
 
 def test_appliance_insights_panel_exposes_filter_and_sort_controls() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "data-appliance-insights-filter",
@@ -3864,7 +3857,7 @@ def test_appliance_insights_panel_exposes_filter_and_sort_controls() -> None:
 
 
 def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "data-appliance-insights-detail-path",
@@ -3876,7 +3869,7 @@ def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks()
 
 
 def test_appliance_detail_panel_renders_why_energy_changed() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "_renderWhyEnergyChanged",
@@ -4002,7 +3995,7 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         path.read_text(encoding="utf-8")
         for path in (
             INTEGRATION_DIR / "entities" / "setup_health.py",
-            INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js",
+            *FRONTEND_ASSETS,
             INTEGRATION_DIR / "panel.py",
         )
     )
@@ -4059,7 +4052,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
     source_text = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
-            PANEL_ASSET,
+            *FRONTEND_ASSETS,
             INTEGRATION_DIR / "panel.py",
         )
     )
@@ -4153,13 +4146,7 @@ def test_notification_and_dashboard_text_live_in_translations() -> None:
 
 
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_renderSelectedRecommendationEvidence()" in asset
     assert "selected_recommendation" in asset
@@ -4168,7 +4155,7 @@ def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None
 
 
 def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     preview = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
@@ -4195,13 +4182,7 @@ def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
 
 
 def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_renderAndScrollToTop()" in asset
     assert "_scrollToTop()" in asset
@@ -4210,13 +4191,7 @@ def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:
 
 
 def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "this._nilmLabelDrafts = new Map();" in asset
     assert (
@@ -4228,13 +4203,7 @@ def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
 
 
 def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "circuitsetup-energy-analyzer-route-change",
@@ -4250,13 +4219,7 @@ def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() ->
 
 
 def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "_actionRefreshRouteKey(actionKey)",
@@ -4815,7 +4778,7 @@ def test_nilm_decision_action_contracts() -> None:
     )
 
 def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     scoped_start = asset.index("        .evidence-meta .metric,")
     scoped_style = asset[scoped_start : asset.index("}", scoped_start)]
@@ -4840,7 +4803,7 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
 
 
 def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     surface_rule = re.search(
         r"\.legend\s*\{(?P<body>.*?)\}",
         asset,
@@ -5394,7 +5357,7 @@ def test_nilm_interval_action_contracts() -> None:
     )
 
 def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     summary_start = asset.index(
         "        [data-evidence-technical] > summary {"
@@ -5410,7 +5373,7 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
 
 
 def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     surface_rule = re.search(
         r"\.section-surface\s*\{(?P<body>.*?)\}",
         asset,
@@ -5678,13 +5641,7 @@ def test_alert_evidence_render_contracts() -> None:
     )
 
 def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "new Date(value)" in asset
     assert "raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T" not in asset

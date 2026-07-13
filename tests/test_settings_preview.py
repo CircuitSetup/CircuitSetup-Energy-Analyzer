@@ -20,7 +20,7 @@ PANEL_JS = (
     / "custom_components"
     / "circuitsetup_energy_analyzer"
     / "frontend"
-    / "energy-analyzer-panel.js"
+    / "energy-analyzer-panel-main.js"
 )
 
 

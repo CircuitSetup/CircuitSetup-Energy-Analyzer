@@ -225,7 +225,7 @@ def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit()
 
 def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     assert 'new CustomEvent("location-changed"' in panel_script
@@ -236,7 +236,7 @@ def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
 
 def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split("  _actionRefreshRouteKey(actionKey) {", 1)[1].split(
@@ -250,7 +250,7 @@ def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
 
 def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
@@ -276,7 +276,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
 
 def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
