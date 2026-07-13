@@ -1316,3 +1316,43 @@ def test_feature_store_preserves_settings_recommendations() -> None:
         serialized["settings_recommendation_notification_episode_key"]
         == raw["settings_recommendation_notification_episode_key"]
     )
+
+
+def test_notification_preferences_and_digest_settings_round_trip() -> None:
+    data = FeatureStoreData(
+        appliance_notification_preferences={
+            "circuit:dryer": {
+                "finished_running": True,
+                "delivery_mode": "daily_summary",
+            }
+        },
+        notification_delivery_state={
+            "cooldowns": {
+                "circuit:dryer|unusual_runtime": "2026-07-13T12:00:00+00:00"
+            },
+            "deferred": [
+                {
+                    "alert_id": "alert-1",
+                    "defer_until": "2026-07-14T07:00:00-04:00",
+                }
+            ],
+        },
+        weekly_digest_settings={"enabled": True, "delivery": "panel_only"},
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert STORAGE_VERSION == 7
+    assert restored.appliance_notification_preferences == (
+        data.appliance_notification_preferences
+    )
+    assert restored.notification_delivery_state == data.notification_delivery_state
+    assert restored.weekly_digest_settings == data.weekly_digest_settings
+
+
+def test_legacy_store_uses_safe_notification_defaults() -> None:
+    restored = feature_store_data_from_dict({"schema_version": 6})
+
+    assert restored.appliance_notification_preferences == {}
+    assert restored.notification_delivery_state == {}
+    assert restored.weekly_digest_settings == {}

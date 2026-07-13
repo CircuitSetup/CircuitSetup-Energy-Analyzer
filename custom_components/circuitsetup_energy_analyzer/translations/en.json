@@ -1145,7 +1145,9 @@
         "action_unavailable": "Action unavailable: {label}. Reload the evidence panel and try again.",
         "action_unavailable_reason": "Action unavailable: {reason}.",
         "action_service_missing": "Action unavailable: {label}. The panel did not receive a service to call.",
-        "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again."
+        "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.",
+        "notification_preferences_save": "Could not save appliance notification preferences: {message}",
+        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}"
       },
       "messages": {
         "saved_label": "Saved label: {label}.",
@@ -1186,7 +1188,9 @@
         "showing_all_nilm_sessions": "Showing all NILM graph sessions.",
         "showing_selected_signature": "Showing graph sessions for selected signature.",
         "no_paired_sessions": "No paired sessions matched this signature yet.",
-        "updated_nilm_graph_window": "Updated NILM graph window."
+        "updated_nilm_graph_window": "Updated NILM graph window.",
+        "notification_preferences_saved": "Appliance notification preferences saved.",
+        "weekly_digest_settings_saved": "Weekly digest settings saved."
       },
       "actions": {
         "groups": {
@@ -1306,7 +1310,48 @@
         "history_24_hours": "Past 24 hours",
         "history_7_days": "Past 7 days",
         "history_30_days": "Past 30 days",
-        "history_window": "Showing {start} to {end}."
+        "history_window": "Showing {start} to {end}.",
+        "notifications": "Appliance Notifications"
+      },
+      "notifications": {
+        "delivery_mode": "Delivery mode",
+        "minimum_confidence": "Minimum NILM confidence",
+        "cooldown_minutes": "Cooldown minutes",
+        "quiet_hours_start": "Quiet hours start",
+        "quiet_hours_end": "Quiet hours end",
+        "categories": {
+          "finished_running": "Finished running",
+          "unusual_runtime": "Unusual runtime",
+          "high_daily_energy": "High daily energy",
+          "electrical_issue": "Electrical issue",
+          "capacity_demand_issue": "Capacity or demand issue",
+          "data_quality_issue": "Data quality issue",
+          "nilm_review_needed": "NILM review needed"
+        },
+        "delivery_modes": {
+          "immediate": "Immediate",
+          "daily_summary": "Daily summary",
+          "weekly_digest": "Weekly digest only",
+          "disabled": "Disabled"
+        }
+      },
+      "weekly_digest": {
+        "heading": "Weekly Appliance Digest",
+        "enabled": "Create a weekly appliance digest",
+        "delivery": "Digest delivery",
+        "notify_service": "Mobile notify service",
+        "period": "Summary for {start} through {end}.",
+        "no_report": "No weekly report has been generated yet.",
+        "biggest_changes": "Largest changes from normal",
+        "top_energy_users": "Top energy users",
+        "unresolved_items": "Recurring unresolved issues",
+        "nilm_review_items": "NILM assignments needing validation",
+        "load_shift_opportunities": "Load-shifting opportunities",
+        "delivery_modes": {
+          "panel_only": "Panel only",
+          "persistent_notification": "Persistent notification",
+          "mobile_notification": "Mobile notification"
+        }
       },
       "attention": {
         "none": "No appliances need attention right now.",

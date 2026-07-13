@@ -671,6 +671,28 @@ def test_direct_meter_conversion_preserves_nilm_identity_in_appliance_detail() -
     assert assignment_detail == detail
 
 
+def test_appliance_detail_payload_includes_notification_preferences() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.store_data.appliance_notification_preferences = {
+        "circuit:fridge": {
+            "finished_running": True,
+            "delivery_mode": "daily_summary",
+        }
+    }
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    preferences = payload["notification_preferences"]
+    assert preferences["appliance_key"] == "circuit:fridge"
+    assert preferences["finished_running"] is True
+    assert preferences["electrical_issue"] is True
+    assert preferences["delivery_mode"] == "daily_summary"
+
+
 def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

@@ -167,6 +167,14 @@ questions instead of raw diagnostic entity lists:
   a bounded, non-mutating preview of the alerts or operating-state changes the
   candidate would have produced from up to 14 days and 500 retained samples.
   The preview is historical guidance, not a prediction of future behavior.
+- **Appliance Notifications** in Appliance Detail controls finished, runtime,
+  energy, electrical, capacity/demand, data-quality, and NILM-review categories
+  without creating one entity per preference. Delivery can be immediate, a
+  daily queue, weekly-digest-only, or disabled, with local quiet hours,
+  cooldown, and a NILM-only confidence floor.
+- **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
+  each appliance's own normal separately from top energy users and can stay in
+  the panel or use a persistent/mobile notification target.
 - **Alert Evidence** starts with a visual comparison, then keeps graph-first
   evidence beside the plain-language explanation and moves technical details
   into a disclosure for deeper review.

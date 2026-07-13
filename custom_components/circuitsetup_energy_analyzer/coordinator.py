@@ -879,6 +879,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(nilm_alert)
         alerts.extend(await self._notify_nilm_virtual_appliances(now))
         alerts.extend(await self.pipeline.async_process_cross_circuit(samples, context))
+        alerts.extend(
+            await self.notification_controller.async_notify_finished_events(
+                events,
+                now,
+            )
+        )
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -908,6 +914,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
             self._mark_store_dirty()
+        await self.notification_controller.async_dispatch_due(now)
+        await self.notification_controller.async_refresh_weekly_digest(now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:

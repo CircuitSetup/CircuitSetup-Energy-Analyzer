@@ -155,6 +155,11 @@ class FeatureStoreData:
         tuple[str, ...],
         ...,
     ] = field(default_factory=tuple)
+    appliance_notification_preferences: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    notification_delivery_state: dict[str, Any] = field(default_factory=dict)
+    weekly_digest_settings: dict[str, Any] = field(default_factory=dict)
     dashboard_status: dict[str, Any] = field(default_factory=dict)
 
 
@@ -396,6 +401,15 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             list(part)
             for part in data.settings_recommendation_notification_episode_key
         ],
+        "appliance_notification_preferences": _dict_of_dicts(
+            data.appliance_notification_preferences
+        ),
+        "notification_delivery_state": _json_mapping(
+            data.notification_delivery_state
+        ),
+        "weekly_digest_settings": _json_mapping(
+            data.weekly_digest_settings
+        ),
         "dashboard_status": _dict_of_jsonable_values(data.dashboard_status),
     }
 
@@ -514,6 +528,15 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         settings_recommendation_notification_episode_key=_episode_key_from_raw(
             raw.get("settings_recommendation_notification_episode_key", [])
         ),
+        appliance_notification_preferences=_dict_of_dicts(
+            raw.get("appliance_notification_preferences", {})
+        ),
+        notification_delivery_state=_json_mapping(
+            raw.get("notification_delivery_state", {})
+        ),
+        weekly_digest_settings=_json_mapping(
+            raw.get("weekly_digest_settings", {})
+        ),
         dashboard_status=_dict_of_jsonable_values(raw.get("dashboard_status", {})),
     )
 
@@ -521,10 +544,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
 async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v1 feature-store payload to current storage semantics."""
 
-    return _migrate_v5_to_v6_payload(
-        _migrate_v4_to_v5_payload(
-            _migrate_v3_to_v4_payload(
-                _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
+    return _migrate_v6_to_v7_payload(
+        _migrate_v5_to_v6_payload(
+            _migrate_v4_to_v5_payload(
+                _migrate_v3_to_v4_payload(
+                    _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
+                )
             )
         )
     )
@@ -533,9 +558,11 @@ async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
 async def migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v2 feature-store payload to current storage semantics."""
 
-    return _migrate_v5_to_v6_payload(
-        _migrate_v4_to_v5_payload(
-            _migrate_v3_to_v4_payload(_migrate_v2_to_v3_payload(data))
+    return _migrate_v6_to_v7_payload(
+        _migrate_v5_to_v6_payload(
+            _migrate_v4_to_v5_payload(
+                _migrate_v3_to_v4_payload(_migrate_v2_to_v3_payload(data))
+            )
         )
     )
 
@@ -543,21 +570,31 @@ async def migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
 async def migrate_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v3 feature-store payload to current storage semantics."""
 
-    return _migrate_v5_to_v6_payload(
-        _migrate_v4_to_v5_payload(_migrate_v3_to_v4_payload(data))
+    return _migrate_v6_to_v7_payload(
+        _migrate_v5_to_v6_payload(
+            _migrate_v4_to_v5_payload(_migrate_v3_to_v4_payload(data))
+        )
     )
 
 
 async def migrate_v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v4 feature-store payload to current storage semantics."""
 
-    return _migrate_v5_to_v6_payload(_migrate_v4_to_v5_payload(data))
+    return _migrate_v6_to_v7_payload(
+        _migrate_v5_to_v6_payload(_migrate_v4_to_v5_payload(data))
+    )
 
 
 async def migrate_v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v5 feature-store payload to canonical NILM identities."""
 
-    return _migrate_v5_to_v6_payload(data)
+    return _migrate_v6_to_v7_payload(_migrate_v5_to_v6_payload(data))
+
+
+async def migrate_v6_to_v7(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a v6 store to notification preferences and digest state."""
+
+    return _migrate_v6_to_v7_payload(data)
 
 
 def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
@@ -576,6 +613,8 @@ def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
         payload = _migrate_v4_to_v5_payload(payload)
     if version < 6:
         payload = _migrate_v5_to_v6_payload(payload)
+    if version < 7:
+        payload = _migrate_v6_to_v7_payload(payload)
     payload["schema_version"] = STORAGE_VERSION
     return payload
 
@@ -626,7 +665,7 @@ def _migrate_v3_to_v4_payload(data: Any) -> dict[str, Any]:
 
 def _migrate_v4_to_v5_payload(data: Any) -> dict[str, Any]:
     payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = STORAGE_VERSION
+    payload["schema_version"] = 5
     payload["nilm_session_history_by_circuit"] = _dict_of_list_dicts(
         payload.get("nilm_session_history_by_circuit", {})
     )
@@ -635,11 +674,26 @@ def _migrate_v4_to_v5_payload(data: Any) -> dict[str, Any]:
 
 def _migrate_v5_to_v6_payload(data: Any) -> dict[str, Any]:
     payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = STORAGE_VERSION
+    payload["schema_version"] = 6
     payload["nilm_appliance_assignments_by_circuit"] = (
         _nilm_assignments_with_identity(
             payload.get("nilm_appliance_assignments_by_circuit", {})
         )
+    )
+    return payload
+
+
+def _migrate_v6_to_v7_payload(data: Any) -> dict[str, Any]:
+    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
+    payload["schema_version"] = 7
+    payload["appliance_notification_preferences"] = _dict_of_dicts(
+        payload.get("appliance_notification_preferences", {})
+    )
+    payload["notification_delivery_state"] = _json_mapping(
+        payload.get("notification_delivery_state", {})
+    )
+    payload["weekly_digest_settings"] = _json_mapping(
+        payload.get("weekly_digest_settings", {})
     )
     return payload
 
@@ -808,6 +862,12 @@ def _copy_payload(value: Any) -> Any:
     return value
 
 
+def _json_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return _copy_payload(value)
+
+
 def _events_from_raw(values: Any) -> list[CircuitEvent]:
     events: list[CircuitEvent] = []
     for value in _list_items(values):
@@ -959,6 +1019,10 @@ def prune_events(
         settings_recommendation_notification_episode_key=(
             data.settings_recommendation_notification_episode_key
         ),
+        appliance_notification_preferences=data.appliance_notification_preferences,
+        notification_delivery_state=data.notification_delivery_state,
+        weekly_digest_settings=data.weekly_digest_settings,
+        dashboard_status=data.dashboard_status,
     )
 
 
@@ -1012,6 +1076,8 @@ class FeatureStore:
                     return await migrate_v4_to_v5(old_data)
                 if old_major_version == 5:
                     return await migrate_v5_to_v6(old_data)
+                if old_major_version == 6:
+                    return await migrate_v6_to_v7(old_data)
                 if old_major_version == STORAGE_VERSION:
                     return _migrated_feature_store_payload(old_data)
                 raise NotImplementedError

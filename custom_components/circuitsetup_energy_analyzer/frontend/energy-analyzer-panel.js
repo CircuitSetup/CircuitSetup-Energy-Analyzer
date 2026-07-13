@@ -537,6 +537,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return response.json();
   }
 
+  async _postJson(apiPath, fetchPath, body) {
+    if (this._hass && this._hass.callApi) {
+      return this._hass.callApi("POST", apiPath, body);
+    }
+    const response = await fetch(fetchPath, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  }
+
   async _callAction(actionKey, options = {}) {
     const payloadActions = this._payload && this._payload.actions;
     const fallbackAlert = this._payload && this._payload.alert;
@@ -2723,6 +2738,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
+    this._listen("[data-save-appliance-notifications]", () => this._saveApplianceNotificationPreferences());
+    this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
       button.addEventListener("click", () => {
         this._callApplianceDetailAction(button.dataset.applianceDetailAction);
@@ -2956,7 +2973,62 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>${this._escape(this._panelText("headers.needs_attention"))}</h2>
         ${this._renderNeedsAttention(payload.needs_attention)}
       </section>
+      ${this._renderWeeklyDigest(payload.weekly_digest, payload.weekly_digest_settings)}
     `;
+  }
+
+  _renderWeeklyDigest(digest, settings = {}) {
+    const report = digest || {};
+    const sections = [
+      ["biggest_changes", "weekly_digest.biggest_changes"],
+      ["top_energy_users", "weekly_digest.top_energy_users"],
+      ["unresolved_items", "weekly_digest.unresolved_items"],
+      ["nilm_review_items", "weekly_digest.nilm_review_items"],
+      ["load_shift_opportunities", "weekly_digest.load_shift_opportunities"],
+    ];
+    return `<section class="panel" data-weekly-digest>
+      <h2>${this._escape(this._panelText("weekly_digest.heading"))}</h2>
+      <div class="entity-list">
+        <label><input type="checkbox" data-weekly-digest-enabled ${settings.enabled ? "checked" : ""}> ${this._escape(this._panelText("weekly_digest.enabled"))}</label>
+        <label>${this._escape(this._panelText("weekly_digest.delivery"))}
+          <select data-weekly-digest-delivery>
+            ${["panel_only", "persistent_notification", "mobile_notification"].map((mode) => `<option value="${mode}" ${settings.delivery === mode ? "selected" : ""}>${this._escape(this._panelText(`weekly_digest.delivery_modes.${mode}`))}</option>`).join("")}
+          </select>
+        </label>
+        <label>${this._escape(this._panelText("weekly_digest.notify_service"))}<input type="text" value="${this._escape(settings.notify_service || "")}" data-weekly-digest-notify-service></label>
+      </div>
+      <div class="actions"><button type="button" data-save-weekly-digest>${this._escape(this._panelText("actions.labels.save"))}</button></div>
+      ${report.week_start ? `<p class="muted">${this._escape(this._panelTextFormat("weekly_digest.period", { start: report.week_start, end: report.week_end }))}</p>` : `<p class="muted">${this._escape(this._panelText("weekly_digest.no_report"))}</p>`}
+      ${sections.map(([key, label]) => {
+        const items = Array.isArray(report[key]) ? report[key] : [];
+        return items.length ? `<h3>${this._escape(this._panelText(label))}</h3>${this._renderSimpleList(items.map((item) => `${item.display_name}: ${this._formatKwh(item.energy_kwh)}`), "")}` : "";
+      }).join("")}
+    </section>`;
+  }
+
+  async _saveWeeklyDigestSettings() {
+    const panel = this.shadowRoot.querySelector("[data-weekly-digest]");
+    if (!panel) {
+      return;
+    }
+    const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
+    const entryId = route.searchParams.get("entry_id") || "";
+    const query = entryId ? `?${new URLSearchParams({ entry_id: entryId })}` : "";
+    const body = {
+      enabled: panel.querySelector("[data-weekly-digest-enabled]").checked,
+      delivery: panel.querySelector("[data-weekly-digest-delivery]").value,
+      notify_service: panel.querySelector("[data-weekly-digest-notify-service]").value,
+    };
+    try {
+      const result = await this._postJson(`${SETUP_HEALTH_CALL_API_PATH}${query}`, `${SETUP_HEALTH_API_PATH}${query}`, body);
+      if (result && result.weekly_digest_settings) {
+        this._setupHealth.weekly_digest_settings = result.weekly_digest_settings;
+      }
+      this._lastActionMessage = this._panelText("messages.weekly_digest_settings_saved");
+    } catch (error) {
+      this._lastActionMessage = this._panelTextFormat("errors.weekly_digest_settings_save", { message: error.message });
+    }
+    this._render();
   }
 
   _renderNeedsAttention(items) {
@@ -3166,11 +3238,78 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
+      ${this._renderApplianceNotificationPreferences(payload.notification_preferences)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
         ${this._renderApplianceActions(payload.actions)}
       </section>
     `;
+  }
+
+  _renderApplianceNotificationPreferences(preferences) {
+    if (!preferences) {
+      return "";
+    }
+    const categories = [
+      "finished_running",
+      "unusual_runtime",
+      "high_daily_energy",
+      "electrical_issue",
+      "capacity_demand_issue",
+      "data_quality_issue",
+      "nilm_review_needed",
+    ];
+    const deliveryModes = ["immediate", "daily_summary", "weekly_digest", "disabled"];
+    return `<section class="panel" data-appliance-notifications>
+      <h2>${this._escape(this._panelText("appliance_detail.notifications"))}</h2>
+      <div class="entity-list">
+        ${categories.map((category) => `<label><input type="checkbox" data-notification-category="${category}" ${preferences[category] ? "checked" : ""}> ${this._escape(this._panelText(`notifications.categories.${category}`))}</label>`).join("")}
+        <label>${this._escape(this._panelText("notifications.delivery_mode"))}
+          <select data-notification-delivery-mode>${deliveryModes.map((mode) => `<option value="${mode}" ${preferences.delivery_mode === mode ? "selected" : ""}>${this._escape(this._panelText(`notifications.delivery_modes.${mode}`))}</option>`).join("")}</select>
+        </label>
+        <label>${this._escape(this._panelText("notifications.minimum_confidence"))}<input type="number" min="0" max="1" step="0.05" value="${this._escape(preferences.minimum_confidence)}" data-notification-minimum-confidence></label>
+        <label>${this._escape(this._panelText("notifications.cooldown_minutes"))}<input type="number" min="0" max="10080" step="5" value="${this._escape(preferences.cooldown_minutes)}" data-notification-cooldown></label>
+        <label>${this._escape(this._panelText("notifications.quiet_hours_start"))}<input type="time" value="${this._escape(preferences.quiet_hours_start || "")}" data-notification-quiet-start></label>
+        <label>${this._escape(this._panelText("notifications.quiet_hours_end"))}<input type="time" value="${this._escape(preferences.quiet_hours_end || "")}" data-notification-quiet-end></label>
+      </div>
+      <div class="actions"><button type="button" data-save-appliance-notifications>${this._escape(this._panelText("actions.labels.save"))}</button></div>
+    </section>`;
+  }
+
+  async _saveApplianceNotificationPreferences() {
+    const panel = this.shadowRoot.querySelector("[data-appliance-notifications]");
+    if (!panel) {
+      return;
+    }
+    const body = {};
+    for (const input of panel.querySelectorAll("[data-notification-category]")) {
+      body[input.dataset.notificationCategory] = input.checked;
+    }
+    body.delivery_mode = panel.querySelector("[data-notification-delivery-mode]").value;
+    body.minimum_confidence = Number(panel.querySelector("[data-notification-minimum-confidence]").value);
+    body.cooldown_minutes = Number(panel.querySelector("[data-notification-cooldown]").value);
+    body.quiet_hours_start = panel.querySelector("[data-notification-quiet-start]").value || null;
+    body.quiet_hours_end = panel.querySelector("[data-notification-quiet-end]").value || null;
+    const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
+    const params = new URLSearchParams();
+    for (const key of ["circuit_id", "assignment_id"]) {
+      if (route.searchParams.get(key)) {
+        params.set(key, route.searchParams.get(key));
+      }
+    }
+    const query = params.toString();
+    const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
+    const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
+    try {
+      const result = await this._postJson(apiPath, fetchPath, body);
+      if (result && result.notification_preferences) {
+        this._applianceDetail.notification_preferences = result.notification_preferences;
+      }
+      this._lastActionMessage = this._panelText("messages.notification_preferences_saved");
+    } catch (error) {
+      this._lastActionMessage = this._panelTextFormat("errors.notification_preferences_save", { message: error.message });
+    }
+    this._render();
   }
 
   _renderApplianceDetailHistory(history) {

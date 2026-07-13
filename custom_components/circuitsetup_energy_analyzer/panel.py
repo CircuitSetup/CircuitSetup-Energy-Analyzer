@@ -15,6 +15,7 @@ from .appliance_detail import (
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
 )
+from .appliance_notifications import preferences_from_dict
 from .attention import attention_items_for_coordinators
 from .const import DOMAIN
 from .entities.setup_health import (
@@ -127,7 +128,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-5"
+PANEL_MODULE_VERSION = "20260713-6"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -222,6 +223,18 @@ class ApplianceDetailView(HomeAssistantView):
         )
         return web.json_response(payload)
 
+    async def post(self, request: Any) -> Any:
+        """Persist notification preferences for the selected appliance."""
+        hass = request.app[KEY_HASS]
+        payload = await request.json()
+        result = await async_set_appliance_notification_preferences(
+            _loaded_coordinators(hass),
+            circuit_id=request.query.get("circuit_id"),
+            assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
+            values=payload,
+        )
+        return web.json_response(result)
+
 
 class SetupHealthView(HomeAssistantView):
     """Authenticated read-only Setup Health endpoint."""
@@ -238,6 +251,16 @@ class SetupHealthView(HomeAssistantView):
             entry_id=request.query.get(ATTR_ENTRY_ID),
         )
         return web.json_response(payload)
+
+    async def post(self, request: Any) -> Any:
+        """Persist weekly digest opt-in and delivery settings."""
+        hass = request.app[KEY_HASS]
+        result = await async_set_weekly_digest_settings(
+            _loaded_coordinators(hass),
+            entry_id=request.query.get(ATTR_ENTRY_ID),
+            values=await request.json(),
+        )
+        return web.json_response(result)
 
 
 class NilmWorkspaceView(HomeAssistantView):
@@ -582,6 +605,14 @@ def setup_health_payload(
     needs_attention = [
         item.as_dict() for item in attention_items_for_coordinators((coordinator,))
     ]
+    raw_digest_settings = getattr(
+        coordinator.store_data,
+        "weekly_digest_settings",
+        {},
+    )
+    digest_settings = (
+        dict(raw_digest_settings) if isinstance(raw_digest_settings, Mapping) else {}
+    )
     return {
         "status": "ok",
         "requested_entry_id": requested_entry_id,
@@ -600,8 +631,92 @@ def setup_health_payload(
         "checklist_ready_count": attributes.get("checklist_ready_count"),
         "checklist_total_count": attributes.get("checklist_total_count"),
         "needs_attention": needs_attention,
+        "weekly_digest": digest_settings.get("latest_report"),
+        "weekly_digest_settings": {
+            "enabled": digest_settings.get("enabled") is True,
+            "delivery": str(digest_settings.get("delivery") or "panel_only"),
+            "notify_service": str(digest_settings.get("notify_service") or ""),
+        },
         "text": text,
     }
+
+
+async def async_set_appliance_notification_preferences(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None,
+    assignment_id: str | None,
+    values: Any,
+) -> dict[str, Any]:
+    """Save validated preferences using the backend-derived appliance key."""
+    for coordinator in coordinators:
+        detail = (
+            appliance_detail_for_assignment(coordinator, str(assignment_id))
+            if assignment_id
+            else appliance_detail_for_circuit(coordinator, str(circuit_id))
+        )
+        if detail is None:
+            continue
+        appliance_key = detail.appliance_key or f"circuit:{detail.circuit_id}"
+        preferences = preferences_from_dict(
+            values if isinstance(values, Mapping) else {},
+            appliance_key=appliance_key,
+        )
+        coordinator.store_data.appliance_notification_preferences[appliance_key] = (
+            preferences.as_dict()
+        )
+        persistence = getattr(coordinator, "store_persistence", None)
+        mark_dirty = getattr(persistence, "mark_dirty", None)
+        if callable(mark_dirty):
+            mark_dirty()
+        save = getattr(persistence, "async_save_if_dirty", None)
+        if callable(save):
+            clock = getattr(coordinator, "current_time", None)
+            now = clock() if callable(clock) else datetime.now(UTC)
+            await save(now)
+        return {"status": "saved", "notification_preferences": preferences.as_dict()}
+    return {"status": "not_found", "notification_preferences": None}
+
+
+async def async_set_weekly_digest_settings(
+    coordinators: Iterable[Any],
+    *,
+    entry_id: str | None,
+    values: Any,
+) -> dict[str, Any]:
+    coordinator = _setup_health_coordinator(coordinators, entry_id)
+    if coordinator is None:
+        return {"status": "not_found", "weekly_digest_settings": None}
+    raw = values if isinstance(values, Mapping) else {}
+    delivery = str(raw.get("delivery") or "panel_only")
+    if delivery not in {
+        "panel_only",
+        "persistent_notification",
+        "mobile_notification",
+    }:
+        delivery = "panel_only"
+    settings = {
+        "enabled": raw.get("enabled") is True,
+        "delivery": delivery,
+        "notify_service": (
+            str(raw.get("notify_service") or "").strip()
+            if delivery == "mobile_notification"
+            else ""
+        ),
+    }
+    existing = getattr(coordinator.store_data, "weekly_digest_settings", {})
+    if isinstance(existing, Mapping) and existing.get("latest_report"):
+        settings["latest_report"] = existing["latest_report"]
+    coordinator.store_data.weekly_digest_settings = settings
+    persistence = getattr(coordinator, "store_persistence", None)
+    mark_dirty = getattr(persistence, "mark_dirty", None)
+    if callable(mark_dirty):
+        mark_dirty()
+    save = getattr(persistence, "async_save_if_dirty", None)
+    if callable(save):
+        clock = getattr(coordinator, "current_time", None)
+        await save(clock() if callable(clock) else datetime.now(UTC))
+    return {"status": "saved", "weekly_digest_settings": settings}
 
 
 def _setup_health_coordinator(
@@ -624,12 +739,27 @@ def _appliance_detail_payload(
     requested_circuit_id: str | None,
     requested_assignment_id: str | None,
 ) -> dict[str, Any]:
+    appliance_key = detail.appliance_key or f"circuit:{detail.circuit_id}"
+    preferences_by_appliance = getattr(
+        coordinator.store_data,
+        "appliance_notification_preferences",
+        {},
+    )
+    raw_preferences = (
+        preferences_by_appliance.get(appliance_key, {})
+        if isinstance(preferences_by_appliance, Mapping)
+        else {}
+    )
     return {
         "status": "ok",
         "requested_circuit_id": requested_circuit_id,
         "requested_assignment_id": requested_assignment_id,
         "detail": detail.as_dict(),
         "history": _appliance_detail_history_payload(coordinator, detail),
+        "notification_preferences": preferences_from_dict(
+            raw_preferences,
+            appliance_key=appliance_key,
+        ).as_dict(),
         "actions": _appliance_detail_actions(coordinator, detail),
     }
 
