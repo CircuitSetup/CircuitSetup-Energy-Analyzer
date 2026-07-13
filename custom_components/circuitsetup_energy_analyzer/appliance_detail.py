@@ -32,6 +32,11 @@ from .sensor import (
     health_summary_attributes,
     health_summary_value,
 )
+from .session_timeline import (
+    ApplianceTimelineSession,
+    direct_appliance_timeline,
+    nilm_appliance_timeline,
+)
 
 SourceType = Literal["direct_meter", "nilm_estimate", "mixed", "mains", "unknown"]
 ExpectationStatus = Literal[
@@ -219,6 +224,7 @@ class ApplianceDetail:
     current_session_duration_seconds: float | None = None
     current_session: dict[str, Any] | None = None
     last_matched_session: dict[str, Any] | None = None
+    session_timeline: tuple[ApplianceTimelineSession, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         """Return JSON-friendly data."""
@@ -320,6 +326,10 @@ def appliance_detail_for_circuit(
             else config.circuit_id
             if source_type == "mains"
             else None
+        ),
+        session_timeline=direct_appliance_timeline(
+            coordinator,
+            config.circuit_id,
         ),
     )
 
@@ -466,6 +476,22 @@ def _nilm_detail(
         last_matched_session=_nilm_session_detail(
             state,
             state.last_matched_session_id,
+        ),
+        session_timeline=nilm_appliance_timeline(
+            state,
+            (
+                getattr(analyzer_state, "active_alerts_by_circuit", {}).get(
+                    state.mains_circuit_id,
+                    (),
+                )
+            ),
+            maintenance=(
+                getattr(
+                    getattr(coordinator, "store_data", None),
+                    "maintenance_by_circuit",
+                    {},
+                ).get(state.mains_circuit_id, {})
+            ),
         ),
     )
 

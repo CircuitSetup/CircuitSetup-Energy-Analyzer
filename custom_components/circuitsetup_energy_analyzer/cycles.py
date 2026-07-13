@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from types import MappingProxyType
 from typing import Any
 
@@ -279,14 +279,14 @@ def build_normalized_run_sessions(
     active_start: datetime | None = None
 
     for event in circuit_events:
-        if event.timestamp > now:
+        if _timeline_instant(event.timestamp) > _timeline_instant(now):
             break
         if event.event_type is EventType.START:
             active_start = event.timestamp
             continue
         if event.event_type is not EventType.STOP or active_start is None:
             continue
-        duration = max((event.timestamp - active_start).total_seconds(), 0.0)
+        duration = _elapsed_seconds(active_start, event.timestamp)
         raw_sessions.append(
             RunSession(
                 started_at=active_start,
@@ -303,7 +303,7 @@ def build_normalized_run_sessions(
                 started_at=active_start,
                 stopped_at=None,
                 duration_seconds=_round_seconds(
-                    max((now - active_start).total_seconds(), 0.0)
+                    _elapsed_seconds(active_start, now)
                 ),
                 merged_transition_count=1,
             )
@@ -317,8 +317,9 @@ def build_normalized_run_sessions(
         previous = merged_sessions[-1]
         if (
             previous.stopped_at is not None
-            and session.started_at >= previous.stopped_at
-            and (session.started_at - previous.stopped_at).total_seconds()
+            and _timeline_instant(session.started_at)
+            >= _timeline_instant(previous.stopped_at)
+            and _elapsed_seconds(previous.stopped_at, session.started_at)
             <= merge_gap_seconds
         ):
             merged_sessions[-1] = RunSession(
@@ -335,6 +336,21 @@ def build_normalized_run_sessions(
             continue
         merged_sessions.append(session)
     return merged_sessions
+
+
+def _elapsed_seconds(start: datetime, end: datetime) -> float:
+    if start.tzinfo is not None and end.tzinfo is not None:
+        return max(
+            (end.astimezone(UTC) - start.astimezone(UTC)).total_seconds(),
+            0.0,
+        )
+    return max((end - start).total_seconds(), 0.0)
+
+
+def _timeline_instant(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(UTC)
+    return value.replace(tzinfo=UTC)
 
 
 def _isoformat_or_none(value: datetime | None) -> str | None:
@@ -469,7 +485,7 @@ def _circuit_cycle_events(
             if event.circuit_id == circuit_id
             and event.event_type in {EventType.START, EventType.STOP}
         ),
-        key=lambda event: event.timestamp,
+        key=lambda event: _timeline_instant(event.timestamp),
     )
 
 

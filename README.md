@@ -157,6 +157,10 @@ questions instead of raw diagnostic entity lists:
   appliance findings, and NILM validation work. Findings are ranked, limited
   to three per appliance, and semantically deduplicated so repeated energy
   wording does not crowd out electrical or data-quality issues.
+- **Session Timeline** pairs retained start/stop transitions for direct meters
+  and uses assignment-only NILM sessions for estimates. Solid blocks are
+  direct, dashed blocks are estimated, open runs have an open edge, and
+  maintenance or alert markers remain visible with a text detail fallback.
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
   and reset/apply/dismiss actions.

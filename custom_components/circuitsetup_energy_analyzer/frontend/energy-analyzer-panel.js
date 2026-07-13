@@ -13,6 +13,7 @@ const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
 const APPLIANCE_DETAIL_QUERY_PARAM = "appliance_detail";
 const SETUP_HEALTH_QUERY_PARAM = "setup_health";
+const PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence";
 const REVIEW_SUGGESTED_SETTINGS_QUERY_PARAM = "review_suggested_settings";
 const LAST_ACTION_MESSAGE_STORAGE_KEY = "circuitsetupEnergyAnalyzerLastActionMessage";
 const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
@@ -2269,6 +2270,58 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         .appliance-timeline-item p {
           margin: 0;
         }
+        .session-strip-list {
+          display: grid;
+          gap: 10px;
+        }
+        .session-strip summary {
+          cursor: pointer;
+          display: grid;
+          gap: 6px;
+          list-style: none;
+        }
+        .session-strip-track {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 4px;
+          height: 22px;
+          overflow: hidden;
+          position: relative;
+        }
+        .session-strip-block {
+          background: var(--primary-color, #0b6bcb);
+          border: 2px solid var(--primary-color, #0b6bcb);
+          bottom: 2px;
+          min-width: 4px;
+          position: absolute;
+          top: 2px;
+        }
+        .session-strip-block.nilm_estimate {
+          background: transparent;
+          border-style: dashed;
+        }
+        .session-strip-block.maintenance {
+          background: var(--disabled-text-color, #8a929c);
+          border-color: var(--disabled-text-color, #8a929c);
+        }
+        .session-strip-block.anomalous::after,
+        .session-strip-block.has-alert::after {
+          color: var(--error-color, #db4437);
+          content: "!";
+          font-weight: 700;
+          left: 50%;
+          position: absolute;
+          top: -3px;
+          transform: translateX(-50%);
+        }
+        .session-strip-block.running {
+          border-right-style: dotted;
+        }
+        .session-strip-detail {
+          display: grid;
+          gap: 4px;
+          padding: 8px 0 0;
+        }
         code {
           background: var(--secondary-background-color, #f4f6f8);
           border-radius: 4px;
@@ -3090,6 +3143,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
       </section>
       <section class="panel">
+        <h2>${this._escape(this._panelText("appliance_detail.session_timeline"))}</h2>
+        ${this._renderSessionTimeline(detail.session_timeline)}
+      </section>
+      <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
         ${this._renderApplianceTimeline(detail.recent_timeline)}
       </section>
@@ -3180,6 +3237,48 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${item.detail ? `<p class="muted">${this._escape(item.detail)}</p>` : ""}
       </li>
     `).join("")}</ol>`;
+  }
+
+  _renderSessionTimeline(sessions) {
+    const items = Array.isArray(sessions) ? sessions : [];
+    if (!items.length) {
+      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_sessions"))}</p>`;
+    }
+    return `<div class="session-strip-list">${items.map((session) => {
+      const start = new Date(session.start);
+      const end = session.end ? new Date(session.end) : new Date();
+      const startClock = this._timelineClockParts(start);
+      const endClock = this._timelineClockParts(end);
+      const crossesDay = startClock.dateKey !== endClock.dateKey || endClock.minutes < startClock.minutes;
+      const left = Math.max(0, Math.min(startClock.minutes / 14.4, 99.5));
+      const width = crossesDay
+        ? Math.max(0.5, 100 - left)
+        : Math.max(0.5, Math.min((endClock.minutes - startClock.minutes) / 14.4, 100 - left));
+      const hasAlerts = Array.isArray(session.alert_ids) && session.alert_ids.length;
+      const classes = [session.source_type, session.status, session.maintenance ? "maintenance" : "", hasAlerts ? "has-alert" : "", session.end ? "" : "running"].filter(Boolean).join(" ");
+      const source = this._sourceLabel(session.source_type);
+      const summary = `${this._formatDateTime(session.start)} - ${session.end ? this._formatDateTime(session.end) : this._panelText("appliance_detail.running_now")}`;
+      const alertId = hasAlerts ? session.alert_ids[0] : "";
+      const maintenanceText = session.maintenance ? this._panelText("appliance_detail.maintenance_session") : "";
+      const block = `<span class="session-strip-block ${this._escape(classes)}" style="left:${left}%;width:${width}%"></span>`;
+      const continuation = crossesDay
+        ? `<span class="session-strip-block ${this._escape(classes)}" style="left:0;width:${Math.max(0.5, Math.min(endClock.minutes / 14.4, 100))}%"></span>`
+        : "";
+      return `<details class="session-strip" data-session-id="${this._escape(session.session_id || "")}">
+        <summary>
+          <span class="session-strip-track" role="img" aria-label="${this._escape([source, this._friendlyFeature(session.status), maintenanceText, summary].filter(Boolean).join(", "))}">${block}${continuation}</span>
+          <strong>${this._escape(summary)}</strong>
+        </summary>
+        <div class="session-strip-detail">
+          <span>${this._escape(source)} · ${this._escape(this._friendlyFeature(session.status))}</span>
+          ${maintenanceText ? `<span>${this._escape(maintenanceText)}</span>` : ""}
+          ${session.duration_seconds !== null && session.duration_seconds !== undefined ? `<span>${this._escape(this._formatDuration(session.duration_seconds))}</span>` : ""}
+          ${session.estimated_energy_kwh !== null && session.estimated_energy_kwh !== undefined ? `<span>${this._escape(this._formatKwh(session.estimated_energy_kwh))}</span>` : ""}
+          ${session.confidence !== null && session.confidence !== undefined ? `<span>${this._escape(this._formatConfidence(session.confidence))}</span>` : ""}
+          ${alertId ? `<a class="button secondary" href="/${PANEL_URL_PATH}?alert_id=${encodeURIComponent(alertId)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
+        </div>
+      </details>`;
+    }).join("")}</div>`;
   }
 
   _renderApplianceComparisons(comparisons) {
@@ -5762,6 +5861,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const day = String(date.getDate()).padStart(2, "0");
       const minute = String(date.getMinutes()).padStart(2, "0");
       return this._formatDateParts(year, month, day, date.getHours(), minute);
+    }
+  }
+
+  _timelineClockParts(date) {
+    try {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: this._timeZone(),
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }).formatToParts(date).map((part) => [part.type, part.value]),
+      );
+      return {
+        dateKey: `${parts.year}-${parts.month}-${parts.day}`,
+        minutes: Number(parts.hour) * 60 + Number(parts.minute),
+      };
+    } catch (_error) {
+      return {
+        dateKey: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
+        minutes: date.getHours() * 60 + date.getMinutes(),
+      };
     }
   }
 

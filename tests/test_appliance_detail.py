@@ -10,7 +10,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
+    CircuitEvent,
     CircuitMode,
+    EventType,
     SensorRef,
     SensorRole,
     Severity,
@@ -306,6 +308,36 @@ def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
     assert timeline["items"][0]["detail"] == "Observed start event."
 
 
+def test_direct_appliance_detail_includes_normalized_session_timeline() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 6, 30, 13, 0, tzinfo=UTC)
+    coordinator.store_data.events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 30, 12, 0, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 30, 12, 10, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    timeline = appliance_detail_payload(
+        [coordinator],
+        circuit_id="fridge",
+    )["detail"]["session_timeline"]
+
+    assert len(timeline) == 1
+    assert timeline[0]["source_type"] == "direct_meter"
+    assert timeline[0]["duration_seconds"] == 600.0
+
+
 def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
@@ -581,6 +613,12 @@ def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None
     assert timeline_ids == {
         "session-dishwasher-complete",
         "session-dishwasher-open",
+    }
+    assert {
+        item["session_id"] for item in detail["session_timeline"]
+    } == timeline_ids
+    assert {item["source_type"] for item in detail["session_timeline"]} == {
+        "nilm_estimate"
     }
     embedded_rows = payload["history"]["embedded_series"][0]
     assert not any("09:00:00" in row["last_changed"] for row in embedded_rows)
