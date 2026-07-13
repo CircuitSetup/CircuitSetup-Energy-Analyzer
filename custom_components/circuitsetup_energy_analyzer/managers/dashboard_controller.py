@@ -134,8 +134,11 @@ class DashboardController:
             ),
             None,
         )
+        runtime_only = existing is None
+        if existing is None:
+            existing = _runtime_lovelace_dashboard(lovelace_data, payload)
         if existing is not None:
-            if not callable(update_method):
+            if not runtime_only and not callable(update_method):
                 return "unavailable", "dashboard_update_unavailable"
             item_id = _lovelace_dashboard_item_id(existing, payload)
             allowed_update_keys = {
@@ -149,9 +152,11 @@ class DashboardController:
                 for key, value in storage_payload.items()
                 if key in allowed_update_keys
             }
-            updated_item = await _async_lovelace_method_result(
-                update_method(item_id, update_payload)
-            )
+            updated_item = None
+            if not runtime_only:
+                updated_item = await _async_lovelace_method_result(
+                    update_method(item_id, update_payload)
+                )
             item = {
                 **_lovelace_dashboard_item_mapping(existing),
                 **(dict(updated_item) if isinstance(updated_item, Mapping) else {}),
@@ -247,6 +252,23 @@ def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:
         _normalize_lovelace_path(_lovelace_dashboard_item_value(item, key)) == target
         for key in ("url_path", "id")
     )
+
+
+def _runtime_lovelace_dashboard(
+    lovelace_data: Any,
+    payload: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    target = _normalize_lovelace_path(payload.get("url_path"))
+    dashboards = _lovelace_dashboards(lovelace_data)
+    if not target or dashboards is None:
+        return None
+    dashboard = dashboards.get(target)
+    if dashboard is None:
+        return None
+    config = _lovelace_dashboard_item_value(dashboard, "config")
+    if isinstance(config, Mapping):
+        return config
+    return {"id": target, "url_path": target}
 
 
 def _lovelace_data_from_hass(hass: Any) -> Any:
