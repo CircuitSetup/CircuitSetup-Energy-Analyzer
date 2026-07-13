@@ -159,6 +159,63 @@ def _hass_with_states(
     return SimpleNamespace(states=FakeStates(), config=SimpleNamespace())
 
 
+@pytest.mark.asyncio
+async def test_process_update_promotes_new_expected_schedule_alerts(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="pool_pump",
+        severity=Severity.WARNING,
+        message="Missed three expected windows.",
+        feature="expected_schedule_missed",
+        repeated_count=3,
+    )
+    calls: list[datetime] = []
+    notifications: list[AlertEvidence] = []
+
+    def refresh(coordinator, timestamp):
+        del coordinator
+        calls.append(timestamp)
+        return [alert]
+
+    async def notify(hass, alert_to_create, **kwargs) -> None:
+        del hass, kwargs
+        notifications.append(alert_to_create)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        refresh,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        notify,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(get=lambda entity_id: None),
+            data={},
+            config=SimpleNamespace(time_zone="UTC"),
+        ),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert calls == [now]
+    assert alert in coordinator.store_data.alerts
+    assert notifications == [alert]
+
+
 def test_process_events_into_state_tracks_latest_event_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -1744,6 +1801,174 @@ async def test_coordinator_start_replaces_existing_subscription(monkeypatch) -> 
     assert coordinator.source_entities == ("sensor.well_pump_power",)
     await coordinator.async_stop()
     assert unsubscribed == ["sensor.fridge_power", "sensor.well_pump_power"]
+
+
+@pytest.mark.asyncio
+async def test_coordinator_listens_for_configured_schedule_entities(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    subscriptions: list[list[str]] = []
+
+    def fake_track_state_change_event(hass, entity_ids, callback):
+        del hass, callback
+        subscriptions.append(entity_ids)
+        return lambda: None
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_state_change_event",
+        fake_track_state_change_event,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={
+                "circuit:pool_pump": {
+                    "enabled": True,
+                    "schedule_entity_id": "schedule.pool_pump",
+                }
+            }
+        ),
+    )
+
+    await coordinator.async_start(["sensor.pool_pump_power"])
+
+    assert subscriptions == [
+        ["sensor.pool_pump_power", "schedule.pool_pump"]
+    ]
+    assert coordinator.source_entities == (
+        "sensor.pool_pump_power",
+        "schedule.pool_pump",
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinator_periodically_evaluates_local_schedule_boundaries(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    tracked: list[tuple[timedelta, Any]] = []
+    unsubscribed: list[bool] = []
+
+    def track_interval(hass, callback, interval):
+        del hass
+        tracked.append((interval, callback))
+        return lambda: unsubscribed.append(True)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_time_interval",
+        track_interval,
+        raising=False,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={
+                "circuit:pool_pump": {
+                    "enabled": True,
+                    "windows": [
+                        {
+                            "start": "08:00",
+                            "end": "10:00",
+                            "weekdays": [0, 1, 2, 3, 4],
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    coordinator.async_refresh_expected_schedules = AsyncMock()
+
+    await coordinator.async_start(["sensor.pool_pump_power"])
+
+    assert tracked[0][0] == timedelta(minutes=5)
+    await tracked[0][1](datetime(2026, 7, 13, 10, 0, tzinfo=UTC))
+    coordinator.async_refresh_expected_schedules.assert_awaited_once()
+    await coordinator.async_stop()
+    assert unsubscribed == [True]
+
+
+@pytest.mark.asyncio
+async def test_schedule_timer_rechecks_source_freshness_before_recording_miss() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    stale = now - timedelta(minutes=30)
+
+    class FakeStates:
+        def get(self, entity_id: str) -> Any:
+            if entity_id != "sensor.pool_pump_power":
+                return None
+            return SimpleNamespace(
+                state="0",
+                attributes={"unit_of_measurement": "W"},
+                last_changed=stale,
+                last_updated=stale,
+            )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=FakeStates(),
+            data={},
+            config=SimpleNamespace(time_zone="America/New_York"),
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "pool_pump",
+                    "name": "Pool Pump",
+                    "mode": "single_phase",
+                    "appliance_profile": "pool_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.pool_pump_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={
+                "circuit:pool_pump": {
+                    "enabled": True,
+                    "windows": [
+                        {
+                            "start": "08:00",
+                            "end": "10:00",
+                            "weekdays": [0],
+                        }
+                    ],
+                    "minimum_duration_minutes": 30,
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.operating_state_by_circuit["pool_pump"] = "off"
+    coordinator.state.data_quality_checklist_by_circuit["pool_pump"] = {
+        "required_sensors_present": True,
+        "source_data_fresh": True,
+        "numeric_states_valid": True,
+    }
+    coordinator._async_save_store = AsyncMock()
+
+    await coordinator.async_refresh_expected_schedules(now)
+
+    assert coordinator.store_data.appliance_schedule_evidence == {}
+    assert coordinator.state.expected_schedule_by_appliance[
+        "circuit:pool_pump"
+    ]["suppressed_reason"] == "source_unavailable"
 
 
 @pytest.mark.asyncio

@@ -1147,7 +1147,8 @@
         "action_service_missing": "Action unavailable: {label}. The panel did not receive a service to call.",
         "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.",
         "notification_preferences_save": "Could not save appliance notification preferences: {message}",
-        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}"
+        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}",
+        "expected_schedule_save": "Could not save the expected schedule: {message}"
       },
       "messages": {
         "saved_label": "Saved label: {label}.",
@@ -1190,7 +1191,8 @@
         "no_paired_sessions": "No paired sessions matched this signature yet.",
         "updated_nilm_graph_window": "Updated NILM graph window.",
         "notification_preferences_saved": "Appliance notification preferences saved.",
-        "weekly_digest_settings_saved": "Weekly digest settings saved."
+        "weekly_digest_settings_saved": "Weekly digest settings saved.",
+        "expected_schedule_saved": "Expected schedule saved."
       },
       "actions": {
         "groups": {
@@ -1351,6 +1353,29 @@
           "panel_only": "Panel only",
           "persistent_notification": "Persistent notification",
           "mobile_notification": "Mobile notification"
+        }
+      },
+      "expected_schedule": {
+        "heading": "Expected Schedule",
+        "enabled": "Use an expected operating schedule",
+        "mode": "Schedule source",
+        "schedule_entity": "Home Assistant Schedule entity",
+        "local_windows": "Local time windows",
+        "select_schedule": "Select a Schedule entity",
+        "start": "Start",
+        "end": "End",
+        "weekdays": "Expected days",
+        "minimum_duration": "Minimum expected runtime (minutes)",
+        "add_window": "Add window",
+        "remove_window": "Remove window",
+        "days": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
         }
       },
       "attention": {

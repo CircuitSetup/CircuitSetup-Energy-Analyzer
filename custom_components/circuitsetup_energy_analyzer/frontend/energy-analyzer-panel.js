@@ -111,6 +111,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historySeries = [];
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._expectedScheduleDraft = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailChartSeries = [];
     this._applianceDetailHistoryParsed = false;
@@ -236,6 +237,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryLoading = false;
     this._nilmWorkspace = null;
     this._applianceDetail = null;
+    this._expectedScheduleDraft = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailHistoryHours = 0;
     this._applianceDetailHistoryBounds = null;
@@ -404,6 +406,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       this._applianceDetail = detail;
+      this._expectedScheduleDraft = this._scheduleDraftFromPayload(detail.expected_schedule);
       await this._loadApplianceDetailHistory(undefined, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
@@ -2212,6 +2215,36 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           gap: 8px;
           margin-top: 10px;
         }
+        .schedule-mode,
+        .schedule-weekdays {
+          border: 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin: 0;
+          padding: 0;
+        }
+        .schedule-windows {
+          display: grid;
+          gap: 10px;
+        }
+        .schedule-window {
+          align-items: end;
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(2, minmax(120px, 180px)) minmax(220px, 1fr) 44px;
+          padding-bottom: 10px;
+        }
+        .schedule-window label,
+        [data-expected-schedule] .entity-list > label {
+          display: grid;
+          gap: 4px;
+        }
+        [data-expected-schedule] input,
+        [data-expected-schedule] select {
+          min-width: 0;
+        }
         .appliance-comparison-grid {
           display: grid;
           gap: 12px;
@@ -2662,6 +2695,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           .workspace-progress {
             grid-column: 1 / -1;
           }
+          .schedule-window {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
+          }
+          .schedule-weekdays {
+            grid-column: 1 / -1;
+          }
         }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
@@ -2739,6 +2778,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     this._listen("[data-save-appliance-notifications]", () => this._saveApplianceNotificationPreferences());
+    this._listen("[data-save-expected-schedule]", () => this._saveExpectedSchedule());
+    this._listen("[data-add-schedule-window]", () => {
+      const draft = this._readExpectedScheduleForm();
+      draft.windows.push({ start: "08:00", end: "10:00", weekdays: [0, 1, 2, 3, 4] });
+      this._expectedScheduleDraft = draft;
+      this._render();
+    });
+    for (const button of this.shadowRoot.querySelectorAll("[data-remove-schedule-window]")) {
+      button.addEventListener("click", () => {
+        const draft = this._readExpectedScheduleForm();
+        draft.windows.splice(Number(button.dataset.removeScheduleWindow), 1);
+        this._expectedScheduleDraft = draft;
+        this._render();
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-schedule-mode]")) {
+      input.addEventListener("change", () => {
+        this._expectedScheduleDraft = this._readExpectedScheduleForm();
+        this._render();
+      });
+    }
     this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
       button.addEventListener("click", () => {
@@ -3239,6 +3299,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
       ${this._renderApplianceNotificationPreferences(payload.notification_preferences)}
+      ${this._renderExpectedSchedule(payload.expected_schedule)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
         ${this._renderApplianceActions(payload.actions)}
@@ -3308,6 +3369,121 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._lastActionMessage = this._panelText("messages.notification_preferences_saved");
     } catch (error) {
       this._lastActionMessage = this._panelTextFormat("errors.notification_preferences_save", { message: error.message });
+    }
+    this._render();
+  }
+
+  _scheduleDraftFromPayload(expectedSchedule) {
+    const settings = expectedSchedule && expectedSchedule.settings;
+    if (!settings) {
+      return null;
+    }
+    return {
+      enabled: Boolean(settings.enabled),
+      mode: settings.schedule_entity_id ? "entity" : "local",
+      schedule_entity_id: settings.schedule_entity_id || null,
+      windows: Array.isArray(settings.windows)
+        ? settings.windows.map((window) => ({
+          start: window.start || "08:00",
+          end: window.end || "10:00",
+          weekdays: Array.isArray(window.weekdays) ? window.weekdays.map(Number) : [],
+        }))
+        : [],
+      minimum_duration_minutes: Number(settings.minimum_duration_minutes) || 15,
+      required_repeats: Number(settings.required_repeats) || 3,
+    };
+  }
+
+  _renderExpectedSchedule(expectedSchedule) {
+    if (!expectedSchedule) {
+      return "";
+    }
+    const draft = this._expectedScheduleDraft
+      || this._scheduleDraftFromPayload(expectedSchedule)
+      || { enabled: false, schedule_entity_id: null, windows: [], minimum_duration_minutes: 15, required_repeats: 3 };
+    const mode = draft.mode || (draft.schedule_entity_id ? "entity" : "local");
+    const entities = Array.isArray(expectedSchedule.schedule_entities)
+      ? expectedSchedule.schedule_entities
+      : [];
+    const windows = draft.windows.length
+      ? draft.windows
+      : [{ start: "08:00", end: "10:00", weekdays: [0, 1, 2, 3, 4] }];
+    const dayLabels = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const context = expectedSchedule.context;
+    return `<section class="panel" data-expected-schedule>
+      <h2>${this._escape(this._panelText("expected_schedule.heading"))}</h2>
+      ${context ? `<p><strong>${this._escape(this._friendlyFeature(context.status))}</strong> ${this._escape(context.message || "")}</p>` : ""}
+      <div class="entity-list">
+        <label><input type="checkbox" data-schedule-enabled ${draft.enabled ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.enabled"))}</label>
+        <fieldset class="schedule-mode" aria-label="${this._escape(this._panelText("expected_schedule.mode"))}">
+          <label><input type="radio" name="expected-schedule-mode" value="entity" data-schedule-mode ${mode === "entity" ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.schedule_entity"))}</label>
+          <label><input type="radio" name="expected-schedule-mode" value="local" data-schedule-mode ${mode === "local" ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.local_windows"))}</label>
+        </fieldset>
+        ${mode === "entity" ? `<label>${this._escape(this._panelText("expected_schedule.schedule_entity"))}
+          <select data-schedule-entity>
+            <option value="">${this._escape(this._panelText("expected_schedule.select_schedule"))}</option>
+            ${entities.map((item) => `<option value="${this._escape(String(item.entity_id || ""))}" ${draft.schedule_entity_id === item.entity_id ? "selected" : ""}>${this._escape(item.name || this._friendlyEntityName(item))}</option>`).join("")}
+          </select>
+        </label>` : `<div class="schedule-windows">
+          ${windows.map((window, index) => `<div class="schedule-window" data-schedule-window>
+            <label>${this._escape(this._panelText("expected_schedule.start"))}<input type="time" value="${this._escape(window.start)}" data-schedule-window-start></label>
+            <label>${this._escape(this._panelText("expected_schedule.end"))}<input type="time" value="${this._escape(window.end)}" data-schedule-window-end></label>
+            <div class="schedule-weekdays" aria-label="${this._escape(this._panelText("expected_schedule.weekdays"))}">
+              ${dayLabels.map((day, dayIndex) => `<label><input type="checkbox" value="${dayIndex}" data-schedule-weekday ${window.weekdays.includes(dayIndex) ? "checked" : ""}> ${this._escape(this._panelText(`expected_schedule.days.${day}`))}</label>`).join("")}
+            </div>
+            <button type="button" class="secondary icon-button" data-remove-schedule-window="${index}" title="${this._escape(this._panelText("expected_schedule.remove_window"))}" aria-label="${this._escape(this._panelText("expected_schedule.remove_window"))}"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>
+          </div>`).join("")}
+          <button type="button" class="secondary" data-add-schedule-window><ha-icon icon="mdi:plus"></ha-icon>${this._escape(this._panelText("expected_schedule.add_window"))}</button>
+        </div>`}
+        <label>${this._escape(this._panelText("expected_schedule.minimum_duration"))}<input type="number" min="1" max="1440" step="1" value="${this._escape(draft.minimum_duration_minutes)}" data-schedule-minimum-duration></label>
+      </div>
+      <div class="actions"><button type="button" data-save-expected-schedule>${this._escape(this._panelText("actions.labels.save"))}</button></div>
+    </section>`;
+  }
+
+  _readExpectedScheduleForm() {
+    const panel = this.shadowRoot.querySelector("[data-expected-schedule]");
+    const current = this._expectedScheduleDraft || { required_repeats: 3 };
+    if (!panel) {
+      return current;
+    }
+    const mode = panel.querySelector("[data-schedule-mode]:checked")?.value || "local";
+    const windows = Array.from(panel.querySelectorAll("[data-schedule-window]")).map((row) => ({
+      start: row.querySelector("[data-schedule-window-start]").value,
+      end: row.querySelector("[data-schedule-window-end]").value,
+      weekdays: Array.from(row.querySelectorAll("[data-schedule-weekday]:checked")).map((input) => Number(input.value)),
+    }));
+    return {
+      enabled: panel.querySelector("[data-schedule-enabled]").checked,
+      mode,
+      schedule_entity_id: mode === "entity" ? panel.querySelector("[data-schedule-entity]")?.value || null : null,
+      windows,
+      minimum_duration_minutes: Number(panel.querySelector("[data-schedule-minimum-duration]").value) || 15,
+      required_repeats: Number(current.required_repeats) || 3,
+    };
+  }
+
+  async _saveExpectedSchedule() {
+    const body = this._readExpectedScheduleForm();
+    const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
+    const params = new URLSearchParams();
+    for (const key of ["circuit_id", "assignment_id"]) {
+      if (route.searchParams.get(key)) {
+        params.set(key, route.searchParams.get(key));
+      }
+    }
+    const query = params.toString();
+    const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
+    const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
+    try {
+      const result = await this._postJson(apiPath, fetchPath, { expected_schedule: body });
+      if (result && result.expected_schedule_settings) {
+        this._applianceDetail.expected_schedule.settings = result.expected_schedule_settings;
+        this._expectedScheduleDraft = this._scheduleDraftFromPayload(this._applianceDetail.expected_schedule);
+      }
+      this._lastActionMessage = this._panelText("messages.expected_schedule_saved");
+    } catch (error) {
+      this._lastActionMessage = this._panelTextFormat("errors.expected_schedule_save", { message: error.message });
     }
     this._render();
   }

@@ -26,6 +26,7 @@ from .const import (
 )
 from .dashboard import normalize_dashboard_layout
 from .events import CircuitEventDetector
+from .expected_schedule import refresh_expected_schedule_contexts
 from .managers.alert_policies import AlertPolicyManager
 from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
@@ -123,10 +124,14 @@ RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
 RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
 RECOMMENDATION_DECISIONS_MAX_AGE = timedelta(days=365)
 try:
-    from homeassistant.helpers.event import async_track_state_change_event
+    from homeassistant.helpers.event import (
+        async_track_state_change_event,
+        async_track_time_interval,
+    )
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 except ModuleNotFoundError:
     async_track_state_change_event = None
+    async_track_time_interval = None
 
     class DataUpdateCoordinator:
         """Small fallback so helper tests can import without Home Assistant."""
@@ -201,6 +206,9 @@ class AnalyzerState:
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
     operating_state_by_circuit: dict[str, str] = field(default_factory=dict)
     operating_state_snapshot_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    expected_schedule_by_appliance: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
     nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
@@ -692,6 +700,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.last_exported_history_csv: str = ""
         self.mapping_checks_run = 0
         self._last_settings_recommendation_source_refresh_at: datetime | None = None
+        self._unsub_expected_schedule_interval: Any | None = None
         self.state = AnalyzerState()
         self.started = False
         self.source_updates = SourceUpdateManager(
@@ -706,11 +715,92 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
-        await self.source_updates.async_start(source_entities)
+        entities = [
+            str(entity_id)
+            for entity_id in source_entities
+            if str(entity_id) and not str(entity_id).startswith("schedule.")
+        ]
+        schedule_settings = getattr(
+            self.store_data,
+            "appliance_schedule_settings",
+            {},
+        )
+        for raw in (
+            schedule_settings.values()
+            if isinstance(schedule_settings, Mapping)
+            else ()
+        ):
+            if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
+                continue
+            entity_id = str(raw.get("schedule_entity_id") or "").strip()
+            if entity_id.startswith("schedule."):
+                entities.append(entity_id)
+        await self.source_updates.async_start(tuple(dict.fromkeys(entities)))
+        self._refresh_expected_schedule_interval_listener()
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
+        if self._unsub_expected_schedule_interval is not None:
+            self._unsub_expected_schedule_interval()
+            self._unsub_expected_schedule_interval = None
         await self.source_updates.async_stop()
+
+    def _refresh_expected_schedule_interval_listener(self: Self) -> None:
+        """Refresh periodic evaluation for local expected-schedule windows."""
+        if self._unsub_expected_schedule_interval is not None:
+            self._unsub_expected_schedule_interval()
+            self._unsub_expected_schedule_interval = None
+        if async_track_time_interval is None or not self._has_local_schedule_windows():
+            return
+        self._unsub_expected_schedule_interval = async_track_time_interval(
+            self.hass,
+            self.async_refresh_expected_schedules,
+            timedelta(minutes=5),
+        )
+
+    def _has_local_schedule_windows(self: Self) -> bool:
+        """Return whether any enabled schedule uses locally configured windows."""
+        schedule_settings = getattr(
+            self.store_data,
+            "appliance_schedule_settings",
+            {},
+        )
+        for raw in (
+            schedule_settings.values()
+            if isinstance(schedule_settings, Mapping)
+            else ()
+        ):
+            if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
+                continue
+            if str(raw.get("schedule_entity_id") or "").strip():
+                continue
+            windows = raw.get("windows")
+            if isinstance(windows, list) and bool(windows):
+                return True
+        return False
+
+    async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
+        """Evaluate local schedule boundaries without a source state change."""
+        alerts = await self._async_apply_expected_schedule_contexts(now)
+        if alerts:
+            process_events_into_state(self.state, (), alerts)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now, force=False)
+
+    async def _async_apply_expected_schedule_contexts(
+        self: Self,
+        now: datetime,
+    ) -> list[AlertEvidence]:
+        """Evaluate schedule context and persist any new evidence."""
+        active_alerts: list[AlertEvidence] = []
+        for schedule_alert in refresh_expected_schedule_contexts(self, now):
+            schedule_alert = self.evidence_actions.alert_with_feedback(schedule_alert)
+            if schedule_alert.feedback_status != "expected":
+                active_alerts.append(schedule_alert)
+            self.store_data.alerts.append(schedule_alert)
+            self._mark_store_dirty()
+            await self._notify_alert(schedule_alert)
+        return active_alerts
 
     @property
     def _source_update_task(self: Self) -> Any | None:
@@ -905,6 +995,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
+        alerts.extend(await self._async_apply_expected_schedule_contexts(now))
         if alerts:
             process_events_into_state(self.state, events, alerts)
         recommendation_refresh_due = self._settings_recommendation_refresh_due(

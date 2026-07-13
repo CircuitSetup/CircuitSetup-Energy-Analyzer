@@ -175,6 +175,11 @@ questions instead of raw diagnostic entity lists:
 - **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
   each appliance's own normal separately from top energy users and can stay in
   the panel or use a persistent/mobile notification target.
+- **Expected Schedule** is optional per appliance. Use a Home
+  Assistant Schedule entity or local weekday/time windows for loads such as a
+  pool pump or EV charger. One missed window stays in learning; outside-window
+  or missed-window findings require repeated evidence, fresh source data, and
+  no active maintenance before an alert is promoted.
 - **Alert Evidence** starts with a visual comparison, then keeps graph-first
   evidence beside the plain-language explanation and moves technical details
   into a disclosure for deeper review.

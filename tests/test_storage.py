@@ -1342,7 +1342,7 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 7
+    assert STORAGE_VERSION == 8
     assert restored.appliance_notification_preferences == (
         data.appliance_notification_preferences
     )
@@ -1356,3 +1356,33 @@ def test_legacy_store_uses_safe_notification_defaults() -> None:
     assert restored.appliance_notification_preferences == {}
     assert restored.notification_delivery_state == {}
     assert restored.weekly_digest_settings == {}
+
+
+def test_expected_schedule_settings_and_evidence_round_trip() -> None:
+    data = FeatureStoreData(
+        appliance_schedule_settings={
+            "circuit:pool_pump": {
+                "enabled": True,
+                "schedule_entity_id": "schedule.pool_pump",
+                "minimum_duration_minutes": 30,
+            }
+        },
+        appliance_schedule_evidence={
+            "circuit:pool_pump": {
+                "missed_window_ids": ["window-1", "window-2"],
+                "evaluated_window_ids": ["window-1", "window-2"],
+            }
+        },
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.appliance_schedule_settings == data.appliance_schedule_settings
+    assert restored.appliance_schedule_evidence == data.appliance_schedule_evidence
+
+
+def test_v7_store_uses_safe_expected_schedule_defaults() -> None:
+    restored = feature_store_data_from_dict({"schema_version": 7})
+
+    assert restored.appliance_schedule_settings == {}
+    assert restored.appliance_schedule_evidence == {}

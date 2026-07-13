@@ -23,6 +23,7 @@ from .entities.setup_health import (
     setup_health_panel_text,
     setup_health_value,
 )
+from .expected_schedule import schedule_settings_from_dict
 from .localized_text import translation_section, translation_text
 from .models import (
     AlertEvidence,
@@ -128,7 +129,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-6"
+PANEL_MODULE_VERSION = "20260713-7"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -224,15 +225,23 @@ class ApplianceDetailView(HomeAssistantView):
         return web.json_response(payload)
 
     async def post(self, request: Any) -> Any:
-        """Persist notification preferences for the selected appliance."""
+        """Persist appliance notification or expected-schedule settings."""
         hass = request.app[KEY_HASS]
         payload = await request.json()
-        result = await async_set_appliance_notification_preferences(
-            _loaded_coordinators(hass),
-            circuit_id=request.query.get("circuit_id"),
-            assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
-            values=payload,
-        )
+        if isinstance(payload, Mapping) and "expected_schedule" in payload:
+            result = await async_set_appliance_expected_schedule(
+                _loaded_coordinators(hass),
+                circuit_id=request.query.get("circuit_id"),
+                assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
+                values=payload.get("expected_schedule"),
+            )
+        else:
+            result = await async_set_appliance_notification_preferences(
+                _loaded_coordinators(hass),
+                circuit_id=request.query.get("circuit_id"),
+                assignment_id=request.query.get(ATTR_ASSIGNMENT_ID),
+                values=payload,
+            )
         return web.json_response(result)
 
 
@@ -719,6 +728,53 @@ async def async_set_weekly_digest_settings(
     return {"status": "saved", "weekly_digest_settings": settings}
 
 
+async def async_set_appliance_expected_schedule(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None,
+    assignment_id: str | None,
+    values: Any,
+) -> dict[str, Any]:
+    """Save bounded expected-schedule settings for a backend-resolved appliance."""
+    for coordinator in coordinators:
+        detail = (
+            appliance_detail_for_assignment(coordinator, str(assignment_id))
+            if assignment_id
+            else appliance_detail_for_circuit(coordinator, str(circuit_id))
+        )
+        if detail is None:
+            continue
+        appliance_key = detail.appliance_key or f"circuit:{detail.circuit_id}"
+        settings = schedule_settings_from_dict(
+            values if isinstance(values, Mapping) else {},
+            appliance_key=appliance_key,
+        )
+        stored = settings.as_dict()
+        existing = coordinator.store_data.appliance_schedule_settings.get(
+            appliance_key
+        )
+        coordinator.store_data.appliance_schedule_settings[appliance_key] = stored
+        if existing != stored:
+            coordinator.store_data.appliance_schedule_evidence.pop(
+                appliance_key,
+                None,
+            )
+        persistence = getattr(coordinator, "store_persistence", None)
+        mark_dirty = getattr(persistence, "mark_dirty", None)
+        if callable(mark_dirty):
+            mark_dirty()
+        save = getattr(persistence, "async_save_if_dirty", None)
+        if callable(save):
+            clock = getattr(coordinator, "current_time", None)
+            await save(clock() if callable(clock) else datetime.now(UTC))
+        if getattr(coordinator, "started", False):
+            restart = getattr(coordinator, "async_start", None)
+            if callable(restart):
+                await restart(getattr(coordinator, "source_entities", ()))
+        return {"status": "saved", "expected_schedule_settings": stored}
+    return {"status": "not_found", "expected_schedule_settings": None}
+
+
 def _setup_health_coordinator(
     coordinators: Iterable[Any],
     entry_id: str | None,
@@ -750,6 +806,26 @@ def _appliance_detail_payload(
         if isinstance(preferences_by_appliance, Mapping)
         else {}
     )
+    schedule_settings_by_appliance = getattr(
+        coordinator.store_data,
+        "appliance_schedule_settings",
+        {},
+    )
+    raw_schedule_settings = (
+        schedule_settings_by_appliance.get(appliance_key, {})
+        if isinstance(schedule_settings_by_appliance, Mapping)
+        else {}
+    )
+    schedule_contexts = getattr(
+        coordinator.state,
+        "expected_schedule_by_appliance",
+        {},
+    )
+    schedule_context = (
+        schedule_contexts.get(appliance_key)
+        if isinstance(schedule_contexts, Mapping)
+        else None
+    )
     return {
         "status": "ok",
         "requested_circuit_id": requested_circuit_id,
@@ -760,8 +836,43 @@ def _appliance_detail_payload(
             raw_preferences,
             appliance_key=appliance_key,
         ).as_dict(),
+        "expected_schedule": {
+            "settings": schedule_settings_from_dict(
+                raw_schedule_settings,
+                appliance_key=appliance_key,
+            ).as_dict(),
+            "context": (
+                dict(schedule_context)
+                if isinstance(schedule_context, Mapping)
+                else None
+            ),
+            "schedule_entities": _schedule_entity_options(coordinator),
+        },
         "actions": _appliance_detail_actions(coordinator, detail),
     }
+
+
+def _schedule_entity_options(coordinator: Any) -> list[dict[str, str]]:
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    async_all = getattr(states, "async_all", None)
+    if not callable(async_all):
+        return []
+    try:
+        entity_states = async_all("schedule")
+    except TypeError:
+        entity_states = async_all()
+    options = []
+    for state in entity_states:
+        entity_id = str(getattr(state, "entity_id", "") or "")
+        if not entity_id.startswith("schedule."):
+            continue
+        options.append(
+            {
+                "entity_id": entity_id,
+                "name": str(getattr(state, "name", "") or entity_id),
+            }
+        )
+    return sorted(options, key=lambda item: item["name"].casefold())[:100]
 
 
 def _appliance_detail_actions(

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -691,6 +694,85 @@ def test_appliance_detail_payload_includes_notification_preferences() -> None:
     assert preferences["finished_running"] is True
     assert preferences["electrical_issue"] is True
     assert preferences["delivery_mode"] == "daily_summary"
+
+
+def test_appliance_detail_payload_includes_expected_schedule_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:fridge": {
+            "enabled": True,
+            "schedule_entity_id": "schedule.fridge",
+            "minimum_duration_minutes": 20,
+        }
+    }
+    coordinator.state.expected_schedule_by_appliance["circuit:fridge"] = {
+        "status": "running_in_expected_window",
+        "message": "Running during the expected schedule.",
+    }
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            async_all=lambda: [
+                SimpleNamespace(
+                    entity_id="schedule.fridge",
+                    name="Fridge Schedule",
+                ),
+                SimpleNamespace(entity_id="sensor.power", name="Power"),
+            ]
+        )
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    schedule = payload["expected_schedule"]
+    assert schedule["settings"]["schedule_entity_id"] == "schedule.fridge"
+    assert schedule["context"]["status"] == "running_in_expected_window"
+    assert schedule["schedule_entities"] == [
+        {"entity_id": "schedule.fridge", "name": "Fridge Schedule"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_expected_schedule_save_uses_backend_appliance_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        async_set_appliance_expected_schedule,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 7, 13, 12, tzinfo=UTC)
+    coordinator.store_persistence = SimpleNamespace(
+        mark_dirty=Mock(),
+        async_save_if_dirty=AsyncMock(),
+    )
+
+    result = await async_set_appliance_expected_schedule(
+        [coordinator],
+        circuit_id="fridge",
+        assignment_id=None,
+        values={
+            "enabled": True,
+            "windows": [
+                {
+                    "start": "08:00",
+                    "end": "10:00",
+                    "weekdays": [0, 1, 2, 3, 4],
+                }
+            ],
+            "minimum_duration_minutes": 30,
+        },
+    )
+
+    assert result["status"] == "saved"
+    assert result["expected_schedule_settings"]["appliance_key"] == (
+        "circuit:fridge"
+    )
+    assert coordinator.store_data.appliance_schedule_settings[
+        "circuit:fridge"
+    ]["windows"][0]["start"] == "08:00"
+    assert coordinator.store_data.appliance_schedule_evidence == {}
 
 
 def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
