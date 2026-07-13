@@ -1106,6 +1106,7 @@
       "headers": {
         "alert_evidence": "Alert Evidence",
         "appliance_detail": "Appliance Detail",
+        "needs_attention": "Needs Attention",
         "appliance_detail_message": "Appliance behavior summary.",
         "suggested_settings": "Suggested Settings",
         "suggested_settings_message": "Review pending analyzer setting recommendations.",
@@ -1302,6 +1303,13 @@
         "history_7_days": "Past 7 days",
         "history_30_days": "Past 30 days",
         "history_window": "Showing {start} to {end}."
+      },
+      "attention": {
+        "none": "No appliances need attention right now.",
+        "fix_setup_or_data": "Fix Setup or Data",
+        "review_appliance_behavior": "Review Appliance Behavior",
+        "validate_nilm": "Validate NILM",
+        "open_detail": "Open Appliance Detail"
       },
       "recommendations": {
         "suggested_settings": "Suggested Settings",

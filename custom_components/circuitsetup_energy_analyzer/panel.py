@@ -15,6 +15,7 @@ from .appliance_detail import (
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
 )
+from .attention import attention_items_for_coordinators
 from .const import DOMAIN
 from .entities.setup_health import (
     setup_health_attributes,
@@ -122,7 +123,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-2"
+PANEL_MODULE_VERSION = "20260713-3"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -566,6 +567,7 @@ def setup_health_payload(
             "open_path": None,
             "checklist_ready_count": 0,
             "checklist_total_count": 0,
+            "needs_attention": [],
             "text": text,
         }
 
@@ -573,6 +575,9 @@ def setup_health_payload(
     checklist = list(attributes.get("checklist") or [])
     issues = list(attributes.get("issues") or [])
     state = setup_health_value(coordinator)
+    needs_attention = [
+        item.as_dict() for item in attention_items_for_coordinators((coordinator,))
+    ]
     return {
         "status": "ok",
         "requested_entry_id": requested_entry_id,
@@ -590,6 +595,7 @@ def setup_health_payload(
         "warning_count": attributes.get("warning_count"),
         "checklist_ready_count": attributes.get("checklist_ready_count"),
         "checklist_total_count": attributes.get("checklist_total_count"),
+        "needs_attention": needs_attention,
         "text": text,
     }
 

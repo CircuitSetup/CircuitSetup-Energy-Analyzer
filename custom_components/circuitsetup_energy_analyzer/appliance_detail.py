@@ -393,6 +393,7 @@ def _nilm_detail(
         and state.confidence >= NILM_FINISHED_CONFIDENCE_THRESHOLD
         and state.model_status not in NILM_REVIEW_MODEL_STATES
     )
+    comparisons = _nilm_metric_comparisons(coordinator, state)
     return ApplianceDetail(
         circuit_id=state.mains_circuit_id,
         display_name=state.display_name,
@@ -409,11 +410,12 @@ def _nilm_detail(
         runtime_today_seconds=state.runtime_today_seconds,
         run_count_today=state.run_count_today,
         cost_today=None,
-        today_vs_normal=_nilm_metric_comparisons(coordinator, state),
+        today_vs_normal=comparisons,
         expectations=_nilm_expectations(
             state,
             review_needed=review_needed,
             evidence_path=evidence_path,
+            comparisons=comparisons,
         ),
         recent_timeline=_nilm_session_timeline(state),
         active_alerts=_active_alert_summaries(
@@ -937,7 +939,170 @@ def appliance_expectations_for_circuit(
     source_type: SourceType,
     evidence_path: str,
 ) -> tuple[ApplianceExpectation, ...]:
-    """Return one bounded behavior expectation for a direct appliance."""
+    """Return up to three ranked, semantically distinct findings."""
+    primary = _primary_appliance_expectations_for_circuit(
+        coordinator,
+        config,
+        state,
+        comparisons=comparisons,
+        source_type=source_type,
+        evidence_path=evidence_path,
+    )
+    maintenance = _mapping_for_circuit(
+        state,
+        "maintenance_by_circuit",
+        config.circuit_id,
+    )
+    candidates = list(primary)
+    if maintenance.get("active") is True:
+        checklist = _mapping_for_circuit(
+            state,
+            "data_quality_checklist_by_circuit",
+            config.circuit_id,
+        )
+        if checklist and _data_quality_problem(checklist):
+            candidates.append(
+                _expectation(
+                    config,
+                    title="Source data needs review",
+                    status="not_enough_data",
+                    source_type=source_type,
+                    observed="Analyzer source data is missing, stale, or invalid.",
+                    expected="Reliable checks need fresh numeric source data.",
+                    why_it_matters="Maintenance still requires trustworthy inputs.",
+                    what_to_check_first=("Review source sensor data.",),
+                    evidence_path=evidence_path,
+                )
+            )
+        return _ranked_distinct_expectations(candidates)
+
+    runtime_is_context_explained = bool(
+        primary
+        and primary[0].status == "expected"
+    )
+    electrical_attrs = electrical_health_attributes(state, config.circuit_id)
+    if _mapping_status(
+        state,
+        "leg_imbalance_status_by_circuit",
+        config.circuit_id,
+    ) == "imbalanced":
+        candidates.append(
+            _expectation(
+                config,
+                title="Electrical balance needs review",
+                status="possible_issue",
+                source_type=source_type,
+                observed="A dual-phase load has meaningful leg-to-leg imbalance.",
+                expected="Both legs should stay within the learned balance range.",
+                why_it_matters=(
+                    "Imbalance can indicate CT pairing, wiring, or load issues."
+                ),
+                what_to_check_first=_first_checks(
+                    electrical_attrs.get("what_to_check_first")
+                ),
+                evidence_path=evidence_path,
+            )
+        )
+    for metric_id, title, observed, first_check in (
+        (
+            "daily_energy_kwh",
+            "Energy is above normal",
+            f"{config.name} energy is above normal today.",
+            "Review recent use and source data.",
+        ),
+        (
+            "runtime_today_seconds",
+            "Runtime is above normal",
+            f"{config.name} runtime is above the learned range.",
+            "Check whether the appliance is still running or ran longer than expected.",
+        ),
+    ):
+        if metric_id == "runtime_today_seconds" and runtime_is_context_explained:
+            continue
+        comparison = _comparison_by_id(comparisons, metric_id)
+        if not _is_higher(comparison):
+            continue
+        candidates.append(
+            _expectation(
+                config,
+                title=title,
+                status="watch",
+                source_type=source_type,
+                observed=observed,
+                expected=_normal_range_text(comparison),
+                why_it_matters=(
+                    "Repeated changes from this appliance's own normal may need review."
+                ),
+                what_to_check_first=(first_check,),
+                evidence_path=evidence_path,
+            )
+        )
+    return _ranked_distinct_expectations(candidates)
+
+
+def _ranked_distinct_expectations(
+    candidates: list[ApplianceExpectation],
+) -> tuple[ApplianceExpectation, ...]:
+    ranked = sorted(
+        enumerate(candidates),
+        key=lambda item: (_expectation_rank(item[1]), item[0]),
+    )
+    selected: list[ApplianceExpectation] = []
+    groups: set[str] = set()
+    for _, candidate in ranked:
+        group = _expectation_semantic_group(candidate)
+        if group in groups:
+            continue
+        groups.add(group)
+        selected.append(candidate)
+        if len(selected) == 3:
+            break
+    return tuple(selected)
+
+
+def _expectation_rank(expectation: ApplianceExpectation) -> int:
+    group = _expectation_semantic_group(expectation)
+    if group == "data_quality":
+        return 0
+    if group in {"electrical", "capacity"}:
+        return 1
+    if expectation.status == "possible_issue":
+        return 2
+    if group == "nilm":
+        return 3
+    if expectation.status == "watch":
+        return 4
+    if expectation.status == "expected":
+        return 6
+    return 7
+
+
+def _expectation_semantic_group(expectation: ApplianceExpectation) -> str:
+    text = f"{expectation.expectation_id} {expectation.title}".lower()
+    for group, tokens in (
+        ("data_quality", ("source data", "data_quality", "missing", "stale")),
+        ("electrical", ("electrical", "imbalance", "leg balance")),
+        ("capacity", ("capacity", "demand limit")),
+        ("nilm", ("nilm", "validation")),
+        ("runtime", ("runtime", "cycle")),
+        ("energy", ("energy", "usage")),
+        ("context", ("weather", "rain", "schedule", "maintenance")),
+    ):
+        if any(token in text for token in tokens):
+            return group
+    return expectation.expectation_id
+
+
+def _primary_appliance_expectations_for_circuit(
+    coordinator: Any,
+    config: CircuitConfig,
+    state: Any,
+    *,
+    comparisons: tuple[MetricComparison, ...],
+    source_type: SourceType,
+    evidence_path: str,
+) -> tuple[ApplianceExpectation, ...]:
+    """Return the established primary behavior expectation."""
     circuit_id = config.circuit_id
     expectation_source = source_type
     maintenance = _mapping_for_circuit(state, "maintenance_by_circuit", circuit_id)
@@ -949,9 +1114,9 @@ def appliance_expectations_for_circuit(
                 status="expected",
                 source_type=expectation_source,
                 observed="Maintenance is active for this appliance.",
-                expected="Issue language is suppressed while work is expected.",
+                expected="Alert language is suppressed while work is expected.",
                 why_it_matters=(
-                    "This prevents maintenance work from looking like a new fault."
+                    "This prevents maintenance work from looking like a new concern."
                 ),
                 what_to_check_first=(
                     "Finish maintenance and resume alerts when work is complete.",
@@ -1194,6 +1359,7 @@ def _nilm_expectations(
     *,
     review_needed: bool,
     evidence_path: str,
+    comparisons: tuple[MetricComparison, ...] = (),
 ) -> tuple[ApplianceExpectation, ...]:
     if review_needed:
         status: ExpectationStatus = "watch"
@@ -1208,7 +1374,7 @@ def _nilm_expectations(
         observed = "The NILM assignment is validated with sufficient confidence."
         title = "NILM estimate is validated"
         first_check = "No validation action is needed right now."
-    return (
+    candidates = [
         ApplianceExpectation(
             expectation_id=f"{state.assignment_id}:nilm_validation",
             circuit_id=state.mains_circuit_id,
@@ -1217,14 +1383,34 @@ def _nilm_expectations(
             source_type="nilm_estimate",
             confidence=state.confidence,
             observed=observed,
-            expected="Estimated appliances should be validated before fault alerts.",
+            expected="Estimated appliances should be validated before alerts.",
             why_it_matters=(
                 "NILM is an estimate from mains power, not a direct measurement."
             ),
             what_to_check_first=(first_check,),
             evidence_path=evidence_path,
-        ),
-    )
+        )
+    ]
+    energy = _comparison_by_id(comparisons, "daily_energy_kwh")
+    if _is_higher(energy):
+        candidates.append(
+            ApplianceExpectation(
+                expectation_id=f"{state.assignment_id}:energy",
+                circuit_id=state.mains_circuit_id,
+                title="Estimated energy is above normal",
+                status="watch",
+                source_type="nilm_estimate",
+                confidence=state.confidence,
+                observed="Estimated energy is above the validated learned range.",
+                expected=_normal_range_text(energy),
+                why_it_matters="This estimate should be reviewed with its sessions.",
+                what_to_check_first=(
+                    "Confirm the assignment and recent NILM intervals.",
+                ),
+                evidence_path=evidence_path,
+            )
+        )
+    return _ranked_distinct_expectations(candidates)
 
 
 def _active_alert_summaries(

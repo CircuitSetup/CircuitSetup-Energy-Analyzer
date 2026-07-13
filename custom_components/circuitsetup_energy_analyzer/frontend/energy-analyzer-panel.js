@@ -2899,7 +2899,32 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         <h2>${this._escape(this._setupHealthText("checklist_heading"))}</h2>
         ${this._renderSetupHealthChecklist(payload.checklist, payload.issues)}
       </section>
+      <section class="panel" data-needs-attention>
+        <h2>${this._escape(this._panelText("headers.needs_attention"))}</h2>
+        ${this._renderNeedsAttention(payload.needs_attention)}
+      </section>
     `;
+  }
+
+  _renderNeedsAttention(items) {
+    const safeItems = Array.isArray(items) ? items : [];
+    if (!safeItems.length) {
+      return `<p class="muted">${this._escape(this._panelText("attention.none"))}</p>`;
+    }
+    const labels = {
+      fix_setup_or_data: this._panelText("attention.fix_setup_or_data"),
+      review_appliance_behavior: this._panelText("attention.review_appliance_behavior"),
+      validate_nilm: this._panelText("attention.validate_nilm"),
+    };
+    return `<div class="entity-list">${safeItems.map((item) => `
+      <div class="metric" data-attention-item="${this._escape(item.item_id || "")}">
+        <span>${this._escape(labels[item.category] || this._friendlyFeature(item.category))}</span>
+        <strong>${this._escape(item.display_name || item.appliance_key)}</strong>
+        <p>${this._escape(item.reason || "")}</p>
+        <p class="muted">${this._escape(item.next_step || "")}</p>
+        ${item.action_path ? `<a class="button secondary" href="${this._escape(item.action_path)}">${this._escape(this._panelText("attention.open_detail"))}</a>` : ""}
+      </div>
+    `).join("")}</div>`;
   }
 
   _renderSetupHealthChecklist(items, issues) {

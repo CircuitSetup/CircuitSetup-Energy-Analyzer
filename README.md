@@ -152,7 +152,11 @@ questions instead of raw diagnostic entity lists:
   confidence and false-positive rate.
 - **Setup Health checklist** adds onboarding checklist attributes for source
   data, assignments, CT direction, cumulative kWh, appliance profiles,
-  dashboard creation, notifications, NILM, and learning progress.
+  dashboard creation, notifications, NILM, and learning progress. Its compact
+  **Needs Attention** view shows only actionable setup/data problems, direct
+  appliance findings, and NILM validation work. Findings are ranked, limited
+  to three per appliance, and semantically deduplicated so repeated energy
+  wording does not crowd out electrical or data-quality issues.
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
   and reset/apply/dismiss actions.
