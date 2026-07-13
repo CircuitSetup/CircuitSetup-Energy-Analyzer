@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from .local_time import TimeZone, local_date
+from .local_time import TimeZone, as_ha_local, local_date
 
 DEFAULT_USAGE_WINDOW_DAYS = 7
 DEFAULT_DAILY_USAGE_SPIKE_RATIO = 0.25
@@ -70,6 +70,13 @@ def record_energy_usage(
     threshold_ratio = max(float(settings.daily_spike_ratio), 0.0)
     today = _calendar_date(timestamp, time_zone).isoformat()
     days = _coerce_days(history.get("days"))
+    _update_day_coverage(
+        history,
+        days,
+        timestamp=timestamp,
+        today=today,
+        time_zone=time_zone,
+    )
     prior_days = _prior_days(days, today, window_days)
 
     last_energy = _float_or_none(history.get("last_energy_kwh"))
@@ -164,8 +171,8 @@ def record_energy_usage(
     )
 
 
-def _coerce_days(raw_days: Any) -> list[dict[str, float | str]]:
-    days: list[dict[str, float | str]] = []
+def _coerce_days(raw_days: Any) -> list[dict[str, float | str | bool]]:
+    days: list[dict[str, float | str | bool]] = []
     if not isinstance(raw_days, list):
         return days
     for raw_day in raw_days:
@@ -175,12 +182,18 @@ def _coerce_days(raw_days: Any) -> list[dict[str, float | str]]:
         usage = _float_or_none(raw_day.get("usage_kwh"))
         if not isinstance(date, str) or usage is None:
             continue
-        days.append({"date": date, "usage_kwh": _round_kwh(max(usage, 0.0))})
+        day: dict[str, float | str | bool] = {
+            "date": date,
+            "usage_kwh": _round_kwh(max(usage, 0.0)),
+        }
+        if isinstance(raw_day.get("complete"), bool):
+            day["complete"] = raw_day["complete"]
+        days.append(day)
     return days
 
 
 def _prior_days(
-    days: list[dict[str, float | str]],
+    days: list[dict[str, float | str | bool]],
     today: str,
     window_days: int,
 ) -> list[dict[str, float]]:
@@ -194,7 +207,7 @@ def _prior_days(
 
 
 def _add_daily_usage(
-    days: list[dict[str, float | str]],
+    days: list[dict[str, float | str | bool]],
     date: str,
     delta_kwh: float,
 ) -> None:
@@ -205,17 +218,20 @@ def _add_daily_usage(
     days.append({"date": date, "usage_kwh": _round_kwh(delta_kwh)})
 
 
-def _usage_for_date(days: list[dict[str, float | str]], date: str) -> float:
+def _usage_for_date(
+    days: list[dict[str, float | str | bool]],
+    date: str,
+) -> float:
     return sum(float(day["usage_kwh"]) for day in days if day["date"] == date)
 
 
 def _prune_days(
-    days: list[dict[str, float | str]],
+    days: list[dict[str, float | str | bool]],
     timestamp: datetime,
     retention_days: int,
     *,
     time_zone: TimeZone = None,
-) -> list[dict[str, float | str]]:
+) -> list[dict[str, float | str | bool]]:
     cutoff = (
         _calendar_date(timestamp, time_zone) - timedelta(days=max(retention_days, 1))
     ).isoformat()
@@ -229,6 +245,54 @@ def _calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
     if time_zone is None or timestamp.tzinfo is None:
         return timestamp.date()
     return local_date(timestamp, time_zone)
+
+
+def _update_day_coverage(
+    history: dict[str, Any],
+    days: list[dict[str, float | str | bool]],
+    *,
+    timestamp: datetime,
+    today: str,
+    time_zone: TimeZone,
+) -> None:
+    """Mark a day complete only when samples bracket both local midnights."""
+    calendar_timestamp = _calendar_datetime(timestamp, time_zone)
+    coverage_date = str(history.get("coverage_date") or "")
+    first_sample = _datetime_or_none(history.get("coverage_first_sample_at"))
+    last_sample = _datetime_or_none(history.get("coverage_last_sample_at"))
+    if coverage_date and coverage_date < today and first_sample and last_sample:
+        first_calendar = _calendar_datetime(first_sample, time_zone)
+        last_calendar = _calendar_datetime(last_sample, time_zone)
+        next_date = last_calendar.date() + timedelta(days=1)
+        bracketed = (
+            coverage_date == last_calendar.date().isoformat()
+            and first_calendar.date() == last_calendar.date()
+            and next_date == calendar_timestamp.date()
+            and _seconds_after_midnight(first_calendar) <= 15 * 60
+            and _seconds_after_midnight(last_calendar) >= 23 * 3600 + 45 * 60
+            and _seconds_after_midnight(calendar_timestamp) <= 15 * 60
+            and 0.0 <= (timestamp - last_sample).total_seconds() <= 30 * 60
+        )
+        if bracketed:
+            for day in days:
+                if day.get("date") == coverage_date:
+                    day["complete"] = True
+                    break
+
+    if coverage_date != today:
+        history["coverage_date"] = today
+        history["coverage_first_sample_at"] = timestamp.isoformat()
+    history["coverage_last_sample_at"] = timestamp.isoformat()
+
+
+def _calendar_datetime(timestamp: datetime, time_zone: TimeZone) -> datetime:
+    if time_zone is None or timestamp.tzinfo is None:
+        return timestamp
+    return as_ha_local(timestamp, time_zone)
+
+
+def _seconds_after_midnight(timestamp: datetime) -> int:
+    return timestamp.hour * 3600 + timestamp.minute * 60 + timestamp.second
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

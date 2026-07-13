@@ -64,14 +64,14 @@ def _detail(config: CircuitConfig, state: AnalyzerState, store_data=None) -> dic
     return payload["detail"]
 
 
-def test_today_vs_normal_classifies_daily_energy_from_baseline() -> None:
+def test_open_day_energy_with_only_full_day_baseline_stays_learning() -> None:
     state = AnalyzerState()
     state.data_quality_checklist_by_circuit["fridge"] = {
         "required_sensors_present": True,
         "numeric_states_valid": True,
         "source_data_fresh": True,
     }
-    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.daily_energy_usage_by_circuit["fridge"] = 0.5
     store_data = FeatureStoreData(
         baselines={
             "fridge:daily_energy_kwh": _baseline("daily_energy_kwh", 2.0, 1.8, 2.2)
@@ -85,20 +85,58 @@ def test_today_vs_normal_classifies_daily_energy_from_baseline() -> None:
     )
 
     comparison = detail["today_vs_normal"][0]
-    assert comparison == {
-        "metric_id": "daily_energy_kwh",
-        "label": "Energy today",
-        "unit": "kWh",
-        "current_value": 2.4,
-        "normal_low": 1.8,
-        "normal_high": 2.2,
-        "normal_median": 2.0,
-        "status": "higher",
-        "confidence": 0.9,
-        "source": "baseline",
+    assert comparison["metric_id"] == "daily_energy_kwh"
+    assert comparison["label"] == "Energy so far"
+    assert comparison["unit"] == "kWh"
+    assert comparison["current_value"] == 0.5
+    assert comparison["status"] == "learning"
+    assert comparison["status"] not in {"higher", "lower"}
+    assert comparison.get("comparison_mode") == "same_time_of_day"
+
+
+def test_early_day_energy_uses_same_time_baseline_and_labels_projection() -> None:
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 0.5
+    state.energy_usage_evidence_by_circuit["fridge"] = {
+        "comparison_mode": "same_time_of_day",
+        "as_of": "2026-07-13T08:00:00-04:00",
+        "contextual_expected_range": [0.4, 0.7],
+        "contextual_baseline_median_kwh": 0.55,
+        "contextual_baseline_confidence": 0.88,
+        "projection_value": 1.9,
+        "projection_low": 1.7,
+        "projection_high": 2.1,
+        "projection_confidence": 0.58,
     }
-    assert detail["expectations"][0]["status"] == "watch"
-    assert "above normal" in detail["expectations"][0]["observed"]
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:daily_energy_kwh": _baseline(
+                "daily_energy_kwh",
+                2.0,
+                1.8,
+                2.2,
+            )
+        }
+    )
+
+    comparison = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+        store_data,
+    )["today_vs_normal"][0]
+
+    assert comparison["label"] == "Energy so far"
+    assert comparison.get("comparison_mode") == "same_time_of_day"
+    assert comparison.get("as_of") == "2026-07-13T08:00:00-04:00"
+    assert (comparison["normal_low"], comparison["normal_high"]) == (0.4, 0.7)
+    assert (comparison["normal_low"], comparison["normal_high"]) != (1.8, 2.2)
+    assert comparison["status"] == "normal"
+    assert comparison.get("projection_value") == 1.9
+    assert (comparison.get("projection_low"), comparison.get("projection_high")) == (
+        1.7,
+        2.1,
+    )
+    assert comparison.get("projection_confidence", 1.0) < comparison["confidence"]
 
 
 def test_today_vs_normal_learning_and_missing_data_statuses() -> None:
@@ -125,6 +163,46 @@ def test_today_vs_normal_learning_and_missing_data_statuses() -> None:
     assert missing["today_vs_normal"][0]["status"] == "missing_data"
 
 
+def test_partial_period_metrics_with_full_day_baselines_stay_learning() -> None:
+    state = AnalyzerState()
+    state.run_cycle_runtime_seconds_by_circuit["hvac"] = 25_200.0
+    state.run_cycle_count_by_circuit["hvac"] = 12
+    state.peak_demand_w_by_circuit["hvac"] = 5200.0
+    store_data = FeatureStoreData(
+        baselines={
+            "hvac:runtime_today_seconds": _baseline(
+                "runtime_today_seconds", 18_000.0, 14_400.0, 21_600.0
+            ),
+            "hvac:run_count_today": _baseline(
+                "run_count_today", 6.0, 4.0, 8.0
+            ),
+            "hvac:demand_peak_w": _baseline(
+                "demand_peak_w", 4600.0, 4200.0, 5000.0
+            ),
+        }
+    )
+
+    comparisons = {
+        item["metric_id"]: item
+        for item in _detail(_config("hvac", ApplianceProfile.HVAC), state, store_data)[
+            "today_vs_normal"
+        ]
+    }
+
+    assert {
+        metric_id: comparisons[metric_id]["status"]
+        for metric_id in (
+            "runtime_today_seconds",
+            "run_count_today",
+            "demand_peak_w",
+        )
+    } == {
+        "runtime_today_seconds": "learning",
+        "run_count_today": "learning",
+        "demand_peak_w": "learning",
+    }
+
+
 def test_contextual_energy_comparison_uses_existing_evidence_range() -> None:
     state = AnalyzerState()
     state.daily_energy_usage_by_circuit["hvac"] = 8.5
@@ -143,10 +221,12 @@ def test_contextual_energy_comparison_uses_existing_evidence_range() -> None:
     assert comparison["normal_high"] == 10.0
 
 
-def test_today_vs_normal_estimates_cost_from_daily_energy_and_rate() -> None:
+def test_today_vs_normal_uses_accumulated_cost_without_flat_rate_baseline() -> None:
     state = AnalyzerState()
     state.daily_energy_usage_by_circuit["fridge"] = 2.4
     state.cost_current_rate_by_circuit["fridge"] = 0.25
+    state.cost_today_by_circuit["fridge"] = 0.6
+    state.cost_evidence_by_circuit["fridge"] = {"cost_today_status": "actual"}
     store_data = FeatureStoreData(
         baselines={
             "fridge:daily_energy_kwh": _baseline("daily_energy_kwh", 2.0, 1.8, 2.2)
@@ -161,22 +241,134 @@ def test_today_vs_normal_estimates_cost_from_daily_energy_and_rate() -> None:
     comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
 
     assert detail["cost_today"] == 0.6
-    assert comparisons["cost_today"] == {
-        "metric_id": "cost_today",
-        "label": "Cost today",
-        "unit": "$",
-        "current_value": 0.6,
-        "normal_low": 0.45,
-        "normal_high": 0.55,
-        "normal_median": 0.5,
-        "status": "higher",
-        "confidence": 0.9,
-        "source": "baseline_cost_estimate",
-    }
+    cost = comparisons["cost_today"]
+    assert cost["label"] == "Cost so far"
+    assert cost["unit"] == "currency"
+    assert cost["current_value"] == 0.6
+    assert cost["normal_low"] is None
+    assert cost["normal_high"] is None
+    assert cost["normal_median"] is None
+    assert cost["status"] == "learning"
+    assert cost["confidence"] is None
+    assert cost["source"] == "current_state"
+    assert cost.get("comparison_mode") == "same_time_of_day"
+
+
+def test_running_power_uses_running_baseline() -> None:
+    state = AnalyzerState()
+    state.latest_real_power_w_by_circuit["fridge"] = 104.0
+    state.run_cycle_status_by_circuit["fridge"] = "running"
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:real_power": _baseline("real_power", 100.0, 90.0, 110.0),
+            "fridge:standby_power_w": _baseline(
+                "standby_power_w",
+                5.0,
+                3.0,
+                8.0,
+            ),
+        }
+    )
+
+    detail = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+        store_data,
+    )
+    power = {item["metric_id"]: item for item in detail["today_vs_normal"]}[
+        "current_power_w"
+    ]
+
+    assert power.get("comparison_mode") == "running_state"
+    assert (power["normal_low"], power["normal_high"]) == (90.0, 110.0)
+    assert power["status"] == "normal"
+
+
+def test_idle_power_uses_standby_baseline() -> None:
+    state = AnalyzerState()
+    state.latest_real_power_w_by_circuit["fridge"] = 5.0
+    state.run_cycle_status_by_circuit["fridge"] = "idle"
+    state.standby_status_by_circuit["fridge"] = "standby"
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:real_power": _baseline("real_power", 100.0, 90.0, 110.0),
+            "fridge:standby_power_w": _baseline(
+                "standby_power_w",
+                5.0,
+                3.0,
+                8.0,
+            ),
+        }
+    )
+
+    detail = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+        store_data,
+    )
+    power = {item["metric_id"]: item for item in detail["today_vs_normal"]}[
+        "current_power_w"
+    ]
+
+    assert power.get("comparison_mode") == "current_state"
+    assert (power["normal_low"], power["normal_high"]) == (3.0, 8.0)
+    assert power["status"] == "normal"
+
+
+def test_unknown_operating_state_does_not_use_standby_baseline() -> None:
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:standby_power_w": _baseline(
+                "standby_power_w",
+                5.0,
+                3.0,
+                8.0,
+            )
+        }
+    )
+
+    for operating_state in ("unknown", "learning"):
+        state = AnalyzerState()
+        state.latest_real_power_w_by_circuit["fridge"] = 5.0
+        state.run_cycle_status_by_circuit["fridge"] = operating_state
+
+        power = {
+            item["metric_id"]: item
+            for item in _detail(
+                _config("fridge", ApplianceProfile.REFRIGERATOR),
+                state,
+                store_data,
+            )["today_vs_normal"]
+        }["current_power_w"]
+
+        assert power["status"] == "learning"
+        assert power["normal_low"] is None
+        assert power["normal_high"] is None
+
+
+def test_mixed_circuit_suppresses_appliance_running_power_comparison() -> None:
+    state = AnalyzerState()
+    state.latest_real_power_w_by_circuit["kitchen"] = 104.0
+    state.run_cycle_status_by_circuit["kitchen"] = "running"
+    store_data = FeatureStoreData(
+        baselines={
+            "kitchen:real_power": _baseline("real_power", 100.0, 90.0, 110.0)
+        }
+    )
+
+    detail = _detail(
+        _config("kitchen", ApplianceProfile.MIXED, mode=CircuitMode.MIXED),
+        state,
+        store_data,
+    )
+
+    metric_ids = {item["metric_id"] for item in detail["today_vs_normal"]}
+    assert "current_power_w" not in metric_ids
 
 
 def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     state = AnalyzerState()
+    state.current_demand_w_by_circuit["ev"] = 3100.0
     state.peak_demand_w_by_circuit["ev"] = 5200.0
     state.capacity_usage_by_circuit["ev"] = 86.0
     state.capacity_status_by_circuit["ev"] = "over_limit"
@@ -202,15 +394,57 @@ def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     detail = _detail(_config("ev", ApplianceProfile.EV_CHARGER), state, store_data)
     comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
 
-    assert comparisons["demand_peak_w"]["label"] == "Demand peak"
+    assert comparisons["current_demand_w"]["label"] == "Current demand"
+    assert comparisons["current_demand_w"]["unit"] == "W"
+    assert comparisons["current_demand_w"]["current_value"] == 3100.0
+    assert comparisons["current_demand_w"].get("comparison_mode") == "current_state"
+    assert comparisons["demand_peak_w"]["label"] == "Demand peak so far"
     assert comparisons["demand_peak_w"]["current_value"] == 5200.0
-    assert comparisons["demand_peak_w"]["status"] == "higher"
+    assert comparisons["demand_peak_w"]["status"] == "learning"
+    assert comparisons["demand_peak_w"]["full_period_normal_low"] == 4200.0
+    assert comparisons["demand_peak_w"]["full_period_normal_high"] == 5000.0
+    assert (
+        comparisons["demand_peak_w"].get("comparison_mode")
+        == "same_time_of_day"
+    )
     assert comparisons["capacity_usage_percent"]["label"] == "Capacity usage"
     assert comparisons["capacity_usage_percent"]["current_value"] == 86.0
     assert comparisons["capacity_usage_percent"]["status"] == "higher"
+    assert (
+        comparisons["capacity_usage_percent"].get("comparison_mode")
+        == "current_state"
+    )
+    assert comparisons["current_demand_w"]["current_value"] != comparisons[
+        "demand_peak_w"
+    ]["current_value"]
+    assert comparisons["capacity_usage_percent"]["unit"] == "%"
     assert comparisons["solar_covered_share_percent"]["label"] == "Solar-covered share"
     assert comparisons["solar_covered_share_percent"]["current_value"] == 74.0
     assert comparisons["solar_covered_share_percent"]["status"] == "normal"
+
+
+def test_capacity_and_demand_comparisons_expose_configured_limits() -> None:
+    state = AnalyzerState()
+    state.peak_demand_w_by_circuit["ev"] = 4200.0
+    state.demand_evidence_by_circuit["ev"] = {"demand_limit_w": 5000.0}
+    state.capacity_usage_by_circuit["ev"] = 86.0
+    state.capacity_status_by_circuit["ev"] = "over_limit"
+    state.capacity_evidence_by_circuit["ev"] = {"warning_ratio": 0.8}
+
+    comparisons = {
+        item["metric_id"]: item
+        for item in _detail(_config("ev", ApplianceProfile.EV_CHARGER), state)[
+            "today_vs_normal"
+        ]
+    }
+
+    capacity = comparisons["capacity_usage_percent"]
+    assert capacity["configured_warning_value"] == 80.0
+    assert capacity["configured_limit_value"] == 100.0
+    assert capacity["limit_unit"] == "%"
+    demand = comparisons["demand_peak_w"]
+    assert demand["configured_limit_value"] == 5000.0
+    assert demand["limit_unit"] == "W"
 
 
 def test_today_vs_normal_skips_unconfigured_capacity_metric() -> None:
@@ -245,6 +479,30 @@ def test_demand_peak_comparison_uses_contextual_demand_evidence() -> None:
     assert demand["confidence"] == 0.77
 
 
+def test_unavailable_cost_is_not_presented_as_valid() -> None:
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.cost_current_rate_by_circuit["fridge"] = 0.25
+    state.cost_today_by_circuit["fridge"] = 0.6
+    state.cost_evidence_by_circuit["fridge"] = {"cost_today_status": "unavailable"}
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:daily_energy_kwh": _baseline("daily_energy_kwh", 2.0, 1.8, 2.2)
+        }
+    )
+
+    detail = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+        store_data,
+    )
+
+    assert detail["cost_today"] is None
+    assert "cost_today" not in {
+        item["metric_id"] for item in detail["today_vs_normal"]
+    }
+
+
 def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() -> None:
     config = _config("hvac", ApplianceProfile.HVAC)
     store_data = FeatureStoreData(
@@ -259,9 +517,17 @@ def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() ->
     )
     hot = AnalyzerState()
     hot.run_cycle_runtime_seconds_by_circuit["hvac"] = 25_200.0
+    hot.run_cycle_evidence_by_circuit["hvac"] = {
+        "runtime_today_contextual_expected_range_seconds": [14_400.0, 21_600.0],
+        "runtime_today_contextual_baseline_median_seconds": 18_000.0,
+        "runtime_today_contextual_baseline_confidence": 0.9,
+    }
     hot.weather_context_by_circuit["hvac"] = {"status": "weather_correlated"}
     mild = AnalyzerState()
     mild.run_cycle_runtime_seconds_by_circuit["hvac"] = 25_200.0
+    mild.run_cycle_evidence_by_circuit["hvac"] = dict(
+        hot.run_cycle_evidence_by_circuit["hvac"]
+    )
 
     hot_expectation = _detail(config, hot, store_data)["expectations"][0]
     mild_expectation = _detail(config, mild, store_data)["expectations"][0]
@@ -285,11 +551,19 @@ def test_sump_pump_after_rain_is_expected_without_rain_is_watch() -> None:
     )
     after_rain = AnalyzerState()
     after_rain.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 1800.0
+    after_rain.run_cycle_evidence_by_circuit["sump_pump"] = {
+        "runtime_today_contextual_expected_range_seconds": [300.0, 900.0],
+        "runtime_today_contextual_baseline_median_seconds": 600.0,
+        "runtime_today_contextual_baseline_confidence": 0.9,
+    }
     after_rain.rain_pump_context_by_circuit["sump_pump"] = {
         "status": "rain_explained"
     }
     dry = AnalyzerState()
     dry.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 1800.0
+    dry.run_cycle_evidence_by_circuit["sump_pump"] = dict(
+        after_rain.run_cycle_evidence_by_circuit["sump_pump"]
+    )
 
     assert _detail(config, after_rain, store_data)["expectations"][0]["status"] == (
         "expected"

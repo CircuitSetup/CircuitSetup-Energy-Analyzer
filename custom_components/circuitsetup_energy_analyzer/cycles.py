@@ -20,6 +20,7 @@ from .models import (
 RUN_CYCLE_DURATION_FEATURE = "run_cycle_duration_s"
 RUN_CYCLE_DUTY_CYCLE_FEATURE = "run_cycle_daily_duty_cycle_percent"
 RUN_CYCLE_START_COUNT_FEATURE = "run_cycle_daily_start_count"
+RUN_CYCLE_RUNTIME_TODAY_FEATURE = "runtime_today_seconds"
 MIN_CYCLE_BASELINE_CONFIDENCE = 0.6
 
 
@@ -203,6 +204,9 @@ def cycle_baseline_feature_values(
         ],
         RUN_CYCLE_START_COUNT_FEATURE: [
             float(summary.start_count) for summary in active_daily_summaries
+        ],
+        RUN_CYCLE_RUNTIME_TODAY_FEATURE: [
+            summary.runtime_seconds for summary in active_daily_summaries
         ],
     }
 

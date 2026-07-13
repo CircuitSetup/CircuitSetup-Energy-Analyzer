@@ -23,6 +23,7 @@ from ..demand import (
     DemandSettings,
     record_demand_sample,
 )
+from ..local_time import as_ha_local, local_date
 from ..models import AlertEvidence, CircuitConfig, PowerFlowMode
 from ..normalize import NormalizedCircuitSample
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
@@ -291,15 +292,21 @@ def _contextual_demand_comparison(
         circuit_config.circuit_id,
         [],
     )
+    current_local_date = local_date(context.now, context.time_zone)
+    historical_samples = [
+        item
+        for item in stored_contextual_samples(circuit_config.circuit_id, raw_samples)
+        if local_date(item.timestamp, context.time_zone) < current_local_date
+    ]
     selected = select_contextual_baseline(
         circuit_id=circuit_config.circuit_id,
         feature=DEMAND_PEAK_FEATURE,
-        samples=stored_contextual_samples(circuit_config.circuit_id, raw_samples),
+        samples=historical_samples,
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
     sample_recorded = False
-    if result.current_demand_w > 0.0 and context_allows_baseline_learning(
+    if result.peak_demand_w > 0.0 and context_allows_baseline_learning(
         context_key
     ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
@@ -313,7 +320,7 @@ def _contextual_demand_comparison(
                 timestamp=context.now,
                 circuit_id=circuit_config.circuit_id,
                 feature=DEMAND_PEAK_FEATURE,
-                value=result.current_demand_w,
+                value=result.peak_demand_w,
                 context=context_key,
                 source="demand",
             ),
@@ -337,6 +344,8 @@ def _contextual_demand_comparison(
         return {"sample_recorded": sample_recorded}
 
     attrs: dict[str, Any] = {
+        "comparison_mode": "same_time_of_day",
+        "as_of": as_ha_local(context.now, context.time_zone).isoformat(),
         "comparison_basis": "contextual",
         "baseline_context": ", ".join(selected.context.values()),
         "baseline_fallback_level": selected.fallback_level,

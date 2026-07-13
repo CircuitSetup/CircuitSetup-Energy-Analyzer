@@ -11437,9 +11437,11 @@ async def test_export_diagnostics_includes_appliance_detail_story() -> None:
     comparisons = {
         item["metric_id"]: item for item in detail["today_vs_normal"]
     }
-    assert comparisons["daily_energy_kwh"]["status"] == "higher"
-    assert comparisons["daily_energy_kwh"]["normal_low"] == 1.5
-    assert comparisons["daily_energy_kwh"]["normal_high"] == 2.1
+    assert comparisons["daily_energy_kwh"]["status"] == "learning"
+    assert comparisons["daily_energy_kwh"]["normal_low"] is None
+    assert comparisons["daily_energy_kwh"]["normal_high"] is None
+    assert comparisons["daily_energy_kwh"]["full_period_normal_low"] == 1.5
+    assert comparisons["daily_energy_kwh"]["full_period_normal_high"] == 2.1
     assert detail["expectations"]
 
 
@@ -13559,8 +13561,10 @@ async def test_runtime_reports_run_cycle_diagnostics_from_retained_events() -> N
         "last_start": "2026-06-03T11:30:00+00:00",
         "last_stop": "2026-06-03T01:20:00+00:00",
         "scope": "today",
-        "evidence_source": "retained_start_stop_events",
-    }
+            "evidence_source": "retained_start_stop_events",
+            "comparison_mode": "same_time_of_day",
+            "as_of": "2026-06-03T12:00:00+00:00",
+        }
 
 
 @pytest.mark.asyncio
@@ -15837,8 +15841,9 @@ async def test_runtime_tracks_time_of_use_cost() -> None:
     await coordinator.async_process_update()
 
     assert coordinator.state.cost_current_rate_by_circuit["hvac"] == 0.30
-    assert coordinator.state.cost_cycle_by_circuit["hvac"] == 6.2
-    assert coordinator.state.cost_cycle_forecast_by_circuit["hvac"] == 23.25
+    assert coordinator.state.cost_cycle_by_circuit["hvac"] == 5.0
+    assert coordinator.state.cost_cycle_forecast_by_circuit["hvac"] == 18.75
+    assert coordinator.state.cost_cycle_status_by_circuit["hvac"] == "unavailable"
     assert coordinator.state.cost_status_by_circuit["hvac"] == "tou_peak"
     assert coordinator.state.cost_evidence_by_circuit["hvac"]["active_rate_name"] == (
         "Peak"

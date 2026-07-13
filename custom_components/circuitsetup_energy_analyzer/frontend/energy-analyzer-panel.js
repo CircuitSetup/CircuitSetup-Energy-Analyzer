@@ -3029,6 +3029,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
         ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
         ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
+        ${detail.source_quality ? this._metric(this._panelText("appliance_detail.data_quality"), detail.source_quality.label || this._friendlyFeature(detail.source_quality.status), "mdi:database-check-outline") : ""}
+        ${detail.learning_readiness ? this._metric(this._panelText("appliance_detail.learning_readiness"), detail.learning_readiness.label || this._friendlyFeature(detail.learning_readiness.status), "mdi:school-outline") : ""}
         ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
       </section>
       <section class="panel summary">
@@ -3041,7 +3043,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
         ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
         ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:currency-usd")}
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
       </section>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
@@ -3145,11 +3147,40 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
         : this._panelText("common.learning");
+      const hasProjection = item.projection_value !== null && item.projection_value !== undefined;
+      const projectedStatus = hasProjection && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined && item.projection_value > item.full_period_normal_high
+        ? "higher"
+        : hasProjection && item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.projection_value < item.full_period_normal_low
+          ? "lower"
+          : "normal";
+      const fullPeriod = item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined
+        ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.completed_day_normal_range", { low: this._formatComparisonValue(item, item.full_period_normal_low), high: this._formatComparisonValue(item, item.full_period_normal_high) }))}</p>`
+        : "";
+      const configuredWarning = item.configured_warning_value !== null && item.configured_warning_value !== undefined
+        ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.configured_warning", { value: this._formatComparisonValue({ unit: item.limit_unit || item.unit }, item.configured_warning_value) }))}</p>`
+        : "";
+      const configuredLimit = item.configured_limit_value !== null && item.configured_limit_value !== undefined
+        ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.configured_limit", { value: this._formatComparisonValue({ unit: item.limit_unit || item.unit }, item.configured_limit_value) }))}</p>`
+        : "";
+      const asOf = item.as_of
+        ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(item.as_of) }))}</p>`
+        : "";
+      const projection = hasProjection
+        ? `<p><strong>${this._escape(this._panelText("appliance_detail.projected_end_of_day"))}</strong> ${this._escape(this._formatComparisonValue(item, item.projection_value))}</p>
+          ${item.projection_low !== null && item.projection_low !== undefined && item.projection_high !== null && item.projection_high !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_range", { low: this._formatComparisonValue(item, item.projection_low), high: this._formatComparisonValue(item, item.projection_high) }))}</p>` : ""}
+          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_status", { status: this._friendlyFeature(projectedStatus) }))}</p>
+          ${item.projection_confidence !== null && item.projection_confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projection_confidence", { confidence: this._formatConfidence(item.projection_confidence) }))}</p>` : ""}`
+        : "";
       return `
         <div class="appliance-comparison">
           <span class="comparison-label">${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
           <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
           <p class="comparison-summary">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
+          ${fullPeriod}
+          ${configuredWarning}
+          ${configuredLimit}
+          ${asOf}
+          ${projection}
           ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
           ${item.source ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.source_value", { source: this._friendlyFeature(item.source) }))}</p>` : ""}
         </div>
@@ -5535,13 +5566,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _formatCost(value) {
     if (value === null || value === undefined) {
-      return this._panelText("common.unknown");
+      return this._panelText("common.cost_unavailable") || "Cost unavailable";
     }
     const cost = Number(value);
     if (!Number.isFinite(cost)) {
       return this._panelText("common.unknown");
     }
-    return `$${cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const currency = this._hass && this._hass.config && this._hass.config.currency
+      ? String(this._hass.config.currency)
+      : "USD";
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(cost);
   }
 
   _formatDuration(value) {
@@ -5586,7 +5625,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       return this._panelText("common.unknown");
     }
     const unit = comparison && comparison.unit ? String(comparison.unit) : "";
-    if (unit === "$") {
+    if (unit === "currency") {
       return this._formatCost(value);
     }
     if (unit === "%") {

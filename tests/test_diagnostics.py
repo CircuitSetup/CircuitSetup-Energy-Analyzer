@@ -246,7 +246,7 @@ async def test_diagnostics_includes_appliance_detail_runtime_summaries() -> None
     }
     assert details["Kitchen Fridge"]["source_type"] == "direct_meter"
     assert details["Kitchen Fridge"]["daily_energy_kwh"] == 2.4
-    assert details["Kitchen Fridge"]["today_vs_normal"][0]["status"] == "higher"
+    assert details["Kitchen Fridge"]["today_vs_normal"][0]["status"] == "learning"
     assert details["Dishwasher"]["source_type"] == "nilm_estimate"
     assert details["Dishwasher"]["confidence"] == 0.91
     assert "sensor.secret" not in repr(diagnostics["runtime"]["appliance_details"])

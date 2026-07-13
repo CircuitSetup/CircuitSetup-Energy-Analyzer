@@ -252,7 +252,10 @@ class AnalyzerState:
         default_factory=dict
     )
     cost_current_rate_by_circuit: dict[str, float] = field(default_factory=dict)
+    cost_today_by_circuit: dict[str, float | None] = field(default_factory=dict)
+    cost_today_status_by_circuit: dict[str, str] = field(default_factory=dict)
     cost_cycle_by_circuit: dict[str, float] = field(default_factory=dict)
+    cost_cycle_status_by_circuit: dict[str, str] = field(default_factory=dict)
     cost_cycle_forecast_by_circuit: dict[str, float] = field(default_factory=dict)
     cost_status_by_circuit: dict[str, str] = field(default_factory=dict)
     cost_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)

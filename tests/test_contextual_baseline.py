@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from custom_components.circuitsetup_energy_analyzer import contextual_baseline
 from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     ContextDimension,
     ContextKey,
@@ -103,6 +104,14 @@ def test_context_bucket_helpers_accept_ha_local_timezone() -> None:
     assert season_for_datetime(timestamp, time_zone="America/New_York") == "spring"
     assert day_type_for_datetime(timestamp, time_zone="America/New_York") == "weekend"
     assert time_of_day_bucket(timestamp, time_zone="America/New_York") == "evening"
+
+
+def test_day_progress_bucket_uses_home_assistant_local_time() -> None:
+    helper = getattr(contextual_baseline, "day_progress_bucket", None)
+    assert callable(helper), "day_progress_bucket is required for partial-day baselines"
+
+    timestamp = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    assert helper(timestamp, time_zone="America/New_York") == "30-40%"
 
 
 def test_contextual_baseline_builds_robust_stats() -> None:
@@ -413,6 +422,7 @@ def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
     assert context.as_dict() == {
         "appliance_profile": "hvac",
         "circuit_mode": "dual_phase",
+        "day_progress": "60-70%",
         "season": "summer",
         "temperature_bin": "very_hot",
         "time_of_day": "afternoon",
@@ -503,6 +513,7 @@ def test_build_context_for_sample_carries_rain_context_issue() -> None:
     assert context.as_dict() == {
         "appliance_profile": "sump_pump",
         "circuit_mode": "single_phase",
+        "day_progress": "60-70%",
         "rain_context_issue": "rain_activity_conflict",
         "rain_intensity_bin": "moderate",
         "rain_state": "ambiguous",
@@ -542,6 +553,7 @@ def test_build_context_preserves_raw_rain_conflict_when_unit_unknown() -> None:
     assert context.as_dict() == {
         "appliance_profile": "sump_pump",
         "circuit_mode": "single_phase",
+        "day_progress": "60-70%",
         "rain_context_issue": "rain_activity_conflict",
         "rain_intensity_bin": "unknown",
         "rain_state": "unknown",

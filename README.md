@@ -134,10 +134,13 @@ questions instead of raw diagnostic entity lists:
   alerts, first checks, and actions for one appliance or circuit.
 - **Appliance Status** keeps activity, electrical health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
-- **Today vs Normal** compares current daily energy, runtime, run count,
-  estimated cost, power, demand peak, configured capacity usage, and
-  solar-covered share against learned normal ranges when enough baseline data
-  exists.
+- **Today vs Normal** keeps partial-day observations separate from completed
+  days. Energy, runtime, run count, cost, and demand peak use the same local-day
+  progress when history supports it; projected end-of-day values and completed-
+  day normal ranges are labeled separately. Running power uses running history,
+  idle power uses standby history, and mixed circuits avoid appliance-specific
+  power claims. Cost uses Home Assistant's configured currency and becomes
+  unavailable rather than applying the current tariff to an unknown interval.
 - **Direct meter vs Estimated by NILM** labels show whether a value is directly
   measured or inferred from mains power. NILM appliances show confidence and
   validation state; low-confidence NILM asks for review instead of implying a

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.usage import (
     DEFAULT_DAILY_USAGE_SPIKE_RATIO,
@@ -189,3 +189,39 @@ def test_record_energy_usage_ignores_meter_reset_delta() -> None:
     assert result.daily_usage_kwh == 0.0
     assert history["last_energy_kwh"] == 2.0
     assert history["days"] == [{"date": "2026-06-02", "usage_kwh": 8.0}]
+
+
+def test_record_energy_usage_marks_only_bracketed_local_day_complete() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings()
+    energy = 100.0
+    start = datetime(2026, 7, 7, 0, 5, tzinfo=UTC)
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=start,
+        energy_kwh=energy,
+        settings=settings,
+        time_zone="UTC",
+    )
+    energy += 8.0
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=start.replace(hour=23, minute=55),
+        energy_kwh=energy,
+        settings=settings,
+        time_zone="UTC",
+    )
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=start + timedelta(days=1),
+        energy_kwh=energy,
+        settings=settings,
+        time_zone="UTC",
+    )
+
+    assert history["days"] == [
+        {"date": "2026-07-07", "usage_kwh": 8.0, "complete": True}
+    ]

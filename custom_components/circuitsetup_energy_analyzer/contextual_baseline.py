@@ -13,6 +13,7 @@ from .normalize import NormalizedCircuitSample
 
 FALLBACK_SPECIFICITY_WEIGHT = {
     "exact_context": 1.0,
+    "progress_context": 0.9,
     "temperature_context": 0.85,
     "seasonal_context": 0.75,
     "time_context": 0.75,
@@ -22,6 +23,13 @@ FALLBACK_SPECIFICITY_WEIGHT = {
 }
 
 DAILY_ENERGY_FEATURE = "daily_energy_kwh"
+DAY_PROGRESS_FEATURES = {
+    DAILY_ENERGY_FEATURE,
+    "peak_demand_w",
+    "runtime_today_seconds",
+    "run_cycle_daily_start_count",
+    "cost_today",
+}
 CONTEXT_FINGERPRINT_SCHEMA_VERSION = "context:v2"
 DEFAULT_RAIN_INTENSITY_UNIT = "mm/h"
 RAIN_ACTIVITY_CONFLICT = "rain_activity_conflict"
@@ -168,6 +176,16 @@ def time_of_day_bucket(dt: datetime, *, time_zone: TimeZone = None) -> str:
     if hour < 18:
         return "afternoon"
     return "evening"
+
+
+def day_progress_bucket(dt: datetime, *, time_zone: TimeZone = None) -> str:
+    """Return a ten-percent Home Assistant local-day progress bucket."""
+    local_dt = _calendar_datetime(dt, time_zone)
+    elapsed_seconds = (
+        local_dt.hour * 3600 + local_dt.minute * 60 + local_dt.second
+    )
+    lower = min(int(elapsed_seconds / 86400 * 10) * 10, 90)
+    return f"{lower}-{lower + 10}%"
 
 
 def temperature_bin(temperature_f: float | None) -> str:
@@ -412,12 +430,27 @@ def daily_energy_fallback_contexts(
     """Build a conservative daily-energy fallback chain."""
     values = context.as_dict()
     fallbacks: list[tuple[str, ContextKey, int]] = [("exact_context", context, 7)]
+    progress = values.get("day_progress")
+    if progress:
+        progress_context = {"day_progress": progress}
+        for key in ("appliance_profile", "day_type"):
+            if key in values:
+                progress_context[key] = values[key]
+        fallbacks.append(
+            (
+                "progress_context",
+                ContextKey.from_mapping(progress_context),
+                7,
+            )
+        )
+    required_progress = {"day_progress": progress} if progress else {}
     temperature_context = {
         key: values[key]
         for key in ("temperature_bin", "weather_mode")
         if key in values
     }
     if temperature_context:
+        temperature_context.update(required_progress)
         fallbacks.append(
             (
                 "temperature_context",
@@ -426,27 +459,30 @@ def daily_energy_fallback_contexts(
             )
         )
     if "season" in values:
+        seasonal_context = {"season": values["season"], **required_progress}
         fallbacks.append(
             (
                 "seasonal_context",
-                ContextKey.from_mapping({"season": values["season"]}),
+                ContextKey.from_mapping(seasonal_context),
                 10,
             )
         )
     if "time_of_day" in values:
+        time_context = {"time_of_day": values["time_of_day"], **required_progress}
         fallbacks.append(
             (
                 "time_context",
-                ContextKey.from_mapping({"time_of_day": values["time_of_day"]}),
+                ContextKey.from_mapping(time_context),
                 10,
             )
         )
     profile = values.get("appliance_profile")
     if profile:
+        profile_context = {"appliance_profile": profile, **required_progress}
         fallbacks.append(
             (
                 "profile_context",
-                ContextKey.from_mapping({"appliance_profile": profile}),
+                ContextKey.from_mapping(profile_context),
                 12,
             )
         )
@@ -465,7 +501,6 @@ def build_context_for_sample(
     calendar_timestamp: datetime | None = None,
 ) -> ContextKey:
     """Build stable contextual dimensions from existing analyzer state."""
-    del feature
     circuit_id = circuit_config.circuit_id
     context_timestamp = calendar_timestamp or sample.timestamp
     values: dict[str, str] = {
@@ -475,6 +510,11 @@ def build_context_for_sample(
         "season": season_for_datetime(context_timestamp, time_zone=time_zone),
         "time_of_day": time_of_day_bucket(context_timestamp, time_zone=time_zone),
     }
+    if feature in DAY_PROGRESS_FEATURES:
+        values["day_progress"] = day_progress_bucket(
+            context_timestamp,
+            time_zone=time_zone,
+        )
     if circuit_config.power_flow is not PowerFlowMode.LOAD:
         values["power_flow_mode"] = circuit_config.power_flow.value
 
@@ -798,6 +838,9 @@ def _filter_context_for_profile(
         allowed.update({"time_of_day"})
     else:
         allowed.update({"time_of_day"})
+
+    if "day_progress" in values:
+        allowed.add("day_progress")
 
     filtered = {key: value for key, value in values.items() if key in allowed}
     if "day_type" in allowed:

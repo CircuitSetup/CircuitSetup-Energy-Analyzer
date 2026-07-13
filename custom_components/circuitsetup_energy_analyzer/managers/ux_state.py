@@ -3,9 +3,27 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..cycles import cycle_summary_payload, summarize_circuit_cycles
+from ..contextual_baseline import (
+    build_context_for_sample,
+    daily_energy_fallback_contexts,
+    select_contextual_baseline,
+    stored_contextual_samples,
+)
+from ..cycles import (
+    RUN_CYCLE_RUNTIME_TODAY_FEATURE,
+    RUN_CYCLE_START_COUNT_FEATURE,
+    cycle_summary_payload,
+    summarize_circuit_cycles,
+)
 from ..energy_dashboard import evaluate_energy_dashboard_readiness, readiness_payload
-from ..models import AlertEvidence, ApplianceProfile, CircuitConfig, CircuitMode
+from ..local_time import as_ha_local, local_date
+from ..models import (
+    AlertEvidence,
+    ApplianceProfile,
+    BaselineStats,
+    CircuitConfig,
+    CircuitMode,
+)
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import resolve_operating_detection_from_settings
 from ..ux import data_quality_checklist, health_summary, learning_progress
@@ -114,9 +132,19 @@ class UxStateManager:
             cycle_summary.duty_cycle_percent
         )
         coordinator.state.run_cycle_status_by_circuit[circuit_id] = cycle_summary.status
-        coordinator.state.run_cycle_evidence_by_circuit[circuit_id] = (
-            cycle_summary_payload(cycle_summary)
+        cycle_evidence = cycle_summary_payload(cycle_summary)
+        cycle_evidence.update(
+            _same_time_cycle_evidence(
+                config=config,
+                sample=sample,
+                state=coordinator.state,
+                store_data=coordinator.store_data,
+                summary=cycle_summary,
+                now=now,
+                time_zone=coordinator.context_builder.time_zone(),
+            )
         )
+        coordinator.state.run_cycle_evidence_by_circuit[circuit_id] = cycle_evidence
 
         coordinator.environment_context.refresh_weather_context_state(config, now)
         coordinator.environment_context.refresh_water_context_state(config, now)
@@ -196,3 +224,104 @@ class UxStateManager:
         if not alerts:
             return None
         return max(alerts, key=lambda alert: alert.timestamp)
+
+
+def _same_time_cycle_evidence(
+    *,
+    config: CircuitConfig,
+    sample: NormalizedCircuitSample | None,
+    state: Any,
+    store_data: Any,
+    summary: Any,
+    now: datetime,
+    time_zone: str | None,
+) -> dict[str, Any]:
+    context_sample = sample or NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id=config.circuit_id,
+    )
+    current_date = local_date(now, time_zone)
+    raw_samples = store_data.contextual_baseline_samples_by_circuit.get(
+        config.circuit_id,
+        [],
+    )
+    historical = [
+        item
+        for item in stored_contextual_samples(config.circuit_id, raw_samples)
+        if local_date(item.timestamp, time_zone) < current_date
+    ]
+    evidence: dict[str, Any] = {
+        "comparison_mode": "same_time_of_day",
+        "as_of": as_ha_local(now, time_zone).isoformat(),
+    }
+    metrics = (
+        (
+            RUN_CYCLE_RUNTIME_TODAY_FEATURE,
+            "runtime_today",
+            float(summary.runtime_seconds),
+            "runtime_today_contextual_expected_range_seconds",
+            "runtime_today_contextual_baseline_median_seconds",
+            "runtime_today_contextual_baseline_confidence",
+        ),
+        (
+            RUN_CYCLE_START_COUNT_FEATURE,
+            "run_count",
+            float(summary.start_count),
+            "run_count_contextual_expected_range",
+            "run_count_contextual_baseline_median",
+            "run_count_contextual_baseline_confidence",
+        ),
+    )
+    for (
+        feature,
+        projection_prefix,
+        current_value,
+        range_key,
+        median_key,
+        confidence_key,
+    ) in metrics:
+        context_key = build_context_for_sample(
+            circuit_config=config,
+            sample=context_sample,
+            state=state,
+            store_data=store_data,
+            now=now,
+            feature=feature,
+            time_zone=time_zone,
+            calendar_timestamp=now,
+        )
+        selected = select_contextual_baseline(
+            circuit_id=config.circuit_id,
+            feature=feature,
+            samples=historical,
+            fallback_contexts=daily_energy_fallback_contexts(context_key),
+        )
+        if selected is None:
+            continue
+        evidence[range_key] = [round(selected.p10, 3), round(selected.p90, 3)]
+        evidence[median_key] = round(selected.median, 3)
+        evidence[confidence_key] = selected.confidence
+        full_period = store_data.baselines.get(f"{config.circuit_id}:{feature}")
+        if (
+            isinstance(full_period, BaselineStats)
+            and selected.median > 0.0
+            and current_value >= 0.0
+        ):
+            ratio = current_value / selected.median
+            evidence[f"{projection_prefix}_projection_value"] = round(
+                full_period.median * ratio,
+                3,
+            )
+            evidence[f"{projection_prefix}_projection_low"] = round(
+                full_period.p10 * ratio,
+                3,
+            )
+            evidence[f"{projection_prefix}_projection_high"] = round(
+                full_period.p90 * ratio,
+                3,
+            )
+            evidence[f"{projection_prefix}_projection_confidence"] = round(
+                min(selected.confidence, full_period.confidence) * 0.66,
+                3,
+            )
+    return evidence

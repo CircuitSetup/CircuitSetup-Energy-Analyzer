@@ -53,6 +53,15 @@ def _direct_state() -> AnalyzerState:
         "required_sensors_present": True,
         "numeric_states_valid": True,
         "source_data_fresh": True,
+        "metric_roles_present": ["energy", "real_power"],
+        "missing_required_metric_roles": [],
+    }
+    state.learning_progress_by_circuit["fridge"] = {
+        "alert_ready": True,
+        "baseline_age_days": 14,
+        "cycle_count": 18,
+        "learned_feature_count": 3,
+        "pending_feature_samples": 0,
     }
     state.latest_real_power_w_by_circuit["fridge"] = 128.4
     state.run_cycle_status_by_circuit["fridge"] = "running"
@@ -188,7 +197,17 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["daily_energy_kwh"] == 1.82
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
-    assert detail["cost_today"] == 0.46
+    assert detail["cost_today"] is None
+    assert detail["source_quality"] == {
+        "status": "fresh",
+        "label": "Fresh",
+        "available_source_count": 2,
+        "configured_source_count": 2,
+        "stale_source_count": 0,
+        "missing_required_roles": [],
+    }
+    assert detail["learning_readiness"]["status"] == "ready"
+    assert detail["learning_readiness"]["label"] == "Ready"
     assert detail["next_step"] == "Review alert evidence"
     assert detail["what_to_check_first"] == [
         "No electrical check is needed right now."
@@ -217,7 +236,7 @@ def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
     assert "relearn_baseline" in payload["actions"]
 
 
-def test_direct_appliance_detail_uses_the_global_opower_rate() -> None:
+def test_direct_appliance_detail_does_not_reprice_daily_energy_at_global_rate() -> None:
     from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
         appliance_detail_for_circuit,
     )
@@ -228,7 +247,7 @@ def test_direct_appliance_detail_uses_the_global_opower_rate() -> None:
     detail = appliance_detail_for_circuit(coordinator, "fridge")
 
     assert detail is not None
-    assert detail.cost_today == 0.55
+    assert detail.cost_today is None
 
 
 def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:

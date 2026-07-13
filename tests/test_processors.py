@@ -41,7 +41,10 @@ from custom_components.circuitsetup_energy_analyzer.phase_balance import (
 )
 from custom_components.circuitsetup_energy_analyzer.standby import StandbySettings
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
-from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
+from custom_components.circuitsetup_energy_analyzer.usage import (
+    EnergyUsageSettings,
+    record_energy_usage,
+)
 from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
     UtilityComparisonSettings,
 )
@@ -783,6 +786,240 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9
 
 
+def _energy_usage_projection_evidence(
+    days: list[dict[str, object]],
+) -> dict[str, object]:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "refrigerator",
+        "circuit_mode": "single_phase",
+        "season": "summer",
+        "time_of_day": "morning",
+    }
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "fridge": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "days": days,
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "fridge": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": 5.0,
+                    "context": stored_context,
+                    "source": "energy_usage",
+                }
+                for stored_context in (
+                    context_key,
+                    {**context_key, "day_progress": "30-40%"},
+                )
+                for offset in range(1, 8)
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="America/New_York",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(
+            window_days=5,
+        ),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+
+    result = processor.process(_energy_sample(105.0), config, context)
+    updates = {update.path: update.value for update in result.state_updates}
+    return updates[("energy_usage_evidence_by_circuit", "fridge")]
+
+
+def test_energy_usage_projection_rejects_unmarked_legacy_days() -> None:
+    evidence = _energy_usage_projection_evidence(
+        [
+            {"date": f"2026-07-{day:02d}", "usage_kwh": usage}
+            for day, usage in zip(range(8, 13), range(8, 13), strict=True)
+        ]
+    )
+
+    assert "projection_value" not in evidence
+
+
+def test_energy_usage_projection_uses_only_adequate_complete_days() -> None:
+    evidence = _energy_usage_projection_evidence(
+        [
+            {
+                "date": f"2026-07-{day:02d}",
+                "usage_kwh": usage,
+                "complete": True,
+            }
+            for day, usage in zip(range(6, 11), range(8, 13), strict=True)
+        ]
+        + [
+            {"date": "2026-07-11", "usage_kwh": 100.0, "complete": False},
+            {"date": "2026-07-12", "usage_kwh": 100.0, "complete": False},
+        ]
+    )
+
+    assert evidence["projection_value"] == 10.0
+    assert evidence["projection_low"] == 8.0
+    assert evidence["projection_high"] == 12.0
+    assert evidence["full_period_normal_low"] == 8.0
+    assert evidence["full_period_normal_high"] == 12.0
+    assert evidence["projection_confidence"] < evidence[
+        "contextual_baseline_confidence"
+    ]
+
+
+def test_energy_usage_projection_accepts_days_completed_by_live_tracking() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings(window_days=5)
+    energy = 100.0
+    start = datetime(2026, 7, 7, 0, 5, tzinfo=UTC)
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=start,
+        energy_kwh=energy,
+        settings=settings,
+        time_zone="UTC",
+    )
+    for offset, usage in enumerate(range(8, 13)):
+        day_start = start + timedelta(days=offset)
+        energy += usage
+        record_energy_usage(
+            history,
+            circuit_id="fridge",
+            timestamp=day_start.replace(hour=23, minute=55),
+            energy_kwh=energy,
+            settings=settings,
+            time_zone="UTC",
+        )
+        record_energy_usage(
+            history,
+            circuit_id="fridge",
+            timestamp=day_start + timedelta(days=1),
+            energy_kwh=energy,
+            settings=settings,
+            time_zone="UTC",
+        )
+
+    complete_days = [
+        day
+        for day in history["days"]
+        if isinstance(day, dict) and day.get("complete") is True
+    ]
+    assert len(complete_days) == 5
+    evidence = _energy_usage_projection_evidence(complete_days)
+    assert evidence["projection_value"] == 10.0
+
+
+def test_cycle_same_time_evidence_produces_runtime_and_count_projections() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        RUN_CYCLE_RUNTIME_TODAY_FEATURE,
+        RUN_CYCLE_START_COUNT_FEATURE,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers.ux_state import (
+        _same_time_cycle_evidence,
+    )
+
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "refrigerator",
+        "circuit_mode": "single_phase",
+        "day_progress": "50-60%",
+        "season": "summer",
+        "time_of_day": "afternoon",
+    }
+    samples = [
+        {
+            "timestamp": (now - timedelta(days=offset)).isoformat(),
+            "feature": feature,
+            "value": value,
+            "context": context_key,
+            "source": "run_cycle",
+        }
+        for feature, value in (
+            (RUN_CYCLE_RUNTIME_TODAY_FEATURE, 3600.0),
+            (RUN_CYCLE_START_COUNT_FEATURE, 4.0),
+        )
+        for offset in range(1, 8)
+    ]
+    store_data = FeatureStoreData(
+        baselines={
+            f"fridge:{RUN_CYCLE_RUNTIME_TODAY_FEATURE}": BaselineStats(
+                feature=RUN_CYCLE_RUNTIME_TODAY_FEATURE,
+                sample_count=14,
+                median=7200.0,
+                mad=600.0,
+                p10=6000.0,
+                p90=8400.0,
+                confidence=0.9,
+            ),
+            f"fridge:{RUN_CYCLE_START_COUNT_FEATURE}": BaselineStats(
+                feature=RUN_CYCLE_START_COUNT_FEATURE,
+                sample_count=14,
+                median=8.0,
+                mad=1.0,
+                p10=6.0,
+                p90=10.0,
+                confidence=0.9,
+            ),
+        },
+        contextual_baseline_samples_by_circuit={"fridge": samples},
+    )
+
+    evidence = _same_time_cycle_evidence(
+        config=CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+        ),
+        sample=None,
+        state=SimpleNamespace(),
+        store_data=store_data,
+        summary=SimpleNamespace(runtime_seconds=3600.0, start_count=4),
+        now=now,
+        time_zone="UTC",
+    )
+
+    assert evidence["runtime_today_contextual_expected_range_seconds"] == [
+        3600.0,
+        3600.0,
+    ]
+    assert evidence["runtime_today_projection_value"] == 7200.0
+    assert evidence["run_count_projection_value"] == 8.0
+    assert evidence["runtime_today_projection_confidence"] < evidence[
+        "runtime_today_contextual_baseline_confidence"
+    ]
+
+
 def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -796,6 +1033,7 @@ def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -
     context_key = {
         "appliance_profile": "hvac",
         "circuit_mode": "dual_phase",
+        "day_progress": "60-70%",
         "season": "summer",
         "temperature_bin": "very_hot",
         "time_of_day": "afternoon",
@@ -967,7 +1205,7 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
     assert evidence["baseline_fallback_level"] == "not_enough_data"
 
 
-def test_energy_usage_processor_context_uses_rollup_timestamp() -> None:
+def test_energy_usage_context_uses_local_progress_across_dst_fallback() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -976,8 +1214,8 @@ def test_energy_usage_processor_context_uses_rollup_timestamp() -> None:
         EnergyUsageProcessor,
     )
 
-    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
-    sample_time = datetime(2026, 5, 30, 15, 30, tzinfo=UTC)
+    now = datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
+    sample_time = datetime(2026, 10, 30, 15, 30, tzinfo=UTC)
     store_data = FeatureStoreData(
         energy_usage_by_circuit={
             "ev": {
@@ -1021,7 +1259,8 @@ def test_energy_usage_processor_context_uses_rollup_timestamp() -> None:
 
     stored = store_data.contextual_baseline_samples_by_circuit["ev"][0]
     assert stored["timestamp"] == now.isoformat()
-    assert stored["context"]["time_of_day"] == "evening"
+    assert stored["context"]["time_of_day"] == "night"
+    assert stored["context"]["day_progress"] == "0-10%"
 
 
 def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -> None:
@@ -1092,6 +1331,7 @@ def test_energy_usage_alert_features_include_contextual_baseline_details() -> No
     context_key = {
         "appliance_profile": "hvac",
         "circuit_mode": "dual_phase",
+        "day_progress": "60-70%",
         "season": "summer",
         "temperature_bin": "very_hot",
         "time_of_day": "afternoon",
@@ -1165,14 +1405,14 @@ def test_energy_usage_alert_features_include_contextual_baseline_details() -> No
     assert len(result.alerts) == 1
     assert policy.observations[0].features["comparison_basis"] == "contextual"
     assert policy.observations[0].features["baseline_context"] == (
-        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+        "hvac, dual_phase, 60-70%, summer, very_hot, afternoon, cooling"
     )
     assert policy.observations[0].features["baseline_fallback_level"] == (
         "exact_context"
     )
     assert policy.observations[0].features["contextual_baseline_confidence"] == 1.0
     assert result.alerts[0].features["baseline_context"] == (
-        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+        "hvac, dual_phase, 60-70%, summer, very_hot, afternoon, cooling"
     )
 
 
@@ -1473,6 +1713,7 @@ def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() ->
     context_key = {
         "appliance_profile": "hvac",
         "circuit_mode": "dual_phase",
+        "day_progress": "60-70%",
         "season": "summer",
         "temperature_bin": "very_hot",
         "time_of_day": "afternoon",
@@ -1571,6 +1812,7 @@ def test_run_cycle_alert_features_include_contextual_baseline_details() -> None:
     context_key = {
         "appliance_profile": "hvac",
         "circuit_mode": "dual_phase",
+        "day_progress": "60-70%",
         "season": "summer",
         "temperature_bin": "very_hot",
         "time_of_day": "afternoon",
@@ -1632,7 +1874,7 @@ def test_run_cycle_alert_features_include_contextual_baseline_details() -> None:
         "exact_context"
     )
     assert policy.observations[0].features["baseline_context"] == (
-        "hvac, dual_phase, summer, very_hot, afternoon, cooling"
+        "hvac, dual_phase, 60-70%, summer, very_hot, afternoon, cooling"
     )
     assert policy.observations[0].features["contextual_baseline_p90"] == 1450.0
     assert result.alerts[0].features["comparison_basis"] == "contextual"
@@ -2284,11 +2526,14 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert result.store_dirty is True
     assert result.alerts == []
     assert result.notifications == []
-    assert len(result.state_updates) == 5
+    assert len(result.state_updates) == 8
 
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.2
+    assert updates[("cost_today_by_circuit", "fridge")] is None
+    assert updates[("cost_today_status_by_circuit", "fridge")] == "unavailable"
     assert updates[("cost_cycle_by_circuit", "fridge")] == 3.0
+    assert updates[("cost_cycle_status_by_circuit", "fridge")] == "actual"
     assert updates[("cost_cycle_forecast_by_circuit", "fridge")] == 8.18
     assert updates[("cost_status_by_circuit", "fridge")] == "tracking"
     evidence = updates[("cost_evidence_by_circuit", "fridge")]
@@ -2300,6 +2545,101 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert evidence["projected_cycle_cost"] == 8.18
     assert evidence["status"] == "tracking"
     assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
+
+
+def test_cost_processor_produces_same_time_comparison_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context_key = {
+        "appliance_profile": "refrigerator",
+        "circuit_mode": "single_phase",
+        "day_progress": "50-60%",
+        "season": "summer",
+        "time_of_day": "afternoon",
+    }
+    store_data = FeatureStoreData(
+        cost_by_circuit={
+            "fridge": {
+                "cycle_start": "2026-06-01",
+                "cycle_cost": 5.0,
+                "last_energy_kwh": 100.0,
+                "last_sample_at": "2026-06-11T11:00:00+00:00",
+                "days": [
+                    {
+                        "date": f"2026-06-{day:02d}",
+                        "cost": value,
+                        "complete": True,
+                    }
+                    for day, value in zip(
+                        range(4, 11),
+                        (0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4),
+                        strict=True,
+                    )
+                ],
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "fridge": [
+                {
+                    "timestamp": (now - timedelta(days=offset)).isoformat(),
+                    "feature": "cost_today",
+                    "value": value,
+                    "context": context_key,
+                    "source": "cost",
+                }
+                for offset, value in enumerate(
+                    (0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37),
+                    start=1,
+                )
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="UTC",
+    )
+    processor = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            default_rate_per_kwh=0.20,
+        )
+    )
+
+    result = processor.process(
+        _energy_sample(102.0),
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+        ),
+        context,
+    )
+    updates = {update.path: update.value for update in result.state_updates}
+    evidence = updates[("cost_evidence_by_circuit", "fridge")]
+
+    assert evidence["comparison_mode"] == "same_time_of_day"
+    assert evidence["contextual_expected_range"] == [0.32, 0.36]
+    assert evidence["contextual_baseline_median_cost"] == 0.34
+    assert evidence["projection_value"] == 1.294
+    assert evidence["full_period_normal_low"] == 0.9
+    assert evidence["full_period_normal_high"] == 1.3
+    assert evidence["projection_confidence"] < evidence[
+        "contextual_baseline_confidence"
+    ]
 
 
 def test_cost_processor_prefers_the_derived_utility_rate() -> None:
@@ -2421,6 +2761,7 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
     context_key = {
         "appliance_profile": "ev_charger",
         "circuit_mode": "dual_phase",
+        "day_progress": "50-60%",
         "season": "summer",
         "day_type": "weekday",
         "time_of_day": "afternoon",

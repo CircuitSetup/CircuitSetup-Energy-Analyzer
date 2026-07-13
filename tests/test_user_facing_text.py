@@ -1556,16 +1556,19 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     )
 
 
-def test_appliance_detail_renders_cost_values_as_currency() -> None:
+def test_appliance_detail_uses_home_assistant_currency_without_hardcoded_dollars() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
+panel._hass = { config: { currency: "EUR" } };
 panel._applianceDetail = {
   status: "ok",
   detail: {
     activity_state: "Running",
     current_power_w: 820,
     source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "ready", label: "Ready" },
     confidence: null,
     health_state: "Ready",
     electrical_state: "Normal",
@@ -1579,7 +1582,7 @@ panel._applianceDetail = {
     today_vs_normal: [{
       metric_id: "cost_today",
       label: "Cost today",
-      unit: "$",
+      unit: "currency",
       current_value: 0.6,
       normal_low: 0.45,
       normal_high: 0.55,
@@ -1597,16 +1600,111 @@ panel._applianceDetail = {
 const html = panel._renderApplianceDetailBody();
 for (const expected of [
   "Cost Today",
-  "$0.60",
+  "€0.60",
   "Cost today",
-  "Normal $0.45 - $0.55",
+  "Normal €0.45 - €0.55",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
-if (html.includes("0.6 $")) {
-  throw new Error(`cost comparison used suffix currency: ${html}`);
+if (html.includes("$")) {
+  throw new Error(`cost display hardcoded dollars: ${html}`);
+}
+"""
+    )
+
+
+def test_appliance_detail_labels_projected_energy_ranges_and_status() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "daily_energy_kwh",
+  label: "Energy so far",
+  unit: "kWh",
+  current_value: 0.5,
+  normal_low: 0.4,
+  normal_high: 0.7,
+  normal_median: 0.55,
+  comparison_mode: "same_time_of_day",
+  status: "normal",
+  confidence: 0.88,
+  source: "contextual_baseline",
+  projection_value: 1.9,
+  projection_low: 1.7,
+  projection_high: 2.1,
+  projection_confidence: 0.58,
+  full_period_normal_low: 1.4,
+  full_period_normal_high: 1.8,
+  full_period_normal_median: 1.6
+}]);
+for (const expected of [
+  "Energy so far",
+  "Projected end of day",
+  "1.9 kWh",
+  "Projected range 1.7 kWh - 2.1 kWh",
+  "Completed-day normal range 1.4 kWh - 1.8 kWh",
+  "Projected status Higher",
+  "58%",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_shows_full_period_normals_and_limits_without_projection() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "demand_peak_w",
+  label: "Demand peak so far",
+  unit: "W",
+  current_value: 4200,
+  normal_low: null,
+  normal_high: null,
+  normal_median: null,
+  comparison_mode: "same_time_of_day",
+  status: "learning",
+  full_period_normal_low: 3500,
+  full_period_normal_high: 4800,
+  configured_limit_value: 5000,
+  limit_unit: "W"
+}, {
+  metric_id: "capacity_usage_percent",
+  label: "Capacity usage",
+  unit: "%",
+  current_value: 86,
+  status: "higher",
+  configured_warning_value: 80,
+  configured_limit_value: 100,
+  limit_unit: "%"
+}]);
+for (const expected of [
+  "Completed-day normal range 3,500 W - 4,800 W",
+  "Configured limit 5,000 W",
+  "Configured warning 80%",
+  "Configured limit 100%",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_explains_missing_cost_friendly() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const value = panel._formatCost(null);
+if (value !== "Cost unavailable") {
+  throw new Error(`expected friendly missing-cost text, got: ${value}`);
 }
 """
     )
@@ -1622,6 +1720,8 @@ panel._applianceDetail = {
     activity_state: "Running",
     current_power_w: 820,
     source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "ready", label: "Ready" },
     confidence: 0.87,
     health_state: "Ready",
     electrical_state: "Normal",
@@ -1649,6 +1749,8 @@ for (const expected of [
   'icon="mdi:play-circle-outline"',
   'icon="mdi:flash-outline"',
   'icon="mdi:transmission-tower"',
+  'icon="mdi:database-check-outline"',
+  'icon="mdi:school-outline"',
   'icon="mdi:heart-pulse"',
   'icon="mdi:lightning-bolt"',
   'icon="mdi:chart-line"',
@@ -1656,7 +1758,7 @@ for (const expected of [
   'icon="mdi:calendar-today"',
   'icon="mdi:timer-outline"',
   'icon="mdi:counter"',
-  'icon="mdi:currency-usd"',
+  'icon="mdi:cash"',
   'class="appliance-timeline"',
   'class="appliance-comparison-grid"',
   'class="decision-tiles appliance-alert-actions"',

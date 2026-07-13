@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..alerting import Observation
+from ..baseline import build_baseline
 from ..contextual_baseline import (
     DAILY_ENERGY_FEATURE,
     ContextualBaselineSample,
@@ -18,6 +19,7 @@ from ..contextual_baseline import (
     stored_contextual_samples,
     upsert_contextual_sample,
 )
+from ..local_time import as_ha_local, local_date
 from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -220,7 +222,12 @@ def _contextual_daily_energy_comparison(
         circuit_id,
         [],
     )
-    historical_samples = stored_contextual_samples(circuit_id, raw_samples)
+    current_local_date = local_date(context.now, context.time_zone)
+    historical_samples = [
+        item
+        for item in stored_contextual_samples(circuit_id, raw_samples)
+        if local_date(item.timestamp, context.time_zone) < current_local_date
+    ]
     selected = select_contextual_baseline(
         circuit_id=circuit_id,
         feature=DAILY_ENERGY_FEATURE,
@@ -268,6 +275,8 @@ def _contextual_daily_energy_comparison(
         }
 
     attrs: dict[str, Any] = {
+        "comparison_mode": "same_time_of_day",
+        "as_of": as_ha_local(context.now, context.time_zone).isoformat(),
         "comparison_basis": "contextual",
         "baseline_context": ", ".join(selected.context.values()),
         "baseline_fallback_level": selected.fallback_level,
@@ -280,9 +289,51 @@ def _contextual_daily_energy_comparison(
         "alert_baseline_value": selected.p90,
         "alert_baseline_confidence": selected.confidence,
     }
+    attrs.update(_daily_energy_projection(result, selected, context))
     if result.spike is not None and result.daily_usage_kwh <= selected.p90:
         attrs["status_override"] = "context_explained"
     return attrs
+
+
+def _daily_energy_projection(
+    result: Any,
+    selected: Any,
+    context: ProcessingContext,
+) -> dict[str, Any]:
+    history = context.store_data.energy_usage_by_circuit.get(result.circuit_id, {})
+    raw_days = history.get("days") if isinstance(history, dict) else None
+    if not isinstance(raw_days, list) or selected.median <= 0.0:
+        return {}
+    today = local_date(context.now, context.time_zone).isoformat()
+    values = []
+    for item in raw_days:
+        if (
+            not isinstance(item, dict)
+            or item.get("complete") is not True
+            or str(item.get("date")) >= today
+        ):
+            continue
+        try:
+            value = float(item["usage_kwh"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if value >= 0.0:
+            values.append(value)
+    required_days = max(int(result.window_days), 1)
+    if len(values) < required_days:
+        return {}
+    full_period = build_baseline(DAILY_ENERGY_FEATURE, values[-required_days:])
+    observed_ratio = max(float(result.daily_usage_kwh), 0.0) / selected.median
+    confidence = round(min(selected.confidence, full_period.confidence) * 0.66, 3)
+    return {
+        "projection_value": round(full_period.median * observed_ratio, 3),
+        "projection_low": round(full_period.p10 * observed_ratio, 3),
+        "projection_high": round(full_period.p90 * observed_ratio, 3),
+        "projection_confidence": confidence,
+        "full_period_normal_low": round(full_period.p10, 3),
+        "full_period_normal_high": round(full_period.p90, 3),
+        "full_period_normal_median": round(full_period.median, 3),
+    }
 
 
 def _contextual_alert_features(
