@@ -4181,3 +4181,15 @@ async def test_setup_entry_rolls_back_services_when_coordinator_start_fails(
     assert hass.data[DOMAIN] == {}
     assert hass.services.registered == {}
     assert hass.services.removed
+
+
+def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _boolean_value,
+    )
+
+    assert _boolean_value("false") is False
+    assert _boolean_value("true") is True
+    assert _boolean_value(0) is False
+    with pytest.raises(Exception, match="Expected a boolean"):
+        _boolean_value("sometimes")

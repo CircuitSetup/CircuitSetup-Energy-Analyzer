@@ -352,6 +352,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       }
       this._nilmWorkspace = workspace;
       await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
+      const routeUrl = new URL(routeKey, window.location.origin);
+      const sessionId = routeUrl.searchParams.get("session_id") || "";
+      const routedSession = sessionId && Array.isArray(workspace.sessions)
+        ? workspace.sessions.find((session) => session.session_id === sessionId)
+        : null;
+      if (routedSession) {
+        this._loadNilmSessionInterval(routedSession);
+      }
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -1175,6 +1183,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         return;
       }
       data.target_assignment_id = target;
+    }
+    if (action.requires && action.requires.includes("direct_circuit_id")) {
+      const targetInput = this.shadowRoot.querySelector(`#nilm_assignment_direct_target_${index}`);
+      const target = targetInput ? targetInput.value.trim() : "";
+      if (!target) {
+        this._error = this._panelText("errors.nilm_direct_meter_required");
+        this._renderAndScrollToTop();
+        return;
+      }
+      data.direct_circuit_id = target;
     }
     const actionContext = this._nilmWorkspaceActionContext();
     const scrollTop = Number(window.scrollY);
@@ -3029,6 +3047,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
         ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
         ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
+        ${detail.source_type === "nilm_estimate" && (detail.mains_source || detail.mains_circuit_id) ? this._metric(this._panelText("appliance_detail.mains_source"), detail.mains_source || detail.mains_circuit_id, "mdi:home-lightning-bolt-outline") : ""}
         ${detail.source_quality ? this._metric(this._panelText("appliance_detail.data_quality"), detail.source_quality.label || this._friendlyFeature(detail.source_quality.status), "mdi:database-check-outline") : ""}
         ${detail.learning_readiness ? this._metric(this._panelText("appliance_detail.learning_readiness"), detail.learning_readiness.label || this._friendlyFeature(detail.learning_readiness.status), "mdi:school-outline") : ""}
         ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
@@ -3224,10 +3243,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const available = actions || {};
     const alertButtons = [
       this._applianceAlertActionTile(available, "open_evidence", this._panelText("actions.labels.open_evidence"), "mdi:chart-line"),
+      this._applianceAlertActionTile(available, "mark_correct", this._panelText("actions.labels.correct"), "mdi:check-circle-outline"),
+      this._applianceAlertActionTile(available, "mark_wrong", this._panelText("actions.labels.wrong_appliance_sentence"), "mdi:close-circle-outline"),
       this._applianceAlertActionTile(available, "mark_expected", this._panelText("actions.labels.mark_expected"), "mdi:check-decagram", this._panelText("actions.helpers.mark_expected")),
       this._applianceAlertActionTile(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), "mdi:message-alert-outline", this._panelText("actions.helpers.mark_unhelpful")),
     ].filter(Boolean);
     const buttons = [
+      this._applianceActionButton(available, "adjust_interval", this._panelText("actions.labels.adjust_interval"), true),
       this._applianceActionButton(available, "review_nilm_assignment", this._panelText("actions.labels.review_nilm_assignment"), true),
       this._applianceActionButton(available, "pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
       this._applianceActionButton(available, "relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
@@ -4775,7 +4797,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderNilmAssignmentEditFields(item, index) {
     const actions = item && item.actions;
-    if (!actions || (!actions.rename && !actions.change_profile && !actions.merge)) {
+    if (!actions || (!actions.rename && !actions.change_profile && !actions.merge && !actions.convert_to_direct_meter)) {
       return "";
     }
     const draftKey = this._nilmAssignmentDraftKey(item);
@@ -4801,6 +4823,13 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
           <select id="nilm_assignment_merge_target_${index}" data-nilm-assignment-merge-target>
             <option value="">${this._escape(this._panelText("actions.labels.do_not_merge"))}</option>
             ${(actions.merge.target_options || []).map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
+          </select>
+        </label>` : ""}
+        ${actions.convert_to_direct_meter ? `<label class="nilm-label-field" for="nilm_assignment_direct_target_${index}">
+          <span class="muted">${this._escape(this._panelText("nilm_workspace.direct_meter_circuit"))}</span>
+          <select id="nilm_assignment_direct_target_${index}" data-nilm-assignment-direct-target>
+            <option value="">${this._escape(this._panelText("nilm_workspace.select_direct_meter_circuit"))}</option>
+            ${(actions.convert_to_direct_meter.target_options || []).map((option) => `<option value="${this._escape(option.value || "")}">${this._escape(option.label || option.value || "")}</option>`).join("")}
           </select>
         </label>` : ""}
       </div>
@@ -4834,6 +4863,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         ${detailButton}
         ${hasSave ? `<button type="button" class="${saveDirty ? "" : "secondary"}" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" data-nilm-assignment-save-key="${this._escape(item.assignment_id || "")}" ${this._busyAction === `nilm_assignments_${index}_save` || !saveDirty ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.save"))}</button>` : ""}
         ${actions.merge ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="merge" ${this._busyAction === `nilm_assignments_${index}_merge` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.merge"))}</button>` : ""}
+        ${actions.convert_to_direct_meter ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="convert_to_direct_meter" ${this._busyAction === `nilm_assignments_${index}_convert_to_direct_meter` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.convert_to_direct_meter"))}</button>` : ""}
         ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.validate_history"))}</button>` : ""}
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>` : ""}
         ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_ha_device"))}</button>` : ""}

@@ -62,7 +62,8 @@ def alert_notification_message(
     """Return Markdown body text for an alert persistent notification."""
     from .alert_links import alert_evidence_path
 
-    display_name = (
+    nilm_display_name = str(alert.features.get("display_name") or "").strip()
+    display_name = nilm_display_name or (
         config.name if config is not None and config.name else alert.circuit_id
     )
     lines = [f"**{display_name}**", "", alert.message]

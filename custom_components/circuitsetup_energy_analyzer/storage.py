@@ -307,7 +307,7 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_label_intervals_by_circuit": _dict_of_list_dicts(
             data.nilm_label_intervals_by_circuit
         ),
-        "nilm_appliance_assignments_by_circuit": _dict_of_list_dicts(
+        "nilm_appliance_assignments_by_circuit": _nilm_assignments_with_identity(
             data.nilm_appliance_assignments_by_circuit
         ),
         "weather_context_by_circuit": _dict_of_dicts(
@@ -420,7 +420,7 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         nilm_label_intervals_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_label_intervals_by_circuit", {})
         ),
-        nilm_appliance_assignments_by_circuit=_dict_of_list_dicts(
+        nilm_appliance_assignments_by_circuit=_nilm_assignments_with_identity(
             raw.get("nilm_appliance_assignments_by_circuit", {})
         ),
         weather_context_by_circuit=_dict_of_dicts(
@@ -521,9 +521,11 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
 async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v1 feature-store payload to current storage semantics."""
 
-    return _migrate_v4_to_v5_payload(
-        _migrate_v3_to_v4_payload(
-            _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
+    return _migrate_v5_to_v6_payload(
+        _migrate_v4_to_v5_payload(
+            _migrate_v3_to_v4_payload(
+                _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
+            )
         )
     )
 
@@ -531,21 +533,31 @@ async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
 async def migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v2 feature-store payload to current storage semantics."""
 
-    return _migrate_v4_to_v5_payload(
-        _migrate_v3_to_v4_payload(_migrate_v2_to_v3_payload(data))
+    return _migrate_v5_to_v6_payload(
+        _migrate_v4_to_v5_payload(
+            _migrate_v3_to_v4_payload(_migrate_v2_to_v3_payload(data))
+        )
     )
 
 
 async def migrate_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v3 feature-store payload to current storage semantics."""
 
-    return _migrate_v4_to_v5_payload(_migrate_v3_to_v4_payload(data))
+    return _migrate_v5_to_v6_payload(
+        _migrate_v4_to_v5_payload(_migrate_v3_to_v4_payload(data))
+    )
 
 
 async def migrate_v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
     """Migrate a v4 feature-store payload to current storage semantics."""
 
-    return _migrate_v4_to_v5_payload(data)
+    return _migrate_v5_to_v6_payload(_migrate_v4_to_v5_payload(data))
+
+
+async def migrate_v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
+    """Migrate a v5 feature-store payload to canonical NILM identities."""
+
+    return _migrate_v5_to_v6_payload(data)
 
 
 def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
@@ -562,6 +574,8 @@ def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
         payload = _migrate_v3_to_v4_payload(payload)
     if version < 5:
         payload = _migrate_v4_to_v5_payload(payload)
+    if version < 6:
+        payload = _migrate_v5_to_v6_payload(payload)
     payload["schema_version"] = STORAGE_VERSION
     return payload
 
@@ -617,6 +631,31 @@ def _migrate_v4_to_v5_payload(data: Any) -> dict[str, Any]:
         payload.get("nilm_session_history_by_circuit", {})
     )
     return payload
+
+
+def _migrate_v5_to_v6_payload(data: Any) -> dict[str, Any]:
+    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
+    payload["schema_version"] = STORAGE_VERSION
+    payload["nilm_appliance_assignments_by_circuit"] = (
+        _nilm_assignments_with_identity(
+            payload.get("nilm_appliance_assignments_by_circuit", {})
+        )
+    )
+    return payload
+
+
+def _nilm_assignments_with_identity(
+    value: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    assignments_by_circuit = _dict_of_list_dicts(value)
+    for circuit_id, assignments in assignments_by_circuit.items():
+        for assignment in assignments:
+            assignment_id = str(assignment.get("assignment_id") or "").strip()
+            if not assignment_id:
+                continue
+            assignment["appliance_key"] = f"nilm:{assignment_id}"
+            assignment.setdefault("mains_circuit_id", circuit_id)
+    return assignments_by_circuit
 
 
 def _nilm_assignments_from_legacy_review_states(
@@ -971,6 +1010,8 @@ class FeatureStore:
                     return await migrate_v3_to_v4(old_data)
                 if old_major_version == 4:
                     return await migrate_v4_to_v5(old_data)
+                if old_major_version == 5:
+                    return await migrate_v5_to_v6(old_data)
                 if old_major_version == STORAGE_VERSION:
                     return _migrated_feature_store_payload(old_data)
                 raise NotImplementedError

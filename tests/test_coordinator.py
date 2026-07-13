@@ -6903,6 +6903,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
             "last_seen": now - timedelta(minutes=45),
             "active_session_id": "session-open",
             "latest_session_id": "session-open",
+            "current_session_duration_seconds": 2700.0,
             "estimated_energy_kwh_today": 1.2,
         }
     )
@@ -6935,6 +6936,11 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert "estimated" in runtime_alert.message.lower()
     assert runtime_alert.features["source_type"] == "nilm_estimate"
     assert runtime_alert.features["confidence"] == pytest.approx(0.86)
+    assert runtime_alert.features["primary_target"] == (
+        "nilm:assignment-dishwasher"
+    )
+    assert runtime_alert.features["source_context"]["mains_circuit_id"] == "mains"
+    assert runtime_alert.features["evidence_context"]["session_id"] == "session-open"
 
     unvalidated_state = SimpleNamespace(
         **{**running_state.__dict__, "model_status": "assigned"}

@@ -41,6 +41,9 @@ SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
 SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY = "validate_nilm_assignment_history"
 SERVICE_RENAME_NILM_APPLIANCE = "rename_nilm_appliance"
 SERVICE_CHANGE_NILM_APPLIANCE_PROFILE = "change_nilm_appliance_profile"
+SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER = (
+    "convert_nilm_appliance_to_direct_meter"
+)
 SERVICE_MERGE_NILM_ASSIGNMENTS = "merge_nilm_assignments"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
@@ -139,6 +142,9 @@ ATTR_SOURCE_SIGNATURE_ID = "source_signature_id"
 ATTR_TARGET_SIGNATURE_ID = "target_signature_id"
 ATTR_SOURCE_ASSIGNMENT_ID = "source_assignment_id"
 ATTR_TARGET_ASSIGNMENT_ID = "target_assignment_id"
+ATTR_DIRECT_CIRCUIT_ID = "direct_circuit_id"
+ATTR_KEEP_ASSIGNMENT_FOR_MASKING = "keep_assignment_for_masking"
+ATTR_KEEP_PUBLISHED_ESTIMATE = "keep_published_estimate"
 ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
@@ -179,6 +185,20 @@ def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> C
 
 def _circuit_schema(*optional: str) -> Callable:
     return _schema(optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, *optional))
+
+
+def _boolean_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "on", "1"}:
+            return True
+        if normalized in {"false", "no", "off", "0"}:
+            return False
+    if isinstance(value, (int, float)) and value in {0, 1}:
+        return bool(value)
+    raise HomeAssistantError(f"Expected a boolean value, got {value!r}")
 
 
 CIRCUIT_SERVICE_SCHEMA = _circuit_schema()
@@ -390,6 +410,15 @@ NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID, ATTR_APPLIANCE_PROFILE),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
+NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA = _schema(
+    required=(ATTR_ASSIGNMENT_ID, ATTR_DIRECT_CIRCUIT_ID),
+    optional=(
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTITY_ID,
+        ATTR_KEEP_ASSIGNMENT_FOR_MASKING,
+        ATTR_KEEP_PUBLISHED_ESTIMATE,
+    ),
+)
 NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA = _schema(
     required=(ATTR_SOURCE_ASSIGNMENT_ID, ATTR_TARGET_ASSIGNMENT_ID),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -456,6 +485,9 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RENAME_NILM_APPLIANCE: NILM_RENAME_APPLIANCE_SERVICE_SCHEMA,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE: (
         NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA
+    ),
+    SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER: (
+        NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA
     ),
     SERVICE_MERGE_NILM_ASSIGNMENTS: NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
@@ -912,6 +944,28 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_ASSIGNMENT_ID),
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+            )
+        return
+
+    if service == SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_coordinators(hass, circuit_id):
+            await _call_if_present(
+                coordinator,
+                "async_convert_nilm_assignment_to_direct_meter",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+                direct_circuit_id=data.get(ATTR_DIRECT_CIRCUIT_ID),
+                keep_assignment_for_masking=data.get(
+                    ATTR_KEEP_ASSIGNMENT_FOR_MASKING,
+                    True,
+                ) if ATTR_KEEP_ASSIGNMENT_FOR_MASKING not in data else _boolean_value(
+                    data[ATTR_KEEP_ASSIGNMENT_FOR_MASKING]
+                ),
+                keep_published_estimate=_boolean_value(data.get(
+                    ATTR_KEEP_PUBLISHED_ESTIMATE,
+                    False,
+                )),
             )
         return
 

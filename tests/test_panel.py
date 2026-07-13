@@ -1426,6 +1426,13 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "profile_options"
     ]
     assert {"value": "mixed", "label": "Mixed"} in change_profile["profile_options"]
+    assert payload["assignments"][0]["actions"]["convert_to_direct_meter"] == {
+        "domain": DOMAIN,
+        "service": "convert_nilm_appliance_to_direct_meter",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["direct_circuit_id"],
+        "target_options": [{"value": "pool_pump", "label": "Pool Pump"}],
+    }
     assert payload["assignments"][0]["actions"]["publish"] == {
         "domain": DOMAIN,
         "service": "publish_nilm_appliance_assignment",

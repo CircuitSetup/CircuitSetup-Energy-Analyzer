@@ -4002,6 +4002,36 @@ def test_water_context_alert_processor_returns_flow_alert() -> None:
     }
 
 
+def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_specs,
+    )
+
+    assignments = [
+        {
+            "assignment_id": "retired",
+            "signature_fingerprints": ["retired-signature"],
+            "lifecycle_state": "retired",
+        },
+        {
+            "assignment_id": "converted",
+            "signature_fingerprints": ["converted-signature"],
+            "conversion_state": "direct_meter",
+            "keep_assignment_for_masking": False,
+        },
+        {
+            "assignment_id": "masking",
+            "signature_fingerprints": ["masking-signature"],
+            "conversion_state": "direct_meter",
+            "keep_assignment_for_masking": True,
+        },
+    ]
+
+    assert _nilm_session_specs([], assignments) == [
+        ("masking-signature", "masking")
+    ]
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 

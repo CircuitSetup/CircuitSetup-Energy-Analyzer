@@ -449,7 +449,7 @@ def test_calibration_report_script_runs_directly() -> None:
     assert "# Confidence Calibration Report" in completed.stdout
 
 
-def test_repository_keeps_appliance_qa_docs_local_only() -> None:
+def test_repository_only_tracks_the_explicit_appliance_qa_matrix() -> None:
     repo_root = Path(__file__).parents[1]
     ignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
 
@@ -464,4 +464,7 @@ def test_repository_keeps_appliance_qa_docs_local_only() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.strip() == ""
+    tracked = set(completed.stdout.splitlines())
+    assert {path for path in tracked if path.startswith("docs/qa/")} == {
+        "docs/qa/end-user-usability-test-matrix.md"
+    }

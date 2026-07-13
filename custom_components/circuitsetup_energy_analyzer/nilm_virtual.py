@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
 
 from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import DOMAIN
 from .models import AlertEvidence, SensorRole, Severity
-from .nilm import NilmEdge, NilmSession, pair_nilm_sessions
+from .nilm import (
+    NilmEdge,
+    NilmSession,
+    build_nilm_appliance_alert_payload,
+    build_nilm_appliance_identity,
+    evaluate_nilm_validation_readiness,
+    nilm_session_to_dict,
+    pair_nilm_sessions,
+    summarize_nilm_assignment_sessions,
+)
 
 NILM_FINISHED_CONFIDENCE_THRESHOLD = 0.8
 NILM_UNUSUAL_CONFIDENCE_THRESHOLD = 0.8
@@ -38,6 +47,20 @@ class NilmVirtualApplianceState:
     mains_source: str | None = None
     appliance_profile: str | None = None
     last_validation: str | None = None
+    appliance_key: str = ""
+    sessions: tuple[dict[str, Any], ...] = ()
+    runtime_today_seconds: float = 0.0
+    run_count_today: int = 0
+    current_session_duration_seconds: float | None = None
+    current_session_id: str | None = None
+    last_matched_session_id: str | None = None
+    latest_signature_id: str | None = None
+    validation_readiness: dict[str, Any] | None = None
+    confirmed_session_ids: frozenset[str] = frozenset()
+    rejected_session_ids: frozenset[str] = frozenset()
+    adjusted_session_ids: frozenset[str] = frozenset()
+    reference_time: datetime | None = None
+    time_zone: str = "UTC"
 
 
 def published_nilm_virtual_appliance_states(
@@ -251,13 +274,16 @@ def nilm_virtual_unusual_runtime_alert(
         return None
     if not _nilm_unusual_alert_allowed(state):
         return None
-    started_at = getattr(state, "last_seen", None)
-    if not isinstance(started_at, datetime):
+    duration_seconds = _optional_positive_float(
+        getattr(state, "current_session_duration_seconds", None)
+    )
+    if duration_seconds is None:
         return None
     baseline_minutes = _optional_positive_float(
         assignment.get("expected_runtime_minutes"),
     )
-    observed_minutes = max(0.0, (now - started_at).total_seconds() / 60.0)
+    observed_minutes = duration_seconds / 60.0
+    started_at = now - timedelta(seconds=duration_seconds)
     repeated_count = _positive_int(assignment.get("unusual_runtime_repeated_count"))
     if (
         baseline_minutes is None
@@ -347,8 +373,11 @@ def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
         "estimated": True,
         "source": "nilm",
         "source_type": "nilm_estimate",
+        "appliance_key": state.appliance_key,
         "assignment_id": state.assignment_id,
+        "appliance_id": state.appliance_id,
         "appliance_profile": state.appliance_profile,
+        "mains_circuit_id": state.mains_circuit_id,
         "mains_source": state.mains_source,
         "confidence": state.confidence,
         "model_status": state.model_status,
@@ -366,51 +395,217 @@ def _nilm_virtual_appliance_state(
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     if not assignment_id:
         return None
-    sessions = _nilm_assignment_sessions(
+    derived_sessions = _nilm_assignment_sessions(
         circuit_id,
         assignment,
         edges,
         signatures_by_id,
     )
-    open_session = _latest_nilm_session(
-        session for session in sessions if session.end is None
+    session_payloads = _merged_assignment_session_payloads(
+        coordinator,
+        circuit_id,
+        assignment,
+        derived_sessions,
     )
-    latest_session = open_session or _latest_nilm_session(sessions)
-    reference_date = _nilm_reference_date(edges, sessions)
-    return NilmVirtualApplianceState(
-        appliance_id=str(assignment.get("appliance_id") or assignment_id),
-        assignment_id=assignment_id,
-        display_name=str(
-            assignment.get("display_name")
-            or assignment.get("appliance_id")
-            or assignment_id
+    now = _nilm_now(coordinator, edges, derived_sessions, session_payloads)
+    time_zone = _nilm_time_zone(coordinator)
+    session_summary = summarize_nilm_assignment_sessions(
+        assignment,
+        session_payloads,
+        now=now,
+        time_zone=time_zone,
+    )
+    identity = build_nilm_appliance_identity(
+        assignment,
+        mains_source_entity_id=_mains_source_entity_id(coordinator, circuit_id),
+    )
+    open_session = next(
+        (
+            session
+            for session in session_summary["sessions"]
+            if str(session.get("session_id") or "")
+            == session_summary["current_session_id"]
         ),
+        None,
+    )
+    rejected_session_ids = {
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("rejected_session_ids"))
+        if str(value or "").strip()
+    }
+    latest_session = _latest_session_payload(
+        [
+            session
+            for session in session_summary["sessions"]
+            if str(session.get("session_id") or "").strip()
+            not in rejected_session_ids
+        ]
+    )
+    return NilmVirtualApplianceState(
+        appliance_id=identity.appliance_id,
+        assignment_id=assignment_id,
+        display_name=identity.display_name,
         is_running=open_session is not None,
         estimated_power_w=(
-            round(float(open_session.median_power_w), 3) if open_session else 0.0
+            round(_clamped_float(open_session.get("median_power_w")), 3)
+            if open_session
+            else 0.0
         ),
-        estimated_energy_kwh_today=_nilm_daily_energy(sessions, reference_date),
+        estimated_energy_kwh_today=session_summary[
+            "estimated_energy_today_kwh"
+        ],
         confidence=_clamped_float(assignment.get("confidence"), upper=1.0),
-        last_seen=_nilm_session_seen(latest_session),
+        last_seen=_session_payload_seen(latest_session),
         active_signature_id=(
-            open_session.signature_fingerprint if open_session else None
-        ),
-        active_session_id=open_session.session_id if open_session else None,
-        latest_session_id=latest_session.session_id if latest_session else None,
-        model_status=str(assignment.get("lifecycle_state") or "candidate"),
-        mains_circuit_id=circuit_id,
-        mains_source=_mains_source_entity_id(coordinator, circuit_id),
-        appliance_profile=(
-            str(assignment.get("appliance_profile"))
-            if assignment.get("appliance_profile")
+            str(open_session.get("signature_fingerprint") or "") or None
+            if open_session
             else None
         ),
+        active_session_id=session_summary["current_session_id"],
+        latest_session_id=(
+            str(latest_session.get("session_id") or "") or None
+            if latest_session
+            else None
+        ),
+        model_status=str(assignment.get("lifecycle_state") or "candidate"),
+        mains_circuit_id=identity.mains_circuit_id or circuit_id,
+        mains_source=identity.mains_source_entity_id,
+        appliance_profile=identity.appliance_profile,
         last_validation=(
             str(assignment.get("last_validation"))
             if assignment.get("last_validation")
             else None
         ),
+        appliance_key=identity.appliance_key,
+        sessions=tuple(session_summary["sessions"]),
+        runtime_today_seconds=session_summary["runtime_today_seconds"],
+        run_count_today=session_summary["run_count_today"],
+        current_session_duration_seconds=session_summary[
+            "current_session_duration_seconds"
+        ],
+        current_session_id=session_summary["current_session_id"],
+        last_matched_session_id=session_summary["last_matched_session_id"],
+        latest_signature_id=(
+            str(latest_session.get("signature_fingerprint") or "") or None
+            if latest_session
+            else None
+        ),
+        validation_readiness=evaluate_nilm_validation_readiness(
+            assignment,
+            session_summary["sessions"],
+            min_confirmed_sessions=3,
+            min_distinct_days=3,
+            max_false_positive_rate=0.2,
+            min_confidence=NILM_FINISHED_CONFIDENCE_THRESHOLD,
+            time_zone=time_zone,
+        ),
+        confirmed_session_ids=frozenset(
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("confirmed_session_ids"))
+            if str(value or "").strip()
+        ),
+        rejected_session_ids=frozenset(rejected_session_ids),
+        adjusted_session_ids=frozenset(
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("adjusted_session_ids"))
+            if str(value or "").strip()
+        ),
+        reference_time=now,
+        time_zone=time_zone,
     )
+
+
+def _merged_assignment_session_payloads(
+    coordinator: Any,
+    circuit_id: str,
+    assignment: Mapping[str, Any],
+    derived_sessions: Iterable[NilmSession],
+) -> list[dict[str, Any]]:
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    session_ids = {
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("session_ids"))
+        if str(value or "").strip()
+    }
+    store_data = getattr(coordinator, "store_data", None)
+    histories = getattr(store_data, "nilm_session_history_by_circuit", {})
+    stored = histories.get(circuit_id, ()) if isinstance(histories, Mapping) else ()
+    merged: dict[str, dict[str, Any]] = {}
+    for session in _iter_items(stored):
+        if not isinstance(session, Mapping):
+            continue
+        session_id = str(session.get("session_id") or "").strip()
+        owner = str(session.get("assignment_id") or "").strip()
+        if not session_id:
+            continue
+        if owner and owner != assignment_id:
+            continue
+        if not owner and session_id not in session_ids:
+            continue
+        merged[session_id] = dict(session)
+    if not merged:
+        for session in derived_sessions:
+            payload = nilm_session_to_dict(session)
+            merged[session.session_id] = payload
+    return sorted(
+        merged.values(),
+        key=lambda session: str(session.get("start") or ""),
+    )
+
+
+def _latest_session_payload(
+    sessions: Iterable[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    return max(
+        sessions,
+        key=lambda session: _session_payload_seen(session)
+        or datetime.min.replace(tzinfo=UTC),
+        default=None,
+    )
+
+
+def _session_payload_seen(session: Mapping[str, Any] | None) -> datetime | None:
+    if session is None:
+        return None
+    for value in (session.get("end"), session.get("start")):
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _nilm_now(
+    coordinator: Any,
+    edges: Iterable[NilmEdge],
+    sessions: Iterable[NilmSession],
+    payloads: Iterable[Mapping[str, Any]],
+) -> datetime:
+    current_time = getattr(coordinator, "current_time", None)
+    if callable(current_time):
+        value = current_time()
+        if isinstance(value, datetime):
+            return value
+    values = [edge.timestamp for edge in edges]
+    values.extend(
+        seen
+        for session in sessions
+        if (seen := _nilm_session_seen(session)) is not None
+    )
+    values.extend(
+        seen
+        for payload in payloads
+        if (seen := _session_payload_seen(payload)) is not None
+    )
+    return max(values, default=datetime.now().astimezone())
+
+
+def _nilm_time_zone(coordinator: Any) -> str:
+    hass = getattr(coordinator, "hass", None)
+    config = getattr(hass, "config", None)
+    return str(getattr(config, "time_zone", "UTC") or "UTC")
 
 
 def _published_assignment(assignment: Mapping[str, Any]) -> bool:
@@ -472,13 +667,56 @@ def _nilm_alert_features(
     *,
     confidence: float,
 ) -> dict[str, Any]:
+    assignment_id = str(getattr(state, "assignment_id", "") or "")
+    appliance_key = (
+        str(getattr(state, "appliance_key", "") or "")
+        or f"nilm:{assignment_id}"
+    )
+    mains_circuit_id = str(
+        getattr(state, "mains_circuit_id", "") or ""
+    )
+    session_id = str(
+        getattr(state, "active_session_id", "")
+        or getattr(state, "latest_session_id", "")
+        or ""
+    )
+    signature_fingerprint = str(
+        getattr(state, "active_signature_id", "")
+        or getattr(state, "latest_signature_id", "")
+        or ""
+    )
+    identity = build_nilm_appliance_identity(
+        {
+            "assignment_id": assignment_id,
+            "appliance_id": str(getattr(state, "appliance_id", "") or ""),
+            "display_name": str(getattr(state, "display_name", "") or ""),
+            "mains_circuit_id": mains_circuit_id,
+            "appliance_profile": str(
+                getattr(state, "appliance_profile", "") or "nilm_virtual"
+            ),
+        },
+        mains_source_entity_id=getattr(state, "mains_source", None),
+    )
+    routing = build_nilm_appliance_alert_payload(
+        identity,
+        session_id=session_id or None,
+        signature_fingerprint=signature_fingerprint or None,
+    )
     return {
         "source": "nilm",
         "source_type": "nilm_estimate",
         "estimated": True,
         "confidence": confidence,
-        "assignment_id": str(getattr(state, "assignment_id", "") or ""),
+        "primary_target": appliance_key,
+        "appliance_key": appliance_key,
+        "assignment_id": assignment_id,
         "appliance_id": str(getattr(state, "appliance_id", "") or ""),
+        "display_name": str(getattr(state, "display_name", "") or ""),
+        "mains_circuit_id": mains_circuit_id,
+        "mains_source_entity_id": getattr(state, "mains_source", None),
+        "session_id": session_id or None,
+        "signature_fingerprint": signature_fingerprint or None,
+        **routing,
         "notification_type": notification_type,
         "notification_key": notification_key,
     }

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH, alert_evidence_path
+from .baseline import build_baseline
+from .local_time import as_ha_local, local_date, local_day_time
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -211,6 +213,12 @@ class ApplianceDetail:
     learning_readiness: dict[str, Any] | None = None
     assignment_id: str | None = None
     mains_source: str | None = None
+    appliance_key: str | None = None
+    appliance_id: str | None = None
+    mains_circuit_id: str | None = None
+    current_session_duration_seconds: float | None = None
+    current_session: dict[str, Any] | None = None
+    last_matched_session: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return JSON-friendly data."""
@@ -245,9 +253,12 @@ def appliance_detail_for_circuit(
         source_type=source_type,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
     )
+    converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
     return ApplianceDetail(
         circuit_id=config.circuit_id,
-        display_name=config.name,
+        display_name=str(
+            (converted_assignment or {}).get("display_name") or config.name
+        ),
         appliance_profile=config.appliance_profile.value,
         source_type=source_type,
         confidence=None,
@@ -286,7 +297,54 @@ def appliance_detail_for_circuit(
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
         source_quality=_direct_source_quality(config, state),
         learning_readiness=_learning_readiness(state, config.circuit_id),
+        assignment_id=(
+            str(converted_assignment.get("assignment_id") or "") or None
+            if converted_assignment
+            else None
+        ),
+        appliance_key=(
+            str(converted_assignment.get("appliance_key") or "")
+            or f"nilm:{converted_assignment.get('assignment_id')}"
+            if converted_assignment
+            else f"circuit:{config.circuit_id}"
+        ),
+        appliance_id=(
+            str(converted_assignment.get("appliance_id") or "")
+            or config.circuit_id
+            if converted_assignment
+            else config.circuit_id
+        ),
+        mains_circuit_id=(
+            str(converted_assignment.get("mains_circuit_id") or "") or None
+            if converted_assignment
+            else config.circuit_id
+            if source_type == "mains"
+            else None
+        ),
     )
+
+
+def _converted_nilm_assignment(
+    coordinator: Any,
+    circuit_id: str,
+) -> Mapping[str, Any] | None:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return None
+    for assignments in assignments_by_circuit.values():
+        for assignment in _iter_items(assignments):
+            if (
+                isinstance(assignment, Mapping)
+                and assignment.get("conversion_state") == "direct_meter"
+                and str(assignment.get("direct_circuit_id") or "") == circuit_id
+            ):
+                return assignment
+    return None
 
 
 def appliance_detail_for_assignment(
@@ -298,21 +356,42 @@ def appliance_detail_for_assignment(
     if not requested_id:
         return None
 
+    stored_assignment = _stored_nilm_assignment(coordinator, requested_id)
+    if (
+        stored_assignment is not None
+        and stored_assignment.get("conversion_state") == "direct_meter"
+    ):
+        direct_circuit_id = str(
+            stored_assignment.get("direct_circuit_id") or ""
+        ).strip()
+        if direct_circuit_id:
+            return appliance_detail_for_circuit(coordinator, direct_circuit_id)
+
     for state in nilm_virtual_appliance_states(coordinator, published_only=False):
         if state.assignment_id != requested_id:
             continue
-        return _nilm_detail(_coordinator_state(coordinator), state)
+        return _nilm_detail(coordinator, state)
     return None
 
 
 def _nilm_detail(
-    analyzer_state: Any,
+    coordinator: Any,
     state: NilmVirtualApplianceState,
 ) -> ApplianceDetail:
+    analyzer_state = _coordinator_state(coordinator)
     evidence_path = _nilm_evidence_path(state)
+    validation_ready = bool(
+        state.validation_readiness and state.validation_readiness.get("ready")
+    )
     review_needed = (
         state.confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
         or state.model_status in NILM_REVIEW_MODEL_STATES
+        or not validation_ready
+    )
+    needs_history = (
+        not validation_ready
+        and state.confidence >= NILM_FINISHED_CONFIDENCE_THRESHOLD
+        and state.model_status not in NILM_REVIEW_MODEL_STATES
     )
     return ApplianceDetail(
         circuit_id=state.mains_circuit_id,
@@ -327,32 +406,33 @@ def _nilm_detail(
         energy_state="Estimated",
         current_power_w=state.estimated_power_w,
         daily_energy_kwh=state.estimated_energy_kwh_today,
-        runtime_today_seconds=None,
-        run_count_today=None,
-        cost_today=_estimated_cost(
-            state.estimated_energy_kwh_today,
-            _positive_state_number(
-                analyzer_state,
-                "cost_current_rate_by_circuit",
-                state.mains_circuit_id,
-            ),
-        ),
-        today_vs_normal=(),
+        runtime_today_seconds=state.runtime_today_seconds,
+        run_count_today=state.run_count_today,
+        cost_today=None,
+        today_vs_normal=_nilm_metric_comparisons(coordinator, state),
         expectations=_nilm_expectations(
             state,
             review_needed=review_needed,
             evidence_path=evidence_path,
         ),
-        recent_timeline=_recent_timeline(analyzer_state, state.mains_circuit_id),
+        recent_timeline=_nilm_session_timeline(state),
         active_alerts=_active_alert_summaries(
             analyzer_state,
             state.mains_circuit_id,
             config=None,
             assignment_id=state.assignment_id,
         ),
-        next_step="Review NILM assignment" if review_needed else "No action needed",
+        next_step=(
+            "Confirm more NILM sessions"
+            if needs_history
+            else "Review NILM assignment"
+            if review_needed
+            else "No action needed"
+        ),
         what_to_check_first=(
-            ("Validate this estimated appliance before relying on alerts.",)
+            ("Confirm this appliance across more days before using comparisons.",)
+            if needs_history
+            else ("Validate this estimated appliance before relying on alerts.",)
             if review_needed
             else ("Review NILM confidence before acting on appliance alerts.",)
         ),
@@ -366,11 +446,240 @@ def _nilm_detail(
         },
         learning_readiness={
             "status": "needs_validation" if review_needed else "ready",
-            "label": "Needs validation" if review_needed else "Ready",
+            "label": (
+                "Not enough confirmed history"
+                if needs_history
+                else "Needs validation"
+                if review_needed
+                else "Ready"
+            ),
         },
         assignment_id=state.assignment_id,
         mains_source=state.mains_source,
+        appliance_key=state.appliance_key,
+        appliance_id=state.appliance_id,
+        mains_circuit_id=state.mains_circuit_id,
+        current_session_duration_seconds=state.current_session_duration_seconds,
+        current_session=_nilm_session_detail(state, state.current_session_id),
+        last_matched_session=_nilm_session_detail(
+            state,
+            state.last_matched_session_id,
+        ),
     )
+
+
+def _nilm_metric_comparisons(
+    coordinator: Any,
+    state: NilmVirtualApplianceState,
+) -> tuple[MetricComparison, ...]:
+    readiness = state.validation_readiness or {}
+    if not readiness.get("ready") or state.model_status not in {
+        "published",
+        "validated",
+    }:
+        return ()
+    specs = (
+        (
+            "daily_energy_kwh",
+            "Energy so far",
+            "kWh",
+            state.estimated_energy_kwh_today,
+        ),
+        (
+            "runtime_today_seconds",
+            "Runtime so far",
+            "s",
+            state.runtime_today_seconds,
+        ),
+        (
+            "run_count_today",
+            "Runs so far",
+            "count",
+            float(state.run_count_today),
+        ),
+    )
+    comparisons: list[MetricComparison] = []
+    for metric_id, label, unit, current in specs:
+        baseline = _nilm_session_baseline(state, metric_id)
+        comparison = _metric_comparison(
+            metric_id=metric_id,
+            label=label,
+            unit=unit,
+            current=current,
+            baseline=baseline,
+            comparison_mode=ComparisonMode.SAME_TIME_OF_DAY,
+            as_of=state.reference_time,
+            explanation="Validated assignment-specific NILM session history.",
+        )
+        if comparison is not None:
+            comparisons.append(comparison)
+    return tuple(comparisons)
+
+
+def _nilm_session_baseline(
+    state: NilmVirtualApplianceState,
+    metric_id: str,
+) -> ComparisonBaseline | None:
+    if state.reference_time is None:
+        return None
+    current_local = as_ha_local(state.reference_time, state.time_zone)
+    current_date = current_local.date()
+    as_of_clock = current_local.time().replace(tzinfo=None)
+    daily: dict[Any, dict[str, float]] = {}
+    for session in state.sessions:
+        session_id = str(session.get("session_id") or "").strip()
+        if session_id not in state.confirmed_session_ids or not session.get("end"):
+            continue
+        start = _datetime_or_none(session.get("start"))
+        end = _datetime_or_none(session.get("end"))
+        if start is None or end is None:
+            continue
+        total_duration = max(
+            (
+                end.astimezone(UTC) - start.astimezone(UTC)
+            ).total_seconds(),
+            0.0,
+        )
+        session_energy = max(
+            _number_or_none(session.get("estimated_energy_kwh")) or 0.0,
+            0.0,
+        )
+        day = local_date(start, state.time_zone)
+        final_day = local_date(end, state.time_zone)
+        while day <= final_day and day < current_date:
+            day_start = local_day_time(day, datetime.min.time(), state.time_zone)
+            day_cutoff = local_day_time(day, as_of_clock, state.time_zone)
+            overlap_start = max(start, day_start)
+            overlap_end = min(end, day_cutoff)
+            if overlap_end > overlap_start:
+                values = daily.setdefault(day, _empty_nilm_daily_metrics())
+                overlap_seconds = (
+                    overlap_end.astimezone(UTC)
+                    - overlap_start.astimezone(UTC)
+                ).total_seconds()
+                values["runtime_today_seconds"] += overlap_seconds
+                if total_duration > 0:
+                    values["daily_energy_kwh"] += session_energy * (
+                        overlap_seconds / total_duration
+                    )
+            if local_date(start, state.time_zone) == day and start < day_cutoff:
+                daily.setdefault(day, _empty_nilm_daily_metrics())[
+                    "run_count_today"
+                ] += 1.0
+            day += timedelta(days=1)
+    samples = [values[metric_id] for values in daily.values() if metric_id in values]
+    if len(samples) < 3:
+        return None
+    baseline = build_baseline(metric_id, samples)
+    return (
+        baseline.p10,
+        baseline.p90,
+        baseline.median,
+        baseline.confidence,
+        "validated_nilm_sessions",
+    )
+
+
+def _empty_nilm_daily_metrics() -> dict[str, float]:
+    return {
+        "daily_energy_kwh": 0.0,
+        "runtime_today_seconds": 0.0,
+        "run_count_today": 0.0,
+    }
+
+
+def _nilm_session_detail(
+    state: NilmVirtualApplianceState,
+    session_id: str | None,
+) -> dict[str, Any] | None:
+    if not session_id:
+        return None
+    for session in state.sessions:
+        if str(session.get("session_id") or "") != session_id:
+            continue
+        duration = _number_or_none(session.get("duration_seconds"))
+        if not session.get("end"):
+            duration = state.current_session_duration_seconds
+        return {
+            "session_id": session_id,
+            "signature_fingerprint": str(
+                session.get("signature_fingerprint") or ""
+            )
+            or None,
+            "start": _iso_value(session.get("start")),
+            "end": _iso_value(session.get("end")),
+            "duration_seconds": duration,
+            "estimated_energy_kwh": _number_or_none(
+                session.get("estimated_energy_kwh")
+            ),
+            "confidence": _number_or_none(session.get("confidence")),
+            "validation_result": _nilm_session_validation_result(
+                state,
+                session_id,
+            ),
+        }
+    return None
+
+
+def _stored_nilm_assignment(
+    coordinator: Any,
+    assignment_id: str,
+) -> Mapping[str, Any] | None:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return None
+    for assignments in assignments_by_circuit.values():
+        for assignment in _iter_items(assignments):
+            if (
+                isinstance(assignment, Mapping)
+                and str(assignment.get("assignment_id") or "") == assignment_id
+            ):
+                return assignment
+    return None
+
+
+def _nilm_session_validation_result(
+    state: NilmVirtualApplianceState,
+    session_id: str,
+) -> str | None:
+    if session_id in state.confirmed_session_ids:
+        return "confirmed"
+    if session_id in state.rejected_session_ids:
+        return "rejected"
+    if session_id in state.adjusted_session_ids:
+        return "adjusted"
+    return None
+
+
+def _nilm_session_timeline(
+    state: NilmVirtualApplianceState,
+) -> dict[str, Any] | None:
+    items: list[dict[str, Any]] = []
+    for session in reversed(state.sessions[-20:]):
+        detail = _nilm_session_detail(
+            state,
+            str(session.get("session_id") or "") or None,
+        )
+        if detail is None:
+            continue
+        running = not detail.get("end")
+        items.append(
+            {
+                **detail,
+                "timestamp": detail.get("start"),
+                "kind": "running" if running else "completed",
+                "title": "Estimated run in progress" if running else "Estimated run",
+                "detail": (
+                    "Estimated from the assigned NILM signature on the mains source."
+                ),
+            }
+        )
+    return {"status": "activity", "items": items} if items else None
 
 
 def metric_comparisons_for_circuit(
@@ -951,10 +1260,14 @@ def _active_alert_summaries(
                 repeated_count=int(alert.repeated_count),
                 first_seen=_iso(alert.first_seen),
                 last_seen=_iso(alert.last_seen),
-                evidence_path=_evidence_path(
-                    circuit_id=circuit_id,
-                    alert_id=notification_id_for_alert(alert),
-                    feature=alert.feature,
+                evidence_path=(
+                    alert_evidence_path(alert)
+                    if assignment_id is not None
+                    else _evidence_path(
+                        circuit_id=circuit_id,
+                        alert_id=notification_id_for_alert(alert),
+                        feature=alert.feature,
+                    )
                 )
                 if config is not None or assignment_id is not None
                 else None,
@@ -1504,6 +1817,12 @@ def _iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         return value.isoformat()
     return None
+
+
+def _iso_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value or None
+    return _iso(value)
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

@@ -3,8 +3,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
     NilmController,
+)
+from custom_components.circuitsetup_energy_analyzer.storage import (
+    FeatureStoreData,
+    feature_store_data_from_dict,
+    feature_store_data_to_dict,
 )
 
 
@@ -100,6 +107,167 @@ def test_nilm_controller_owns_assignment_helper_behavior() -> None:
     assert updated["session_ids"] == ["session-1"]
     assert updated["label_interval_ids"] == ["interval-1"]
     assert updated["confidence"] == 0.82
+
+
+def test_nilm_assignment_identity_and_history_survive_restart() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-old",
+                    "assignment_id": "assignment-dishwasher",
+                    "start": "2026-06-01T10:00:00+00:00",
+                    "end": "2026-06-01T10:30:00+00:00",
+                },
+                {
+                    "session_id": "session-other",
+                    "assignment_id": "assignment-dryer",
+                    "start": "2026-06-02T11:00:00+00:00",
+                    "end": "2026-06-02T11:30:00+00:00",
+                },
+                {
+                    "session_id": "session-new",
+                    "assignment_id": "assignment-dishwasher",
+                    "start": "2026-06-02T10:00:00+00:00",
+                    "end": "2026-06-02T10:30:00+00:00",
+                },
+            ]
+        }
+    )
+    controller = _nilm_controller(
+        SimpleNamespace(current_time=lambda: now, store_data=store_data)
+    )
+    assignment = controller.upsert_assignment(
+        "mains",
+        assignment_id="assignment-dishwasher",
+        appliance_id="dishwasher",
+        label="Kitchen Dishwasher",
+        appliance_profile="dishwasher",
+        session_id="session-new",
+    )
+    assignment.update(
+        {
+            "confirmed_session_ids": ["session-new"],
+            "rejected_session_ids": ["session-old"],
+            "last_validation": "correct",
+        }
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(store_data))
+    restarted = _nilm_controller(
+        SimpleNamespace(current_time=lambda: now, store_data=restored)
+    )
+    restored_assignment = restarted.assignment_for_id(
+        "mains",
+        "assignment-dishwasher",
+    )
+    history = restarted.assignment_session_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert restored_assignment["appliance_key"] == "nilm:assignment-dishwasher"
+    assert restored_assignment["display_name"] == "Kitchen Dishwasher"
+    assert restored_assignment["confirmed_session_ids"] == ["session-new"]
+    assert restored_assignment["rejected_session_ids"] == ["session-old"]
+    assert restored_assignment["last_validation"] == "correct"
+    assert [session["session_id"] for session in history] == [
+        "session-new",
+        "session-old",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_convert_nilm_assignment_to_direct_meter_preserves_history() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    async def async_noop(*_args: object) -> None:
+        return None
+
+    assignment = {
+        "assignment_id": "assignment-dishwasher",
+        "appliance_key": "nilm:assignment-dishwasher",
+        "appliance_id": "dishwasher",
+        "display_name": "Kitchen Dishwasher",
+        "appliance_profile": "dishwasher",
+        "mains_circuit_id": "mains",
+        "signature_fingerprints": ["signature-1"],
+        "session_ids": ["session-1", "session-2"],
+        "confirmed_session_ids": ["session-1"],
+        "rejected_session_ids": ["session-2"],
+        "label_interval_ids": ["interval-1"],
+        "last_validation": "wrong_appliance",
+        "lifecycle_state": "published",
+        "publish_entities": True,
+        "created_device": True,
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        ),
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=async_noop,
+        ),
+        config_entry_controller=SimpleNamespace(async_reload=async_noop),
+    )
+    controller = _nilm_controller(coordinator)
+
+    converted = await controller.async_convert_nilm_assignment_to_direct_meter(
+        "mains",
+        "assignment-dishwasher",
+        direct_circuit_id="dishwasher_direct",
+    )
+
+    assert converted["appliance_key"] == "nilm:assignment-dishwasher"
+    assert converted["display_name"] == "Kitchen Dishwasher"
+    assert converted["appliance_profile"] == "dishwasher"
+    assert converted["signature_fingerprints"] == ["signature-1"]
+    assert converted["session_ids"] == ["session-1", "session-2"]
+    assert converted["confirmed_session_ids"] == ["session-1"]
+    assert converted["rejected_session_ids"] == ["session-2"]
+    assert converted["label_interval_ids"] == ["interval-1"]
+    assert converted["last_validation"] == "wrong_appliance"
+    assert converted["conversion_state"] == "direct_meter"
+    assert converted["direct_circuit_id"] == "dishwasher_direct"
+    assert converted["converted_at"] == now.isoformat()
+    assert converted["publish_entities"] is False
+    assert converted["created_device"] is False
+    assert converted["keep_published_estimate"] is False
+
+    with pytest.raises(ValueError, match="cannot republish"):
+        await controller.async_publish_nilm_appliance_assignment(
+            "mains",
+            "assignment-dishwasher",
+        )
+
+
+def test_assignment_history_prefers_explicit_session_owner() -> None:
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            "mains": [
+                {
+                    "assignment_id": "assignment-one",
+                    "session_ids": ["stale-session"],
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "stale-session",
+                    "assignment_id": "assignment-two",
+                }
+            ]
+        },
+    )
+    controller = _nilm_controller(SimpleNamespace(store_data=store_data))
+
+    assert controller.assignment_session_history("mains", "assignment-one") == []
 
 
 def _nilm_controller(coordinator: object) -> NilmController:

@@ -144,7 +144,12 @@ questions instead of raw diagnostic entity lists:
 - **Direct meter vs Estimated by NILM** labels show whether a value is directly
   measured or inferred from mains power. NILM appliances show confidence and
   validation state; low-confidence NILM asks for review instead of implying a
-  confirmed appliance fault.
+  confirmed appliance fault. Each estimate has a stable
+  `nilm:<assignment_id>` appliance identity, assignment-only session history,
+  runtime and run-count summaries, and alerts that open that appliance's detail
+  while keeping the source mains visible. Today vs Normal stays hidden until
+  enough sessions across multiple days are confirmed with acceptable
+  confidence and false-positive rate.
 - **Setup Health checklist** adds onboarding checklist attributes for source
   data, assignments, CT direction, cumulative kWh, appliance profiles,
   dashboard creation, notifications, NILM, and learning progress.
@@ -691,7 +696,7 @@ Unknown load estimates may include:
 
 These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
 
-Open the separate NILM workspace route from the evidence panel to label signatures, drag across the graph to select one or more appliance intervals, merge duplicate signatures, and create an estimated Home Assistant device for a confirmed assignment. **Label appliance interval** collects the appliance name and type, highlights the active graph selection and matching time fields, and sends the saved evidence directly to Needs Review. Assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace groups work into four lanes: Needs Review, Assigned, Published, and Ignored / Expected. Lane tabs keep the queue scannable while the selected review card's focused inspector owns its choices and single **Apply** decision. The dynamic dashboard NILM card can show the same lane counts when it is available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, health, activity, and energy summaries. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Remove HA Device** or **Retire** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
+Open the separate NILM workspace route from the evidence panel to label signatures, drag across the graph to select one or more appliance intervals, merge duplicate signatures, and create an estimated Home Assistant device for a confirmed assignment. **Label appliance interval** collects the appliance name and type, highlights the active graph selection and matching time fields, and sends the saved evidence directly to Needs Review. Assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace groups work into four lanes: Needs Review, Assigned, Published, and Ignored / Expected. Lane tabs keep the queue scannable while the selected review card's focused inspector owns its choices and single **Apply** decision. The dynamic dashboard NILM card can show the same lane counts when it is available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, runtime, run count, health, activity, and energy summaries. If the same appliance later receives a configured direct meter, **Use Direct Meter** preserves the NILM label and validation history while removing duplicate estimated entities by default. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Remove HA Device** or **Retire** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
 
 ## Suggested settings
 
@@ -840,7 +845,7 @@ The service actions below are optional. They are useful when you want to call an
 | Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
 | Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_unhelpful` |
 | Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
-| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `merge_nilm_assignments`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
+| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `convert_nilm_appliance_to_direct_meter`, `merge_nilm_assignments`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
 | Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
 

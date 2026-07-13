@@ -1521,6 +1521,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             appliance_profile=appliance_profile,
         )
 
+    async def async_convert_nilm_assignment_to_direct_meter(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        direct_circuit_id: str,
+        keep_assignment_for_masking: bool = True,
+        keep_published_estimate: bool = False,
+    ) -> dict[str, Any]:
+        """Link a NILM appliance to a configured direct-meter circuit."""
+        return await self.nilm_controller.async_convert_nilm_assignment_to_direct_meter(
+            circuit_id,
+            assignment_id,
+            direct_circuit_id=direct_circuit_id,
+            keep_assignment_for_masking=keep_assignment_for_masking,
+            keep_published_estimate=keep_published_estimate,
+        )
+
     async def async_merge_nilm_assignments(
         self: Self,
         circuit_id: str,

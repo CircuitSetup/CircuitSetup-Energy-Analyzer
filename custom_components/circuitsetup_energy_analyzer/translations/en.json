@@ -1138,6 +1138,7 @@
         "nilm_session_label_required": "Enter an appliance name before assigning this NILM session.",
         "nilm_assignment_type_required": "Enter an appliance type before changing this NILM assignment.",
         "nilm_assignment_merge_required": "Choose an assignment to merge into.",
+        "nilm_direct_meter_required": "Choose the configured direct-meter circuit.",
         "nilm_assignment_save_unavailable": "Action unavailable: NILM assignment save.",
         "nilm_assignment_no_changes": "No assignment changes to save.",
         "action_unavailable": "Action unavailable: {label}. Reload the evidence panel and try again.",
@@ -1238,6 +1239,7 @@
           "adjust_interval": "Adjust Interval",
           "adjust_label": "Adjust Label",
           "complete_interval": "Complete Interval",
+          "convert_to_direct_meter": "Use Direct Meter",
           "remove_interval": "Remove Interval"
         },
         "helpers": {
@@ -1260,6 +1262,7 @@
         "electrical": "Electrical",
         "energy": "Energy",
         "model": "Model",
+        "mains_source": "Mains Source",
         "data_quality": "Data",
         "learning_readiness": "Learning",
         "energy_today": "Energy Today",
@@ -1340,6 +1343,8 @@
         "existing_appliance": "Existing appliance",
         "new_appliance": "New appliance",
         "merge_into": "Merge into",
+        "direct_meter_circuit": "Direct-meter circuit",
+        "select_direct_meter_circuit": "Select a configured circuit",
         "merge_targets_summary": "Showing {shown} of {total} merge targets. {omitted} more can be selected after loading the full slim NILM list.",
         "no_merge_target": "No other signature is available to merge into yet.",
         "no_merge_target_action": "No other NILM signature is available to merge into yet.",

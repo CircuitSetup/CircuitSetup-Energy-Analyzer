@@ -62,6 +62,7 @@ from .services import (
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
+    SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
@@ -71,6 +72,8 @@ from .services import (
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
+    SERVICE_MARK_NILM_APPLIANCE_CORRECT,
+    SERVICE_MARK_NILM_APPLIANCE_WRONG,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
     SERVICE_MERGE_NILM_SIGNATURES,
@@ -119,7 +122,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260713-1"
+PANEL_MODULE_VERSION = "20260713-2"
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"
@@ -627,25 +630,82 @@ def _appliance_detail_actions(
 ) -> dict[str, dict[str, Any]]:
     actions: dict[str, dict[str, Any]] = {}
     if detail.source_type == "nilm_estimate" and detail.assignment_id:
-        if detail.evidence_path:
+        active_alert = detail.active_alerts[0] if detail.active_alerts else None
+        alert_id = active_alert.alert_id if active_alert else None
+        if active_alert and active_alert.evidence_path:
             actions["open_evidence"] = {
                 "type": "navigate",
-                "path": detail.evidence_path,
+                "path": active_alert.evidence_path,
             }
+        session_id = (
+            str((detail.current_session or {}).get(ATTR_SESSION_ID) or "")
+            or str((detail.last_matched_session or {}).get(ATTR_SESSION_ID) or "")
+        )
+        adjustable_session_id = (
+            str((detail.last_matched_session or {}).get(ATTR_SESSION_ID) or "")
+            if (detail.last_matched_session or {}).get("end")
+            else ""
+        )
+        action_data = {
+            ATTR_CIRCUIT_ID: detail.circuit_id,
+            ATTR_ASSIGNMENT_ID: detail.assignment_id,
+        }
+        if session_id:
+            action_data[ATTR_SESSION_ID] = session_id
+            actions["mark_correct"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_VALIDATE_NILM_SESSION,
+                "data": dict(action_data),
+            }
+            actions["mark_wrong"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_REJECT_NILM_SESSION,
+                "data": dict(action_data),
+            }
+        if adjustable_session_id:
+            adjust_query = urlencode(
+                {
+                    ATTR_CIRCUIT_ID: detail.circuit_id,
+                    ATTR_ASSIGNMENT_ID: detail.assignment_id,
+                    ATTR_SESSION_ID: adjustable_session_id,
+                    "nilm_workspace": "1",
+                    "adjust_interval": "1",
+                }
+            )
+            actions["adjust_interval"] = {
+                "type": "navigate",
+                "path": f"/{PANEL_URL_PATH}?{adjust_query}",
+            }
+        if alert_id:
+            actions["mark_correct"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MARK_NILM_APPLIANCE_CORRECT,
+                "data": {ATTR_ALERT_ID: alert_id},
+            }
+            actions["mark_wrong"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MARK_NILM_APPLIANCE_WRONG,
+                "data": {ATTR_ALERT_ID: alert_id},
+            }
+            for key, service in (
+                ("mark_expected", SERVICE_MARK_ALERT_EXPECTED),
+                ("mark_unhelpful", SERVICE_MARK_ALERT_UNHELPFUL),
+            ):
+                actions[key] = {
+                    "domain": DOMAIN,
+                    "service": service,
+                    "data": {ATTR_ALERT_ID: alert_id},
+                }
         review_query = urlencode(
             {
-                ATTR_CIRCUIT_ID: detail.circuit_id,
-                ATTR_ASSIGNMENT_ID: detail.assignment_id,
+                **action_data,
                 "nilm_workspace": "1",
             }
         )
         actions["review_nilm_assignment"] = {
             "type": "navigate",
             "path": f"/{PANEL_URL_PATH}?{review_query}",
-            "data": {
-                ATTR_CIRCUIT_ID: detail.circuit_id,
-                ATTR_ASSIGNMENT_ID: detail.assignment_id,
-            },
+            "data": action_data,
         }
         return actions
 
@@ -779,11 +839,6 @@ def _nilm_embedded_history_series(
         for value in _iter_items(assignment.get(key))
         if str(value or "")
     }
-    fingerprints = {
-        str(value or "")
-        for value in _iter_items(assignment.get("signature_fingerprints"))
-        if str(value or "")
-    }
     appliance_id = re.sub(
         r"[^a-z0-9_]+",
         "_",
@@ -794,10 +849,11 @@ def _nilm_embedded_history_series(
     for session in _iter_items(sessions_by_circuit.get(detail.circuit_id)):
         if not isinstance(session, Mapping):
             continue
+        session_owner = str(session.get("assignment_id") or "").strip()
         matches = (
-            str(session.get("assignment_id") or "") == detail.assignment_id
-            or str(session.get("session_id") or "") in session_ids
-            or str(session.get("signature_fingerprint") or "") in fingerprints
+            session_owner == detail.assignment_id
+            if session_owner
+            else str(session.get("session_id") or "") in session_ids
         )
         start = _datetime_from_iso(session.get("start"))
         if not matches or start is None:
@@ -1847,12 +1903,17 @@ def _nilm_assignments_for_circuit(
         for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
         if isinstance(item, dict)
     ]
+    direct_circuit_options = _nilm_direct_circuit_options(
+        coordinator,
+        circuit_id,
+    )
     return [
         _nilm_assignment_payload(
             circuit_id,
             item,
             assignments,
             label_intervals=label_intervals,
+            direct_circuit_options=direct_circuit_options,
         )
         for item in assignments
     ]
@@ -1897,6 +1958,7 @@ def _nilm_assignment_payload(
     assignments: Iterable[Mapping[str, Any]] = (),
     *,
     label_intervals: Iterable[Mapping[str, Any]] = (),
+    direct_circuit_options: Iterable[Mapping[str, str]] = (),
 ) -> dict[str, Any]:
     payload = {
         str(key): value
@@ -1929,6 +1991,15 @@ def _nilm_assignment_payload(
         actions["change_profile"]["profile_options"] = (
             _nilm_appliance_profile_options(payload.get(ATTR_APPLIANCE_PROFILE))
         )
+        direct_options = [dict(option) for option in direct_circuit_options]
+        if direct_options and payload.get("conversion_state") != "direct_meter":
+            actions["convert_to_direct_meter"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER,
+                "data": dict(action_data),
+                "requires": ["direct_circuit_id"],
+                "target_options": direct_options,
+            }
         if _nilm_assignment_has_ground_truth_intervals(payload, label_intervals):
             actions["validate_history"] = {
                 "domain": DOMAIN,
@@ -1953,7 +2024,10 @@ def _nilm_assignment_payload(
                 "service": SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
                 "data": dict(action_data),
             }
-        elif state not in {"expected", "ignored"}:
+        elif (
+            state not in {"expected", "ignored"}
+            and payload.get("conversion_state") != "direct_meter"
+        ):
             actions["publish"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -1967,6 +2041,27 @@ def _nilm_assignment_payload(
     if actions:
         payload["actions"] = actions
     return payload
+
+
+def _nilm_direct_circuit_options(
+    coordinator: Any,
+    mains_circuit_id: str,
+) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        if not isinstance(config, CircuitConfig):
+            continue
+        if config.circuit_id == mains_circuit_id or config.mode in {
+            CircuitMode.MAINS_NILM,
+            CircuitMode.MIXED,
+        } or config.appliance_profile in {
+            ApplianceProfile.MAINS_NILM,
+            ApplianceProfile.MIXED,
+            ApplianceProfile.SOLAR_INVERTER,
+        }:
+            continue
+        options.append({"value": config.circuit_id, "label": config.name})
+    return options
 
 
 def _nilm_assignment_has_ground_truth_intervals(
@@ -2029,6 +2124,7 @@ def _nilm_virtual_appliances_for_assignments(
         latest_session = open_session or _latest_nilm_session(assignment_sessions)
         virtual_appliances.append(
             {
+                "appliance_key": f"nilm:{assignment_id}",
                 "appliance_id": str(
                     assignment.get("appliance_id") or assignment_id
                 ),

@@ -1,12 +1,339 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from statistics import median, multimode
 from typing import Any
+from urllib.parse import urlencode
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import CircuitEvent, CircuitSample, EventType
+
+
+@dataclass(frozen=True, slots=True)
+class NilmApplianceIdentity:
+    """Stable logical identity for one NILM appliance assignment."""
+
+    appliance_key: str
+    assignment_id: str
+    appliance_id: str
+    display_name: str
+    mains_circuit_id: str
+    mains_source_entity_id: str | None
+    appliance_profile: str
+
+
+def build_nilm_appliance_identity(
+    assignment: Mapping[str, Any],
+    *,
+    mains_source_entity_id: str | None = None,
+) -> NilmApplianceIdentity:
+    """Build an appliance identity without conflating it with its mains source."""
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if not assignment_id:
+        raise ValueError("Missing assignment_id.")
+    appliance_id = str(assignment.get("appliance_id") or assignment_id).strip()
+    return NilmApplianceIdentity(
+        appliance_key=f"nilm:{assignment_id}",
+        assignment_id=assignment_id,
+        appliance_id=appliance_id,
+        display_name=str(
+            assignment.get("display_name") or appliance_id or assignment_id
+        ).strip(),
+        mains_circuit_id=str(assignment.get("mains_circuit_id") or "").strip(),
+        mains_source_entity_id=(
+            str(mains_source_entity_id).strip() if mains_source_entity_id else None
+        ),
+        appliance_profile=str(
+            assignment.get("appliance_profile") or "nilm_virtual"
+        ).strip(),
+    )
+
+
+def nilm_appliance_detail_path(identity: NilmApplianceIdentity) -> str:
+    """Return the appliance-scoped detail route for a NILM identity."""
+    return "/circuitsetup-energy-analyzer-evidence?" + urlencode(
+        {
+            "circuit_id": identity.mains_circuit_id,
+            "assignment_id": identity.assignment_id,
+            "nilm_workspace": "1",
+            "appliance_detail": "1",
+        }
+    )
+
+
+def build_nilm_appliance_alert_payload(
+    identity: NilmApplianceIdentity,
+    *,
+    session_id: str | None = None,
+    signature_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    """Return explicit appliance target, mains source, and evidence context."""
+    return {
+        "primary_target": identity.appliance_key,
+        "source_context": {
+            "mains_circuit_id": identity.mains_circuit_id,
+            "mains_source_entity_id": identity.mains_source_entity_id,
+        },
+        "evidence_context": {
+            "assignment_id": identity.assignment_id,
+            "session_id": session_id,
+            "signature_fingerprint": signature_fingerprint,
+        },
+        "appliance_detail_path": nilm_appliance_detail_path(identity),
+    }
+
+
+def summarize_nilm_assignment_sessions(
+    assignment: Mapping[str, Any],
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    now: datetime,
+    time_zone: str = "UTC",
+) -> dict[str, Any]:
+    """Summarize only the sessions owned by one NILM assignment."""
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    assigned_session_ids = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("session_ids"))
+        if str(value).strip()
+    }
+    rejected_session_ids = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("rejected_session_ids"))
+        if str(value).strip()
+    }
+    owned_sessions = [
+        dict(session)
+        for session in sessions
+        if _nilm_session_owned_by_assignment(
+            session,
+            assignment_id=assignment_id,
+            assigned_session_ids=assigned_session_ids,
+        )
+    ]
+    zone = _nilm_zone(time_zone)
+    local_today = _nilm_aware(now).astimezone(zone).date()
+    day_start = datetime.combine(local_today, time.min, tzinfo=zone)
+    day_end = day_start + timedelta(days=1)
+    runtime_today = 0.0
+    energy_today = 0.0
+    run_count_today = 0
+    open_session: Mapping[str, Any] | None = None
+    latest_session: Mapping[str, Any] | None = None
+    latest_seen: datetime | None = None
+    for session in owned_sessions:
+        if str(session.get("session_id") or "").strip() in rejected_session_ids:
+            continue
+        start = _nilm_datetime(session.get("start"))
+        if start is None:
+            continue
+        end = _nilm_datetime(session.get("end"))
+        if end is not None and (latest_seen is None or end > latest_seen):
+            latest_seen = end
+            latest_session = session
+        if end is None:
+            current_open_start = (
+                _nilm_datetime(open_session.get("start"))
+                if open_session is not None
+                else None
+            )
+            if current_open_start is None or start > current_open_start:
+                open_session = session
+        session_end = end or now
+        overlap_start = max(start, day_start)
+        overlap_end = min(session_end, day_end)
+        if overlap_end <= overlap_start:
+            continue
+        if start.astimezone(zone).date() == local_today:
+            run_count_today += 1
+        overlap_duration = max(
+            0.0,
+            (
+                overlap_end.astimezone(UTC) - overlap_start.astimezone(UTC)
+            ).total_seconds(),
+        )
+        runtime_today += overlap_duration
+        total_duration = max(
+            0.0,
+            (
+                session_end.astimezone(UTC) - start.astimezone(UTC)
+            ).total_seconds(),
+        )
+        session_energy = max(
+            _nilm_number(session.get("estimated_energy_kwh")) or 0.0,
+            0.0,
+        )
+        if end is None and session_energy == 0.0:
+            session_energy = (
+                max(_nilm_number(session.get("median_power_w")) or 0.0, 0.0)
+                * total_duration
+                / 3_600_000.0
+            )
+        if total_duration > 0:
+            energy_today += session_energy * (overlap_duration / total_duration)
+    current_duration = None
+    if open_session is not None:
+        open_start = _nilm_datetime(open_session.get("start"))
+        if open_start is not None:
+            current_duration = max(
+                0.0,
+                (
+                    now.astimezone(UTC) - open_start.astimezone(UTC)
+                ).total_seconds(),
+            )
+    return {
+        "sessions": owned_sessions,
+        "runtime_today_seconds": round(runtime_today, 3),
+        "run_count_today": run_count_today,
+        "estimated_energy_today_kwh": round(energy_today, 3),
+        "current_session_duration_seconds": (
+            round(current_duration, 3) if current_duration is not None else None
+        ),
+        "current_session_id": (
+            str(open_session.get("session_id") or "") or None
+            if open_session is not None
+            else None
+        ),
+        "last_matched_session_id": (
+            str(latest_session.get("session_id") or "") or None
+            if latest_session is not None
+            else None
+        ),
+    }
+
+
+def evaluate_nilm_validation_readiness(
+    assignment: Mapping[str, Any],
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    min_confirmed_sessions: int = 5,
+    min_distinct_days: int = 3,
+    max_false_positive_rate: float = 0.2,
+    min_confidence: float = 0.75,
+    time_zone: str = "UTC",
+) -> dict[str, Any]:
+    """Gate NILM comparisons until all validation thresholds are met."""
+    confirmed_ids = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("confirmed_session_ids"))
+        if str(value).strip()
+    }
+    rejected_ids = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("rejected_session_ids"))
+        if str(value).strip()
+    }
+    zone = _nilm_zone(time_zone)
+    confirmed_days = {
+        start.astimezone(zone).date()
+        for session in sessions
+        if str(session.get("session_id") or "").strip() in confirmed_ids
+        and (start := _nilm_datetime(session.get("start"))) is not None
+    }
+    validation_total = len(confirmed_ids) + len(rejected_ids)
+    stored_false_positive_rate = _nilm_number(
+        assignment.get("false_positive_rate")
+    )
+    false_positive_rate = (
+        stored_false_positive_rate
+        if stored_false_positive_rate is not None
+        else len(rejected_ids) / validation_total
+        if validation_total
+        else 0.0
+    )
+    confidence = _nilm_number(assignment.get("confidence")) or 0.0
+    ready = (
+        len(confirmed_ids) >= max(min_confirmed_sessions, 0)
+        and len(confirmed_days) >= max(min_distinct_days, 0)
+        and false_positive_rate <= max_false_positive_rate
+        and confidence >= min_confidence
+    )
+    return {
+        "ready": ready,
+        "today_vs_normal_enabled": ready,
+        "status": "ready" if ready else "needs_validation",
+        "confirmed_sessions": len(confirmed_ids),
+        "distinct_confirmed_days": len(confirmed_days),
+        "false_positive_rate": round(false_positive_rate, 3),
+        "confidence": round(confidence, 3),
+    }
+
+
+def plan_nilm_direct_meter_conversion(
+    identity: NilmApplianceIdentity,
+    assignment: Mapping[str, Any],
+    *,
+    direct_circuit_id: str,
+    keep_assignment_for_masking: bool = True,
+) -> dict[str, Any]:
+    """Build a lossless conversion plan while disabling duplicate estimates."""
+    direct_id = str(direct_circuit_id or "").strip()
+    if not direct_id:
+        raise ValueError("Missing direct_circuit_id.")
+    return {
+        "appliance_key": identity.appliance_key,
+        "assignment_id": identity.assignment_id,
+        "direct_circuit_id": direct_id,
+        "display_name": identity.display_name,
+        "appliance_profile": identity.appliance_profile,
+        "confirmed_session_ids": list(
+            _nilm_list(assignment.get("confirmed_session_ids"))
+        ),
+        "rejected_session_ids": list(
+            _nilm_list(assignment.get("rejected_session_ids"))
+        ),
+        "adjusted_session_ids": list(
+            _nilm_list(assignment.get("adjusted_session_ids"))
+        ),
+        "publish_estimated_entities": False,
+        "keep_assignment_for_masking": bool(keep_assignment_for_masking),
+    }
+
+
+def _nilm_session_owned_by_assignment(
+    session: Mapping[str, Any],
+    *,
+    assignment_id: str,
+    assigned_session_ids: set[str],
+) -> bool:
+    session_id = str(session.get("session_id") or "").strip()
+    owner = str(session.get("assignment_id") or "").strip()
+    if owner:
+        return owner == assignment_id
+    return bool(session_id and session_id in assigned_session_ids)
+
+
+def _nilm_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return _nilm_aware(value)
+    try:
+        return _nilm_aware(datetime.fromisoformat(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _nilm_aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=ZoneInfo("UTC"))
+
+
+def _nilm_zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(str(name or "UTC"))
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def _nilm_number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nilm_list(value: Any) -> tuple[Any, ...]:
+    return tuple(value) if isinstance(value, list | tuple | set) else ()
 
 
 @dataclass(frozen=True, slots=True)
