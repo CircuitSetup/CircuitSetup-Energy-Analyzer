@@ -447,6 +447,7 @@ def _household_overview_section(
                 "entity": setup_health,
                 "name": _dashboard_text("cards", "setup_health"),
                 "vertical": False,
+                "grid_options": {"columns": "full", "rows": 1},
                 "tap_action": {
                     "action": "navigate",
                     "navigation_path": _setup_health_panel_path(entry_id),
@@ -512,7 +513,7 @@ def _household_overview_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "top_appliances_right_now"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(activity_rows),
                 "entities": activity_rows,
             }
         )
@@ -553,7 +554,7 @@ def _todays_energy_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "top_energy_users_today"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(daily_rows[:5]),
                 "entities": daily_rows[:5],
             }
         )
@@ -599,7 +600,7 @@ def _todays_energy_section(
                 {
                     "type": "glance",
                     "title": _dashboard_text("entity_labels", "solar_covered_share"),
-                    "columns": DASHBOARD_COLUMNS,
+                    "columns": _glance_columns(solar_rows[:5]),
                     "entities": solar_rows[:5],
                 }
             )
@@ -617,11 +618,7 @@ def _appliance_status_section(
     hass: Any | None,
     entry_id: str | None,
 ) -> dict[str, Any]:
-    cards: list[dict[str, Any]] = [
-        _markdown_card(
-            _dashboard_text("notes", "appliance_status_summary")
-        )
-    ]
+    cards: list[dict[str, Any]] = []
     for circuit in circuits:
         circuit_id = _circuit_id(circuit)
         if not circuit_id:
@@ -642,6 +639,7 @@ def _appliance_status_section(
     return {
         "type": "grid",
         "title": _section_title("appliance_status"),
+        "column_span": 2,
         "cards": cards,
     }
 
@@ -670,7 +668,7 @@ def _mains_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "mains_rollups"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(rollup_rows),
                 "entities": rollup_rows,
             }
         )
@@ -747,7 +745,7 @@ def _mains_section(
                 {
                     "type": "glance",
                     "title": _dashboard_text("cards", "unknown_load_signals"),
-                    "columns": DASHBOARD_COLUMNS,
+                    "columns": _glance_columns(unknown_rows),
                     "entities": unknown_rows,
                 }
             )
@@ -941,7 +939,7 @@ def _nilm_review_section(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "nilm_review"),
-                "columns": DASHBOARD_COLUMNS,
+                "columns": _glance_columns(rows),
                 "entities": rows,
             }
         )
@@ -1109,7 +1107,7 @@ def _water_flow_context_card(
         {
             "type": "glance",
             "title": _dashboard_text("cards", "water_flow_context"),
-            "columns": DASHBOARD_COLUMNS,
+            "columns": _glance_columns(rows),
             "entities": rows,
         },
     )
@@ -1185,6 +1183,7 @@ def _entities_card(title: str, rows: Iterable[dict[str, str]]) -> dict[str, Any]
         "type": "entities",
         "title": title,
         "show_header_toggle": False,
+        "grid_options": {"columns": "full", "rows": "auto"},
         "entities": list(_dedupe_entity_rows(rows)),
     }
 
@@ -1641,8 +1640,16 @@ def _guessed_entity_id(circuit_id: str, entity_domain: str, entity_key: str) -> 
     return f"{entity_domain}.{circuit_id}_{entity_key}"
 
 
-def _markdown_card(content: str) -> dict[str, str]:
-    return {"type": "markdown", "content": content}
+def _glance_columns(rows: Sequence[Any]) -> int:
+    return max(1, min(2, len(rows)))
+
+
+def _markdown_card(content: str) -> dict[str, Any]:
+    return {
+        "type": "markdown",
+        "content": content,
+        "grid_options": {"columns": "full", "rows": "auto"},
+    }
 
 
 def _expert_evidence_markdown(circuits: Iterable[Any]) -> str:
