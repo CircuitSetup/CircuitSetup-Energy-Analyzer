@@ -1750,6 +1750,82 @@ if (value !== "Cost unavailable") {
     )
 
 
+def test_settings_saves_reject_unsaved_api_results() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  async function assertRejected(panel, response, save, current) {
+    const original = current();
+    panel._loadedRouteKey = "/panel";
+    panel._render = () => {};
+    panel._postJson = async () => response;
+    await save();
+    assert.equal(current(), original);
+    assert.match(panel._lastActionMessage, /not_found/);
+  }
+
+  const weekly = new context.Panel();
+  weekly._setupHealth = { weekly_digest_settings: { enabled: false } };
+  weekly.shadowRoot = { querySelector: () => ({ querySelector: (field) => ({
+    "[data-weekly-digest-enabled]": { checked: true },
+    "[data-weekly-digest-delivery]": { value: "panel_only" },
+    "[data-weekly-digest-notify-service]": { value: "" },
+  })[field] }) };
+  await assertRejected(weekly, { status: "not_found", weekly_digest_settings: { enabled: true } },
+    () => weekly._saveWeeklyDigestSettings(), () => weekly._setupHealth.weekly_digest_settings);
+
+  const notifications = new context.Panel();
+  notifications._applianceDetail = { notification_preferences: { delivery_mode: "immediate" } };
+  notifications.shadowRoot = { querySelector: () => ({
+    querySelector: (field) => ({
+      "[data-notification-delivery-mode]": { value: "disabled" },
+      "[data-notification-minimum-confidence]": { value: "0.6" },
+      "[data-notification-cooldown]": { value: "60" },
+      "[data-notification-quiet-start]": { value: "" },
+      "[data-notification-quiet-end]": { value: "" },
+    })[field],
+    querySelectorAll: () => [],
+  }) };
+  await assertRejected(notifications, { status: "not_found", notification_preferences: { delivery_mode: "disabled" } },
+    () => notifications._saveApplianceNotificationPreferences(), () => notifications._applianceDetail.notification_preferences);
+
+  const expected = new context.Panel();
+  expected._applianceDetail = { expected_schedule: { settings: { enabled: false } } };
+  expected._expectedScheduleDraft = { enabled: true, mode: "local", windows: [], minimum_duration_minutes: 15, required_repeats: 3 };
+  expected._readExpectedScheduleForm = () => expected._expectedScheduleDraft;
+  await assertRejected(expected, { status: "not_found", expected_schedule_settings: { enabled: true } },
+    () => expected._saveExpectedSchedule(), () => expected._applianceDetail.expected_schedule.settings);
+
+  const schedulePanel = new context.Panel();
+  const windows = [{ start: "07:30", end: "09:00", weekdays: [0, 2, 4] }];
+  schedulePanel._expectedScheduleDraft = {
+    enabled: true,
+    mode: "local",
+    schedule_entity_id: null,
+    windows,
+    minimum_duration_minutes: 20,
+    required_repeats: 3,
+  };
+  schedulePanel.shadowRoot = { querySelector(selector) {
+    assert.equal(selector, "[data-expected-schedule]");
+    return {
+      querySelector(field) {
+        return {
+          "[data-schedule-mode]:checked": { value: "local" },
+          "[data-schedule-enabled]": { checked: true },
+          "[data-schedule-entity]": { value: "schedule.dishwasher" },
+          "[data-schedule-minimum-duration]": { value: "20" },
+        }[field];
+      },
+      querySelectorAll() { return []; },
+    };
+  } };
+  assert.deepEqual(schedulePanel._readExpectedScheduleForm().windows, windows);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
 def test_appliance_detail_uses_icons_grids_timeline_and_alert_action_tiles() -> None:
     _run_panel_node_script(
         """

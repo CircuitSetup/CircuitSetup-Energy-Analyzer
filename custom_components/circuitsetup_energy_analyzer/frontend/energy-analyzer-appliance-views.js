@@ -469,7 +469,7 @@ export function createApplianceViewMethods({
       notify_service: panel.querySelector("[data-weekly-digest-notify-service]").value,
     };
     try {
-      const result = await this._postJson(`${SETUP_HEALTH_CALL_API_PATH}${query}`, `${SETUP_HEALTH_API_PATH}${query}`, body);
+      const result = this._savedResult(await this._postJson(`${SETUP_HEALTH_CALL_API_PATH}${query}`, `${SETUP_HEALTH_API_PATH}${query}`, body));
       if (result && result.weekly_digest_settings) {
         this._setupHealth.weekly_digest_settings = result.weekly_digest_settings;
       }
@@ -478,6 +478,13 @@ export function createApplianceViewMethods({
       this._lastActionMessage = this._panelTextFormat("errors.weekly_digest_settings_save", { message: error.message });
     }
     this._render();
+  }
+
+  _savedResult(result) {
+    if (result?.status !== "saved") {
+      throw new Error(result?.message || result?.status || "Save failed");
+    }
+    return result;
   }
 
   _renderNeedsAttention(items) {
@@ -731,7 +738,7 @@ export function createApplianceViewMethods({
     const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
     const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
     try {
-      const result = await this._postJson(apiPath, fetchPath, body);
+      const result = this._savedResult(await this._postJson(apiPath, fetchPath, body));
       if (result && result.notification_preferences) {
         this._applianceDetail.notification_preferences = result.notification_preferences;
       }
@@ -826,7 +833,7 @@ export function createApplianceViewMethods({
       enabled: panel.querySelector("[data-schedule-enabled]").checked,
       mode,
       schedule_entity_id: mode === "entity" ? panel.querySelector("[data-schedule-entity]")?.value || null : null,
-      windows,
+      windows: windows.length ? windows : current.windows || [],
       minimum_duration_minutes: Number(panel.querySelector("[data-schedule-minimum-duration]").value) || 15,
       required_repeats: Number(current.required_repeats) || 3,
     };
@@ -845,7 +852,7 @@ export function createApplianceViewMethods({
     const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
     const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
     try {
-      const result = await this._postJson(apiPath, fetchPath, { expected_schedule: body });
+      const result = this._savedResult(await this._postJson(apiPath, fetchPath, { expected_schedule: body }));
       if (result && result.expected_schedule_settings) {
         this._applianceDetail.expected_schedule.settings = result.expected_schedule_settings;
         this._expectedScheduleDraft = this._scheduleDraftFromPayload(this._applianceDetail.expected_schedule);

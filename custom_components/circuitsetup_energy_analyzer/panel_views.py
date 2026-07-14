@@ -16,11 +16,15 @@ from .panel_contracts import (
 )
 
 try:
-    from homeassistant.components.http import HomeAssistantView
+    from homeassistant.components.http import HomeAssistantView, require_admin
 except ModuleNotFoundError:
 
     class HomeAssistantView:  # type: ignore[no-redef]
         """Fallback base class for unit tests without Home Assistant installed."""
+
+    def require_admin(method: Any) -> Any:
+        """Preserve imports when Home Assistant is unavailable."""
+        return method
 
 
 class AlertEvidenceView(HomeAssistantView):
@@ -72,6 +76,7 @@ class ApplianceDetailView(HomeAssistantView):
         )
         return panel.web.json_response(payload)
 
+    @require_admin
     async def post(self, request: Any) -> Any:
         """Persist appliance notification or expected-schedule settings."""
         from . import panel
@@ -132,6 +137,7 @@ class SetupHealthView(HomeAssistantView):
         )
         return panel.web.json_response(payload)
 
+    @require_admin
     async def post(self, request: Any) -> Any:
         """Persist weekly digest opt-in and delivery settings."""
         from . import panel
