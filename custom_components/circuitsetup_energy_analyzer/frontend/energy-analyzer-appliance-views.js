@@ -45,7 +45,6 @@ export function createApplianceViewMethods({
         return;
       }
       this._applianceDetail = detail;
-      this._expectedScheduleDraft = this._scheduleDraftFromPayload(detail.expected_schedule);
       await this._loadApplianceDetailHistory(undefined, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
@@ -201,52 +200,6 @@ export function createApplianceViewMethods({
     }
   }
 
-  async _callApplianceDetailAction(actionKey) {
-    const payload = this._applianceDetail || {};
-    const actions = payload.actions || {};
-    const action = actions[actionKey];
-    if (!this._guardActionCall(action, `appliance detail ${actionKey}`)) {
-      return;
-    }
-    if (action.path) {
-      this._navigate(action.path);
-      return;
-    }
-    const actionContext = this._actionContext();
-    const busyKey = `appliance_detail_${actionKey}`;
-    this._busyAction = busyKey;
-    this._render();
-    try {
-      if (action.domain) {
-        await this._hass.callService(action.domain, action.service, action.data || {});
-      } else {
-        await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
-      }
-      if (!actionContext.isCurrent()) {
-        return;
-      }
-      const message = this._applianceDetailActionMessage(actionKey);
-      this._busyAction = "";
-      const routeKey = this._routeKey();
-      const refresh = this._loadEvidence({ routeKey });
-      const refreshRequestId = this._evidenceRequestId;
-      await refresh;
-      if (!this._isCurrentRequest(refreshRequestId, routeKey)) {
-        return;
-      }
-      this._lastActionMessage = message;
-      this._render();
-      this._scrollToTop();
-    } catch (error) {
-      if (!actionContext.isCurrent()) {
-        return;
-      }
-      this._error = this._panelTextFormat("errors.run_service", { service: action.service, message: error.message });
-      this._busyAction = "";
-      this._renderAndScrollToTop();
-    }
-  }
-
   _routeRequestsApplianceDetail(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
     if (routeUrl.searchParams.get(APPLIANCE_DETAIL_QUERY_PARAM) === "1") {
@@ -268,17 +221,6 @@ export function createApplianceViewMethods({
   _routeRequestsSetupHealth(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
     return routeUrl.searchParams.get(SETUP_HEALTH_QUERY_PARAM) === "1";
-  }
-
-  _applianceDetailActionMessage(actionKey) {
-    const messages = {
-      pause_alerts: "messages.alert_pause_updated",
-      relearn_baseline: "messages.baseline_relearn_requested",
-      open_advanced_circuit_settings: "messages.opening_advanced_settings",
-      open_evidence: "messages.opening_evidence",
-      review_nilm_assignment: "messages.opening_nilm_assignment_review",
-    };
-    return this._panelText(messages[actionKey] || "common.action_complete");
   }
 
   _renderApplianceInsightsBody() {
@@ -629,10 +571,6 @@ export function createApplianceViewMethods({
         ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
       </section>
       <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.session_timeline"))}</h2>
-        ${this._renderSessionTimeline(detail.session_timeline)}
-      </section>
-      <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
         ${this._renderApplianceTimeline(detail.recent_timeline)}
       </section>
@@ -652,12 +590,6 @@ export function createApplianceViewMethods({
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
-      </section>
-      ${this._renderApplianceNotificationPreferences(payload.notification_preferences)}
-      ${this._renderExpectedSchedule(payload.expected_schedule)}
-      <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.actions"))}</h2>
-        ${this._renderApplianceActions(payload.actions)}
       </section>
     `;
   }
@@ -681,187 +613,6 @@ export function createApplianceViewMethods({
         percent: this._formatChangePercent(value),
       }))}</li>`).join("")}</ul>` : ""}
     </section>`;
-  }
-
-  _renderApplianceNotificationPreferences(preferences) {
-    if (!preferences) {
-      return "";
-    }
-    const categories = [
-      "finished_running",
-      "unusual_runtime",
-      "high_daily_energy",
-      "electrical_issue",
-      "capacity_demand_issue",
-      "data_quality_issue",
-      "nilm_review_needed",
-    ];
-    const deliveryModes = ["immediate", "daily_summary", "weekly_digest", "disabled"];
-    return `<section class="panel" data-appliance-notifications>
-      <h2>${this._escape(this._panelText("appliance_detail.notifications"))}</h2>
-      <div class="entity-list">
-        ${categories.map((category) => `<label><input type="checkbox" data-notification-category="${category}" ${preferences[category] ? "checked" : ""}> ${this._escape(this._panelText(`notifications.categories.${category}`))}</label>`).join("")}
-        <label>${this._escape(this._panelText("notifications.delivery_mode"))}
-          <select data-notification-delivery-mode>${deliveryModes.map((mode) => `<option value="${mode}" ${preferences.delivery_mode === mode ? "selected" : ""}>${this._escape(this._panelText(`notifications.delivery_modes.${mode}`))}</option>`).join("")}</select>
-        </label>
-        <label>${this._escape(this._panelText("notifications.minimum_confidence"))}<input type="number" min="0" max="1" step="0.05" value="${this._escape(preferences.minimum_confidence)}" data-notification-minimum-confidence></label>
-        <label>${this._escape(this._panelText("notifications.cooldown_minutes"))}<input type="number" min="0" max="10080" step="5" value="${this._escape(preferences.cooldown_minutes)}" data-notification-cooldown></label>
-        <label>${this._escape(this._panelText("notifications.quiet_hours_start"))}<input type="time" value="${this._escape(preferences.quiet_hours_start || "")}" data-notification-quiet-start></label>
-        <label>${this._escape(this._panelText("notifications.quiet_hours_end"))}<input type="time" value="${this._escape(preferences.quiet_hours_end || "")}" data-notification-quiet-end></label>
-      </div>
-      <div class="actions"><button type="button" data-save-appliance-notifications>${this._escape(this._panelText("actions.labels.save"))}</button></div>
-    </section>`;
-  }
-
-  async _saveApplianceNotificationPreferences() {
-    const panel = this.shadowRoot.querySelector("[data-appliance-notifications]");
-    if (!panel) {
-      return;
-    }
-    const body = {};
-    for (const input of panel.querySelectorAll("[data-notification-category]")) {
-      body[input.dataset.notificationCategory] = input.checked;
-    }
-    body.delivery_mode = panel.querySelector("[data-notification-delivery-mode]").value;
-    body.minimum_confidence = Number(panel.querySelector("[data-notification-minimum-confidence]").value);
-    body.cooldown_minutes = Number(panel.querySelector("[data-notification-cooldown]").value);
-    body.quiet_hours_start = panel.querySelector("[data-notification-quiet-start]").value || null;
-    body.quiet_hours_end = panel.querySelector("[data-notification-quiet-end]").value || null;
-    const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
-    const params = new URLSearchParams();
-    for (const key of ["circuit_id", "assignment_id", "entry_id"]) {
-      if (route.searchParams.get(key)) {
-        params.set(key, route.searchParams.get(key));
-      }
-    }
-    const query = params.toString();
-    const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
-    const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
-    try {
-      const result = this._savedResult(await this._postJson(apiPath, fetchPath, body));
-      if (result && result.notification_preferences) {
-        this._applianceDetail.notification_preferences = result.notification_preferences;
-      }
-      this._lastActionMessage = this._panelText("messages.notification_preferences_saved");
-    } catch (error) {
-      this._lastActionMessage = this._panelTextFormat("errors.notification_preferences_save", { message: error.message });
-    }
-    this._render();
-  }
-
-  _scheduleDraftFromPayload(expectedSchedule) {
-    const settings = expectedSchedule && expectedSchedule.settings;
-    if (!settings) {
-      return null;
-    }
-    return {
-      enabled: Boolean(settings.enabled),
-      mode: settings.schedule_entity_id ? "entity" : "local",
-      schedule_entity_id: settings.schedule_entity_id || null,
-      windows: Array.isArray(settings.windows)
-        ? settings.windows.map((window) => ({
-          start: window.start || "08:00",
-          end: window.end || "10:00",
-          weekdays: Array.isArray(window.weekdays) ? window.weekdays.map(Number) : [],
-        }))
-        : [],
-      minimum_duration_minutes: Number(settings.minimum_duration_minutes) || 15,
-      required_repeats: Number(settings.required_repeats) || 3,
-    };
-  }
-
-  _renderExpectedSchedule(expectedSchedule) {
-    if (!expectedSchedule) {
-      return "";
-    }
-    const draft = this._expectedScheduleDraft
-      || this._scheduleDraftFromPayload(expectedSchedule)
-      || { enabled: false, schedule_entity_id: null, windows: [], minimum_duration_minutes: 15, required_repeats: 3 };
-    const mode = draft.mode || (draft.schedule_entity_id ? "entity" : "local");
-    const entities = Array.isArray(expectedSchedule.schedule_entities)
-      ? expectedSchedule.schedule_entities
-      : [];
-    const windows = draft.windows.length
-      ? draft.windows
-      : [{ start: "08:00", end: "10:00", weekdays: [0, 1, 2, 3, 4] }];
-    const dayLabels = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-    const context = expectedSchedule.context;
-    return `<section class="panel" data-expected-schedule>
-      <h2>${this._escape(this._panelText("expected_schedule.heading"))}</h2>
-      ${context ? `<p><strong>${this._escape(this._friendlyFeature(context.status))}</strong> ${this._escape(context.message || "")}</p>` : ""}
-      <div class="entity-list">
-        <label><input type="checkbox" data-schedule-enabled ${draft.enabled ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.enabled"))}</label>
-        <fieldset class="schedule-mode" aria-label="${this._escape(this._panelText("expected_schedule.mode"))}">
-          <label><input type="radio" name="expected-schedule-mode" value="entity" data-schedule-mode ${mode === "entity" ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.schedule_entity"))}</label>
-          <label><input type="radio" name="expected-schedule-mode" value="local" data-schedule-mode ${mode === "local" ? "checked" : ""}> ${this._escape(this._panelText("expected_schedule.local_windows"))}</label>
-        </fieldset>
-        ${mode === "entity" ? `<label>${this._escape(this._panelText("expected_schedule.schedule_entity"))}
-          <select data-schedule-entity>
-            <option value="">${this._escape(this._panelText("expected_schedule.select_schedule"))}</option>
-            ${entities.map((item) => `<option value="${this._escape(String(item.entity_id || ""))}" ${draft.schedule_entity_id === item.entity_id ? "selected" : ""}>${this._escape(item.name || this._friendlyEntityName(item))}</option>`).join("")}
-          </select>
-        </label>` : `<div class="schedule-windows">
-          ${windows.map((window, index) => `<div class="schedule-window" data-schedule-window>
-            <label>${this._escape(this._panelText("expected_schedule.start"))}<input type="time" value="${this._escape(window.start)}" data-schedule-window-start></label>
-            <label>${this._escape(this._panelText("expected_schedule.end"))}<input type="time" value="${this._escape(window.end)}" data-schedule-window-end></label>
-            <div class="schedule-weekdays" aria-label="${this._escape(this._panelText("expected_schedule.weekdays"))}">
-              ${dayLabels.map((day, dayIndex) => `<label><input type="checkbox" value="${dayIndex}" data-schedule-weekday ${window.weekdays.includes(dayIndex) ? "checked" : ""}> ${this._escape(this._panelText(`expected_schedule.days.${day}`))}</label>`).join("")}
-            </div>
-            <button type="button" class="secondary icon-button" data-remove-schedule-window="${index}" title="${this._escape(this._panelText("expected_schedule.remove_window"))}" aria-label="${this._escape(this._panelText("expected_schedule.remove_window"))}"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>
-          </div>`).join("")}
-          <button type="button" class="secondary" data-add-schedule-window><ha-icon icon="mdi:plus"></ha-icon>${this._escape(this._panelText("expected_schedule.add_window"))}</button>
-        </div>`}
-        <label>${this._escape(this._panelText("expected_schedule.minimum_duration"))}<input type="number" min="1" max="1440" step="1" value="${this._escape(draft.minimum_duration_minutes)}" data-schedule-minimum-duration></label>
-      </div>
-      <div class="actions"><button type="button" data-save-expected-schedule>${this._escape(this._panelText("actions.labels.save"))}</button></div>
-    </section>`;
-  }
-
-  _readExpectedScheduleForm() {
-    const panel = this.shadowRoot.querySelector("[data-expected-schedule]");
-    const current = this._expectedScheduleDraft || { required_repeats: 3 };
-    if (!panel) {
-      return current;
-    }
-    const mode = panel.querySelector("[data-schedule-mode]:checked")?.value || "local";
-    const windows = Array.from(panel.querySelectorAll("[data-schedule-window]")).map((row) => ({
-      start: row.querySelector("[data-schedule-window-start]").value,
-      end: row.querySelector("[data-schedule-window-end]").value,
-      weekdays: Array.from(row.querySelectorAll("[data-schedule-weekday]:checked")).map((input) => Number(input.value)),
-    }));
-    return {
-      enabled: panel.querySelector("[data-schedule-enabled]").checked,
-      mode,
-      schedule_entity_id: mode === "entity" ? panel.querySelector("[data-schedule-entity]")?.value || null : null,
-      windows: windows.length ? windows : current.windows || [],
-      minimum_duration_minutes: Number(panel.querySelector("[data-schedule-minimum-duration]").value) || 15,
-      required_repeats: Number(current.required_repeats) || 3,
-    };
-  }
-
-  async _saveExpectedSchedule() {
-    const body = this._readExpectedScheduleForm();
-    const route = new URL(this._loadedRouteKey || this._routeKey(), window.location.origin);
-    const params = new URLSearchParams();
-    for (const key of ["circuit_id", "assignment_id", "entry_id"]) {
-      if (route.searchParams.get(key)) {
-        params.set(key, route.searchParams.get(key));
-      }
-    }
-    const query = params.toString();
-    const apiPath = `${APPLIANCE_DETAIL_CALL_API_PATH}${query ? `?${query}` : ""}`;
-    const fetchPath = `${APPLIANCE_DETAIL_API_PATH}${query ? `?${query}` : ""}`;
-    try {
-      const result = this._savedResult(await this._postJson(apiPath, fetchPath, { expected_schedule: body }));
-      if (result && result.expected_schedule_settings) {
-        this._applianceDetail.expected_schedule.settings = result.expected_schedule_settings;
-        this._expectedScheduleDraft = this._scheduleDraftFromPayload(this._applianceDetail.expected_schedule);
-      }
-      this._lastActionMessage = this._panelText("messages.expected_schedule_saved");
-    } catch (error) {
-      this._lastActionMessage = this._panelTextFormat("errors.expected_schedule_save", { message: error.message });
-    }
-    this._render();
   }
 
   _renderApplianceDetailHistory(history) {
@@ -1010,55 +761,6 @@ export function createApplianceViewMethods({
         ${item.evidence_path ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
       </div>
     `).join("")}</div>`;
-  }
-
-  _renderApplianceActions(actions) {
-    const available = actions || {};
-    const alertButtons = [
-      this._applianceAlertActionTile(available, "open_evidence", this._panelText("actions.labels.open_evidence"), "mdi:chart-line"),
-      this._applianceAlertActionTile(available, "mark_correct", this._panelText("actions.labels.correct"), "mdi:check-circle-outline"),
-      this._applianceAlertActionTile(available, "mark_wrong", this._panelText("actions.labels.wrong_appliance_sentence"), "mdi:close-circle-outline"),
-      this._applianceAlertActionTile(available, "mark_expected", this._panelText("actions.labels.mark_expected"), "mdi:check-decagram", this._panelText("actions.helpers.mark_expected")),
-      this._applianceAlertActionTile(available, "mark_unhelpful", this._panelText("actions.labels.not_helpful"), "mdi:message-alert-outline", this._panelText("actions.helpers.mark_unhelpful")),
-    ].filter(Boolean);
-    const buttons = [
-      this._applianceActionButton(available, "adjust_interval", this._panelText("actions.labels.adjust_interval"), true),
-      this._applianceActionButton(available, "review_nilm_assignment", this._panelText("actions.labels.review_nilm_assignment"), true),
-      this._applianceActionButton(available, "pause_alerts", this._panelText("actions.labels.pause_alerts"), true),
-      this._applianceActionButton(available, "relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
-      this._applianceActionButton(available, "open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
-    ].filter(Boolean);
-    if (!alertButtons.length && !buttons.length) {
-      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_actions"))}</p>`;
-    }
-    return `
-      ${alertButtons.length ? `<div class="decision-tiles appliance-alert-actions">${alertButtons.join("")}</div>` : ""}
-      ${buttons.length ? `<div class="actions appliance-general-actions">${buttons.join("")}</div>` : ""}
-    `;
-  }
-
-  _applianceAlertActionTile(actions, actionKey, label, icon, helper = "") {
-    const action = actions && actions[actionKey];
-    if (!action) {
-      return "";
-    }
-    const busyKey = `appliance_detail_${actionKey}`;
-    const disabled = this._busyAction === busyKey || action.enabled === false ? "disabled" : "";
-    const reason = action.unavailable_label || action.unavailable_reason || "";
-    const title = reason ? ` title="${this._escape(reason)}"` : "";
-    return `<button type="button" data-appliance-detail-action="${actionKey}" class="decision-tile appliance-alert-action"${title} ${disabled}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(action.label || label)}</strong>${helper ? `<small>${this._escape(helper)}</small>` : ""}</span></button>`;
-  }
-
-  _applianceActionButton(actions, actionKey, label, secondary = false) {
-    const action = actions && actions[actionKey];
-    if (!action) {
-      return "";
-    }
-    const busyKey = `appliance_detail_${actionKey}`;
-    const disabled = this._busyAction === busyKey || action.enabled === false ? "disabled" : "";
-    const reason = action.unavailable_label || action.unavailable_reason || "";
-    const title = reason ? ` title="${this._escape(reason)}"` : "";
-    return `<button type="button" data-appliance-detail-action="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${disabled}>${this._escape(action.label || label)}</button>`;
   }
 
   _zoomApplianceHistoryGraph(factor) {

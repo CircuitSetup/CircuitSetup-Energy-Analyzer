@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -19,14 +18,6 @@ from custom_components.circuitsetup_energy_analyzer.session_timeline import (
     nilm_appliance_timeline,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
-
-PANEL_JS = (
-    Path(__file__).parents[1]
-    / "custom_components"
-    / "circuitsetup_energy_analyzer"
-    / "frontend"
-    / "energy-analyzer-panel-main.js"
-)
 
 
 def _event(at: datetime, event_type: EventType) -> CircuitEvent:
@@ -276,14 +267,3 @@ def test_nilm_timeline_payload_is_bounded_to_newest_sessions() -> None:
     assert len(timeline) == 40
     assert timeline[0].session_id == "session-15"
     assert timeline[-1].session_id == "session-54"
-
-
-def test_session_strip_has_timezone_and_accessibility_fallbacks() -> None:
-    source = PANEL_JS.read_text(encoding="utf-8")
-
-    assert "_timelineClockParts(start)" in source
-    assert "timeZone: this._timeZone()" in source
-    assert "crossesDay" in source
-    assert 'session.end ? "" : "running"' in source
-    assert 'appliance_detail.maintenance_session' in source
-    assert 'role="img" aria-label=' in source

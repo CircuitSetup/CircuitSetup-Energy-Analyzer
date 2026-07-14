@@ -260,22 +260,6 @@ export class PanelShellMethods {
           color: var(--secondary-text-color, #5f6b7a);
           line-height: 1.35;
         }
-        .appliance-alert-actions {
-          margin-top: 4px;
-        }
-        .appliance-alert-action {
-          background: var(--secondary-background-color, #f4f6f8);
-          color: var(--primary-text-color, #1f2933);
-          font: inherit;
-          grid-template-columns: auto minmax(0, 1fr);
-          text-align: left;
-        }
-        .appliance-alert-action:hover {
-          border-color: var(--primary-color, #0b6bcb);
-        }
-        .appliance-general-actions {
-          margin-top: 12px;
-        }
         .response-section > button {
           justify-self: start;
         }
@@ -503,36 +487,6 @@ export class PanelShellMethods {
           gap: 8px;
           margin-top: 10px;
         }
-        .schedule-mode,
-        .schedule-weekdays {
-          border: 0;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px 14px;
-          margin: 0;
-          padding: 0;
-        }
-        .schedule-windows {
-          display: grid;
-          gap: 10px;
-        }
-        .schedule-window {
-          align-items: end;
-          border-bottom: 1px solid var(--divider-color, #d8dde6);
-          display: grid;
-          gap: 10px;
-          grid-template-columns: repeat(2, minmax(120px, 180px)) minmax(220px, 1fr) 44px;
-          padding-bottom: 10px;
-        }
-        .schedule-window label,
-        [data-expected-schedule] .entity-list > label {
-          display: grid;
-          gap: 4px;
-        }
-        [data-expected-schedule] input,
-        [data-expected-schedule] select {
-          min-width: 0;
-        }
         .appliance-insights-controls {
           align-items: end;
           display: grid;
@@ -684,58 +638,6 @@ export class PanelShellMethods {
         }
         .appliance-timeline-item p {
           margin: 0;
-        }
-        .session-strip-list {
-          display: grid;
-          gap: 10px;
-        }
-        .session-strip summary {
-          cursor: pointer;
-          display: grid;
-          gap: 6px;
-          list-style: none;
-        }
-        .session-strip-track {
-          background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 4px;
-          height: 22px;
-          overflow: hidden;
-          position: relative;
-        }
-        .session-strip-block {
-          background: var(--primary-color, #0b6bcb);
-          border: 2px solid var(--primary-color, #0b6bcb);
-          bottom: 2px;
-          min-width: 4px;
-          position: absolute;
-          top: 2px;
-        }
-        .session-strip-block.nilm_estimate {
-          background: transparent;
-          border-style: dashed;
-        }
-        .session-strip-block.maintenance {
-          background: var(--disabled-text-color, #8a929c);
-          border-color: var(--disabled-text-color, #8a929c);
-        }
-        .session-strip-block.anomalous::after,
-        .session-strip-block.has-alert::after {
-          color: var(--error-color, #db4437);
-          content: "!";
-          font-weight: 700;
-          left: 50%;
-          position: absolute;
-          top: -3px;
-          transform: translateX(-50%);
-        }
-        .session-strip-block.running {
-          border-right-style: dotted;
-        }
-        .session-strip-detail {
-          display: grid;
-          gap: 4px;
-          padding: 8px 0 0;
         }
         code {
           background: var(--secondary-background-color, #f4f6f8);
@@ -1101,12 +1003,6 @@ export class PanelShellMethods {
             font-size: 12px;
             font-weight: 700;
           }
-          .schedule-window {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
-          }
-          .schedule-weekdays {
-            grid-column: 1 / -1;
-          }
         }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
@@ -1183,34 +1079,7 @@ export class PanelShellMethods {
     this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
-    this._listen("[data-save-appliance-notifications]", () => this._saveApplianceNotificationPreferences());
-    this._listen("[data-save-expected-schedule]", () => this._saveExpectedSchedule());
-    this._listen("[data-add-schedule-window]", () => {
-      const draft = this._readExpectedScheduleForm();
-      draft.windows.push({ start: "08:00", end: "10:00", weekdays: [0, 1, 2, 3, 4] });
-      this._expectedScheduleDraft = draft;
-      this._render();
-    });
-    for (const button of this.shadowRoot.querySelectorAll("[data-remove-schedule-window]")) {
-      button.addEventListener("click", () => {
-        const draft = this._readExpectedScheduleForm();
-        draft.windows.splice(Number(button.dataset.removeScheduleWindow), 1);
-        this._expectedScheduleDraft = draft;
-        this._render();
-      });
-    }
-    for (const input of this.shadowRoot.querySelectorAll("[data-schedule-mode]")) {
-      input.addEventListener("change", () => {
-        this._expectedScheduleDraft = this._readExpectedScheduleForm();
-        this._render();
-      });
-    }
     this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
-    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
-      button.addEventListener("click", () => {
-        this._callApplianceDetailAction(button.dataset.applianceDetailAction);
-      });
-    }
     for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.recommendationIndex, 10);
