@@ -733,6 +733,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
                         "usage_kwh": 10.0,
+                        "complete": True,
                     }
                     for offset in range(1, 6)
                 ],
@@ -1048,6 +1049,7 @@ def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
                         "usage_kwh": 10.0,
+                        "complete": True,
                     }
                     for offset in range(1, 6)
                 ],
@@ -1139,6 +1141,7 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
                         "usage_kwh": 10.0,
+                        "complete": True,
                     }
                     for offset in range(1, 6)
                 ],
@@ -1346,6 +1349,7 @@ def test_energy_usage_alert_features_include_contextual_baseline_details() -> No
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
                         "usage_kwh": 10.0,
+                        "complete": True,
                     }
                     for offset in range(1, 6)
                 ],

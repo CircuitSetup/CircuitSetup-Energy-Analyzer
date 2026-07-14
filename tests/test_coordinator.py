@@ -8718,6 +8718,13 @@ async def test_demo_appliance_history_is_seeded_after_learning() -> None:
     await coordinator.async_process_update()
 
     usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
+    seeded_prior_days = [
+        day
+        for day in coordinator.store_data.energy_usage_by_circuit[circuit_id]["days"]
+        if str(day.get("date", "")) < now.date().isoformat()
+    ]
+    assert seeded_prior_days
+    assert all(day.get("complete") is True for day in seeded_prior_days)
     assert usage["baseline_day_count"] >= 7
     assert usage["status"] != "learning"
     assert usage["status"] != "waiting_for_delta"
@@ -12142,13 +12149,13 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
                     "last_energy_kwh": 100.0,
                     "last_sample_at": "2026-06-03T00:00:00+00:00",
                     "days": [
-                        {"date": "2026-05-27", "usage_kwh": 6.0},
-                        {"date": "2026-05-28", "usage_kwh": 7.0},
-                        {"date": "2026-05-29", "usage_kwh": 8.0},
-                        {"date": "2026-05-30", "usage_kwh": 7.0},
-                        {"date": "2026-05-31", "usage_kwh": 6.0},
-                        {"date": "2026-06-01", "usage_kwh": 8.0},
-                        {"date": "2026-06-02", "usage_kwh": 8.0},
+                        {"date": "2026-05-27", "usage_kwh": 6.0, "complete": True},
+                        {"date": "2026-05-28", "usage_kwh": 7.0, "complete": True},
+                        {"date": "2026-05-29", "usage_kwh": 8.0, "complete": True},
+                        {"date": "2026-05-30", "usage_kwh": 7.0, "complete": True},
+                        {"date": "2026-05-31", "usage_kwh": 6.0, "complete": True},
+                        {"date": "2026-06-01", "usage_kwh": 8.0, "complete": True},
+                        {"date": "2026-06-02", "usage_kwh": 8.0, "complete": True},
                     ],
                 }
             }

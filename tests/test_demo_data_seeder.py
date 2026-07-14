@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from custom_components.circuitsetup_energy_analyzer.demo import (
+    DEMO_HISTORY_SEED_VERSION,
+)
 from custom_components.circuitsetup_energy_analyzer.managers.demo_data import (
     DemoDataSeeder,
 )
@@ -94,6 +97,63 @@ def test_demo_data_seeder_energy_usage_history_uses_ha_local_seed_dates() -> Non
         "2026-05-30",
     ]
     assert coordinator.store_persistence.dirty is True
+
+
+def test_demo_data_seeder_upgrades_prior_unmarked_seed_history() -> None:
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    coordinator = _Coordinator()
+    config = _demo_config("refrigerator")
+    coordinator.store_data.energy_usage_by_circuit[config.circuit_id] = {
+        "days": [
+            {"date": f"2026-05-{day:02d}", "usage_kwh": 99.0}
+            for day in range(24, 31)
+        ],
+        "last_energy_kwh": 45.0,
+        "last_sample_at": "2026-05-31T12:00:00+00:00",
+        "_demo_seed_version": 1,
+        "_demo_seed_date": "2026-05-31",
+    }
+
+    DemoDataSeeder(coordinator).seed_energy_usage_history(
+        config,
+        SimpleNamespace(energy=52.6),
+        now,
+        EnergyUsageSettings(window_days=7),
+    )
+
+    history = coordinator.store_data.energy_usage_by_circuit[config.circuit_id]
+    assert history["_demo_seed_version"] == DEMO_HISTORY_SEED_VERSION
+    assert all(day.get("complete") is True for day in history["days"])
+    assert all(day["usage_kwh"] != 99.0 for day in history["days"])
+    assert coordinator.store_persistence.dirty is True
+
+
+def test_demo_data_seeder_preserves_unrelated_existing_history() -> None:
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+    coordinator = _Coordinator()
+    config = _demo_config("refrigerator")
+    existing = {
+        "days": [{"date": "2026-05-31", "usage_kwh": 0.4}],
+        "last_energy_kwh": 52.2,
+        "last_sample_at": "2026-05-31T12:00:00+00:00",
+        "source": "user",
+    }
+    coordinator.store_data.energy_usage_by_circuit[config.circuit_id] = existing
+
+    DemoDataSeeder(coordinator).seed_energy_usage_history(
+        config,
+        SimpleNamespace(energy=52.6),
+        now,
+        EnergyUsageSettings(window_days=7),
+    )
+
+    assert coordinator.store_data.energy_usage_by_circuit[config.circuit_id] == {
+        "days": [{"date": "2026-05-31", "usage_kwh": 0.4}],
+        "last_energy_kwh": 52.2,
+        "last_sample_at": "2026-05-31T12:00:00+00:00",
+        "source": "user",
+    }
+    assert coordinator.store_persistence.dirty is False
 
 
 def test_demo_data_seeder_weather_context_history_uses_ha_local_prior_days() -> None:

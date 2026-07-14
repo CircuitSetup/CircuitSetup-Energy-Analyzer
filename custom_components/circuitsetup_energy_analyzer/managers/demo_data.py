@@ -151,19 +151,34 @@ class DemoDataSeeder:
             config.circuit_id,
             {},
         )
+        seed_version = history.get("_demo_seed_version")
+        known_demo_history = (
+            isinstance(seed_version, int)
+            and not isinstance(seed_version, bool)
+            and 1 <= seed_version <= DEMO_HISTORY_SEED_VERSION
+        )
+        if history and not known_demo_history:
+            return
+
         days = history.get("days")
-        prior_day_count = (
+        complete_prior_day_count = (
             sum(
                 1
                 for day in days
-                if isinstance(day, Mapping) and str(day.get("date", "")) < today
+                if (
+                    isinstance(day, Mapping)
+                    and str(day.get("date", "")) < today
+                    and day.get("complete") is True
+                )
             )
             if isinstance(days, list)
             else 0
         )
-        if prior_day_count >= window_days and _float_or_none(
-            history.get("last_energy_kwh"),
-        ) is not None:
+        if (
+            seed_version == DEMO_HISTORY_SEED_VERSION
+            and complete_prior_day_count >= window_days
+            and _float_or_none(history.get("last_energy_kwh")) is not None
+        ):
             return
 
         circuit_key = demo_circuit_key(config)
@@ -174,6 +189,7 @@ class DemoDataSeeder:
             {
                 "date": (start_date + timedelta(days=index)).isoformat(),
                 "usage_kwh": round(float(usage), 3),
+                "complete": True,
             }
             for index, usage in enumerate(prior_usage)
         ]

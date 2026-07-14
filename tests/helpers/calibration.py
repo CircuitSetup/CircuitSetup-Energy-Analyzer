@@ -86,6 +86,7 @@ class CalibrationSample:
     timestamp: datetime
     t: int
     states: dict[str, Any]
+    completes_prior_energy_days: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +299,13 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 }
                 for issue in normalized_sample.quality_issues
             )
+
+            if calibration_sample.completes_prior_energy_days:
+                _mark_prior_energy_days_complete(
+                    store_data,
+                    circuit_config.circuit_id,
+                    calibration_sample.timestamp,
+                )
 
             results = [
                 event_processor.process(
@@ -578,9 +586,25 @@ def _expand_segment(
                 timestamp=start_time + timedelta(seconds=t),
                 t=t,
                 states=states,
+                completes_prior_energy_days=True,
             )
         )
     return samples
+
+
+def _mark_prior_energy_days_complete(
+    store_data: FeatureStoreData,
+    circuit_id: str,
+    timestamp: datetime,
+) -> None:
+    history = store_data.energy_usage_by_circuit.get(circuit_id, {})
+    days = history.get("days")
+    if not isinstance(days, list):
+        return
+    today = timestamp.date().isoformat()
+    for day in days:
+        if isinstance(day, dict) and str(day.get("date", "")) < today:
+            day["complete"] = True
 
 
 def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
