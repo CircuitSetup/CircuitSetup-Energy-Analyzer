@@ -241,6 +241,38 @@ def _coordinator(
     )
 
 
+def _nilm_coordinator(
+    sessions: list[dict[str, object]],
+    *,
+    rejected_session_ids: list[str] | None = None,
+) -> SimpleNamespace:
+    coordinator = _coordinator()
+    coordinator.store_data.appliance_schedule_settings = {
+        "nilm:assignment-pool-pump": {
+            **_settings().as_dict(),
+            "appliance_key": "nilm:assignment-pool-pump",
+        }
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-pool-pump",
+                "appliance_key": "nilm:assignment-pool-pump",
+                "lifecycle_state": "validated",
+                "confidence": 0.91,
+                "rejected_session_ids": rejected_session_ids or [],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {"mains": sessions}
+    coordinator.state.data_quality_checklist_by_circuit["mains"] = {
+        "required_sensors_present": True,
+        "source_data_fresh": True,
+        "numeric_states_valid": True,
+    }
+    return coordinator
+
+
 def test_completed_window_with_minimum_runtime_is_not_missed() -> None:
     events = [
         CircuitEvent(
@@ -385,25 +417,8 @@ def test_three_distinct_outside_sessions_create_one_watch_alert() -> None:
 
 
 def test_validated_nilm_session_uses_the_same_schedule_context() -> None:
-    coordinator = _coordinator()
-    coordinator.store_data.appliance_schedule_settings = {
-        "nilm:assignment-pool-pump": _settings().as_dict()
-    }
-    coordinator.store_data.appliance_schedule_settings[
-        "nilm:assignment-pool-pump"
-    ]["appliance_key"] = "nilm:assignment-pool-pump"
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
-        "mains": [
-            {
-                "assignment_id": "assignment-pool-pump",
-                "appliance_key": "nilm:assignment-pool-pump",
-                "lifecycle_state": "validated",
-                "confidence": 0.91,
-            }
-        ]
-    }
-    coordinator.store_data.nilm_session_history_by_circuit = {
-        "mains": [
+    coordinator = _nilm_coordinator(
+        [
             {
                 "session_id": "session-running",
                 "assignment_id": "assignment-pool-pump",
@@ -412,12 +427,7 @@ def test_validated_nilm_session_uses_the_same_schedule_context() -> None:
                 "confidence": 0.92,
             }
         ]
-    }
-    coordinator.state.data_quality_checklist_by_circuit["mains"] = {
-        "required_sensors_present": True,
-        "source_data_fresh": True,
-        "numeric_states_valid": True,
-    }
+    )
 
     alerts = refresh_expected_schedule_contexts(
         coordinator,
@@ -428,6 +438,56 @@ def test_validated_nilm_session_uses_the_same_schedule_context() -> None:
     assert coordinator.state.expected_schedule_by_appliance[
         "nilm:assignment-pool-pump"
     ]["status"] == "running_in_expected_window"
+
+
+def test_rejected_open_nilm_session_is_not_running() -> None:
+    coordinator = _nilm_coordinator(
+        [
+            {
+                "session_id": "session-rejected",
+                "assignment_id": "assignment-pool-pump",
+                "start": "2026-07-13T08:15:00-04:00",
+                "end": None,
+            }
+        ],
+        rejected_session_ids=["session-rejected"],
+    )
+
+    refresh_expected_schedule_contexts(
+        coordinator,
+        datetime(2026, 7, 13, 9, 0, tzinfo=TIME_ZONE),
+    )
+
+    assert coordinator.state.expected_schedule_by_appliance[
+        "nilm:assignment-pool-pump"
+    ]["status"] == "learning"
+
+
+def test_rejected_completed_nilm_session_does_not_satisfy_runtime() -> None:
+    coordinator = _nilm_coordinator(
+        [
+            {
+                "session_id": "session-rejected",
+                "assignment_id": "assignment-pool-pump",
+                "start": "2026-07-13T08:10:00-04:00",
+                "end": "2026-07-13T08:45:00-04:00",
+            }
+        ],
+        rejected_session_ids=["session-rejected"],
+    )
+
+    refresh_expected_schedule_contexts(
+        coordinator,
+        datetime(2026, 7, 13, 12, 0, tzinfo=TIME_ZONE),
+    )
+
+    evidence = coordinator.store_data.appliance_schedule_evidence[
+        "nilm:assignment-pool-pump"
+    ]
+    assert len(evidence["missed_window_ids"]) == 1
+    assert coordinator.state.expected_schedule_by_appliance[
+        "nilm:assignment-pool-pump"
+    ]["status"] == "learning"
 
 
 def test_converted_nilm_identity_uses_its_direct_meter_runtime() -> None:

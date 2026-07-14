@@ -200,7 +200,7 @@ def _prior_days(
     prior = [
         {"date": str(day["date"]), "usage_kwh": float(day["usage_kwh"])}
         for day in days
-        if str(day["date"]) < today
+        if str(day["date"]) < today and day.get("complete") is True
     ]
     prior.sort(key=lambda day: day["date"])
     return prior[-window_days:]

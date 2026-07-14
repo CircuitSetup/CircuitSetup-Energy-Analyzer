@@ -82,6 +82,7 @@ class _ScheduleTarget:
     assignment_id: str | None = None
     confidence: float | None = None
     model_ready: bool = True
+    rejected_session_ids: frozenset[str] = frozenset()
 
 
 def schedule_settings_from_dict(
@@ -498,6 +499,7 @@ def _schedule_target(store_data: Any, appliance_key: str) -> _ScheduleTarget | N
             key = str(assignment.get("appliance_key") or f"nilm:{assignment_id}")
             if key != appliance_key:
                 continue
+            rejected = assignment.get("rejected_session_ids")
             if assignment.get("conversion_state") == "direct_meter":
                 direct_circuit_id = str(
                     assignment.get("direct_circuit_id") or ""
@@ -515,6 +517,11 @@ def _schedule_target(store_data: Any, appliance_key: str) -> _ScheduleTarget | N
                 assignment_id=assignment_id,
                 confidence=_float_or_none(assignment.get("confidence")),
                 model_ready=lifecycle in {"confirmed", "published", "validated"},
+                rejected_session_ids=frozenset(
+                    str(value).strip()
+                    for value in rejected
+                    if str(value).strip()
+                ) if isinstance(rejected, list | tuple | set) else frozenset(),
             )
     return None
 
@@ -745,6 +752,8 @@ def _nilm_sessions(store_data: Any, target: _ScheduleTarget) -> list[Mapping[str
         for session in session_values
         if isinstance(session, Mapping)
         and str(session.get("assignment_id") or "") == target.assignment_id
+        and str(session.get("session_id") or "").strip()
+        not in target.rejected_session_ids
     ]
 
 
