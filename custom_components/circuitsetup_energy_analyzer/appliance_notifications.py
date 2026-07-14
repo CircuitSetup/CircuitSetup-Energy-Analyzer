@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any, Literal
 
+from .notifications import POWER_QUALITY_ALERT_FEATURES
+
 DELIVERY_MODES = frozenset(
     {"immediate", "daily_summary", "weekly_digest", "disabled"}
 )
@@ -126,9 +128,14 @@ def decide_notification_delivery(
 
 def alert_notification_category(feature: str) -> str:
     normalized = str(feature or "").lower()
+    if normalized in POWER_QUALITY_ALERT_FEATURES:
+        return "electrical_issue"
     if "finished" in normalized:
         return "finished_running"
-    if "daily_energy" in normalized or "energy_spike" in normalized:
+    if any(
+        token in normalized
+        for token in ("daily_energy", "energy_spike", "unusual_energy")
+    ):
         return "high_daily_energy"
     if "runtime" in normalized or "duration" in normalized:
         return "unusual_runtime"

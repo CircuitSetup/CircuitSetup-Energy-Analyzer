@@ -124,6 +124,24 @@ def test_nilm_alert_categories_remain_independent() -> None:
     assert alert_notification_category("nilm_high_daily_energy") == (
         "high_daily_energy"
     )
+    assert alert_notification_category("nilm_appliance_unusual_energy") == (
+        "high_daily_energy"
+    )
     assert alert_notification_category("nilm_low_confidence_change") == (
         "nilm_review_needed"
     )
+
+
+@pytest.mark.parametrize(
+    "feature",
+    [
+        "reactive_shift_under_stable_real_power",
+        "power_factor_shift_under_load",
+        "apparent_power_shift",
+        "motor_relationship_changed",
+        "split_phase_relationship_changed",
+        "resistive_load_became_reactive",
+    ],
+)
+def test_power_quality_alerts_use_electrical_issue_category(feature: str) -> None:
+    assert alert_notification_category(feature) == "electrical_issue"

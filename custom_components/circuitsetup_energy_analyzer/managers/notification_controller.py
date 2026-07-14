@@ -238,8 +238,12 @@ class NotificationController:
                 active_alerts.append(alert)
             if alert_id in self.notified_alert_ids:
                 continue
-            self._coordinator.store_data.alerts.append(alert)
-            self._coordinator.store_persistence.mark_dirty()
+            if not any(
+                notifications.notification_id_for_alert(stored_alert) == alert_id
+                for stored_alert in self._coordinator.store_data.alerts
+            ):
+                self._coordinator.store_data.alerts.append(alert)
+                self._coordinator.store_persistence.mark_dirty()
             await self.async_notify_alert(alert)
         return active_alerts
 

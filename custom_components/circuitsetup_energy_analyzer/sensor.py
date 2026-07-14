@@ -86,6 +86,7 @@ from .nilm_virtual import (
     nilm_virtual_unique_id,
     published_nilm_virtual_appliance_states,
 )
+from .notifications import POWER_QUALITY_ALERT_FEATURES
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
 from .tariff import configured_electricity_rate
@@ -336,21 +337,9 @@ def power_quality_evidence_value(state: Any, circuit_id: str) -> str:
     )
 
 
-_POWER_QUALITY_ALERT_FEATURES = frozenset(
-    {
-        "reactive_shift_under_stable_real_power",
-        "power_factor_shift_under_load",
-        "apparent_power_shift",
-        "motor_relationship_changed",
-        "split_phase_relationship_changed",
-        "resistive_load_became_reactive",
-    }
-)
-
-
 def _power_quality_alert_confirmed(state: Any, circuit_id: str) -> bool:
     return any(
-        getattr(alert, "feature", "") in _POWER_QUALITY_ALERT_FEATURES
+        getattr(alert, "feature", "") in POWER_QUALITY_ALERT_FEATURES
         for alert in getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ())
     )
 

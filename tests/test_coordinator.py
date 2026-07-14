@@ -7336,6 +7336,61 @@ async def test_nilm_virtual_low_confidence_notification_prompts_validation(
 
 
 @pytest.mark.asyncio
+async def test_suppressed_nilm_alert_is_stored_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    sent_notifications: list[AlertEvidence] = []
+
+    async def fake_notification(hass, alert, **kwargs) -> None:
+        sent_notifications.append(alert)
+
+    monkeypatch.setattr(
+        coordinator_module.notifications,
+        "async_create_alert_notification",
+        fake_notification,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "mains_circuit_id": "mains",
+                        "lifecycle_state": "needs_validation",
+                        "confidence": 0.5,
+                        "created_device": True,
+                        "publish_entities": True,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator._notify_nilm_virtual_appliances(now)
+    await coordinator._notify_nilm_virtual_appliances(now)
+
+    assert len(coordinator.store_data.alerts) == 1
+    assert coordinator.notification_controller.notified_alert_ids == set()
+
+    coordinator.store_data.appliance_notification_preferences[
+        "nilm:assignment-dishwasher"
+    ] = {"minimum_confidence": 0.4}
+    await coordinator._notify_nilm_virtual_appliances(now)
+
+    assert len(coordinator.store_data.alerts) == 1
+    assert len(sent_notifications) == 1
+
+
+@pytest.mark.asyncio
 async def test_nilm_virtual_needs_validation_notification_uses_review_category(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

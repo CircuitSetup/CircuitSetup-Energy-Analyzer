@@ -12,7 +12,7 @@ from .localized_text import translation_text
 from .models import AlertEvidence, CircuitConfig
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
-_POWER_QUALITY_ALERT_FEATURES = frozenset(
+POWER_QUALITY_ALERT_FEATURES = frozenset(
     {
         "reactive_shift_under_stable_real_power",
         "power_factor_shift_under_load",
@@ -101,7 +101,7 @@ def alert_notification_message(
 
 
 def _power_quality_notice_lines(alert: AlertEvidence) -> list[str]:
-    if alert.feature not in _POWER_QUALITY_ALERT_FEATURES:
+    if alert.feature not in POWER_QUALITY_ALERT_FEATURES:
         return []
     return [
         "",
