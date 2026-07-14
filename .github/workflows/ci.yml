@@ -124,7 +124,7 @@ jobs:
           python -c "from homeassistant.const import __version__; print(f'Home Assistant version: {__version__}')"
 
       - name: Run Home Assistant contract tests
-        run: python -m pytest tests/test_control_entities.py tests/test_config_flow.py tests_homeassistant -q
+        run: python -m pytest tests/test_control_entities.py tests/test_config_flow.py tests_homeassistant --ignore=tests_homeassistant/test_browser_e2e.py -q
 
   home-assistant-control-entity-contract:
     name: Home Assistant control entity contract

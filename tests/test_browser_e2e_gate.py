@@ -43,3 +43,9 @@ def test_ci_runs_browser_gate_and_uploads_failure_artifacts() -> None:
         and step.get("if") == "failure()"
         for step in steps
     )
+
+    contract_commands = "\n".join(
+        str(step.get("run", ""))
+        for step in jobs["home-assistant-contract"]["steps"]
+    )
+    assert "--ignore=tests_homeassistant/test_browser_e2e.py" in contract_commands
