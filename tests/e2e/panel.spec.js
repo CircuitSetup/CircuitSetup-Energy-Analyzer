@@ -63,6 +63,37 @@ async function openPanel(page, query) {
   return panel;
 }
 
+async function openDashboardGraphs(page) {
+  await page.goto(`${HARNESS}?alert_id=alert-kitchen-energy`);
+  await page.waitForFunction(() => window.__panelReady === true);
+  await page.evaluate(() => {
+    const hass = window.__panel._hass;
+    const panelConfig = window.__panel._panel;
+    hass.states["sensor.kitchen_power"] = {
+      state: "610",
+      attributes: { friendly_name: "Kitchen Power", unit_of_measurement: "W" },
+    };
+    window.__panel.remove();
+    const dashboard = document.createElement("circuitsetup-energy-analyzer-dashboard-graphs");
+    dashboard.setConfig({
+      appliance_power_entities: ["sensor.kitchen_power"],
+      detail_path: "/circuitsetup-energy-analyzer-evidence?alert_id=alert-kitchen-energy",
+      title: "Appliance energy",
+    });
+    dashboard.panel = panelConfig;
+    dashboard.hass = hass;
+    const main = document.createElement("main");
+    const heading = document.createElement("h1");
+    heading.textContent = "Energy dashboard";
+    main.append(heading, dashboard);
+    document.body.append(main);
+    window.__panel = dashboard;
+  });
+  const dashboard = page.locator("circuitsetup-energy-analyzer-dashboard-graphs");
+  await expect(dashboard.locator(".chart-data-fallback")).toBeVisible();
+  return dashboard;
+}
+
 async function toHaveNoViolations(page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
@@ -118,6 +149,39 @@ test("major panel routes pass automated accessibility checks", async ({ page }) 
     await openPanel(page, query);
     await toHaveNoViolations(page);
   }
+});
+
+test("dashboard chart data fallback is keyboard accessible and responsive", async ({ page, isMobile }) => {
+  await mockPanelApi(page);
+  const dashboard = await openDashboardGraphs(page);
+  const disclosure = dashboard.locator(".chart-data-fallback");
+  const summary = disclosure.locator(":scope > summary");
+  const detailLink = dashboard.locator("[data-dashboard-alert-detail]");
+
+  await expect(dashboard.locator("svg.chart")).toBeVisible();
+  await expect(detailLink).toBeVisible();
+  await expect(disclosure.locator("[data-dashboard-alert-detail]")).toHaveCount(0);
+  await expect(summary).toHaveCSS("cursor", "pointer");
+  expect((await summary.boundingBox()).height).toBeGreaterThanOrEqual(44);
+
+  await summary.focus();
+  await expect(summary).toBeFocused();
+  await summary.press("Enter");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await expect(disclosure.locator("li")).toHaveCount(3);
+  await summary.press("Space");
+  await expect(disclosure).not.toHaveAttribute("open", "");
+
+  const layout = await dashboard.evaluate((host) => {
+    const chart = host.shadowRoot.querySelector("svg.chart").getBoundingClientRect();
+    return { chartLeft: chart.left, chartRight: chart.right, viewportWidth: window.innerWidth };
+  });
+  expect(layout.chartLeft).toBeGreaterThanOrEqual(0);
+  expect(layout.chartRight).toBeLessThanOrEqual(layout.viewportWidth + 1);
+  if (isMobile) {
+    expect(layout.viewportWidth).toBe(390);
+  }
+  await toHaveNoViolations(page);
 });
 
 test("mobile layout has no horizontal page overflow", async ({ page, isMobile }) => {

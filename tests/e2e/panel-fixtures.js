@@ -18,7 +18,10 @@ export const evidence = {
     what_happened: "Energy use is above the recent same-time range.",
     why_it_matters: "Longer runtime can explain a higher daily total.",
     what_to_check_first: "Confirm the appliance ran when expected.",
-    graph_entities: [],
+    graph_entities: ["sensor.kitchen_power"],
+    graph_window_start: "2026-07-13T17:00:00Z",
+    graph_window_end: "2026-07-13T20:00:00Z",
+    y_axis_label: "W",
   },
   actions: {
     acknowledge: {
@@ -69,6 +72,12 @@ export const evidence = {
     },
   ],
 };
+
+export const chartHistory = [[
+  { entity_id: "sensor.kitchen_power", state: "420", last_changed: "2026-07-13T17:00:00Z" },
+  { entity_id: "sensor.kitchen_power", state: "980", last_changed: "2026-07-13T18:30:00Z" },
+  { entity_id: "sensor.kitchen_power", state: "610", last_changed: "2026-07-13T20:00:00Z" },
+]];
 
 export const applianceInsights = {
   status: "ok",
@@ -384,6 +393,6 @@ export function apiPayload(pathname) {
   if (pathname.endsWith("/appliance_detail")) return applianceDetail;
   if (pathname.endsWith("/setup_health")) return setupHealth;
   if (pathname.endsWith("/nilm_workspace")) return nilmWorkspace;
-  if (pathname.includes("/history/period")) return [];
+  if (pathname.includes("/history/period")) return chartHistory;
   throw new Error(`Unmocked browser API request: ${pathname}`);
 }

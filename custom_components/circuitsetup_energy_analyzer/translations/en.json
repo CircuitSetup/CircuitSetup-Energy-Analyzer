@@ -1574,6 +1574,8 @@
         "point_title": "{name}: {value}{unit} at {time}",
         "session_title": "{label} ({session_id})",
         "session_confidence": ", confidence {confidence}%",
+        "data_summary": "{count} chart data items available.",
+        "data_fallback": "View chart data",
         "changed_by": "{feature} changed by {percent}%.",
         "changed_metrics": "Changed metrics: {metrics}.",
         "change_fallback": "The analyzer found a repeated change.",

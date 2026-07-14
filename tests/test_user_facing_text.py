@@ -3650,6 +3650,62 @@ if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
     )
 
 
+def test_chart_data_fallback_covers_visible_points_sessions_and_edges() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "Kitchen Fridge", points: [
+      { time: Date.parse("2026-06-24T18:10:00Z"), value: 123.456 },
+      { time: Date.parse("2026-06-24T18:20:00Z"), value: 98.5 },
+    ] },
+    { name: "Basement Freezer", points: [
+      { time: Date.parse("2026-06-24T18:30:00Z"), value: 45.25 },
+    ] },
+  ],
+  {
+    graph_window_start: "2026-06-24T18:00:00Z",
+    graph_window_end: "2026-06-24T19:00:00Z",
+    y_axis_label: "W",
+    nilm_select_interval: true,
+    nilm_sessions: [
+      { session_id: "session-in", display_label: "Dishwasher", start: "2026-06-24T18:05:00Z", end: "2026-06-24T18:25:00Z", confidence: 0.82, selected: true },
+      { session_id: "session-out", display_label: "Out of window", start: "2026-06-24T20:00:00Z", end: "2026-06-24T20:30:00Z", confidence: 0.9 },
+    ],
+    nilm_edges: [
+      { timestamp: "2026-06-24T18:15:00Z", direction: "rising" },
+      { timestamp: "2026-06-24T20:15:00Z", direction: "falling_outside" },
+    ],
+  },
+);
+const svg = html.match(/<svg[\s\S]*?<\/svg>/)[0];
+const fallback = html.match(/<details class="action-disclosure chart-data-fallback">[\s\S]*?<\/details>/)[0];
+assert.match(html, /5 chart data items available/);
+assert.match(fallback, /<summary>View chart data<\/summary>/);
+for (const expected of [
+  "Kitchen Fridge: 123.46 W",
+  "Kitchen Fridge: 98.5 W",
+  "Basement Freezer: 45.25 W",
+  "Dishwasher (session-in): 2026-06-24 6:05PM - 2026-06-24 6:25PM, confidence 82%",
+  "Rising: 2026-06-24 6:15PM",
+]) {
+  assert.ok(fallback.includes(expected), `missing fallback item: ${expected}`);
+}
+for (const excluded of ["session-out", "Out of window", "falling_outside"]) {
+  assert.ok(!fallback.includes(excluded), `unexpected out-of-window item: ${excluded}`);
+}
+for (const attribute of ["data-nilm-", "data-chart-"]) {
+  assert.ok(!fallback.includes(attribute), `fallback copied interactive attribute: ${attribute}`);
+}
+for (const attribute of ['data-nilm-chart-select="1"', 'data-nilm-selected="true"', 'data-nilm-edge-direction="rising"']) {
+  assert.ok(svg.includes(attribute), `SVG lost interactive attribute: ${attribute}`);
+}
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
     asset = _frontend_source()
 
@@ -3816,6 +3872,11 @@ card._nilmWorkspaceHistorySeries = [[
 ]];
 card._render();
 const html = card.shadowRoot.innerHTML;
+const fallbackIndex = html.indexOf('chart-data-fallback');
+const detailLinkIndex = html.indexOf('data-dashboard-alert-detail');
+if (fallbackIndex < 0 || detailLinkIndex < 0 || fallbackIndex > detailLinkIndex) {
+  throw new Error("dashboard chart fallback must be outside and before the detail link");
+}
 for (const expected of [
   "Latest related notification",
   "Pool pump used more power than expected.",

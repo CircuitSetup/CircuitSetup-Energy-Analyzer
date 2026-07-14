@@ -424,13 +424,19 @@ export function createEvidenceViewMethods({
     const valueRange = Math.max(maxValue - minValue, 1);
     const x = (time) => padLeft + ((time - minTime) / timeRange) * (width - padLeft - padRight);
     const y = (value) => padTop + (1 - ((value - minValue) / valueRange)) * (height - padTop - padBottom);
+    const unit = alert.y_axis_label ? ` ${alert.y_axis_label}` : "";
+    const pointTitle = (item, point) => this._panelTextFormat("chart.point_title", {
+      name: item.name,
+      value: this._formatNumber(point.value),
+      unit,
+      time: this._formatDateTime(new Date(point.time)),
+    });
 
     const lines = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
-      const unit = alert.y_axis_label ? ` ${alert.y_axis_label}` : "";
       const circles = item.points.map((point) => {
-        const title = this._panelTextFormat("chart.point_title", { name: item.name, value: this._formatNumber(point.value), unit, time: this._formatDateTime(new Date(point.time)) });
+        const title = pointTitle(item, point);
         return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"><title>${this._escape(title)}</title></circle>`;
       }).join("");
       return `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${points}"></polyline>${circles}`;
@@ -459,14 +465,17 @@ export function createEvidenceViewMethods({
       const direction = this._friendlyFeature(edge.direction);
       return `<line class="nilm-edge-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}" data-nilm-edge-time="${this._escape(new Date(markerTime).toISOString())}" data-nilm-edge-direction="${this._escape(edge.direction)}"><title>${this._escape(direction)}</title></line>`;
     }).join("");
-    const sessionBands = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
+    const sessionItems = (Array.isArray(alert.nilm_sessions) ? alert.nilm_sessions : []).map((session) => {
       const start = Date.parse(session && session.start || "");
       const end = Date.parse(session && session.end || "");
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) {
-        return "";
+        return null;
       }
       const confidence = Number(session && session.confidence);
       const confidenceValue = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : null;
+      return { session, start, end, confidenceValue };
+    }).filter(Boolean);
+    const sessionBands = sessionItems.map(({ session, start, end, confidenceValue }) => {
       const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
       const lowConfidenceAttr = this._isLowNilmConfidence(confidenceValue) ? ' data-nilm-low-confidence="true"' : "";
       const selectedAttr = session.selected ? ' data-nilm-selected="true"' : "";
@@ -491,6 +500,22 @@ export function createEvidenceViewMethods({
     const selectAttrs = alert.nilm_select_interval
       ? ` tabindex="0" data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
       : "";
+    const dataItems = [
+      ...series.flatMap((item) => item.points.map((point) => pointTitle(item, point))),
+      ...sessionItems.map(({ session, start, end, confidenceValue }) => {
+        const label = this._nilmSessionGraphLabel(session);
+        const sessionId = session.session_id || this._panelText("nilm_workspace.nilm_session");
+        const title = label ? this._panelTextFormat("chart.session_title", { label, session_id: sessionId }) : sessionId;
+        const confidence = confidenceValue !== null ? this._panelTextFormat("chart.session_confidence", { confidence: Math.round(confidenceValue * 100) }) : "";
+        return `${title}: ${this._formatDateTime(new Date(start))} - ${this._formatDateTime(new Date(end))}${confidence}`;
+      }),
+      ...edgeItems.map((edge) => `${this._friendlyFeature(edge.direction)}: ${this._formatDateTime(new Date(edge.time))}`),
+    ];
+    const dataFallback = `<p class="muted chart-data-summary">${this._escape(this._panelTextFormat("chart.data_summary", { count: dataItems.length }))}</p>
+      <details class="action-disclosure chart-data-fallback">
+        <summary>${this._escape(this._panelText("chart.data_fallback"))}</summary>
+        <ul>${dataItems.map((item) => `<li>${this._escape(item)}</li>`).join("")}</ul>
+      </details>`;
 
     return `
       <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(this._panelText("chart.alert_evidence_label"))}"${selectAttrs}>
@@ -508,6 +533,7 @@ export function createEvidenceViewMethods({
       </svg>
       <div class="legend">${legend}</div>
       <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
+      ${dataFallback}
     `;
   }
 

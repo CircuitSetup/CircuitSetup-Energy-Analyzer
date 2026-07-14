@@ -127,20 +127,18 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             font-size: 13px;
             white-space: nowrap;
           }
-          .dashboard-chart-link {
-            color: inherit;
-            display: block;
-            text-decoration: none;
-          }
-          .dashboard-chart-link:focus {
-            outline: 2px solid var(--primary-color, #03a9f4);
-            outline-offset: 3px;
-          }
           .detail-link {
-            color: var(--primary-color, #03a9f4);
+            color: var(--primary-color, #0b6bcb);
             display: inline-block;
             font-weight: 600;
             margin-top: 8px;
+          }
+          .action-disclosure > summary {
+            box-sizing: border-box;
+            cursor: pointer;
+            line-height: 20px;
+            min-height: 44px;
+            padding: 12px 0;
           }
           .chart {
             height: auto;
@@ -264,10 +262,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       <section>
         <h3>${this._escape(this._panelText("dashboard_graphs.latest_notification"))}</h3>
         <p>${this._escape(description)}</p>
-        <a class="dashboard-chart-link" href="${this._escape(detailPath)}" data-dashboard-alert-detail>
-          ${this._renderChart(alert)}
-          <span class="detail-link">${this._escape(this._panelText("dashboard_graphs.view_notification_detail"))}</span>
-        </a>
+        ${this._renderChart(alert)}
+        <a class="detail-link" href="${this._escape(detailPath)}" data-dashboard-alert-detail>${this._escape(this._panelText("dashboard_graphs.view_notification_detail"))}</a>
       </section>
     `;
   }
