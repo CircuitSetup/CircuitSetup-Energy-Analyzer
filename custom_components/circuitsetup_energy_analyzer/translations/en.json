@@ -852,6 +852,7 @@
         "safety_notice": "Safety notice",
         "nilm_estimated": "Estimated from mains power by NILM.",
         "confidence": "Confidence",
+        "cost_unavailable": "Cost unavailable",
         "comparison_value": "Comparison value",
         "baseline_value": "Baseline value"
       },
@@ -1105,6 +1106,9 @@
       "headers": {
         "alert_evidence": "Alert Evidence",
         "appliance_detail": "Appliance Detail",
+        "appliance_insights": "Appliance Insights",
+        "appliance_insights_message": "Compare appliance activity, energy, source quality, and readiness.",
+        "needs_attention": "Needs Attention",
         "appliance_detail_message": "Appliance behavior summary.",
         "suggested_settings": "Suggested Settings",
         "suggested_settings_message": "Review pending analyzer setting recommendations.",
@@ -1124,6 +1128,7 @@
         "load_nilm_workspace": "Could not load NILM workspace: {message}",
         "load_nilm_workspace_history": "Could not load NILM workspace history: {message}",
         "load_appliance_detail": "Could not load Appliance Detail from {path}: {message}",
+        "load_appliance_insights": "Could not load Appliance Insights: {message}",
         "load_appliance_history": "Could not load appliance history from {path}: {message}",
         "run_service": "Could not run {service}: {message}",
         "alert_decision_required": "Choose a response before applying.",
@@ -1137,12 +1142,16 @@
         "nilm_session_label_required": "Enter an appliance name before assigning this NILM session.",
         "nilm_assignment_type_required": "Enter an appliance type before changing this NILM assignment.",
         "nilm_assignment_merge_required": "Choose an assignment to merge into.",
+        "nilm_direct_meter_required": "Choose the configured direct-meter circuit.",
         "nilm_assignment_save_unavailable": "Action unavailable: NILM assignment save.",
         "nilm_assignment_no_changes": "No assignment changes to save.",
         "action_unavailable": "Action unavailable: {label}. Reload the evidence panel and try again.",
         "action_unavailable_reason": "Action unavailable: {reason}.",
         "action_service_missing": "Action unavailable: {label}. The panel did not receive a service to call.",
-        "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again."
+        "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.",
+        "notification_preferences_save": "Could not save appliance notification preferences: {message}",
+        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}",
+        "expected_schedule_save": "Could not save the expected schedule: {message}"
       },
       "messages": {
         "saved_label": "Saved label: {label}.",
@@ -1183,7 +1192,10 @@
         "showing_all_nilm_sessions": "Showing all NILM graph sessions.",
         "showing_selected_signature": "Showing graph sessions for selected signature.",
         "no_paired_sessions": "No paired sessions matched this signature yet.",
-        "updated_nilm_graph_window": "Updated NILM graph window."
+        "updated_nilm_graph_window": "Updated NILM graph window.",
+        "notification_preferences_saved": "Appliance notification preferences saved.",
+        "weekly_digest_settings_saved": "Weekly digest settings saved.",
+        "expected_schedule_saved": "Expected schedule saved."
       },
       "actions": {
         "groups": {
@@ -1237,6 +1249,7 @@
           "adjust_interval": "Adjust Interval",
           "adjust_label": "Adjust Label",
           "complete_interval": "Complete Interval",
+          "convert_to_direct_meter": "Use Direct Meter",
           "remove_interval": "Remove Interval"
         },
         "helpers": {
@@ -1259,19 +1272,43 @@
         "electrical": "Electrical",
         "energy": "Energy",
         "model": "Model",
+        "mains_source": "Mains Source",
+        "data_quality": "Data",
+        "learning_readiness": "Learning",
         "energy_today": "Energy Today",
         "energy_history": "Energy History",
         "runtime_today": "Runtime Today",
         "runs_today": "Runs Today",
         "cost_today": "Cost Today",
-        "recent_timeline": "Recent Timeline",
+        "session_timeline": "Session Timeline",
+        "recent_timeline": "Appliance Activity History",
+        "no_sessions": "No appliance sessions are available yet.",
+        "running_now": "Running now",
+        "maintenance_session": "Overlapped maintenance",
         "today_vs_normal": "Today vs Normal",
+        "why_energy_changed": "Why Energy Changed",
+        "energy_change_insufficient": "Not enough evidence is available to separate the causes of today's energy change.",
+        "energy_change_contribution": "{factor}: {percent}",
+        "energy_change_factors": {
+          "runtime": "Runtime",
+          "running_power": "Running power",
+          "cycle_count": "Cycle count",
+          "unexplained": "Not yet explained"
+        },
         "behavior_expectations": "Behavior Expectations",
         "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
         "actions": "Actions",
         "learning_ranges": "Learning normal ranges for this appliance.",
         "comparison_summary": "Normal {normal}. Status {status}.",
+        "projected_end_of_day": "Projected end of day",
+        "projected_range": "Projected range {low} - {high}",
+        "completed_day_normal_range": "Completed-day normal range {low} - {high}",
+        "projected_status": "Projected status {status}",
+        "configured_warning": "Configured warning {value}",
+        "configured_limit": "Configured limit {value}",
+        "as_of": "As of {timestamp}",
+        "projection_confidence": "Projection confidence {confidence}",
         "confidence_value": "Confidence {confidence}",
         "source_value": "Source {source}",
         "not_enough_expectations": "Not enough data for appliance-specific expectations yet.",
@@ -1287,7 +1324,109 @@
         "history_24_hours": "Past 24 hours",
         "history_7_days": "Past 7 days",
         "history_30_days": "Past 30 days",
-        "history_window": "Showing {start} to {end}."
+        "history_window": "Showing {start} to {end}.",
+        "notifications": "Appliance Notifications"
+      },
+      "appliance_insights": {
+        "loading": "Loading Appliance Insights...",
+        "empty": "No appliances match the selected filters.",
+        "yes": "Yes",
+        "no": "No",
+        "confidence": "Evidence confidence {confidence}",
+        "filters": {
+          "heading": "Filters",
+          "running": "Running",
+          "needs_attention": "Needs Attention",
+          "nilm_estimated": "NILM Estimated",
+          "learning": "Learning",
+          "data_problem": "Data Problem"
+        },
+        "sorts": {
+          "heading": "Sort",
+          "default": "Needs attention, running, largest change",
+          "highest_energy": "Highest Energy",
+          "largest_change": "Largest Change",
+          "name": "Appliance Name"
+        },
+        "columns": {
+          "appliance": "Appliance",
+          "now": "Now",
+          "energy_today": "Energy Today",
+          "today_vs_normal": "Today vs Normal",
+          "source": "Source Quality",
+          "readiness_confidence": "Readiness and Confidence",
+          "needs_attention": "Needs Attention"
+        }
+      },
+      "notifications": {
+        "delivery_mode": "Delivery mode",
+        "minimum_confidence": "Minimum NILM confidence",
+        "cooldown_minutes": "Cooldown minutes",
+        "quiet_hours_start": "Quiet hours start",
+        "quiet_hours_end": "Quiet hours end",
+        "categories": {
+          "finished_running": "Finished running",
+          "unusual_runtime": "Unusual runtime",
+          "high_daily_energy": "High daily energy",
+          "electrical_issue": "Electrical issue",
+          "capacity_demand_issue": "Capacity or demand issue",
+          "data_quality_issue": "Data quality issue",
+          "nilm_review_needed": "NILM review needed"
+        },
+        "delivery_modes": {
+          "immediate": "Immediate",
+          "daily_summary": "Daily summary",
+          "weekly_digest": "Weekly digest only",
+          "disabled": "Disabled"
+        }
+      },
+      "weekly_digest": {
+        "heading": "Weekly Appliance Digest",
+        "enabled": "Create a weekly appliance digest",
+        "delivery": "Digest delivery",
+        "notify_service": "Mobile notify service",
+        "period": "Summary for {start} through {end}.",
+        "no_report": "No weekly report has been generated yet.",
+        "biggest_changes": "Largest changes from normal",
+        "top_energy_users": "Top energy users",
+        "unresolved_items": "Recurring unresolved issues",
+        "nilm_review_items": "NILM assignments needing validation",
+        "load_shift_opportunities": "Load-shifting opportunities",
+        "delivery_modes": {
+          "panel_only": "Panel only",
+          "persistent_notification": "Persistent notification",
+          "mobile_notification": "Mobile notification"
+        }
+      },
+      "expected_schedule": {
+        "heading": "Expected Schedule",
+        "enabled": "Use an expected operating schedule",
+        "mode": "Schedule source",
+        "schedule_entity": "Home Assistant Schedule entity",
+        "local_windows": "Local time windows",
+        "select_schedule": "Select a Schedule entity",
+        "start": "Start",
+        "end": "End",
+        "weekdays": "Expected days",
+        "minimum_duration": "Minimum expected runtime (minutes)",
+        "add_window": "Add window",
+        "remove_window": "Remove window",
+        "days": {
+          "mon": "Mon",
+          "tue": "Tue",
+          "wed": "Wed",
+          "thu": "Thu",
+          "fri": "Fri",
+          "sat": "Sat",
+          "sun": "Sun"
+        }
+      },
+      "attention": {
+        "none": "No appliances need attention right now.",
+        "fix_setup_or_data": "Fix Setup or Data",
+        "review_appliance_behavior": "Review Appliance Behavior",
+        "validate_nilm": "Validate NILM",
+        "open_detail": "Open Appliance Detail"
       },
       "recommendations": {
         "suggested_settings": "Suggested Settings",
@@ -1303,7 +1442,16 @@
         "no_evidence_summary": "No compact evidence summary is available for this recommendation.",
         "evidence_count": "{count} evidence fields were captured{omitted}.",
         "evidence_omitted": "; {count} are hidden from this compact preview",
-        "value_row": "{label}: {value}"
+        "value_row": "{label}: {value}",
+        "preview_history": "Preview historical impact",
+        "preview_window": "{count} retained observations from {start} to {end}.",
+        "preview_alerts": "alerts",
+        "preview_state_changes": "state changes",
+        "preview_count": "{label}: {count} {metric}",
+        "preview_removed": "Would no longer trigger: {examples}",
+        "preview_added": "Would newly trigger: {examples}",
+        "preview_limitations": "Limitations",
+        "preview_alert_selected_history": "A reliable preview is unavailable because retained history contains only alerts selected by the current setting."
       },
       "nilm_workspace": {
         "loading": "Loading NILM workspace...",
@@ -1329,6 +1477,8 @@
         "existing_appliance": "Existing appliance",
         "new_appliance": "New appliance",
         "merge_into": "Merge into",
+        "direct_meter_circuit": "Direct-meter circuit",
+        "select_direct_meter_circuit": "Select a configured circuit",
         "merge_targets_summary": "Showing {shown} of {total} merge targets. {omitted} more can be selected after loading the full slim NILM list.",
         "no_merge_target": "No other signature is available to merge into yet.",
         "no_merge_target_action": "No other NILM signature is available to merge into yet.",
@@ -1424,6 +1574,8 @@
         "point_title": "{name}: {value}{unit} at {time}",
         "session_title": "{label} ({session_id})",
         "session_confidence": ", confidence {confidence}%",
+        "data_summary": "{count} chart data items available.",
+        "data_fallback": "View chart data",
         "changed_by": "{feature} changed by {percent}%.",
         "changed_metrics": "Changed metrics: {metrics}.",
         "change_fallback": "The analyzer found a repeated change.",

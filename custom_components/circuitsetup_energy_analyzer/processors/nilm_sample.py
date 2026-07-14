@@ -390,6 +390,13 @@ def _nilm_session_specs(
     for assignment in assignments:
         if not isinstance(assignment, Mapping):
             continue
+        if str(assignment.get("lifecycle_state") or "").strip() == "retired":
+            continue
+        if (
+            assignment.get("conversion_state") == "direct_meter"
+            and assignment.get("keep_assignment_for_masking") is False
+        ):
+            continue
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
         for value in _list_items(assignment.get("signature_fingerprints")):
             fingerprint = str(value or "").strip()

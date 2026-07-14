@@ -1,0 +1,398 @@
+export const evidence = {
+  status: "matched_alert",
+  circuit: { circuit_id: "kitchen", name: "Kitchen Appliances" },
+  alert: {
+    alert_id: "alert-kitchen-energy",
+    circuit_id: "kitchen",
+    feature: "daily_energy",
+    feature_name: "Daily Energy",
+    repeated_count: 3,
+    observed_value: 2.4,
+    baseline_value: 1.8,
+    expected_value: 2.0,
+    threshold: 2.2,
+    unit: "kWh",
+    sample_count: 12,
+    first_seen: "2026-07-13T17:00:00Z",
+    last_seen: "2026-07-13T19:30:00Z",
+    what_happened: "Energy use is above the recent same-time range.",
+    why_it_matters: "Longer runtime can explain a higher daily total.",
+    what_to_check_first: "Confirm the appliance ran when expected.",
+    graph_entities: ["sensor.kitchen_power"],
+    graph_window_start: "2026-07-13T17:00:00Z",
+    graph_window_end: "2026-07-13T20:00:00Z",
+    y_axis_label: "W",
+  },
+  actions: {
+    acknowledge: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "acknowledge_alert",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
+    mark_expected: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_alert_expected",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
+    mark_unhelpful: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_alert_unhelpful",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
+  },
+  setting_recommendations: [
+    {
+      recommendation_id: "energy-threshold",
+      status: "pending",
+      display_label: "Daily energy threshold",
+      current_value: 2.2,
+      default_value: 2.5,
+      suggested_value: 2.6,
+      expected_effect: "Reduce repeat alerts caused by known cooking loads.",
+      impact_preview: {
+        history_start: "2026-07-01T00:00:00Z",
+        history_end: "2026-07-13T00:00:00Z",
+        observations_evaluated: 24,
+        current_alert_count: 4,
+        candidate_alert_count: 1,
+        limitations: ["Recent history only."],
+      },
+      actions: {
+        apply: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "apply_setting_recommendation",
+          data: { recommendation_id: "energy-threshold" },
+        },
+        reset: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "reset_setting_recommendation",
+          data: { recommendation_id: "energy-threshold" },
+        },
+      },
+    },
+  ],
+};
+
+export const chartHistory = [[
+  { entity_id: "sensor.kitchen_power", state: "420", last_changed: "2026-07-13T17:00:00Z" },
+  { entity_id: "sensor.kitchen_power", state: "980", last_changed: "2026-07-13T18:30:00Z" },
+  { entity_id: "sensor.kitchen_power", state: "610", last_changed: "2026-07-13T20:00:00Z" },
+]];
+
+export const applianceInsights = {
+  status: "ok",
+  items: [
+    {
+      appliance_key: "circuit:kitchen",
+      display_name: "Kitchen Appliances",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=kitchen",
+      source_path: "/circuitsetup-energy-analyzer-evidence?circuit_id=kitchen",
+      source_type: "direct_meter",
+      source_quality: { status: "fresh", label: "Fresh" },
+      learning_readiness: { status: "ready", label: "Ready" },
+      activity_state: "running",
+      daily_energy_kwh: 2.4,
+      today_vs_normal_percent: 18,
+      confidence: 0.98,
+      is_running: true,
+      needs_attention: true,
+      attention_reason: "Energy use is above the recent normal range.",
+      is_nilm: false,
+      is_learning: false,
+      has_data_problem: false,
+    },
+    {
+      appliance_key: "nilm:dishwasher",
+      display_name: "Dishwasher Estimate",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&assignment_id=dishwasher",
+      source_path: "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains&assignment_id=dishwasher",
+      source_type: "nilm_estimate",
+      source_quality: { status: "fresh", label: "Fresh" },
+      learning_readiness: { status: "learning", label: "4 of 7 sessions" },
+      activity_state: "idle",
+      daily_energy_kwh: 1.1,
+      today_vs_normal_percent: 9,
+      confidence: 0.81,
+      is_running: false,
+      needs_attention: true,
+      attention_reason: "One recent session needs validation.",
+      is_nilm: true,
+      is_learning: true,
+      has_data_problem: false,
+    },
+    {
+      appliance_key: "circuit:bedroom_fan",
+      display_name: "Bedroom Fan",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=bedroom_fan",
+      source_path: "/circuitsetup-energy-analyzer-evidence?circuit_id=bedroom_fan",
+      source_type: "direct_meter",
+      source_quality: { status: "fresh", label: "Fresh" },
+      learning_readiness: { status: "ready", label: "Ready" },
+      activity_state: "off",
+      daily_energy_kwh: 0.2,
+      today_vs_normal_percent: 0,
+      confidence: 0.99,
+      is_running: false,
+      needs_attention: false,
+      attention_reason: "",
+      is_nilm: false,
+      is_learning: false,
+      has_data_problem: false,
+    },
+  ],
+};
+
+export const applianceDetail = {
+  status: "ok",
+  detail: {
+    display_name: "Kitchen Appliances",
+    next_step: "Review the recent energy change.",
+    activity_state: "running",
+    current_power_w: 840,
+    source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "ready", label: "Ready" },
+    confidence: 0.98,
+    health_state: "Needs attention",
+    electrical_state: "Normal",
+    energy_state: "Above normal",
+    model_status: "Ready",
+    daily_energy_kwh: 2.4,
+    runtime_today_seconds: 5400,
+    run_count_today: 3,
+    cost_today: 0.42,
+    session_timeline: [
+      {
+        session_id: "direct-session-1",
+        start: "2026-07-13T17:00:00Z",
+        end: "2026-07-13T17:45:00Z",
+        duration_seconds: 2700,
+        source_type: "direct_meter",
+        confidence: 0.98,
+        status: "completed",
+        alert_ids: ["alert-kitchen-energy"],
+        maintenance: false,
+        estimated_energy_kwh: 0.63,
+      },
+    ],
+    recent_timeline: [],
+    today_vs_normal: [
+      {
+        metric_id: "daily_energy",
+        label: "Energy so far",
+        unit: "kWh",
+        current_value: 2.4,
+        normal_low: 1.5,
+        normal_high: 2.1,
+        full_period_normal_low: 1.8,
+        full_period_normal_high: 2.3,
+        projection_value: 2.7,
+        projection_low: 2.5,
+        projection_high: 2.9,
+        projection_confidence: 0.72,
+        status: "higher",
+        confidence: 0.96,
+        source: "same_time_of_day",
+        as_of: "2026-07-13T19:30:00Z",
+      },
+    ],
+    energy_change_explanation: {
+      total_change_percent: 18,
+      runtime_contribution_percent: 14,
+      running_power_contribution_percent: 4,
+      cycle_count_contribution_percent: 0,
+      unexplained_percent: 0,
+      confidence: 0.86,
+      explanation: "Mostly explained by longer runtime.",
+    },
+    expectations: [],
+    what_to_check_first: ["Confirm today included the expected cooking load."],
+    active_alerts: [
+      {
+        message: "Energy is above the same-time range.",
+        severity: "watch",
+        repeated_count: 3,
+        evidence_path: "/circuitsetup-energy-analyzer-evidence?alert_id=alert-kitchen-energy",
+      },
+    ],
+  },
+  history: {
+    entities: ["sensor.kitchen_energy"],
+    entity_series: [{ entity_id: "sensor.kitchen_energy", unit: "kWh" }],
+    default_hours: 168,
+    period_hours: [24, 168, 720],
+  },
+  actions: {
+    relearn_baseline: {
+      label: "Relearn Baseline",
+      domain: "circuitsetup_energy_analyzer",
+      service: "relearn_baseline",
+      data: { circuit_id: "kitchen" },
+    },
+    open_evidence: {
+      type: "navigate",
+      path: "/circuitsetup-energy-analyzer-evidence?alert_id=alert-kitchen-energy",
+    },
+    mark_expected: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_alert_expected",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
+    mark_unhelpful: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_alert_unhelpful",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
+  },
+};
+
+export const setupHealth = {
+  status: "ok",
+  checklist: [
+    {
+      item_id: "dashboard",
+      status: "ready",
+      title: "Energy dashboard",
+      why_it_matters: "The generated dashboard is current.",
+      fix: "Review dashboard",
+      open_path: "/config/dashboards",
+    },
+  ],
+  issues: [],
+  needs_attention: [
+    {
+      item_id: "attention-kitchen",
+      appliance_key: "circuit:kitchen",
+      display_name: "Kitchen Appliances",
+      category: "review_appliance_behavior",
+      reason: "Energy use is above normal.",
+      next_step: "Open Appliance Detail.",
+      action_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=kitchen",
+    },
+  ],
+  weekly_digest: null,
+  weekly_digest_settings: { enabled: false, delivery: "panel_only", notify_service: "" },
+};
+
+export const nilmWorkspace = {
+  status: "ok",
+  circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  history: {
+    start: "2026-07-13T12:00:00Z",
+    end: "2026-07-13T20:00:00Z",
+    entities: [],
+  },
+  actions: {
+    label_interval: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "label_nilm_interval",
+      data: { circuit_id: "mains" },
+      profile_options: [
+        { value: "dishwasher", label: "Dishwasher" },
+        { value: "refrigerator", label: "Refrigerator" },
+      ],
+    },
+  },
+  validation: {},
+  signatures: [
+    {
+      signature_id: "signature-1",
+      display_label: "Unknown 900 W load",
+      typical_power_w: 900,
+      confidence: 0.76,
+      seen_count: 5,
+      last_seen: "2026-07-13T19:30:00Z",
+      review_state: "needs_review",
+      actions: {
+        label: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "label_nilm_signature",
+          data: { circuit_id: "mains", signature_id: "signature-1" },
+        },
+        ignore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "ignore_nilm_signature",
+          data: { circuit_id: "mains", signature_id: "signature-1" },
+        },
+        mark_expected: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "mark_nilm_signature_expected",
+          data: { circuit_id: "mains", signature_id: "signature-1" },
+        },
+      },
+    },
+  ],
+  assignments: [
+    {
+      assignment_id: "dishwasher",
+      appliance_id: "dishwasher",
+      display_name: "Dishwasher",
+      appliance_profile: "dishwasher",
+      state: "assigned",
+      signature_ids: ["signature-1"],
+      label_interval_ids: [],
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&assignment_id=dishwasher",
+      actions: {
+        validate_history: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "validate_nilm_assignment_history",
+          data: { circuit_id: "mains", assignment_id: "dishwasher" },
+        },
+      },
+    },
+  ],
+  sessions: [
+    {
+      session_id: "nilm-session-1",
+      assignment_id: "dishwasher",
+      display_label: "Dishwasher",
+      start: "2026-07-13T18:00:00Z",
+      end: "2026-07-13T18:45:00Z",
+      duration_seconds: 2700,
+      confidence: 0.82,
+      estimated_energy_kwh: 0.68,
+      actions: {
+        validate: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "validate_nilm_session",
+          data: {
+            circuit_id: "mains",
+            session_id: "nilm-session-1",
+            assignment_id: "dishwasher",
+          },
+        },
+        reject: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "reject_nilm_session",
+          data: {
+            circuit_id: "mains",
+            session_id: "nilm-session-1",
+            assignment_id: "dishwasher",
+          },
+        },
+      },
+    },
+  ],
+  edges: [],
+  label_intervals: [],
+  virtual_appliances: [],
+  known_load_overlays: [],
+  solar_overlays: [],
+  lanes: {
+    needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [] },
+    assigned: { label: "Assigned", signature_ids: [], assignment_ids: ["dishwasher"], interval_ids: [] },
+    published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
+    ignored_expected: { label: "Ignored / Expected", signature_ids: [], assignment_ids: [], interval_ids: [] },
+  },
+  lane_counts: { needs_review: 1, assigned: 1, published: 0, ignored_expected: 0 },
+};
+
+export function apiPayload(pathname) {
+  if (pathname.endsWith("/alert_evidence")) return evidence;
+  if (pathname.endsWith("/appliance_insights")) return applianceInsights;
+  if (pathname.endsWith("/appliance_detail")) return applianceDetail;
+  if (pathname.endsWith("/setup_health")) return setupHealth;
+  if (pathname.endsWith("/nilm_workspace")) return nilmWorkspace;
+  if (pathname.includes("/history/period")) return chartHistory;
+  throw new Error(`Unmocked browser API request: ${pathname}`);
+}

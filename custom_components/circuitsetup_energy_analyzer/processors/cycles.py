@@ -9,12 +9,14 @@ from typing import Any
 from ..alerting import Observation
 from ..baseline import build_baseline
 from ..contextual_baseline import (
+    ContextKey,
     ContextualBaselineSample,
     build_context_for_sample,
     context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
+    day_progress_bucket,
     select_contextual_baseline,
     stored_contextual_samples,
     upsert_contextual_sample,
@@ -22,6 +24,7 @@ from ..contextual_baseline import (
 from ..cycles import (
     RUN_CYCLE_DURATION_FEATURE,
     RUN_CYCLE_DUTY_CYCLE_FEATURE,
+    RUN_CYCLE_RUNTIME_TODAY_FEATURE,
     RUN_CYCLE_START_COUNT_FEATURE,
     cycle_baseline_feature_values,
     select_cycle_anomaly_evidence,
@@ -92,6 +95,15 @@ class RunCycleProcessor:
             feature="run_cycle",
             time_zone=context.time_zone,
             calendar_timestamp=context.now,
+        )
+        context_key = ContextKey.from_mapping(
+            {
+                **context_key.as_dict(),
+                "day_progress": day_progress_bucket(
+                    context.now,
+                    time_zone=context.time_zone,
+                ),
+            }
         )
         if not self._learning_mature(circuit_config, context.now):
             contextual_dirty = _record_contextual_cycle_samples(
@@ -325,4 +337,5 @@ def _cycle_feature_values(summary: Any) -> dict[str, float]:
         RUN_CYCLE_DURATION_FEATURE: float(summary.active_cycle_seconds),
         RUN_CYCLE_DUTY_CYCLE_FEATURE: float(summary.duty_cycle_percent),
         RUN_CYCLE_START_COUNT_FEATURE: float(summary.start_count),
+        RUN_CYCLE_RUNTIME_TODAY_FEATURE: float(summary.runtime_seconds),
     }

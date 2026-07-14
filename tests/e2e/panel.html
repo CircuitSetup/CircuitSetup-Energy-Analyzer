@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Energy Analyzer Browser Harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import { apiPayload } from "/tests/e2e/panel-fixtures.js";
+
+      const frontendRoot = "/custom_components/circuitsetup_energy_analyzer/frontend";
+      const translationsPath = "/custom_components/circuitsetup_energy_analyzer/translations/en.json";
+      const [{ config_panel: { panel: text } }] = await Promise.all([
+        fetch(translationsPath).then((response) => response.json()),
+        import(`${frontendRoot}/energy-analyzer-panel.js?e2e`),
+      ]);
+
+      const apiCalls = [];
+      const serviceCalls = [];
+      const useFixtureApi = new URLSearchParams(window.location.search).get("mock_api") === "1";
+      const hass = {
+        config: { currency: "USD", time_zone: "UTC" },
+        states: {},
+        async callApi(method, apiPath, data) {
+          const request = { method, apiPath, data };
+          apiCalls.push(request);
+          if (useFixtureApi) {
+            return apiPayload(new URL(`/api/${apiPath}`, window.location.origin).pathname);
+          }
+          const response = await fetch(`/api/${apiPath}`, {
+            method,
+            headers: data === undefined ? undefined : { "Content-Type": "application/json" },
+            body: data === undefined ? undefined : JSON.stringify(data),
+          });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}`);
+          }
+          return response.json();
+        },
+        async callService(domain, service, data) {
+          serviceCalls.push({ domain, service, data });
+        },
+      };
+
+      const panel = document.createElement("circuitsetup-energy-analyzer-panel");
+      panel.panel = { config: { text } };
+      panel.hass = hass;
+      document.body.append(panel);
+      window.__panel = panel;
+      window.__apiCalls = apiCalls;
+      window.__serviceCalls = serviceCalls;
+      window.__panelReady = true;
+    </script>
+  </body>
+</html>

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
+import pytest
+
+from custom_components.circuitsetup_energy_analyzer import nilm as nilm_domain
 from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
     CircuitSample,
@@ -887,3 +891,403 @@ def test_pair_nilm_sessions_uses_stable_ids_for_same_edges() -> None:
     assert reordered.session_id == original.session_id
     assert reordered.on_edge_id == original.on_edge_id
     assert reordered.off_edge_id == original.off_edge_id
+
+
+def _required_nilm_api(name: str):
+    api = getattr(nilm_domain, name, None)
+    assert api is not None, f"nilm.{name} is required for canonical appliance identity"
+    return api
+
+
+def _dishwasher_assignment() -> dict[str, object]:
+    return {
+        "assignment_id": "assignment-dishwasher",
+        "appliance_id": "dishwasher",
+        "display_name": "Dishwasher",
+        "appliance_profile": "dishwasher",
+        "mains_circuit_id": "mains",
+        "session_ids": ["session-1", "session-2"],
+        "confirmed_session_ids": ["session-1"],
+        "rejected_session_ids": [],
+        "adjusted_session_ids": [],
+        "confidence": 0.84,
+        "publish_entities": True,
+    }
+
+
+def test_nilm_appliance_identity_keeps_logical_assignment_and_source_ids_separate(
+) -> None:
+    identity_type = _required_nilm_api("NilmApplianceIdentity")
+    build_identity = _required_nilm_api("build_nilm_appliance_identity")
+
+    identity = build_identity(
+        _dishwasher_assignment(),
+        mains_source_entity_id="sensor.panel_mains_power",
+    )
+
+    assert isinstance(identity, identity_type)
+    assert identity.appliance_key == "nilm:assignment-dishwasher"
+    assert identity.assignment_id == "assignment-dishwasher"
+    assert identity.appliance_id == "dishwasher"
+    assert identity.display_name == "Dishwasher"
+    assert identity.appliance_profile == "dishwasher"
+    assert identity.mains_circuit_id == "mains"
+    assert identity.mains_source_entity_id == "sensor.panel_mains_power"
+
+
+def test_nilm_assignment_session_summary_excludes_the_mains_and_other_assignments(
+) -> None:
+    summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
+    now = datetime(2026, 7, 13, 16, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": "session-1",
+            "assignment_id": "assignment-dishwasher",
+            "start": "2026-07-13T10:00:00+00:00",
+            "end": "2026-07-13T10:30:00+00:00",
+            "duration_seconds": 1800.0,
+            "median_power_w": 800.0,
+            "estimated_energy_kwh": 0.4,
+            "confidence": 0.88,
+        },
+        {
+            "session_id": "session-2",
+            "start": "2026-07-13T14:00:00+00:00",
+            "end": "2026-07-13T14:15:00+00:00",
+            "duration_seconds": 900.0,
+            "median_power_w": 600.0,
+            "estimated_energy_kwh": 0.15,
+            "confidence": 0.82,
+        },
+        {
+            "session_id": "other-session",
+            "assignment_id": "assignment-dryer",
+            "start": "2026-07-13T11:00:00+00:00",
+            "end": "2026-07-13T12:00:00+00:00",
+            "duration_seconds": 3600.0,
+            "estimated_energy_kwh": 4.0,
+        },
+        {
+            "session_id": "mains-session",
+            "start": "2026-07-13T08:00:00+00:00",
+            "end": "2026-07-13T16:00:00+00:00",
+            "duration_seconds": 28800.0,
+            "estimated_energy_kwh": 20.0,
+        },
+    ]
+
+    summary = summarize_sessions(
+        _dishwasher_assignment(),
+        sessions,
+        now=now,
+        time_zone="UTC",
+    )
+
+    assert [item["session_id"] for item in summary["sessions"]] == [
+        "session-1",
+        "session-2",
+    ]
+    assert summary["runtime_today_seconds"] == 2700.0
+    assert summary["run_count_today"] == 2
+    assert summary["estimated_energy_today_kwh"] == 0.55
+    assert summary["last_matched_session_id"] == "session-2"
+
+
+def test_rejected_nilm_session_stays_in_history_but_not_attributed_metrics() -> None:
+    summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
+    assignment = _dishwasher_assignment()
+    assignment["session_ids"] = ["session-rejected", "session-confirmed"]
+    assignment["rejected_session_ids"] = ["session-rejected"]
+    sessions = [
+        {
+            "session_id": "session-rejected",
+            "assignment_id": "assignment-dishwasher",
+            "start": "2026-07-13T10:00:00+00:00",
+            "end": None,
+            "median_power_w": 2000.0,
+        },
+        {
+            "session_id": "session-confirmed",
+            "assignment_id": "assignment-dishwasher",
+            "start": "2026-07-13T08:00:00+00:00",
+            "end": "2026-07-13T08:30:00+00:00",
+            "estimated_energy_kwh": 0.4,
+        },
+    ]
+
+    summary = summarize_sessions(
+        assignment,
+        sessions,
+        now=datetime(2026, 7, 13, 11, 0, tzinfo=UTC),
+        time_zone="UTC",
+    )
+
+    assert {item["session_id"] for item in summary["sessions"]} == {
+        "session-rejected",
+        "session-confirmed",
+    }
+    assert summary["runtime_today_seconds"] == 1800.0
+    assert summary["run_count_today"] == 1
+    assert summary["estimated_energy_today_kwh"] == 0.4
+    assert summary["current_session_id"] is None
+    assert summary["last_matched_session_id"] == "session-confirmed"
+
+
+def test_nilm_assignment_runtime_clips_sessions_at_local_midnight() -> None:
+    summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
+    assignment = _dishwasher_assignment()
+    assignment["session_ids"] = ["session-midnight"]
+
+    summary = summarize_sessions(
+        assignment,
+        [
+            {
+                "session_id": "session-midnight",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-07-12T23:50:00+00:00",
+                "end": "2026-07-13T00:10:00+00:00",
+                "duration_seconds": 1200.0,
+                "estimated_energy_kwh": 0.2,
+            }
+        ],
+        now=datetime(2026, 7, 13, 1, 0, tzinfo=UTC),
+        time_zone="UTC",
+    )
+
+    assert summary["runtime_today_seconds"] == 600.0
+    assert summary["run_count_today"] == 0
+    assert summary["estimated_energy_today_kwh"] == 0.1
+
+
+def test_nilm_open_session_estimates_energy_from_power_and_elapsed_time() -> None:
+    summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
+    assignment = _dishwasher_assignment()
+    assignment["session_ids"] = ["session-open"]
+
+    summary = summarize_sessions(
+        assignment,
+        [
+            {
+                "session_id": "session-open",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-07-13T10:00:00+00:00",
+                "end": None,
+                "median_power_w": 1000.0,
+                "estimated_energy_kwh": 0.0,
+            }
+        ],
+        now=datetime(2026, 7, 13, 11, 0, tzinfo=UTC),
+        time_zone="UTC",
+    )
+
+    assert summary["runtime_today_seconds"] == 3600.0
+    assert summary["estimated_energy_today_kwh"] == 1.0
+    assert summary["current_session_duration_seconds"] == 3600.0
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "now", "expected_seconds"),
+    [
+        (
+            "2026-03-08T05:00:00+00:00",
+            None,
+            datetime(2026, 3, 9, 3, 59, tzinfo=UTC),
+            82_740.0,
+        ),
+        (
+            "2026-11-01T04:00:00+00:00",
+            None,
+            datetime(2026, 11, 2, 4, 59, tzinfo=UTC),
+            89_940.0,
+        ),
+    ],
+)
+def test_nilm_runtime_uses_elapsed_time_across_dst_days(
+    start: str,
+    end: str | None,
+    now: datetime,
+    expected_seconds: float,
+) -> None:
+    summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
+    assignment = _dishwasher_assignment()
+    assignment["session_ids"] = ["session-dst"]
+
+    summary = summarize_sessions(
+        assignment,
+        [
+            {
+                "session_id": "session-dst",
+                "assignment_id": "assignment-dishwasher",
+                "start": start,
+                "end": end,
+                "estimated_energy_kwh": 1.0,
+            }
+        ],
+        now=now,
+        time_zone="America/New_York",
+    )
+
+    assert summary["runtime_today_seconds"] == expected_seconds
+
+
+def test_nilm_alert_payload_targets_appliance_and_keeps_source_evidence_context(
+) -> None:
+    build_identity = _required_nilm_api("build_nilm_appliance_identity")
+    build_alert_payload = _required_nilm_api("build_nilm_appliance_alert_payload")
+    detail_path = _required_nilm_api("nilm_appliance_detail_path")
+    identity = build_identity(
+        _dishwasher_assignment(),
+        mains_source_entity_id="sensor.panel_mains_power",
+    )
+
+    payload = build_alert_payload(
+        identity,
+        session_id="session-2",
+        signature_fingerprint="dishwasher|800w",
+    )
+
+    assert payload["primary_target"] == "nilm:assignment-dishwasher"
+    assert payload["source_context"] == {
+        "mains_circuit_id": "mains",
+        "mains_source_entity_id": "sensor.panel_mains_power",
+    }
+    assert payload["evidence_context"] == {
+        "assignment_id": "assignment-dishwasher",
+        "session_id": "session-2",
+        "signature_fingerprint": "dishwasher|800w",
+    }
+    assert payload["appliance_detail_path"] == detail_path(identity)
+
+
+def test_nilm_appliance_detail_route_targets_assignment_instead_of_mains_detail(
+) -> None:
+    build_identity = _required_nilm_api("build_nilm_appliance_identity")
+    detail_path = _required_nilm_api("nilm_appliance_detail_path")
+    identity = build_identity(
+        _dishwasher_assignment(),
+        mains_source_entity_id="sensor.panel_mains_power",
+    )
+
+    path = detail_path(identity)
+    query = parse_qs(urlparse(path).query)
+
+    assert urlparse(path).path == "/circuitsetup-energy-analyzer-evidence"
+    assert query == {
+        "circuit_id": ["mains"],
+        "assignment_id": ["assignment-dishwasher"],
+        "nilm_workspace": ["1"],
+        "appliance_detail": ["1"],
+    }
+
+
+def test_nilm_today_vs_normal_stays_blocked_below_validation_thresholds() -> None:
+    evaluate_readiness = _required_nilm_api("evaluate_nilm_validation_readiness")
+    assignment = _dishwasher_assignment()
+    assignment.update(
+        {
+            "confirmed_session_ids": ["session-1", "session-2", "session-3"],
+            "rejected_session_ids": ["session-4", "session-5"],
+            "confidence": 0.72,
+        }
+    )
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "start": f"2026-07-{10 + (index % 2):02d}T12:00:00+00:00",
+        }
+        for index in range(1, 6)
+    ]
+
+    readiness = evaluate_readiness(
+        assignment,
+        sessions,
+        min_confirmed_sessions=5,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.75,
+        time_zone="UTC",
+    )
+
+    assert readiness["ready"] is False
+    assert readiness["today_vs_normal_enabled"] is False
+    assert readiness["status"] == "needs_validation"
+    assert readiness["confirmed_sessions"] == 3
+    assert readiness["distinct_confirmed_days"] == 2
+    assert readiness["false_positive_rate"] == 0.4
+
+
+def test_nilm_today_vs_normal_enables_only_after_all_validation_thresholds() -> None:
+    evaluate_readiness = _required_nilm_api("evaluate_nilm_validation_readiness")
+    assignment = _dishwasher_assignment()
+    assignment.update(
+        {
+            "confirmed_session_ids": [
+                "session-1",
+                "session-2",
+                "session-3",
+                "session-4",
+                "session-5",
+            ],
+            "rejected_session_ids": ["session-6"],
+            "confidence": 0.84,
+        }
+    )
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "start": f"2026-07-{10 + ((index - 1) % 3):02d}T12:00:00+00:00",
+        }
+        for index in range(1, 7)
+    ]
+
+    readiness = evaluate_readiness(
+        assignment,
+        sessions,
+        min_confirmed_sessions=5,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.75,
+        time_zone="UTC",
+    )
+
+    assert readiness["ready"] is True
+    assert readiness["today_vs_normal_enabled"] is True
+    assert readiness["status"] == "ready"
+    assert readiness["confirmed_sessions"] == 5
+    assert readiness["distinct_confirmed_days"] == 3
+    assert readiness["false_positive_rate"] == 0.167
+
+
+def test_nilm_direct_meter_conversion_preserves_identity_and_validation_history(
+) -> None:
+    build_identity = _required_nilm_api("build_nilm_appliance_identity")
+    plan_conversion = _required_nilm_api("plan_nilm_direct_meter_conversion")
+    assignment = _dishwasher_assignment()
+    assignment.update(
+        {
+            "confirmed_session_ids": ["session-1", "session-2"],
+            "rejected_session_ids": ["session-3"],
+            "adjusted_session_ids": ["session-4"],
+        }
+    )
+    identity = build_identity(
+        assignment,
+        mains_source_entity_id="sensor.panel_mains_power",
+    )
+
+    conversion = plan_conversion(
+        identity,
+        assignment,
+        direct_circuit_id="kitchen_dishwasher",
+        keep_assignment_for_masking=True,
+    )
+
+    assert conversion["appliance_key"] == "nilm:assignment-dishwasher"
+    assert conversion["assignment_id"] == "assignment-dishwasher"
+    assert conversion["direct_circuit_id"] == "kitchen_dishwasher"
+    assert conversion["display_name"] == "Dishwasher"
+    assert conversion["confirmed_session_ids"] == ["session-1", "session-2"]
+    assert conversion["rejected_session_ids"] == ["session-3"]
+    assert conversion["adjusted_session_ids"] == ["session-4"]
+    assert conversion["publish_estimated_entities"] is False
+    assert conversion["keep_assignment_for_masking"] is True

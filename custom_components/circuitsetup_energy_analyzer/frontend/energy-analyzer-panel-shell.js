@@ -1,0 +1,1424 @@
+export class PanelShellMethods {
+  _render() {
+    const nilmFocus = this._nilmFocusState();
+    const payload = this._payload;
+    const alert = payload && payload.alert;
+    const circuit = payload && payload.circuit;
+    const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();
+    const applianceDetailRoute = this._routeRequestsApplianceDetail();
+    const applianceInsightsRoute = this._routeRequestsApplianceInsights();
+    const setupHealthRoute = this._routeRequestsSetupHealth();
+    const suggestedSettingsRoute = this._routeRequestsSuggestedSettings();
+    const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
+    const statusText = setupHealthRoute
+      ? this._setupHealthText("heading")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights")
+      : applianceDetailRoute
+      ? this._panelText("headers.appliance_detail")
+      : nilmWorkspaceRoute
+      ? this._panelText("headers.nilm_workspace")
+      : this._statusText(payload && payload.status);
+    const headerTitle = setupHealthRoute
+      ? this._setupHealthText("heading")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights")
+      : applianceDetailRoute
+      ? (applianceDetail && applianceDetail.display_name) || this._panelText("headers.appliance_detail")
+      : nilmWorkspaceRoute
+      ? this._panelText("headers.nilm_workspace")
+      : (circuit && circuit.name) || (alert && alert.circuit_id) || this._panelText("headers.alert_evidence");
+    const headerMessage = setupHealthRoute
+      ? this._setupHealthText("header_message")
+      : suggestedSettingsRoute
+      ? this._panelText("headers.suggested_settings_message")
+      : applianceInsightsRoute
+      ? this._panelText("headers.appliance_insights_message")
+      : applianceDetailRoute
+      ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
+      : nilmWorkspaceRoute
+      ? circuit && circuit.name
+        ? this._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: circuit.name })
+        : this._panelText("headers.nilm_workspace_message")
+      : (alert && alert.message) || (payload && payload.status === "circuit_found_no_evidence" ? this._evidenceText("fallbacks.current_circuit_message") : this._evidenceText("fallbacks.historical_heading"));
+    const loadingText = setupHealthRoute
+      ? this._setupHealthText("loading")
+      : applianceInsightsRoute
+      ? this._panelText("appliance_insights.loading")
+      : this._evidenceText("loading");
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          min-height: 100vh;
+          box-sizing: border-box;
+          padding: 24px;
+          color: var(--primary-text-color, #1f2933);
+          background: var(--primary-background-color, #f7f8fa);
+          font-family: var(--paper-font-body1_-_font-family, system-ui, sans-serif);
+        }
+        .shell {
+          max-width: 1120px;
+          margin: 0 auto;
+          display: grid;
+          gap: 16px;
+        }
+        h1, h2, p {
+          margin: 0;
+        }
+        h1 {
+          font-size: 28px;
+          line-height: 1.2;
+        }
+        h2 {
+          font-size: 18px;
+        }
+        .panel {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          padding: 18px;
+          box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(15, 23, 42, 0.12));
+        }
+        .page-header {
+          display: grid;
+          gap: 8px;
+        }
+        .summary {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 12px;
+        }
+        .evidence-section {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+        }
+        .evidence-investigation {
+          align-items: start;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 24px;
+        }
+        .evidence-explanation {
+          display: grid;
+          gap: 20px;
+        }
+        .evidence-explanation section {
+          display: grid;
+          gap: 6px;
+        }
+        .section-surface {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          padding: 16px;
+        }
+        .legend {
+          background: var(--card-background-color, #fff);
+          padding: 16px 0 0;
+        }
+        .comparison-scale {
+          min-height: 160px;
+          margin: 4px 64px 0;
+          position: relative;
+        }
+        .comparison-track {
+          background: var(--divider-color, #d8dde6);
+          border-radius: 3px;
+          height: 6px;
+          left: 0;
+          position: absolute;
+          right: 0;
+          top: 61px;
+        }
+        .comparison-marker {
+          bottom: 0;
+          color: var(--primary-text-color, #1f2933);
+          position: absolute;
+          top: 0;
+          transform: translateX(-50%);
+          width: 2px;
+        }
+        .comparison-marker::before {
+          background: var(--primary-color, #0b6bcb);
+          content: "";
+          height: 28px;
+          left: 0;
+          position: absolute;
+          top: 50px;
+          width: 2px;
+        }
+        .comparison-marker span,
+        .comparison-marker strong {
+          left: 50%;
+          position: absolute;
+          transform: translateX(-50%);
+          white-space: nowrap;
+        }
+        .comparison-marker span {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .comparison-marker strong {
+          font-size: 14px;
+        }
+        .comparison-metric {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 13px;
+        }
+        .comparison-marker.expected span { top: 0; }
+        .comparison-marker.expected strong { top: 18px; }
+        .comparison-marker.threshold span { top: 84px; }
+        .comparison-marker.threshold strong { top: 102px; }
+        .comparison-marker.observed span { top: 122px; }
+        .comparison-marker.observed strong { top: 140px; }
+        .comparison-marker.threshold::before {
+          background: var(--warning-color, #f4b400);
+        }
+        .comparison-marker.observed::before {
+          background: var(--error-color, #db4437);
+        }
+        .evidence-meta .metric,
+        [data-evidence-comparison] .metric {
+          background: transparent;
+          border: 0;
+          border-radius: 0;
+          padding: 0;
+        }
+        [data-evidence-technical] > summary {
+          box-sizing: border-box;
+          cursor: pointer;
+          font-size: 18px;
+          font-weight: 700;
+          line-height: 20px;
+          min-height: 44px;
+          padding: 12px 0;
+        }
+        .disclosure .summary {
+          margin-top: 12px;
+        }
+        .decision-group {
+          border: 0;
+          display: grid;
+          gap: 8px;
+          margin: 0;
+          min-width: 0;
+          padding: 0;
+        }
+        .decision-group legend,
+        .action-disclosure > summary {
+          font-size: 18px;
+          font-weight: 700;
+        }
+        .decision-group legend {
+          padding: 0;
+        }
+        .decision-tiles {
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .decision-tile {
+          align-items: start;
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          cursor: pointer;
+          display: grid;
+          gap: 10px;
+          grid-template-columns: auto auto minmax(0, 1fr);
+          min-width: 0;
+          padding: 12px;
+        }
+        .decision-tile:has(input:checked) {
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
+        }
+        .decision-tile input {
+          margin: 3px 0 0;
+        }
+        .decision-tile ha-icon,
+        .nilm-decision-option ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+        }
+        .decision-tile:has(input:checked) ha-icon,
+        .decision-tile:has(input:checked) strong,
+        .nilm-decision-option:has(input:checked) ha-icon,
+        .nilm-decision-option:has(input:checked) strong {
+          color: var(--primary-color, #0b6bcb);
+        }
+        .decision-tile span {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+        .decision-tile small {
+          color: var(--secondary-text-color, #5f6b7a);
+          line-height: 1.35;
+        }
+        .appliance-alert-actions {
+          margin-top: 4px;
+        }
+        .appliance-alert-action {
+          background: var(--secondary-background-color, #f4f6f8);
+          color: var(--primary-text-color, #1f2933);
+          font: inherit;
+          grid-template-columns: auto minmax(0, 1fr);
+          text-align: left;
+        }
+        .appliance-alert-action:hover {
+          border-color: var(--primary-color, #0b6bcb);
+        }
+        .appliance-general-actions {
+          margin-top: 12px;
+        }
+        .response-section > button {
+          justify-self: start;
+        }
+        .inline-feedback {
+          border-left: 4px solid var(--success-color, #2e7d32);
+          padding: 10px 12px;
+        }
+        .inline-feedback.error {
+          border-left-color: var(--error-color, #db4437);
+          color: var(--error-color, #db4437);
+        }
+        .action-disclosure > summary {
+          box-sizing: border-box;
+          cursor: pointer;
+          line-height: 20px;
+          min-height: 44px;
+          padding: 12px 0;
+        }
+        .disclosure-content {
+          display: grid;
+          gap: 12px;
+        }
+        @media (min-width: 801px) {
+          .evidence-investigation {
+            grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+          }
+        }
+        @media (max-width: 720px) {
+          .decision-tiles {
+            grid-template-columns: minmax(0, 1fr);
+          }
+        }
+        @media (max-width: 520px) {
+          .comparison-scale {
+            margin-inline: 44px;
+          }
+        }
+        .metric {
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          padding: 12px;
+          background: var(--secondary-background-color, #f4f6f8);
+        }
+        .metric span {
+          display: block;
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+          margin-bottom: 4px;
+        }
+        .metric .metric-heading {
+          align-items: center;
+          display: flex;
+          gap: 6px;
+        }
+        .metric-heading ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+          height: 16px;
+          width: 16px;
+        }
+        .metric strong {
+          font-size: 18px;
+        }
+        .muted {
+          color: var(--secondary-text-color, #5f6b7a);
+        }
+        .status {
+          display: inline-flex;
+          width: fit-content;
+          border-radius: 8px;
+          padding: 5px 10px;
+          background: var(--state-icon-active-color, #0b6bcb);
+          color: var(--text-primary-color, #fff);
+          font-weight: 700;
+          font-size: 13px;
+        }
+        .safety-notice {
+          border-color: var(--divider-color, #d8dde6);
+          background: var(--card-background-color, #fff);
+        }
+        .safety-notice p {
+          margin-top: 8px;
+        }
+        .chart {
+          width: 100%;
+          min-height: 340px;
+        }
+        .chart[data-nilm-chart-select] {
+          cursor: crosshair;
+          touch-action: none;
+        }
+        .chart text {
+          fill: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .axis, .grid {
+          stroke: var(--divider-color, #d8dde6);
+        }
+        .nilm-edge-marker {
+          stroke: var(--warning-color, #f59e0b);
+          stroke-dasharray: 4 3;
+          stroke-width: 2;
+        }
+        .nilm-session-band {
+          fill: var(--warning-color, #f59e0b);
+          opacity: 0.12;
+        }
+        .nilm-session-band[data-nilm-low-confidence="true"] {
+          stroke: var(--warning-color, #f59e0b);
+          stroke-dasharray: 4 3;
+          stroke-width: 2;
+        }
+        .nilm-session-band[data-nilm-band-kind="label"] {
+          fill: var(--success-color, #15803d);
+        }
+        .nilm-session-band[data-nilm-band-kind="draft"] {
+          fill: var(--primary-color, #03a9f4);
+          cursor: pointer;
+        }
+        .nilm-session-band[data-nilm-selected="true"] {
+          opacity: 0.32 !important;
+          stroke: var(--primary-color, #03a9f4);
+          stroke-width: 3;
+        }
+        .chart .nilm-session-label {
+          fill: var(--primary-text-color, #1f2937);
+          font-size: 11px;
+          font-weight: 700;
+          paint-order: stroke;
+          pointer-events: none;
+          stroke: var(--card-background-color, #fff);
+          stroke-width: 3px;
+        }
+        .legend {
+          display: grid;
+          gap: 6px;
+          margin-top: 12px;
+        }
+        .legend-item {
+          align-items: center;
+          display: flex;
+          gap: 8px;
+          min-width: 0;
+        }
+        .swatch {
+          border-radius: 50%;
+          display: inline-block;
+          height: 10px;
+          width: 10px;
+        }
+        ul {
+          margin: 10px 0 0;
+          padding-left: 20px;
+        }
+        .actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .action-group {
+          display: grid;
+          gap: 8px;
+          margin-top: 12px;
+        }
+        .action-group h3 {
+          font-size: 1rem;
+          margin: 0;
+        }
+        .action-item {
+          display: inline-flex;
+          flex-direction: column;
+          gap: 4px;
+          max-width: 220px;
+        }
+        .action-reason {
+          color: var(--secondary-text-color, #6b7280);
+          font-size: 0.78rem;
+          line-height: 1.3;
+        }
+        button, a.button {
+          align-items: center;
+          appearance: none;
+          border: 1px solid var(--primary-color, #0b6bcb);
+          border-radius: 6px;
+          background: var(--primary-color, #0b6bcb);
+          color: var(--text-primary-color, #fff);
+          cursor: pointer;
+          display: inline-flex;
+          font: inherit;
+          font-weight: 700;
+          justify-content: center;
+          line-height: 1.2;
+          min-height: 44px;
+          padding: 10px 14px;
+          text-decoration: none;
+        }
+        button.secondary, a.button.secondary {
+          background: transparent;
+          color: var(--primary-color, #0b6bcb);
+        }
+        .setup-health-actions {
+          margin-top: 10px;
+        }
+        button:disabled {
+          cursor: wait;
+          opacity: 0.65;
+        }
+        button:focus-visible,
+        a.button:focus-visible,
+        .decision-tile:has(input:focus-visible),
+        .nilm-decision-option:has(input:focus-visible),
+        .nilm-lane:focus-visible,
+        .nilm-review-card:focus-visible,
+        .nilm-review-card[aria-pressed="true"]:focus-visible {
+          box-shadow:
+            0 0 0 2px var(--card-background-color, #fff),
+            0 0 0 5px var(--primary-color, #03a9f4);
+          outline: none;
+        }
+        .error {
+          border-color: var(--error-color, #db4437);
+          color: var(--error-color, #db4437);
+        }
+        .entity-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        .schedule-mode,
+        .schedule-weekdays {
+          border: 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin: 0;
+          padding: 0;
+        }
+        .schedule-windows {
+          display: grid;
+          gap: 10px;
+        }
+        .schedule-window {
+          align-items: end;
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(2, minmax(120px, 180px)) minmax(220px, 1fr) 44px;
+          padding-bottom: 10px;
+        }
+        .schedule-window label,
+        [data-expected-schedule] .entity-list > label {
+          display: grid;
+          gap: 4px;
+        }
+        [data-expected-schedule] input,
+        [data-expected-schedule] select {
+          min-width: 0;
+        }
+        .appliance-insights-controls {
+          align-items: end;
+          display: grid;
+          gap: 12px 24px;
+          grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+        }
+        .appliance-insights-filters {
+          border: 0;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px 18px;
+          margin: 0;
+          padding: 0;
+        }
+        .appliance-insights-filters legend {
+          font-weight: 700;
+          margin-bottom: 8px;
+          padding: 0;
+          width: 100%;
+        }
+        .appliance-insights-filters label {
+          align-items: center;
+          display: inline-flex;
+          gap: 6px;
+          min-height: 32px;
+        }
+        .appliance-insights-sort {
+          display: grid;
+          gap: 6px;
+        }
+        .appliance-insights-sort select {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          min-height: 44px;
+          padding: 8px 10px;
+          width: 100%;
+        }
+        .appliance-insights-table-wrap {
+          overflow-x: auto;
+        }
+        .appliance-insights-table {
+          border-collapse: collapse;
+          min-width: 920px;
+          width: 100%;
+        }
+        .appliance-insights-table th,
+        .appliance-insights-table td {
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          padding: 12px 10px;
+          text-align: left;
+          vertical-align: top;
+        }
+        .appliance-insights-table th {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .appliance-insights-table td:first-child {
+          font-weight: 700;
+        }
+        .appliance-insights-table a {
+          color: var(--primary-color, #0b6bcb);
+          overflow-wrap: anywhere;
+        }
+        .appliance-insights-table small {
+          color: var(--secondary-text-color, #5f6b7a);
+          display: block;
+          line-height: 1.35;
+          margin-top: 4px;
+        }
+        .energy-change-list {
+          display: grid;
+          gap: 6px;
+          margin: 12px 0 0;
+          padding-left: 20px;
+        }
+        .appliance-comparison-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .appliance-comparison {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 6px;
+          display: grid;
+          gap: 6px;
+          min-width: 0;
+          padding: 12px;
+        }
+        .appliance-comparison .comparison-label {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-comparison strong {
+          font-size: 20px;
+        }
+        .appliance-comparison .comparison-summary {
+          color: var(--secondary-text-color, #5f6b7a);
+          margin: 0;
+        }
+        .appliance-comparison p {
+          margin: 0;
+        }
+        .appliance-timeline {
+          list-style: none;
+          margin: 0;
+          padding: 2px 0 0;
+        }
+        .appliance-timeline-item {
+          display: grid;
+          gap: 4px;
+          min-height: 58px;
+          padding: 0 0 18px 30px;
+          position: relative;
+        }
+        .appliance-timeline-item::before {
+          background: var(--divider-color, #d8dde6);
+          bottom: 0;
+          content: "";
+          left: 8px;
+          position: absolute;
+          top: 12px;
+          width: 2px;
+        }
+        .appliance-timeline-item::after {
+          background: var(--primary-color, #0b6bcb);
+          border: 3px solid var(--card-background-color, #fff);
+          border-radius: 50%;
+          content: "";
+          height: 10px;
+          left: 1px;
+          position: absolute;
+          top: 4px;
+          width: 10px;
+        }
+        .appliance-timeline-item:last-child {
+          padding-bottom: 0;
+        }
+        .appliance-timeline-item:last-child::before {
+          display: none;
+        }
+        .appliance-timeline-item time {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-timeline-item p {
+          margin: 0;
+        }
+        .session-strip-list {
+          display: grid;
+          gap: 10px;
+        }
+        .session-strip summary {
+          cursor: pointer;
+          display: grid;
+          gap: 6px;
+          list-style: none;
+        }
+        .session-strip-track {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 4px;
+          height: 22px;
+          overflow: hidden;
+          position: relative;
+        }
+        .session-strip-block {
+          background: var(--primary-color, #0b6bcb);
+          border: 2px solid var(--primary-color, #0b6bcb);
+          bottom: 2px;
+          min-width: 4px;
+          position: absolute;
+          top: 2px;
+        }
+        .session-strip-block.nilm_estimate {
+          background: transparent;
+          border-style: dashed;
+        }
+        .session-strip-block.maintenance {
+          background: var(--disabled-text-color, #8a929c);
+          border-color: var(--disabled-text-color, #8a929c);
+        }
+        .session-strip-block.anomalous::after,
+        .session-strip-block.has-alert::after {
+          color: var(--error-color, #db4437);
+          content: "!";
+          font-weight: 700;
+          left: 50%;
+          position: absolute;
+          top: -3px;
+          transform: translateX(-50%);
+        }
+        .session-strip-block.running {
+          border-right-style: dotted;
+        }
+        .session-strip-detail {
+          display: grid;
+          gap: 4px;
+          padding: 8px 0 0;
+        }
+        code {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 4px;
+          padding: 2px 5px;
+        }
+        .nilm-label-field {
+          display: grid;
+          gap: 4px;
+          margin-top: 10px;
+        }
+        .nilm-label-field input {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 8px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          padding: 8px 10px;
+        }
+        .nilm-label-field select {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 6px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          min-width: 0;
+          padding: 8px 10px;
+        }
+        .nilm-decision-options {
+          display: grid;
+          gap: 8px;
+        }
+        .nilm-decision-option {
+          align-items: center;
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 6px;
+          cursor: pointer;
+          display: grid;
+          gap: 8px;
+          grid-template-columns: auto 24px minmax(0, 1fr);
+          padding: 10px;
+        }
+        .nilm-decision-option:has(input:checked) {
+          border-color: var(--primary-color, #03a9f4);
+        }
+        .nilm-decision-option input {
+          margin: 0;
+        }
+        .nilm-interval-form {
+          display: grid;
+          gap: 10px;
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+          margin: 12px 0;
+        }
+        .nilm-interval-form label {
+          display: grid;
+          gap: 4px;
+        }
+        .nilm-interval-form input,
+        .nilm-interval-form select {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 8px;
+          color: var(--primary-text-color, #111827);
+          font: inherit;
+          padding: 8px 10px;
+          min-width: 0;
+        }
+        .merge-targets {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 8px;
+        }
+        .merge-target-chip {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 8px;
+          color: var(--primary-text-color, #111827);
+          cursor: pointer;
+          font: inherit;
+          padding: 7px 11px;
+        }
+        .merge-target-chip[aria-pressed="true"] {
+          background: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+        .workspace-section {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+        }
+        .nilm-interval-rows {
+          display: grid;
+          gap: 10px;
+          margin: 12px 0;
+        }
+        .nilm-interval-row {
+          border: 1px solid var(--divider-color, #d8dee6);
+          border-radius: 6px;
+          display: grid;
+          gap: 8px;
+          padding: 10px;
+        }
+        .nilm-interval-row[data-nilm-active="true"] {
+          border-color: var(--primary-color, #03a9f4);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+        }
+        .nilm-interval-row-heading {
+          align-items: center;
+          display: grid;
+          gap: 8px;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+        }
+        .nilm-interval-row-heading span {
+          color: var(--primary-color, #03a9f4);
+          font-size: 12px;
+        }
+        .nilm-workspace {
+          display: grid;
+          gap: 18px;
+          min-width: 0;
+        }
+        .workspace-summary {
+          align-items: end;
+          display: grid;
+          gap: 8px 20px;
+          grid-template-columns: minmax(0, 1fr) auto minmax(180px, 0.8fr);
+          min-width: 0;
+        }
+        .workspace-summary-item,
+        .workspace-progress {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+        }
+        .workspace-summary-item span,
+        .workspace-progress span {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .workspace-summary-item strong {
+          overflow-wrap: anywhere;
+        }
+        .workspace-progress {
+          grid-template-columns: minmax(0, 1fr) auto;
+        }
+        .workspace-progress span {
+          grid-column: 1 / -1;
+        }
+        .workspace-progress progress {
+          accent-color: var(--primary-color, #03a9f4);
+          align-self: center;
+          height: 8px;
+          width: 100%;
+        }
+        .workspace-progress strong {
+          font-size: 13px;
+          white-space: nowrap;
+        }
+        .nilm-lanes {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+        .nilm-lane {
+          background: transparent;
+          border-color: transparent;
+          color: var(--primary-text-color, #111827);
+          flex: 0 0 auto;
+          gap: 8px;
+          min-height: 44px;
+          padding-inline: 6px;
+          white-space: nowrap;
+        }
+        .nilm-lane[aria-selected="true"] {
+          border-color: var(--primary-color, #03a9f4);
+          color: var(--primary-text-color, #111827);
+        }
+        .nilm-lane strong {
+          align-items: center;
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 8px;
+          display: inline-flex;
+          justify-content: center;
+          min-height: 24px;
+          min-width: 24px;
+          padding: 0 6px;
+        }
+        .nilm-review-layout {
+          align-items: start;
+          display: grid;
+          gap: 16px;
+          grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.6fr);
+          min-width: 0;
+        }
+        .nilm-review-list {
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+        }
+        .nilm-review-card {
+          background: var(--card-background-color, #fff);
+          border-color: var(--divider-color, #d8dee6);
+          color: var(--primary-text-color, #111827);
+          display: grid;
+          gap: 10px;
+          justify-content: stretch;
+          min-height: 132px;
+          text-align: left;
+          width: 100%;
+        }
+        .nilm-review-card[aria-pressed="true"] {
+          border-color: var(--primary-color, #03a9f4);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+        }
+        .review-card-heading,
+        .review-card-facts {
+          align-items: baseline;
+          display: flex;
+          gap: 12px;
+          justify-content: space-between;
+          min-width: 0;
+        }
+        .review-card-heading {
+          flex-wrap: wrap;
+        }
+        .review-card-context {
+          flex-wrap: wrap;
+        }
+        .review-card-heading strong {
+          overflow-wrap: anywhere;
+        }
+        .review-card-heading span,
+        .review-card-facts {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+          overflow-wrap: anywhere;
+        }
+        .power-meter {
+          background: var(--divider-color, #d8dee6);
+          border-radius: 3px;
+          display: block;
+          height: 6px;
+          overflow: hidden;
+          width: 100%;
+        }
+        .power-meter > span {
+          background: var(--primary-color, #03a9f4);
+          display: block;
+          height: 100%;
+          width: var(--power-percent, 0%);
+        }
+        .nilm-review-card progress {
+          accent-color: var(--primary-color, #03a9f4);
+          height: 8px;
+          width: 100%;
+        }
+        .nilm-review-inspector {
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+        }
+        .nilm-review-card[aria-pressed="true"] .review-card-heading strong {
+          color: var(--primary-text-color, #111827);
+        }
+        .nilm-lane-empty {
+          min-height: 44px;
+          padding: 12px 0;
+        }
+        .icon-button,
+        .nilm-graph-controls button {
+          height: 44px;
+          padding: 0;
+          width: 44px;
+        }
+        .decision-tile,
+        .nilm-lane,
+        .nilm-review-card,
+        .icon-button {
+          min-height: 44px;
+        }
+        .loading-skeleton {
+          background: var(--secondary-background-color, #f4f6f8);
+          min-height: 180px;
+          opacity: 0.72;
+        }
+        .graph-loading-skeleton {
+          min-height: 340px;
+        }
+        .nilm-loading-skeleton {
+          min-height: 480px;
+        }
+        @media (min-width: 801px) {
+          .nilm-review-layout {
+            grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.6fr);
+          }
+          .nilm-review-inspector {
+            align-self: start;
+            grid-column: 2;
+            grid-row: 1;
+            padding: 16px;
+          }
+        }
+        @media (max-width: 800px) {
+          :host {
+            padding: 16px;
+          }
+          .evidence-investigation,
+          .nilm-review-layout {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .nilm-review-card,
+          .nilm-review-list,
+          .nilm-review-inspector {
+            grid-column: 1;
+            grid-row: auto;
+          }
+          .workspace-summary {
+            grid-template-columns: minmax(0, 1fr) auto;
+          }
+          .workspace-progress {
+            grid-column: 1 / -1;
+          }
+          .appliance-insights-controls {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .appliance-insights-table {
+            min-width: 0;
+          }
+          .appliance-insights-table thead {
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            height: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: nowrap;
+            width: 1px;
+          }
+          .appliance-insights-table tbody,
+          .appliance-insights-table tr,
+          .appliance-insights-table td {
+            display: block;
+            width: 100%;
+          }
+          .appliance-insights-table tr {
+            border-bottom: 1px solid var(--divider-color, #d8dde6);
+            padding: 10px 0;
+          }
+          .appliance-insights-table td {
+            border: 0;
+            box-sizing: border-box;
+            display: grid;
+            gap: 12px;
+            grid-template-columns: minmax(112px, 0.7fr) minmax(0, 1fr);
+            padding: 7px 0;
+          }
+          .appliance-insights-table td::before {
+            color: var(--secondary-text-color, #5f6b7a);
+            content: attr(data-label);
+            font-size: 12px;
+            font-weight: 700;
+          }
+          .schedule-window {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
+          }
+          .schedule-weekdays {
+            grid-column: 1 / -1;
+          }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            scroll-behavior: auto;
+            transition-duration: 0.01ms !important;
+          }
+        }
+      </style>
+      <main class="shell">
+        <section class="panel page-header">
+          <p class="status">${this._escape(statusText)}</p>
+          <h1>${this._escape(headerTitle)}</h1>
+          <p class="muted">${this._escape(headerMessage)}</p>
+          ${!setupHealthRoute && !suggestedSettingsRoute && !applianceInsightsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
+        </section>
+      ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
+      ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
+      ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
+      ${this._renderSelectedRecommendationEvidence()}
+      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceInsights() ? this._renderApplianceInsightsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))))}
+      </main>
+    `;
+
+    this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
+    this._listen("[data-retry-alert-history]", () => {
+      const alert = this._payload && this._payload.alert;
+      return alert
+        ? this._loadHistory(alert, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+        : undefined;
+    });
+    this._listen("[data-retry-appliance-history]", () => (
+      this._loadApplianceDetailHistory(
+        this._applianceDetailHistoryHours,
+        this._evidenceRequestId,
+        this._loadedRouteKey || this._routeKey(),
+      )
+    ));
+    for (const select of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
+      select.addEventListener("change", () => {
+        this._loadApplianceDetailHistory(
+          Number(select.value),
+          this._evidenceRequestId,
+          this._loadedRouteKey || this._routeKey(),
+        );
+      });
+    }
+    this._listen("[data-retry-nilm-workspace]", () => (
+      this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+    ));
+    this._listen("[data-retry-nilm-history]", () => {
+      const failedRequest = this._nilmWorkspaceHistoryFailedRequest;
+      return failedRequest
+        ? this._loadNilmWorkspaceHistoryForWindow(
+          failedRequest.window,
+          failedRequest,
+        )
+        : this._loadNilmWorkspaceHistory(
+          this._nilmWorkspace,
+          this._evidenceRequestId,
+          this._loadedRouteKey || this._routeKey(),
+        );
+    });
+    this._listen("#apply_alert_decision", () => this._applyAlertDecision());
+    for (const input of this.shadowRoot.querySelectorAll("[data-alert-decision]")) {
+      input.addEventListener("change", () => {
+        this._alertDecision = input.value;
+        const applyButton = this.shadowRoot.querySelector("#apply_alert_decision");
+        if (applyButton) {
+          applyButton.disabled = false;
+        }
+      });
+    }
+    this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
+    this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
+    this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
+    this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
+    this._listen("[data-save-appliance-notifications]", () => this._saveApplianceNotificationPreferences());
+    this._listen("[data-save-expected-schedule]", () => this._saveExpectedSchedule());
+    this._listen("[data-add-schedule-window]", () => {
+      const draft = this._readExpectedScheduleForm();
+      draft.windows.push({ start: "08:00", end: "10:00", weekdays: [0, 1, 2, 3, 4] });
+      this._expectedScheduleDraft = draft;
+      this._render();
+    });
+    for (const button of this.shadowRoot.querySelectorAll("[data-remove-schedule-window]")) {
+      button.addEventListener("click", () => {
+        const draft = this._readExpectedScheduleForm();
+        draft.windows.splice(Number(button.dataset.removeScheduleWindow), 1);
+        this._expectedScheduleDraft = draft;
+        this._render();
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-schedule-mode]")) {
+      input.addEventListener("change", () => {
+        this._expectedScheduleDraft = this._readExpectedScheduleForm();
+        this._render();
+      });
+    }
+    this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-detail-action]")) {
+      button.addEventListener("click", () => {
+        this._callApplianceDetailAction(button.dataset.applianceDetailAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.recommendationIndex, 10);
+        this._callRecommendationAction(index, button.dataset.recommendationAction);
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-decision]")) {
+      input.addEventListener("change", () => {
+        const current = this._nilmDecisionDrafts.get(input.dataset.nilmDecisionKey) || { decision: "", identifyMode: "assign" };
+        this._nilmDecisionDrafts.set(input.dataset.nilmDecisionKey, Object.assign({}, current, { decision: input.value }));
+        this._render();
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-identify-mode]")) {
+      input.addEventListener("change", () => {
+        const current = this._nilmDecisionDrafts.get(input.dataset.nilmDecisionKey) || { decision: "identify", identifyMode: "assign" };
+        this._nilmDecisionDrafts.set(input.dataset.nilmDecisionKey, Object.assign({}, current, { identifyMode: input.value }));
+        this._render();
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-decision-assignment-key]")) {
+      input.addEventListener("change", () => {
+        const current = this._nilmDecisionDrafts.get(input.dataset.nilmDecisionAssignmentKey) || { decision: "identify", identifyMode: "assign" };
+        this._nilmDecisionDrafts.set(input.dataset.nilmDecisionAssignmentKey, Object.assign({}, current, { assignmentId: input.value }));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-apply-decision]")) {
+      button.addEventListener("click", () => {
+        this._applyNilmDecision(Number.parseInt(button.dataset.nilmApplyDecision, 10));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-lane]")) {
+      button.addEventListener("click", () => this._activateNilmLane(button.dataset.nilmLane));
+      button.addEventListener("keydown", (event) => this._handleNilmLaneKeydown(event, button));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-review-item]")) {
+      button.addEventListener("click", () => {
+        this._nilmSelectedReviewKey = button.dataset.nilmReviewItem;
+        const fingerprint = button.dataset.nilmSignatureFingerprint || "";
+        if (fingerprint) {
+          void this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
+        } else {
+          this._render();
+        }
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-input]")) {
+      input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
+      input.addEventListener("input", () => this._rememberNilmLabelIntervalDraft(input));
+      input.addEventListener("change", () => this._rememberNilmLabelIntervalDraft(input));
+      input.addEventListener("focus", () => {
+        const index = Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10);
+        if (index >= 0) this._selectNilmDraftInterval(index);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-open-interval-editor]")) {
+      button.addEventListener("click", () => {
+        this._nilmIntervalEditorOpen = true;
+        if (!this._nilmIntervalDraftItems().length) {
+          this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
+        }
+        this._nilmActiveIntervalIndex = 0;
+        this._render();
+        requestAnimationFrame(() => {
+          const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");
+          if (chart) chart.scrollIntoView({ block: "nearest" });
+        });
+      });
+    }
+    for (const row of this.shadowRoot.querySelectorAll("[data-nilm-interval-row]")) {
+      row.addEventListener("click", () => {
+        this._selectNilmDraftInterval(Number.parseInt(row.dataset.nilmIntervalRow, 10));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-remove-interval]")) {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this._removeNilmDraftInterval(Number.parseInt(button.dataset.nilmRemoveInterval, 10));
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
+      input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
+      input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
+      input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-overlay-toggle]")) {
+      input.addEventListener("change", () => this._toggleNilmOverlaySeries(input));
+    }
+    for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
+      chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
+    }
+    for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
+      band.addEventListener("click", () => {
+        if (band.dataset.nilmDraftIndex !== undefined) {
+          this._selectNilmDraftInterval(Number.parseInt(band.dataset.nilmDraftIndex, 10));
+          return;
+        }
+        if (band.dataset.nilmLabelIntervalIndex !== undefined) {
+          this._callNilmLabelIntervalAction(
+            Number.parseInt(band.dataset.nilmLabelIntervalIndex, 10),
+            "adjust",
+          );
+          return;
+        }
+        this._selectNilmSessionInterval(band);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-session-interval-index]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmSessionIntervalIndex || "-1", 10);
+        this._selectNilmSessionIntervalByIndex(index);
+      });
+    }
+    for (const marker of this.shadowRoot.querySelectorAll("[data-nilm-edge-time]")) {
+      marker.addEventListener("click", () => this._selectNilmEdgeTime(marker));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-zoom]")) {
+      button.addEventListener("click", () => this._zoomNilmGraph(Number(button.dataset.nilmGraphZoom)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-graph-pan]")) {
+      button.addEventListener("click", () => this._panNilmGraph(Number(button.dataset.nilmGraphPan)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-graph-zoom]")) {
+      button.addEventListener("click", () => this._zoomApplianceHistoryGraph(Number(button.dataset.applianceHistoryGraphZoom)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-graph-pan]")) {
+      button.addEventListener("click", () => this._panApplianceHistoryGraph(Number(button.dataset.applianceHistoryGraphPan)));
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmIndex, 10);
+        this._selectNilmMergeTarget(index, button.dataset.nilmMergeTarget);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-load-all-nilm]")) {
+      button.addEventListener("click", () => this._loadExpandedNilm());
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmLabelIntervalIndex || "-1", 10);
+        this._callNilmLabelIntervalAction(index, button.dataset.nilmLabelIntervalAction);
+      });
+    }
+    this._listen(
+      "[data-nilm-interval-refresh-retry]",
+      () => this._retryNilmIntervalWorkspaceRefresh(),
+    );
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-interval-retry]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.getAttribute("data-nilm-interval-retry-index") || "-1", 10);
+        this._callNilmLabelIntervalAction(index, button.getAttribute("data-nilm-interval-retry"));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-session-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmSessionIndex || "-1", 10);
+        this._callNilmWorkspaceItemAction("sessions", index, button.dataset.nilmSessionAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-assignment-action]")) {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const index = Number.parseInt(button.dataset.nilmAssignmentIndex || "-1", 10);
+        this._callNilmWorkspaceItemAction("assignments", index, button.dataset.nilmAssignmentAction);
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-appliance-detail-path]")) {
+      button.addEventListener("click", () => {
+        this._navigate(button.dataset.nilmApplianceDetailPath);
+      });
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-appliance-insights-filter]")) {
+      input.addEventListener("change", () => {
+        this._applianceInsightsFilters[input.dataset.applianceInsightsFilter] = input.checked;
+        this._render();
+      });
+    }
+    const applianceInsightsSort = this.shadowRoot.querySelector("[data-appliance-insights-sort]");
+    if (applianceInsightsSort) {
+      applianceInsightsSort.addEventListener("change", () => {
+        this._applianceInsightsSort = applianceInsightsSort.value;
+        this._render();
+      });
+    }
+    for (const link of this.shadowRoot.querySelectorAll("[data-appliance-insights-detail-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.dataset.applianceInsightsDetailPath);
+      });
+    }
+    for (const link of this.shadowRoot.querySelectorAll("[data-appliance-insights-source-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.dataset.applianceInsightsSourcePath);
+      });
+    }
+    for (const link of this.shadowRoot.querySelectorAll("[data-setup-health-path]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.getAttribute("href"));
+      });
+    }
+    this._restoreNilmFocus(nilmFocus);
+  }
+}

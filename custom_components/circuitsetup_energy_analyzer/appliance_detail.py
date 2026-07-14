@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, is_dataclass
-from datetime import datetime
-from typing import Any, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlencode
 
-from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH, alert_evidence_path
+from .appliance_detail_models import (
+    ApplianceAlertSummary,
+    ApplianceDetail,
+    ApplianceExpectation,
+    ComparisonMode,
+    ExpectationStatus,
+    MetricComparison,
+    MetricStatus,
+    SourceType,
+)
+from .baseline import build_baseline
+from .local_time import as_ha_local, local_date, local_day_time
 from .models import (
     AlertEvidence,
     ApplianceProfile,
@@ -29,18 +40,11 @@ from .sensor import (
     health_summary_attributes,
     health_summary_value,
 )
-from .utility_comparison import effective_electricity_rate
+from .session_timeline import (
+    direct_appliance_timeline,
+    nilm_appliance_timeline,
+)
 
-SourceType = Literal["direct_meter", "nilm_estimate", "mixed", "mains", "unknown"]
-ExpectationStatus = Literal[
-    "ok",
-    "watch",
-    "possible_issue",
-    "expected",
-    "not_enough_data",
-    "not_applicable",
-]
-MetricStatus = Literal["normal", "higher", "lower", "learning", "missing_data"]
 ComparisonBaseline = tuple[float | None, float | None, float | None, float | None, str]
 ProfileExpectationRecipe = tuple[str, str, str, tuple[str, ...]]
 
@@ -108,90 +112,6 @@ _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] =
 }
 
 
-@dataclass(slots=True)
-class MetricComparison:
-    """One Today vs Normal comparison for an appliance."""
-
-    metric_id: str
-    label: str
-    unit: str
-    current_value: float | None
-    normal_low: float | None
-    normal_high: float | None
-    normal_median: float | None
-    status: MetricStatus
-    confidence: float | None
-    source: str
-
-
-@dataclass(slots=True)
-class ApplianceExpectation:
-    """Plain-language expectation derived from existing analyzer state."""
-
-    expectation_id: str
-    circuit_id: str
-    title: str
-    status: ExpectationStatus
-    source_type: SourceType
-    confidence: float | None
-    observed: str
-    expected: str
-    why_it_matters: str
-    what_to_check_first: tuple[str, ...]
-    evidence_path: str | None
-
-
-@dataclass(slots=True)
-class ApplianceAlertSummary:
-    """Bounded alert details for appliance-centered payloads."""
-
-    alert_id: str
-    feature: str
-    message: str
-    severity: str
-    observed_value: float | None
-    baseline_value: float | None
-    change_ratio: float | None
-    repeated_count: int
-    first_seen: str | None
-    last_seen: str | None
-    evidence_path: str | None
-
-
-@dataclass(slots=True)
-class ApplianceDetail:
-    """Appliance-centered read model for panel, dashboard, and diagnostics."""
-
-    circuit_id: str
-    display_name: str
-    appliance_profile: str
-    source_type: SourceType
-    confidence: float | None
-    model_status: str | None
-    activity_state: str
-    health_state: str
-    electrical_state: str
-    energy_state: str
-    current_power_w: float | None
-    daily_energy_kwh: float | None
-    runtime_today_seconds: float | None
-    run_count_today: int | None
-    cost_today: float | None
-    today_vs_normal: tuple[MetricComparison, ...]
-    expectations: tuple[ApplianceExpectation, ...]
-    recent_timeline: dict[str, Any] | None
-    active_alerts: tuple[ApplianceAlertSummary, ...]
-    next_step: str | None
-    what_to_check_first: tuple[str, ...]
-    evidence_path: str | None
-    assignment_id: str | None = None
-    mains_source: str | None = None
-
-    def as_dict(self) -> dict[str, Any]:
-        """Return JSON-friendly data."""
-        return _jsonable(asdict(self))
-
-
 def appliance_detail_for_circuit(
     coordinator: Any,
     circuit_id: str,
@@ -220,9 +140,12 @@ def appliance_detail_for_circuit(
         source_type=source_type,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
     )
+    converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
     return ApplianceDetail(
         circuit_id=config.circuit_id,
-        display_name=config.name,
+        display_name=str(
+            (converted_assignment or {}).get("display_name") or config.name
+        ),
         appliance_profile=config.appliance_profile.value,
         source_type=source_type,
         confidence=None,
@@ -259,7 +182,60 @@ def appliance_detail_for_circuit(
         next_step=str(health_attrs.get("next_step") or "") or None,
         what_to_check_first=first_checks,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
+        source_quality=_direct_source_quality(config, state),
+        learning_readiness=_learning_readiness(state, config.circuit_id),
+        assignment_id=(
+            str(converted_assignment.get("assignment_id") or "") or None
+            if converted_assignment
+            else None
+        ),
+        appliance_key=(
+            str(converted_assignment.get("appliance_key") or "")
+            or f"nilm:{converted_assignment.get('assignment_id')}"
+            if converted_assignment
+            else f"circuit:{config.circuit_id}"
+        ),
+        appliance_id=(
+            str(converted_assignment.get("appliance_id") or "")
+            or config.circuit_id
+            if converted_assignment
+            else config.circuit_id
+        ),
+        mains_circuit_id=(
+            str(converted_assignment.get("mains_circuit_id") or "") or None
+            if converted_assignment
+            else config.circuit_id
+            if source_type == "mains"
+            else None
+        ),
+        session_timeline=direct_appliance_timeline(
+            coordinator,
+            config.circuit_id,
+        ),
     )
+
+
+def _converted_nilm_assignment(
+    coordinator: Any,
+    circuit_id: str,
+) -> Mapping[str, Any] | None:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return None
+    for assignments in assignments_by_circuit.values():
+        for assignment in _iter_items(assignments):
+            if (
+                isinstance(assignment, Mapping)
+                and assignment.get("conversion_state") == "direct_meter"
+                and str(assignment.get("direct_circuit_id") or "") == circuit_id
+            ):
+                return assignment
+    return None
 
 
 def appliance_detail_for_assignment(
@@ -271,22 +247,44 @@ def appliance_detail_for_assignment(
     if not requested_id:
         return None
 
+    stored_assignment = _stored_nilm_assignment(coordinator, requested_id)
+    if (
+        stored_assignment is not None
+        and stored_assignment.get("conversion_state") == "direct_meter"
+    ):
+        direct_circuit_id = str(
+            stored_assignment.get("direct_circuit_id") or ""
+        ).strip()
+        if direct_circuit_id:
+            return appliance_detail_for_circuit(coordinator, direct_circuit_id)
+
     for state in nilm_virtual_appliance_states(coordinator, published_only=False):
         if state.assignment_id != requested_id:
             continue
-        return _nilm_detail(_coordinator_state(coordinator), state)
+        return _nilm_detail(coordinator, state)
     return None
 
 
 def _nilm_detail(
-    analyzer_state: Any,
+    coordinator: Any,
     state: NilmVirtualApplianceState,
 ) -> ApplianceDetail:
+    analyzer_state = _coordinator_state(coordinator)
     evidence_path = _nilm_evidence_path(state)
+    validation_ready = bool(
+        state.validation_readiness and state.validation_readiness.get("ready")
+    )
     review_needed = (
         state.confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
         or state.model_status in NILM_REVIEW_MODEL_STATES
+        or not validation_ready
     )
+    needs_history = (
+        not validation_ready
+        and state.confidence >= NILM_FINISHED_CONFIDENCE_THRESHOLD
+        and state.model_status not in NILM_REVIEW_MODEL_STATES
+    )
+    comparisons = _nilm_metric_comparisons(coordinator, state)
     return ApplianceDetail(
         circuit_id=state.mains_circuit_id,
         display_name=state.display_name,
@@ -300,39 +298,297 @@ def _nilm_detail(
         energy_state="Estimated",
         current_power_w=state.estimated_power_w,
         daily_energy_kwh=state.estimated_energy_kwh_today,
-        runtime_today_seconds=None,
-        run_count_today=None,
-        cost_today=_estimated_cost(
-            state.estimated_energy_kwh_today,
-            _positive_state_number(
-                analyzer_state,
-                "cost_current_rate_by_circuit",
-                state.mains_circuit_id,
-            ),
-        ),
-        today_vs_normal=(),
+        runtime_today_seconds=state.runtime_today_seconds,
+        run_count_today=state.run_count_today,
+        cost_today=None,
+        today_vs_normal=comparisons,
         expectations=_nilm_expectations(
             state,
             review_needed=review_needed,
             evidence_path=evidence_path,
+            comparisons=comparisons,
         ),
-        recent_timeline=_recent_timeline(analyzer_state, state.mains_circuit_id),
+        recent_timeline=_nilm_session_timeline(state),
         active_alerts=_active_alert_summaries(
             analyzer_state,
             state.mains_circuit_id,
             config=None,
             assignment_id=state.assignment_id,
         ),
-        next_step="Review NILM assignment" if review_needed else "No action needed",
+        next_step=(
+            "Confirm more NILM sessions"
+            if needs_history
+            else "Review NILM assignment"
+            if review_needed
+            else "No action needed"
+        ),
         what_to_check_first=(
-            ("Validate this estimated appliance before relying on alerts.",)
+            ("Confirm this appliance across more days before using comparisons.",)
+            if needs_history
+            else ("Validate this estimated appliance before relying on alerts.",)
             if review_needed
             else ("Review NILM confidence before acting on appliance alerts.",)
         ),
         evidence_path=evidence_path,
+        source_quality={
+            "status": "estimated",
+            "label": "Estimated from mains",
+            "available_source_count": 1 if state.mains_source else 0,
+            "stale_source_count": 0,
+            "missing_required_roles": [],
+        },
+        learning_readiness={
+            "status": "needs_validation" if review_needed else "ready",
+            "label": (
+                "Not enough confirmed history"
+                if needs_history
+                else "Needs validation"
+                if review_needed
+                else "Ready"
+            ),
+        },
         assignment_id=state.assignment_id,
         mains_source=state.mains_source,
+        appliance_key=state.appliance_key,
+        appliance_id=state.appliance_id,
+        mains_circuit_id=state.mains_circuit_id,
+        current_session_duration_seconds=state.current_session_duration_seconds,
+        current_session=_nilm_session_detail(state, state.current_session_id),
+        last_matched_session=_nilm_session_detail(
+            state,
+            state.last_matched_session_id,
+        ),
+        session_timeline=nilm_appliance_timeline(
+            state,
+            (
+                getattr(analyzer_state, "active_alerts_by_circuit", {}).get(
+                    state.mains_circuit_id,
+                    (),
+                )
+            ),
+            maintenance=(
+                getattr(
+                    getattr(coordinator, "store_data", None),
+                    "maintenance_by_circuit",
+                    {},
+                ).get(state.mains_circuit_id, {})
+            ),
+        ),
     )
+
+
+def _nilm_metric_comparisons(
+    coordinator: Any,
+    state: NilmVirtualApplianceState,
+) -> tuple[MetricComparison, ...]:
+    readiness = state.validation_readiness or {}
+    if not readiness.get("ready") or state.model_status not in {
+        "published",
+        "validated",
+    }:
+        return ()
+    specs = (
+        (
+            "daily_energy_kwh",
+            "Energy so far",
+            "kWh",
+            state.estimated_energy_kwh_today,
+        ),
+        (
+            "runtime_today_seconds",
+            "Runtime so far",
+            "s",
+            state.runtime_today_seconds,
+        ),
+        (
+            "run_count_today",
+            "Runs so far",
+            "count",
+            float(state.run_count_today),
+        ),
+    )
+    comparisons: list[MetricComparison] = []
+    for metric_id, label, unit, current in specs:
+        baseline = _nilm_session_baseline(state, metric_id)
+        comparison = _metric_comparison(
+            metric_id=metric_id,
+            label=label,
+            unit=unit,
+            current=current,
+            baseline=baseline,
+            comparison_mode=ComparisonMode.SAME_TIME_OF_DAY,
+            as_of=state.reference_time,
+            explanation="Validated assignment-specific NILM session history.",
+        )
+        if comparison is not None:
+            comparisons.append(comparison)
+    return tuple(comparisons)
+
+
+def _nilm_session_baseline(
+    state: NilmVirtualApplianceState,
+    metric_id: str,
+) -> ComparisonBaseline | None:
+    if state.reference_time is None:
+        return None
+    current_local = as_ha_local(state.reference_time, state.time_zone)
+    current_date = current_local.date()
+    as_of_clock = current_local.time().replace(tzinfo=None)
+    daily: dict[Any, dict[str, float]] = {}
+    for session in state.sessions:
+        session_id = str(session.get("session_id") or "").strip()
+        if session_id not in state.confirmed_session_ids or not session.get("end"):
+            continue
+        start = _datetime_or_none(session.get("start"))
+        end = _datetime_or_none(session.get("end"))
+        if start is None or end is None:
+            continue
+        total_duration = max(
+            (
+                end.astimezone(UTC) - start.astimezone(UTC)
+            ).total_seconds(),
+            0.0,
+        )
+        session_energy = max(
+            _number_or_none(session.get("estimated_energy_kwh")) or 0.0,
+            0.0,
+        )
+        day = local_date(start, state.time_zone)
+        final_day = local_date(end, state.time_zone)
+        while day <= final_day and day < current_date:
+            day_start = local_day_time(day, datetime.min.time(), state.time_zone)
+            day_cutoff = local_day_time(day, as_of_clock, state.time_zone)
+            overlap_start = max(start, day_start)
+            overlap_end = min(end, day_cutoff)
+            if overlap_end > overlap_start:
+                values = daily.setdefault(day, _empty_nilm_daily_metrics())
+                overlap_seconds = (
+                    overlap_end.astimezone(UTC)
+                    - overlap_start.astimezone(UTC)
+                ).total_seconds()
+                values["runtime_today_seconds"] += overlap_seconds
+                if total_duration > 0:
+                    values["daily_energy_kwh"] += session_energy * (
+                        overlap_seconds / total_duration
+                    )
+            if local_date(start, state.time_zone) == day and start < day_cutoff:
+                daily.setdefault(day, _empty_nilm_daily_metrics())[
+                    "run_count_today"
+                ] += 1.0
+            day += timedelta(days=1)
+    samples = [values[metric_id] for values in daily.values() if metric_id in values]
+    if len(samples) < 3:
+        return None
+    baseline = build_baseline(metric_id, samples)
+    return (
+        baseline.p10,
+        baseline.p90,
+        baseline.median,
+        baseline.confidence,
+        "validated_nilm_sessions",
+    )
+
+
+def _empty_nilm_daily_metrics() -> dict[str, float]:
+    return {
+        "daily_energy_kwh": 0.0,
+        "runtime_today_seconds": 0.0,
+        "run_count_today": 0.0,
+    }
+
+
+def _nilm_session_detail(
+    state: NilmVirtualApplianceState,
+    session_id: str | None,
+) -> dict[str, Any] | None:
+    if not session_id:
+        return None
+    for session in state.sessions:
+        if str(session.get("session_id") or "") != session_id:
+            continue
+        duration = _number_or_none(session.get("duration_seconds"))
+        if not session.get("end"):
+            duration = state.current_session_duration_seconds
+        return {
+            "session_id": session_id,
+            "signature_fingerprint": str(
+                session.get("signature_fingerprint") or ""
+            )
+            or None,
+            "start": _iso_value(session.get("start")),
+            "end": _iso_value(session.get("end")),
+            "duration_seconds": duration,
+            "estimated_energy_kwh": _number_or_none(
+                session.get("estimated_energy_kwh")
+            ),
+            "confidence": _number_or_none(session.get("confidence")),
+            "validation_result": _nilm_session_validation_result(
+                state,
+                session_id,
+            ),
+        }
+    return None
+
+
+def _stored_nilm_assignment(
+    coordinator: Any,
+    assignment_id: str,
+) -> Mapping[str, Any] | None:
+    store_data = getattr(coordinator, "store_data", None)
+    assignments_by_circuit = getattr(
+        store_data,
+        "nilm_appliance_assignments_by_circuit",
+        {},
+    )
+    if not isinstance(assignments_by_circuit, Mapping):
+        return None
+    for assignments in assignments_by_circuit.values():
+        for assignment in _iter_items(assignments):
+            if (
+                isinstance(assignment, Mapping)
+                and str(assignment.get("assignment_id") or "") == assignment_id
+            ):
+                return assignment
+    return None
+
+
+def _nilm_session_validation_result(
+    state: NilmVirtualApplianceState,
+    session_id: str,
+) -> str | None:
+    if session_id in state.confirmed_session_ids:
+        return "confirmed"
+    if session_id in state.rejected_session_ids:
+        return "rejected"
+    if session_id in state.adjusted_session_ids:
+        return "adjusted"
+    return None
+
+
+def _nilm_session_timeline(
+    state: NilmVirtualApplianceState,
+) -> dict[str, Any] | None:
+    items: list[dict[str, Any]] = []
+    for session in reversed(state.sessions[-20:]):
+        detail = _nilm_session_detail(
+            state,
+            str(session.get("session_id") or "") or None,
+        )
+        if detail is None:
+            continue
+        running = not detail.get("end")
+        items.append(
+            {
+                **detail,
+                "timestamp": detail.get("start"),
+                "kind": "running" if running else "completed",
+                "title": "Estimated run in progress" if running else "Estimated run",
+                "detail": (
+                    "Estimated from the assigned NILM signature on the mains source."
+                ),
+            }
+        )
+    return {"status": "activity", "items": items} if items else None
 
 
 def metric_comparisons_for_circuit(
@@ -373,9 +629,16 @@ def metric_comparisons_for_circuit(
         (
             "cost_today",
             "Cost today",
-            "$",
+            "currency",
             "",
             ("daily_energy_kwh", "daily_energy_usage_kwh"),
+        ),
+        (
+            "current_demand_w",
+            "Current demand",
+            "W",
+            "current_demand_w_by_circuit",
+            ("current_demand_w",),
         ),
         (
             "demand_peak_w",
@@ -414,6 +677,80 @@ def metric_comparisons_for_circuit(
             == "unconfigured"
         ):
             continue
+        if metric_id == "current_power_w":
+            if config.mode is CircuitMode.MIXED:
+                continue
+            operating_status = _mapping_status(
+                state,
+                "run_cycle_status_by_circuit",
+                config.circuit_id,
+            )
+            if operating_status == "running":
+                comparison_mode = ComparisonMode.RUNNING_STATE
+            elif operating_status in {"idle", "no_activity"}:
+                comparison_mode = ComparisonMode.CURRENT_STATE
+                baseline_features = ("standby_power_w",)
+            else:
+                comparison_mode = ComparisonMode.CURRENT_STATE
+                baseline_features = ()
+        else:
+            comparison_mode = _comparison_mode(metric_id)
+            if comparison_mode is ComparisonMode.SAME_TIME_OF_DAY:
+                label = {
+                    "daily_energy_kwh": "Energy so far",
+                    "runtime_today_seconds": "Runtime so far",
+                    "run_count_today": "Runs so far",
+                    "cost_today": "Cost so far",
+                    "demand_peak_w": "Demand peak so far",
+                }.get(metric_id, label)
+        evidence: Mapping[str, Any] = {}
+        if metric_id == "daily_energy_kwh":
+            evidence = _mapping_for_circuit(
+                state,
+                "energy_usage_evidence_by_circuit",
+                config.circuit_id,
+            )
+            if evidence.get("comparison_mode") == ComparisonMode.SAME_TIME_OF_DAY:
+                comparison_mode = ComparisonMode.SAME_TIME_OF_DAY
+                label = "Energy so far"
+        elif metric_id == "cost_today":
+            evidence = _mapping_for_circuit(
+                state,
+                "cost_evidence_by_circuit",
+                config.circuit_id,
+            )
+        elif metric_id in {"runtime_today_seconds", "run_count_today"}:
+            evidence = _mapping_for_circuit(
+                state,
+                "run_cycle_evidence_by_circuit",
+                config.circuit_id,
+            )
+            prefix = (
+                "runtime_today"
+                if metric_id == "runtime_today_seconds"
+                else "run_count"
+            )
+            evidence = {
+                **evidence,
+                "projection_value": evidence.get(f"{prefix}_projection_value"),
+                "projection_low": evidence.get(f"{prefix}_projection_low"),
+                "projection_high": evidence.get(f"{prefix}_projection_high"),
+                "projection_confidence": evidence.get(
+                    f"{prefix}_projection_confidence"
+                ),
+            }
+        elif metric_id == "demand_peak_w":
+            evidence = _mapping_for_circuit(
+                state,
+                "demand_evidence_by_circuit",
+                config.circuit_id,
+            )
+        elif metric_id == "capacity_usage_percent":
+            evidence = _mapping_for_circuit(
+                state,
+                "capacity_evidence_by_circuit",
+                config.circuit_id,
+            )
         current = (
             _estimated_cost_today(state, config.circuit_id)
             if metric_id == "cost_today"
@@ -426,12 +763,74 @@ def metric_comparisons_for_circuit(
             metric_id=metric_id,
             baseline_features=baseline_features,
         )
+        full_period = (
+            _stored_baseline(coordinator, config.circuit_id, baseline_features)
+            if metric_id
+            in {
+                "daily_energy_kwh",
+                "runtime_today_seconds",
+                "run_count_today",
+                "demand_peak_w",
+            }
+            else None
+        )
         comparison = _metric_comparison(
             metric_id=metric_id,
             label=label,
             unit=unit,
             current=current,
             baseline=baseline,
+            comparison_mode=comparison_mode,
+            as_of=_datetime_or_none(evidence.get("as_of")),
+            projection_value=_number_or_none(evidence.get("projection_value")),
+            projection_low=_number_or_none(evidence.get("projection_low")),
+            projection_high=_number_or_none(evidence.get("projection_high")),
+            projection_confidence=_number_or_none(
+                evidence.get("projection_confidence")
+            ),
+            full_period_normal_low=_number_or_none(
+                evidence.get("full_period_normal_low")
+            )
+            if evidence.get("full_period_normal_low") is not None
+            else full_period[0]
+            if full_period is not None
+            else None,
+            full_period_normal_high=_number_or_none(
+                evidence.get("full_period_normal_high")
+            )
+            if evidence.get("full_period_normal_high") is not None
+            else full_period[1]
+            if full_period is not None
+            else None,
+            full_period_normal_median=_number_or_none(
+                evidence.get("full_period_normal_median")
+            )
+            if evidence.get("full_period_normal_median") is not None
+            else full_period[2]
+            if full_period is not None
+            else None,
+            configured_warning_value=(
+                _number_or_none(evidence.get("warning_ratio")) * 100.0
+                if metric_id == "capacity_usage_percent"
+                and _number_or_none(evidence.get("warning_ratio")) is not None
+                else None
+            ),
+            configured_limit_value=(
+                100.0
+                if metric_id == "capacity_usage_percent"
+                else _number_or_none(evidence.get("demand_limit_w"))
+                if metric_id == "demand_peak_w"
+                else None
+            ),
+            limit_unit=(
+                "%"
+                if metric_id == "capacity_usage_percent"
+                else "W"
+                if metric_id == "demand_peak_w"
+                and _number_or_none(evidence.get("demand_limit_w")) is not None
+                else None
+            ),
+            explanation=str(evidence.get("comparison_explanation") or ""),
         )
         if comparison is not None:
             comparisons.append(comparison)
@@ -447,7 +846,170 @@ def appliance_expectations_for_circuit(
     source_type: SourceType,
     evidence_path: str,
 ) -> tuple[ApplianceExpectation, ...]:
-    """Return one bounded behavior expectation for a direct appliance."""
+    """Return up to three ranked, semantically distinct findings."""
+    primary = _primary_appliance_expectations_for_circuit(
+        coordinator,
+        config,
+        state,
+        comparisons=comparisons,
+        source_type=source_type,
+        evidence_path=evidence_path,
+    )
+    maintenance = _mapping_for_circuit(
+        state,
+        "maintenance_by_circuit",
+        config.circuit_id,
+    )
+    candidates = list(primary)
+    if maintenance.get("active") is True:
+        checklist = _mapping_for_circuit(
+            state,
+            "data_quality_checklist_by_circuit",
+            config.circuit_id,
+        )
+        if checklist and _data_quality_problem(checklist):
+            candidates.append(
+                _expectation(
+                    config,
+                    title="Source data needs review",
+                    status="not_enough_data",
+                    source_type=source_type,
+                    observed="Analyzer source data is missing, stale, or invalid.",
+                    expected="Reliable checks need fresh numeric source data.",
+                    why_it_matters="Maintenance still requires trustworthy inputs.",
+                    what_to_check_first=("Review source sensor data.",),
+                    evidence_path=evidence_path,
+                )
+            )
+        return _ranked_distinct_expectations(candidates)
+
+    runtime_is_context_explained = bool(
+        primary
+        and primary[0].status == "expected"
+    )
+    electrical_attrs = electrical_health_attributes(state, config.circuit_id)
+    if _mapping_status(
+        state,
+        "leg_imbalance_status_by_circuit",
+        config.circuit_id,
+    ) == "imbalanced":
+        candidates.append(
+            _expectation(
+                config,
+                title="Electrical balance needs review",
+                status="possible_issue",
+                source_type=source_type,
+                observed="A dual-phase load has meaningful leg-to-leg imbalance.",
+                expected="Both legs should stay within the learned balance range.",
+                why_it_matters=(
+                    "Imbalance can indicate CT pairing, wiring, or load issues."
+                ),
+                what_to_check_first=_first_checks(
+                    electrical_attrs.get("what_to_check_first")
+                ),
+                evidence_path=evidence_path,
+            )
+        )
+    for metric_id, title, observed, first_check in (
+        (
+            "daily_energy_kwh",
+            "Energy is above normal",
+            f"{config.name} energy is above normal today.",
+            "Review recent use and source data.",
+        ),
+        (
+            "runtime_today_seconds",
+            "Runtime is above normal",
+            f"{config.name} runtime is above the learned range.",
+            "Check whether the appliance is still running or ran longer than expected.",
+        ),
+    ):
+        if metric_id == "runtime_today_seconds" and runtime_is_context_explained:
+            continue
+        comparison = _comparison_by_id(comparisons, metric_id)
+        if not _is_higher(comparison):
+            continue
+        candidates.append(
+            _expectation(
+                config,
+                title=title,
+                status="watch",
+                source_type=source_type,
+                observed=observed,
+                expected=_normal_range_text(comparison),
+                why_it_matters=(
+                    "Repeated changes from this appliance's own normal may need review."
+                ),
+                what_to_check_first=(first_check,),
+                evidence_path=evidence_path,
+            )
+        )
+    return _ranked_distinct_expectations(candidates)
+
+
+def _ranked_distinct_expectations(
+    candidates: list[ApplianceExpectation],
+) -> tuple[ApplianceExpectation, ...]:
+    ranked = sorted(
+        enumerate(candidates),
+        key=lambda item: (_expectation_rank(item[1]), item[0]),
+    )
+    selected: list[ApplianceExpectation] = []
+    groups: set[str] = set()
+    for _, candidate in ranked:
+        group = _expectation_semantic_group(candidate)
+        if group in groups:
+            continue
+        groups.add(group)
+        selected.append(candidate)
+        if len(selected) == 3:
+            break
+    return tuple(selected)
+
+
+def _expectation_rank(expectation: ApplianceExpectation) -> int:
+    group = _expectation_semantic_group(expectation)
+    if group == "data_quality":
+        return 0
+    if group in {"electrical", "capacity"}:
+        return 1
+    if expectation.status == "possible_issue":
+        return 2
+    if group == "nilm":
+        return 3
+    if expectation.status == "watch":
+        return 4
+    if expectation.status == "expected":
+        return 6
+    return 7
+
+
+def _expectation_semantic_group(expectation: ApplianceExpectation) -> str:
+    text = f"{expectation.expectation_id} {expectation.title}".lower()
+    for group, tokens in (
+        ("data_quality", ("source data", "data_quality", "missing", "stale")),
+        ("electrical", ("electrical", "imbalance", "leg balance")),
+        ("capacity", ("capacity", "demand limit")),
+        ("nilm", ("nilm", "validation")),
+        ("runtime", ("runtime", "cycle")),
+        ("energy", ("energy", "usage")),
+        ("context", ("weather", "rain", "schedule", "maintenance")),
+    ):
+        if any(token in text for token in tokens):
+            return group
+    return expectation.expectation_id
+
+
+def _primary_appliance_expectations_for_circuit(
+    coordinator: Any,
+    config: CircuitConfig,
+    state: Any,
+    *,
+    comparisons: tuple[MetricComparison, ...],
+    source_type: SourceType,
+    evidence_path: str,
+) -> tuple[ApplianceExpectation, ...]:
+    """Return the established primary behavior expectation."""
     circuit_id = config.circuit_id
     expectation_source = source_type
     maintenance = _mapping_for_circuit(state, "maintenance_by_circuit", circuit_id)
@@ -459,9 +1021,9 @@ def appliance_expectations_for_circuit(
                 status="expected",
                 source_type=expectation_source,
                 observed="Maintenance is active for this appliance.",
-                expected="Issue language is suppressed while work is expected.",
+                expected="Alert language is suppressed while work is expected.",
                 why_it_matters=(
-                    "This prevents maintenance work from looking like a new fault."
+                    "This prevents maintenance work from looking like a new concern."
                 ),
                 what_to_check_first=(
                     "Finish maintenance and resume alerts when work is complete.",
@@ -704,6 +1266,7 @@ def _nilm_expectations(
     *,
     review_needed: bool,
     evidence_path: str,
+    comparisons: tuple[MetricComparison, ...] = (),
 ) -> tuple[ApplianceExpectation, ...]:
     if review_needed:
         status: ExpectationStatus = "watch"
@@ -718,7 +1281,7 @@ def _nilm_expectations(
         observed = "The NILM assignment is validated with sufficient confidence."
         title = "NILM estimate is validated"
         first_check = "No validation action is needed right now."
-    return (
+    candidates = [
         ApplianceExpectation(
             expectation_id=f"{state.assignment_id}:nilm_validation",
             circuit_id=state.mains_circuit_id,
@@ -727,14 +1290,34 @@ def _nilm_expectations(
             source_type="nilm_estimate",
             confidence=state.confidence,
             observed=observed,
-            expected="Estimated appliances should be validated before fault alerts.",
+            expected="Estimated appliances should be validated before alerts.",
             why_it_matters=(
                 "NILM is an estimate from mains power, not a direct measurement."
             ),
             what_to_check_first=(first_check,),
             evidence_path=evidence_path,
-        ),
-    )
+        )
+    ]
+    energy = _comparison_by_id(comparisons, "daily_energy_kwh")
+    if _is_higher(energy):
+        candidates.append(
+            ApplianceExpectation(
+                expectation_id=f"{state.assignment_id}:energy",
+                circuit_id=state.mains_circuit_id,
+                title="Estimated energy is above normal",
+                status="watch",
+                source_type="nilm_estimate",
+                confidence=state.confidence,
+                observed="Estimated energy is above the validated learned range.",
+                expected=_normal_range_text(energy),
+                why_it_matters="This estimate should be reviewed with its sessions.",
+                what_to_check_first=(
+                    "Confirm the assignment and recent NILM intervals.",
+                ),
+                evidence_path=evidence_path,
+            )
+        )
+    return _ranked_distinct_expectations(candidates)
 
 
 def _active_alert_summaries(
@@ -770,10 +1353,14 @@ def _active_alert_summaries(
                 repeated_count=int(alert.repeated_count),
                 first_seen=_iso(alert.first_seen),
                 last_seen=_iso(alert.last_seen),
-                evidence_path=_evidence_path(
-                    circuit_id=circuit_id,
-                    alert_id=notification_id_for_alert(alert),
-                    feature=alert.feature,
+                evidence_path=(
+                    alert_evidence_path(alert)
+                    if assignment_id is not None
+                    else _evidence_path(
+                        circuit_id=circuit_id,
+                        alert_id=notification_id_for_alert(alert),
+                        feature=alert.feature,
+                    )
                 )
                 if config is not None or assignment_id is not None
                 else None,
@@ -828,26 +1415,83 @@ def _comparison_baseline(
                     "contextual_baseline",
                 )
 
-    if metric_id == "cost_today":
-        rate = _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id)
-        energy_baseline = _comparison_baseline(
-            coordinator,
-            state,
-            circuit_id,
-            metric_id="daily_energy_kwh",
-            baseline_features=baseline_features,
-        )
-        if rate is None or energy_baseline is None:
-            return None
-        low, high, median, confidence, source = energy_baseline
-        return (
-            _round_money(low * rate) if low is not None else None,
-            _round_money(high * rate) if high is not None else None,
-            _round_money(median * rate) if median is not None else None,
-            confidence,
-            f"{source}_cost_estimate",
+    if metric_id == "runtime_today_seconds":
+        return _evidence_baseline(
+            _mapping_for_circuit(
+                state,
+                "run_cycle_evidence_by_circuit",
+                circuit_id,
+            ),
+            range_key="runtime_today_contextual_expected_range_seconds",
+            median_key="runtime_today_contextual_baseline_median_seconds",
+            confidence_key="runtime_today_contextual_baseline_confidence",
         )
 
+    if metric_id == "run_count_today":
+        return _evidence_baseline(
+            _mapping_for_circuit(
+                state,
+                "run_cycle_evidence_by_circuit",
+                circuit_id,
+            ),
+            range_key="run_count_contextual_expected_range",
+            median_key="run_count_contextual_baseline_median",
+            confidence_key="run_count_contextual_baseline_confidence",
+        )
+
+    if metric_id == "cost_today":
+        return _evidence_baseline(
+            _mapping_for_circuit(
+                state,
+                "cost_evidence_by_circuit",
+                circuit_id,
+            ),
+            range_key="contextual_expected_range",
+            median_key="contextual_baseline_median_cost",
+            confidence_key="contextual_baseline_confidence",
+        )
+
+    if metric_id in {
+        "daily_energy_kwh",
+        "runtime_today_seconds",
+        "run_count_today",
+        "cost_today",
+        "demand_peak_w",
+    }:
+        # Open-period values may only use explicitly same-time evidence above.
+        return None
+
+    return _stored_baseline(coordinator, circuit_id, baseline_features)
+
+
+def _evidence_baseline(
+    evidence: Mapping[str, Any],
+    *,
+    range_key: str,
+    median_key: str,
+    confidence_key: str,
+) -> ComparisonBaseline | None:
+    contextual_range = evidence.get(range_key)
+    if not isinstance(contextual_range, list | tuple) or len(contextual_range) < 2:
+        return None
+    low = _number_or_none(contextual_range[0])
+    high = _number_or_none(contextual_range[1])
+    if low is None and high is None:
+        return None
+    return (
+        low,
+        high,
+        _number_or_none(evidence.get(median_key)),
+        _number_or_none(evidence.get(confidence_key)),
+        "contextual_baseline",
+    )
+
+
+def _stored_baseline(
+    coordinator: Any,
+    circuit_id: str,
+    baseline_features: tuple[str, ...],
+) -> ComparisonBaseline | None:
     store_data = getattr(coordinator, "store_data", None)
     baselines = getattr(store_data, "baselines", {})
     if not isinstance(baselines, Mapping):
@@ -873,9 +1517,30 @@ def _metric_comparison(
     unit: str,
     current: float | None,
     baseline: ComparisonBaseline | None,
+    comparison_mode: ComparisonMode,
+    as_of: datetime | None = None,
+    projection_value: float | None = None,
+    projection_low: float | None = None,
+    projection_high: float | None = None,
+    projection_confidence: float | None = None,
+    full_period_normal_low: float | None = None,
+    full_period_normal_high: float | None = None,
+    full_period_normal_median: float | None = None,
+    configured_warning_value: float | None = None,
+    configured_limit_value: float | None = None,
+    limit_unit: str | None = None,
+    explanation: str = "",
 ) -> MetricComparison | None:
     if baseline is None:
-        if current is None:
+        has_full_period_baseline = any(
+            value is not None
+            for value in (
+                full_period_normal_low,
+                full_period_normal_high,
+                full_period_normal_median,
+            )
+        )
+        if current is None and not has_full_period_baseline:
             return None
         return MetricComparison(
             metric_id=metric_id,
@@ -885,9 +1550,22 @@ def _metric_comparison(
             normal_low=None,
             normal_high=None,
             normal_median=None,
-            status="learning",
+            status="missing_data" if current is None else "learning",
             confidence=None,
             source="current_state",
+            comparison_mode=comparison_mode,
+            as_of=as_of,
+            projection_value=projection_value,
+            projection_low=projection_low,
+            projection_high=projection_high,
+            projection_confidence=projection_confidence,
+            full_period_normal_low=full_period_normal_low,
+            full_period_normal_high=full_period_normal_high,
+            full_period_normal_median=full_period_normal_median,
+            configured_warning_value=configured_warning_value,
+            configured_limit_value=configured_limit_value,
+            limit_unit=limit_unit,
+            explanation=explanation,
         )
 
     low, high, median, confidence, source = baseline
@@ -910,7 +1588,32 @@ def _metric_comparison(
         status=status,
         confidence=confidence,
         source=source,
+        comparison_mode=comparison_mode,
+        as_of=as_of,
+        projection_value=projection_value,
+        projection_low=projection_low,
+        projection_high=projection_high,
+        projection_confidence=projection_confidence,
+        full_period_normal_low=full_period_normal_low,
+        full_period_normal_high=full_period_normal_high,
+        full_period_normal_median=full_period_normal_median,
+        configured_warning_value=configured_warning_value,
+        configured_limit_value=configured_limit_value,
+        limit_unit=limit_unit,
+        explanation=explanation,
     )
+
+
+def _comparison_mode(metric_id: str) -> ComparisonMode:
+    if metric_id in {
+        "daily_energy_kwh",
+        "runtime_today_seconds",
+        "run_count_today",
+        "cost_today",
+        "demand_peak_w",
+    }:
+        return ComparisonMode.SAME_TIME_OF_DAY
+    return ComparisonMode.CURRENT_STATE
 
 
 def _expectation(
@@ -1084,6 +1787,77 @@ def _state_number(state: Any, field: str, key: str) -> float | None:
     return _number_or_none(mapping.get(key))
 
 
+def _direct_source_quality(config: CircuitConfig, state: Any) -> dict[str, Any]:
+    checklist = _mapping_for_circuit(
+        state,
+        "data_quality_checklist_by_circuit",
+        config.circuit_id,
+    )
+    missing_roles = list(checklist.get("missing_required_metric_roles") or [])
+    roles_present = list(checklist.get("metric_roles_present") or [])
+    if not checklist:
+        status = "unavailable"
+        label = "Unavailable"
+    elif checklist.get("required_sensors_present") is False or missing_roles:
+        status = "missing_metric"
+        label = "Missing metric"
+    elif checklist.get("source_data_fresh") is False:
+        status = "stale"
+        label = "Stale"
+    elif checklist.get("numeric_states_valid") is False:
+        status = "unavailable"
+        label = "Unavailable"
+    else:
+        status = "fresh"
+        label = "Fresh"
+    return {
+        "status": status,
+        "label": label,
+        "available_source_count": len(roles_present),
+        "configured_source_count": len(config.sensors),
+        "stale_source_count": 1 if status == "stale" else 0,
+        "missing_required_roles": missing_roles,
+    }
+
+
+def _learning_readiness(state: Any, circuit_id: str) -> dict[str, Any]:
+    progress = _mapping_for_circuit(
+        state,
+        "learning_progress_by_circuit",
+        circuit_id,
+    )
+    energy = _mapping_for_circuit(
+        state,
+        "energy_usage_evidence_by_circuit",
+        circuit_id,
+    )
+    if progress.get("alert_ready") is True:
+        status, label = "ready", "Ready"
+    elif energy.get("status") == "waiting_for_delta":
+        status, label = "waiting_for_delta", "Waiting for first kWh delta"
+    else:
+        status, label = "learning", "Learning"
+    return {
+        "status": status,
+        "label": label,
+        "baseline_age_days": _number_or_none(progress.get("baseline_age_days")),
+        "cycle_count": _state_int_value(progress.get("cycle_count")),
+        "learned_feature_count": _state_int_value(
+            progress.get("learned_feature_count")
+        ),
+        "pending_feature_samples": _state_int_value(
+            progress.get("pending_feature_samples")
+        ),
+    }
+
+
+def _state_int_value(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _positive_state_number(state: Any, field: str, key: str) -> float | None:
     value = _state_number(state, field, key)
     if value is None or value <= 0.0:
@@ -1092,12 +1866,17 @@ def _positive_state_number(state: Any, field: str, key: str) -> float | None:
 
 
 def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
-    daily_kwh = _state_number(state, "daily_energy_usage_by_circuit", circuit_id)
-    rate = effective_electricity_rate(
-        getattr(state, "utility_cost_rate_by_circuit", {}),
-        _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id),
+    evidence = _mapping_for_circuit(
+        state,
+        "cost_evidence_by_circuit",
+        circuit_id,
     )
-    return _estimated_cost(daily_kwh, rate or None)
+    if evidence.get("cost_today_status") == "unavailable":
+        return None
+    accumulated = _state_number(state, "cost_today_by_circuit", circuit_id)
+    if accumulated is not None:
+        return accumulated
+    return None
 
 
 def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:
@@ -1133,6 +1912,23 @@ def _iso(value: Any) -> str | None:
     return None
 
 
+def _iso_value(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value or None
+    return _iso(value)
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _iter_items(value: Any) -> tuple[Any, ...]:
     if value is None or isinstance(value, str | bytes):
         return ()
@@ -1140,13 +1936,3 @@ def _iter_items(value: Any) -> tuple[Any, ...]:
         return tuple(value)
     except TypeError:
         return ()
-
-
-def _jsonable(value: Any) -> Any:
-    if is_dataclass(value) and not isinstance(value, type):
-        return _jsonable(asdict(value))
-    if isinstance(value, Mapping):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, tuple | list):
-        return [_jsonable(item) for item in value]
-    return value

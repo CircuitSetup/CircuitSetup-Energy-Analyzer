@@ -225,7 +225,7 @@ def test_alert_evidence_payload_anchors_advanced_settings_to_entry_and_circuit()
 
 def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     assert 'new CustomEvent("location-changed"' in panel_script
@@ -236,7 +236,7 @@ def test_panel_navigation_dispatches_home_assistant_route_detail() -> None:
 
 def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel-main.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split("  _actionRefreshRouteKey(actionKey) {", 1)[1].split(
@@ -250,13 +250,13 @@ def test_panel_action_refresh_does_not_rewrite_browser_route() -> None:
 
 def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-nilm-workspace.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
         "  async _saveNilmAssignmentChanges(index) {",
         1,
-    )[1].split("\n  async _callRecommendationAction", 1)[0]
+    )[1].split("\n  _routeRequestsNilmWorkspace", 1)[0]
     context_line = "const actionContext = this._nilmWorkspaceActionContext();"
     assert body.index(context_line) < body.index(
         "await this._hass.callService"
@@ -276,7 +276,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
 
 def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> None:
     panel_script = Path(
-        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js"
+        "custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-nilm-workspace.js"
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
@@ -747,6 +747,53 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     assert recommendation["actions"]["preview"] == {
         "path": recommendation["evidence_path"],
     }
+
+
+def test_recommendation_payload_includes_historical_setting_impact() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    alert = _alert(circuit_id="ev", timestamp=now)
+    coordinator = _coordinator(alert, config=_config("ev"))
+    coordinator.current_time = lambda: now
+    coordinator.store_data.contextual_baseline_samples_by_circuit = {
+        "ev": [
+            {
+                "timestamp": (now - timedelta(days=2)).isoformat(),
+                "feature": "peak_demand_w",
+                "value": 1800.0,
+            },
+            {
+                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "feature": "peak_demand_w",
+                "value": 2400.0,
+            },
+        ]
+    }
+    coordinator.state.settings_recommendations_by_circuit = {
+        "ev": [
+            {
+                "recommendation_id": "ev:demand_limit_w:v1",
+                "circuit_id": "ev",
+                "setting_key": "demand_limit_w",
+                "current_value": 2000.0,
+                "suggested_value": 2500.0,
+            }
+        ]
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    impact = payload["setting_recommendations"][0]["impact_preview"]
+    assert impact["observations_evaluated"] == 2
+    assert impact["current_alert_count"] == 1
+    assert impact["candidate_alert_count"] == 0
+    assert impact["history_start"].startswith("2026-07-11")
 
 
 def test_alert_evidence_payload_selects_requested_recommendation_preview() -> None:
@@ -1426,6 +1473,13 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "profile_options"
     ]
     assert {"value": "mixed", "label": "Mixed"} in change_profile["profile_options"]
+    assert payload["assignments"][0]["actions"]["convert_to_direct_meter"] == {
+        "domain": DOMAIN,
+        "service": "convert_nilm_appliance_to_direct_meter",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+        "requires": ["direct_circuit_id"],
+        "target_options": [{"value": "pool_pump", "label": "Pool Pump"}],
+    }
     assert payload["assignments"][0]["actions"]["publish"] == {
         "domain": DOMAIN,
         "service": "publish_nilm_appliance_assignment",
@@ -1721,6 +1775,113 @@ def test_nilm_workspace_keeps_merged_signature_sessions_on_visible_assignment() 
             }
         ],
     ) == [session]
+
+
+def _nilm_workspace_coordinator(
+    *,
+    entry_id: str,
+    name: str,
+    entity_id: str,
+) -> SimpleNamespace:
+    config = CircuitConfig(
+        circuit_id="mains",
+        name=name,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef(entity_id, SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = entry_id
+    return coordinator
+
+
+def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        nilm_workspace_payload,
+    )
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="First Mains",
+        entity_id="sensor.first_mains_power",
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+
+    payload = nilm_workspace_payload(
+        [first, second],
+        circuit_id="mains",
+        entry_id="entry-2",
+    )
+
+    assert payload["circuit"]["name"] == "Second Mains"
+    assert payload["history"]["entities"] == ["sensor.second_mains_power"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_view_forwards_requested_entry_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="First Mains",
+        entity_id="sensor.first_mains_power",
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: hass},
+        query={"circuit_id": "mains", "entry_id": "entry-2"},
+    )
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmWorkspaceView().get(request)
+
+    assert payload["circuit"]["name"] == "Second Mains"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_view_forwards_requested_entry_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="First Mains",
+        entity_id="sensor.first_mains_power",
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: hass},
+        query={"circuit_id": "mains", "entry_id": "entry-2"},
+    )
+
+    async def history_rows(_hass, _start, _end, entity_ids):
+        return [[{"entity_id": entity_id}] for entity_id in entity_ids]
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmWorkspaceHistoryView().get(request)
+
+    assert payload == [[{"entity_id": "sensor.second_mains_power"}]]
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
@@ -3008,10 +3169,32 @@ def test_setup_health_payload_uses_requested_entry_id() -> None:
     assert payload["next_step"] == "Configure breaker amps for HVAC"
 
 
+def test_appliance_insights_payload_exposes_status_and_items() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+
+    coordinator = _coordinator(config=_config("hvac"))
+    coordinator.entry_id = "entry-hvac"
+
+    payload = appliance_insights_payload([coordinator])
+
+    assert payload["status"] == "ok"
+    assert payload["count"] == 1
+    assert len(payload["items"]) == 1
+    item = payload["items"][0]
+    assert item["appliance_key"] == "circuit:hvac"
+    assert item["display_name"] == "HVAC"
+    assert item["source_type"] == "direct_meter"
+    assert item["detail_path"].endswith("appliance_detail=1&circuit_id=hvac")
+    assert item["is_nilm"] is False
+
+
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         APPLIANCE_DETAIL_API_PATH,
+        APPLIANCE_INSIGHTS_API_PATH,
         EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
@@ -3066,6 +3249,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert [view.url for view in http.views] == [
         EVIDENCE_API_PATH,
         APPLIANCE_DETAIL_API_PATH,
+        APPLIANCE_INSIGHTS_API_PATH,
         SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
@@ -3195,7 +3379,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 5
+    assert len(http.views) == 6
 
     hass.data[DOMAIN][DATA_RELOAD_COUNT] = 1
     assert await async_unload_entry(hass, entry) is True

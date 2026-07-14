@@ -13,7 +13,7 @@ from ..models import AlertEvidence, CircuitEvent
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
-    from ..coordinator import AnalyzerState
+    from ..state import AnalyzerState
     from ..storage import FeatureStoreData
 else:
     HomeAssistant = Any

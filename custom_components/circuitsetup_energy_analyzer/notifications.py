@@ -12,7 +12,7 @@ from .localized_text import translation_text
 from .models import AlertEvidence, CircuitConfig
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
-_POWER_QUALITY_ALERT_FEATURES = frozenset(
+POWER_QUALITY_ALERT_FEATURES = frozenset(
     {
         "reactive_shift_under_stable_real_power",
         "power_factor_shift_under_load",
@@ -62,7 +62,8 @@ def alert_notification_message(
     """Return Markdown body text for an alert persistent notification."""
     from .alert_links import alert_evidence_path
 
-    display_name = (
+    nilm_display_name = str(alert.features.get("display_name") or "").strip()
+    display_name = nilm_display_name or (
         config.name if config is not None and config.name else alert.circuit_id
     )
     lines = [f"**{display_name}**", "", alert.message]
@@ -100,7 +101,7 @@ def alert_notification_message(
 
 
 def _power_quality_notice_lines(alert: AlertEvidence) -> list[str]:
-    if alert.feature not in _POWER_QUALITY_ALERT_FEATURES:
+    if alert.feature not in POWER_QUALITY_ALERT_FEATURES:
         return []
     return [
         "",
@@ -227,6 +228,81 @@ async def async_create_settings_recommendation_notification(
             _settings_recommendation_message(total_pending, entry_id),
             title=_notification_text("settings_recommendations", "title"),
             notification_id=settings_recommendation_notification_id(entry_id),
+        )
+    except (AttributeError, TypeError):
+        return
+
+
+async def async_create_weekly_digest_notification(
+    hass: Any,
+    digest: Any,
+) -> None:
+    """Create one idempotent persistent notification for a weekly digest."""
+    try:
+        from homeassistant.components import persistent_notification
+    except ModuleNotFoundError:
+        return
+    create = getattr(persistent_notification, "async_create", None)
+    if create is None:
+        return
+    biggest = list(getattr(digest, "biggest_changes", ()))
+    top_energy = list(getattr(digest, "top_energy_users", ()))
+    lines = [
+        f"Appliance summary for {digest.week_start} through {digest.week_end}.",
+        "",
+        "**Largest changes from normal**",
+        *(
+            [
+                f"- {item.display_name}: {round(item.change_ratio * 100)}%"
+                for item in biggest
+            ]
+            or ["- No meaningful changes from learned normal.".strip()]
+        ),
+        "",
+        "**Top energy users**",
+        *(
+            [f"- {item.display_name}: {item.energy_kwh} kWh" for item in top_energy]
+            or ["- No retained appliance energy data.".strip()]
+        ),
+    ]
+    try:
+        create(
+            hass,
+            "\n".join(lines),
+            title="Weekly Appliance Digest",
+            notification_id=f"{DOMAIN}_weekly_appliance_digest",
+        )
+    except (AttributeError, TypeError):
+        return
+
+
+async def async_create_daily_summary_notification(
+    hass: Any,
+    alerts: list[AlertEvidence],
+    *,
+    summary_date: str,
+) -> None:
+    """Create one bounded daily appliance-notification summary."""
+    if not alerts:
+        return
+    try:
+        from homeassistant.components import persistent_notification
+    except ModuleNotFoundError:
+        return
+    create = getattr(persistent_notification, "async_create", None)
+    if create is None:
+        return
+    lines = [
+        f"Appliance notifications queued for {summary_date}.",
+        "",
+        *[f"- {alert.message}" for alert in alerts[:20]],
+    ]
+    try:
+        create(
+            hass,
+            "\n".join(lines),
+            title="Daily Appliance Summary",
+            notification_id=f"{DOMAIN}_daily_appliance_summary",
         )
     except (AttributeError, TypeError):
         return

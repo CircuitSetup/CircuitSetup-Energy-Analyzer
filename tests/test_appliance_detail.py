@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -10,7 +13,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
+    CircuitEvent,
     CircuitMode,
+    EventType,
     SensorRef,
     SensorRole,
     Severity,
@@ -53,6 +58,15 @@ def _direct_state() -> AnalyzerState:
         "required_sensors_present": True,
         "numeric_states_valid": True,
         "source_data_fresh": True,
+        "metric_roles_present": ["energy", "real_power"],
+        "missing_required_metric_roles": [],
+    }
+    state.learning_progress_by_circuit["fridge"] = {
+        "alert_ready": True,
+        "baseline_age_days": 14,
+        "cycle_count": 18,
+        "learned_feature_count": 3,
+        "pending_feature_samples": 0,
     }
     state.latest_real_power_w_by_circuit["fridge"] = 128.4
     state.run_cycle_status_by_circuit["fridge"] = "running"
@@ -142,6 +156,28 @@ def _nilm_coordinator() -> SimpleNamespace:
     )
 
 
+def _nilm_session(
+    session_id: str,
+    *,
+    start: datetime,
+    end: datetime | None,
+    duration_seconds: float | None,
+    assignment_id: str = "assignment-dishwasher",
+    energy_kwh: float = 0.2,
+) -> dict[str, object]:
+    return {
+        "session_id": session_id,
+        "assignment_id": assignment_id,
+        "signature_fingerprint": "signature_1",
+        "start": start.isoformat(),
+        "end": end.isoformat() if end else None,
+        "duration_seconds": duration_seconds,
+        "median_power_w": 820.0,
+        "estimated_energy_kwh": energy_kwh,
+        "confidence": 0.91,
+    }
+
+
 def test_existing_summary_fields_feed_appliance_story() -> None:
     state = _direct_state()
 
@@ -188,7 +224,17 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["daily_energy_kwh"] == 1.82
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
-    assert detail["cost_today"] == 0.46
+    assert detail["cost_today"] is None
+    assert detail["source_quality"] == {
+        "status": "fresh",
+        "label": "Fresh",
+        "available_source_count": 2,
+        "configured_source_count": 2,
+        "stale_source_count": 0,
+        "missing_required_roles": [],
+    }
+    assert detail["learning_readiness"]["status"] == "ready"
+    assert detail["learning_readiness"]["label"] == "Ready"
     assert detail["next_step"] == "Review alert evidence"
     assert detail["what_to_check_first"] == [
         "No electrical check is needed right now."
@@ -199,6 +245,61 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["active_alerts"][0]["feature"] == "daily_energy"
     assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
+
+
+def test_appliance_detail_payload_includes_energy_change_explanation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.energy_usage_evidence_by_circuit["fridge"].update(
+        {
+            "contextual_expected_range": [1.0, 1.4],
+            "contextual_baseline_median_kwh": 1.2,
+            "contextual_baseline_confidence": 0.9,
+        }
+    )
+    coordinator.state.run_cycle_evidence_by_circuit["fridge"] = {
+        "runtime_today_contextual_expected_range_seconds": [5400.0, 6600.0],
+        "runtime_today_contextual_baseline_median_seconds": 6000.0,
+        "runtime_today_contextual_baseline_confidence": 0.9,
+        "run_count_contextual_expected_range": [10.0, 14.0],
+        "run_count_contextual_baseline_median": 12.0,
+        "run_count_contextual_baseline_confidence": 0.9,
+    }
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    explanation = payload["detail"]["energy_change_explanation"]
+    assert explanation["appliance_key"] == "circuit:fridge"
+    assert explanation["current_energy_kwh"] == pytest.approx(1.82)
+    assert explanation["normal_energy_kwh"] == pytest.approx(1.2)
+    assert explanation["total_change_percent"] == pytest.approx(51.6666667)
+    assert explanation["confidence"] == pytest.approx(0.9)
+    assert explanation["explanation"].startswith("Energy today is 52% above normal")
+
+
+def test_appliance_detail_payload_scopes_duplicate_circuit_to_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    upstairs = _direct_coordinator()
+    upstairs.circuit_configs = (_config(name="Upstairs Fridge"),)
+    downstairs = _direct_coordinator()
+    downstairs.entry_id = "entry-2"
+    downstairs.circuit_configs = (_config(name="Downstairs Fridge"),)
+
+    payload = appliance_detail_payload(
+        [upstairs, downstairs],
+        circuit_id="fridge",
+        entry_id="entry-2",
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["requested_entry_id"] == "entry-2"
+    assert payload["detail"]["display_name"] == "Downstairs Fridge"
 
 
 def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
@@ -217,7 +318,7 @@ def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
     assert "relearn_baseline" in payload["actions"]
 
 
-def test_direct_appliance_detail_uses_the_global_opower_rate() -> None:
+def test_direct_appliance_detail_does_not_reprice_daily_energy_at_global_rate() -> None:
     from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
         appliance_detail_for_circuit,
     )
@@ -228,7 +329,7 @@ def test_direct_appliance_detail_uses_the_global_opower_rate() -> None:
     detail = appliance_detail_for_circuit(coordinator, "fridge")
 
     assert detail is not None
-    assert detail.cost_today == 0.55
+    assert detail.cost_today is None
 
 
 def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
@@ -263,6 +364,36 @@ def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:
     assert timeline["status"] == "activity"
     assert timeline["latest_title"] == "Start"
     assert timeline["items"][0]["detail"] == "Observed start event."
+
+
+def test_direct_appliance_detail_includes_normalized_session_timeline() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 6, 30, 13, 0, tzinfo=UTC)
+    coordinator.store_data.events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 30, 12, 0, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 30, 12, 10, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+        ),
+    ]
+
+    timeline = appliance_detail_payload(
+        [coordinator],
+        circuit_id="fridge",
+    )["detail"]["session_timeline"]
+
+    assert len(timeline) == 1
+    assert timeline[0]["source_type"] == "direct_meter"
+    assert timeline[0]["duration_seconds"] == 600.0
 
 
 def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
@@ -375,6 +506,12 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
 
     assert payload["status"] == "ok"
     detail = payload["detail"]
+    assert detail["appliance_key"] == "nilm:assignment-dishwasher"
+    assert detail["appliance_id"] == "dishwasher"
+    assert detail["assignment_id"] == "assignment-dishwasher"
+    assert detail["mains_circuit_id"] == "mains"
+
+    assert detail["mains_source"] == "sensor.mains_power"
     assert detail["circuit_id"] == "mains"
     assert detail["display_name"] == "Dishwasher"
     assert detail["appliance_profile"] == "dishwasher"
@@ -387,7 +524,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["energy_state"] == "Estimated"
     assert detail["current_power_w"] == 0.0
     assert detail["daily_energy_kwh"] == 0.818
-    assert detail["cost_today"] == 0.16
+    assert detail["cost_today"] is None
     assert detail["next_step"] == "Review NILM assignment"
     assert detail["what_to_check_first"] == [
         "Validate this estimated appliance before relying on alerts."
@@ -401,24 +538,415 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     }
     review_path = payload["actions"]["review_nilm_assignment"]["path"]
     review_query = parse_qs(urlparse(review_path).query)
-    assert review_query == {
-        "circuit_id": ["mains"],
-        "assignment_id": ["assignment-dishwasher"],
-        "nilm_workspace": ["1"],
-    }
+    assert review_query["circuit_id"] == ["mains"]
+    assert review_query["assignment_id"] == ["assignment-dishwasher"]
+    assert review_query["nilm_workspace"] == ["1"]
+    assert review_query["session_id"]
     assert payload["actions"]["review_nilm_assignment"] == {
         "type": "navigate",
         "path": review_path,
         "data": {
             "circuit_id": "mains",
             "assignment_id": "assignment-dishwasher",
+            "session_id": review_query["session_id"][0],
         },
     }
-    assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
+    assert "open_evidence" not in payload["actions"]
+    assert {"mark_correct", "mark_wrong", "adjust_interval"} <= set(
+        payload["actions"]
+    )
+    assert payload["actions"]["mark_correct"]["service"] == "validate_nilm_session"
+    assert payload["actions"]["mark_wrong"]["service"] == "reject_nilm_session"
     assert payload["history"]["entities"] == [
         "sensor.dishwasher_estimated_power",
         "sensor.dishwasher_estimated_daily_energy",
     ]
+
+
+def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    coordinator.state.active_alerts_by_circuit["mains"] = [
+        AlertEvidence(
+            timestamp=datetime(2026, 6, 30, 9, 0, tzinfo=UTC),
+            circuit_id="mains",
+            severity=Severity.WARNING,
+            message="Dishwasher appears finished.",
+            feature="nilm_appliance_finished",
+            features={"assignment_id": "assignment-dishwasher"},
+        )
+    ]
+
+    payload = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )
+    actions = payload["actions"]
+    alert_id = payload["detail"]["active_alerts"][0]["alert_id"]
+
+    assert actions["open_evidence"]["path"] == (
+        payload["detail"]["active_alerts"][0]["evidence_path"]
+    )
+    for key, service in (
+        ("mark_correct", "mark_nilm_appliance_correct"),
+        ("mark_wrong", "mark_nilm_appliance_wrong"),
+        ("mark_expected", "mark_alert_expected"),
+        ("mark_unhelpful", "mark_alert_unhelpful"),
+    ):
+        assert actions[key]["service"] == service
+        assert actions[key]["data"] == {"alert_id": alert_id}
+
+
+def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 6, 30, 10, 10, tzinfo=UTC)
+    coordinator.state.recent_activity_timeline_by_circuit["mains"] = {
+        "status": "activity",
+        "items": [{"session_id": "mains-timeline-must-not-leak"}],
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            _nilm_session(
+                "session-dishwasher-complete",
+                start=datetime(2026, 6, 30, 8, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 30, 8, 30, tzinfo=UTC),
+                duration_seconds=1800.0,
+            ),
+            _nilm_session(
+                "session-other-appliance",
+                assignment_id="assignment-other",
+                start=datetime(2026, 6, 30, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 30, 9, 15, tzinfo=UTC),
+                duration_seconds=900.0,
+            ),
+            _nilm_session(
+                "session-dishwasher-open",
+                start=datetime(2026, 6, 30, 10, 0, tzinfo=UTC),
+                end=None,
+                duration_seconds=None,
+                energy_kwh=0.0,
+            ),
+        ]
+    }
+
+    payload = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )
+    detail = payload["detail"]
+
+    assert detail["runtime_today_seconds"] == 2400.0
+    assert detail["run_count_today"] == 2
+    assert detail["current_session_duration_seconds"] == 600.0
+    assert detail["current_session"] == {
+        "session_id": "session-dishwasher-open",
+        "signature_fingerprint": "signature_1",
+        "start": "2026-06-30T10:00:00+00:00",
+        "end": None,
+        "duration_seconds": 600.0,
+        "estimated_energy_kwh": 0.0,
+        "confidence": 0.91,
+        "validation_result": None,
+    }
+    assert detail["last_matched_session"] == {
+        "session_id": "session-dishwasher-complete",
+        "signature_fingerprint": "signature_1",
+        "start": "2026-06-30T08:00:00+00:00",
+        "end": "2026-06-30T08:30:00+00:00",
+        "duration_seconds": 1800.0,
+        "estimated_energy_kwh": 0.2,
+        "confidence": 0.91,
+        "validation_result": None,
+    }
+    timeline_ids = {
+        item["session_id"] for item in detail["recent_timeline"]["items"]
+    }
+    assert timeline_ids == {
+        "session-dishwasher-complete",
+        "session-dishwasher-open",
+    }
+    assert {
+        item["session_id"] for item in detail["session_timeline"]
+    } == timeline_ids
+    assert {item["source_type"] for item in detail["session_timeline"]} == {
+        "nilm_estimate"
+    }
+    embedded_rows = payload["history"]["embedded_series"][0]
+    assert not any("09:00:00" in row["last_changed"] for row in embedded_rows)
+    adjust_query = parse_qs(
+        urlparse(payload["actions"]["adjust_interval"]["path"]).query
+    )
+    assert adjust_query["session_id"] == ["session-dishwasher-complete"]
+
+
+def test_direct_meter_conversion_preserves_nilm_identity_in_appliance_detail() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    direct = _config(
+        "dishwasher_direct",
+        name="Dishwasher Meter",
+        profile=ApplianceProfile.WASHER,
+    )
+    coordinator.circuit_configs = (*coordinator.circuit_configs, direct)
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assignment.update(
+        {
+            "appliance_key": "nilm:assignment-dishwasher",
+            "conversion_state": "direct_meter",
+            "direct_circuit_id": "dishwasher_direct",
+            "keep_assignment_for_masking": True,
+            "publish_entities": False,
+        }
+    )
+
+    detail = appliance_detail_payload(
+        [coordinator],
+        circuit_id="dishwasher_direct",
+    )["detail"]
+
+    assert detail["source_type"] == "direct_meter"
+    assert detail["display_name"] == "Dishwasher"
+    assert detail["appliance_key"] == "nilm:assignment-dishwasher"
+    assert detail["assignment_id"] == "assignment-dishwasher"
+    assert detail["mains_circuit_id"] == "mains"
+
+    assignment_detail = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+    assert assignment_detail == detail
+
+
+def test_appliance_detail_payload_includes_notification_preferences() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.store_data.appliance_notification_preferences = {
+        "circuit:fridge": {
+            "finished_running": True,
+            "delivery_mode": "daily_summary",
+        }
+    }
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    preferences = payload["notification_preferences"]
+    assert preferences["appliance_key"] == "circuit:fridge"
+    assert preferences["finished_running"] is True
+    assert preferences["electrical_issue"] is True
+    assert preferences["delivery_mode"] == "daily_summary"
+
+
+def test_appliance_detail_payload_includes_expected_schedule_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:fridge": {
+            "enabled": True,
+            "schedule_entity_id": "schedule.fridge",
+            "minimum_duration_minutes": 20,
+        }
+    }
+    coordinator.state.expected_schedule_by_appliance["circuit:fridge"] = {
+        "status": "running_in_expected_window",
+        "message": "Running during the expected schedule.",
+    }
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            async_all=lambda: [
+                SimpleNamespace(
+                    entity_id="schedule.fridge",
+                    name="Fridge Schedule",
+                ),
+                SimpleNamespace(entity_id="sensor.power", name="Power"),
+            ]
+        )
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    schedule = payload["expected_schedule"]
+    assert schedule["settings"]["schedule_entity_id"] == "schedule.fridge"
+    assert schedule["context"]["status"] == "running_in_expected_window"
+    assert schedule["schedule_entities"] == [
+        {"entity_id": "schedule.fridge", "name": "Fridge Schedule"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_expected_schedule_save_uses_backend_appliance_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        async_set_appliance_expected_schedule,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 7, 13, 12, tzinfo=UTC)
+    coordinator.store_persistence = SimpleNamespace(
+        mark_dirty=Mock(),
+        async_save_if_dirty=AsyncMock(),
+    )
+
+    result = await async_set_appliance_expected_schedule(
+        [coordinator],
+        circuit_id="fridge",
+        assignment_id=None,
+        values={
+            "enabled": True,
+            "windows": [
+                {
+                    "start": "08:00",
+                    "end": "10:00",
+                    "weekdays": [0, 1, 2, 3, 4],
+                }
+            ],
+            "minimum_duration_minutes": 30,
+        },
+    )
+
+    assert result["status"] == "saved"
+    assert result["expected_schedule_settings"]["appliance_key"] == (
+        "circuit:fridge"
+    )
+    assert coordinator.store_data.appliance_schedule_settings[
+        "circuit:fridge"
+    ]["windows"][0]["start"] == "08:00"
+    assert coordinator.store_data.appliance_schedule_evidence == {}
+
+
+def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    sessions = [
+        _nilm_session(
+            f"session-confirmed-{day}",
+            start=datetime(2026, 6, day, 8, 0, tzinfo=UTC),
+            end=datetime(2026, 6, day, 8, 30, tzinfo=UTC),
+            duration_seconds=1800.0,
+            energy_kwh=0.41,
+        )
+        for day in (27, 28, 29, 30)
+    ]
+    assignment.update(
+        {
+            "lifecycle_state": "validated",
+            "confidence": 0.92,
+            "session_ids": [item["session_id"] for item in sessions],
+            "confirmed_session_ids": [item["session_id"] for item in sessions],
+            "false_positive_rate": 0.0,
+        }
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {"mains": sessions}
+    validated = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+
+    assert {item["metric_id"] for item in validated["today_vs_normal"]} >= {
+        "daily_energy_kwh",
+        "runtime_today_seconds",
+        "run_count_today",
+    }
+    assert {
+        item["comparison_mode"] for item in validated["today_vs_normal"]
+    } == {"same_time_of_day"}
+
+    assignment["lifecycle_state"] = "needs_validation"
+    unvalidated = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+    assert unvalidated["today_vs_normal"] == []
+
+    assignment["lifecycle_state"] = "validated"
+    assignment["confirmed_session_ids"] = [sessions[-1]["session_id"]]
+    insufficient_history = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+    assert insufficient_history["today_vs_normal"] == []
+    assert insufficient_history["health_state"] == "Needs validation"
+    assert insufficient_history["learning_readiness"] == {
+        "status": "needs_validation",
+        "label": "Not enough confirmed history",
+    }
+    assert insufficient_history["next_step"] == "Confirm more NILM sessions"
+
+    assignment["confirmed_session_ids"] = [
+        item["session_id"] for item in sessions
+    ]
+    assignment["false_positive_rate"] = 1.0
+    poor_validation = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+    assert poor_validation["today_vs_normal"] == []
+
+
+def test_rejected_nilm_session_is_reviewable_but_not_last_attributed_match() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assignment.update(
+        {
+            "session_ids": ["session-confirmed", "session-rejected"],
+            "rejected_session_ids": ["session-rejected"],
+        }
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            _nilm_session(
+                "session-confirmed",
+                start=datetime(2026, 6, 30, 8, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 30, 8, 30, tzinfo=UTC),
+                duration_seconds=1800.0,
+            ),
+            _nilm_session(
+                "session-rejected",
+                start=datetime(2026, 6, 30, 9, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 30, 9, 30, tzinfo=UTC),
+                duration_seconds=1800.0,
+            ),
+        ]
+    }
+
+    detail = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+
+    assert detail["last_matched_session"]["session_id"] == "session-confirmed"
+    timeline = {
+        item["session_id"]: item for item in detail["recent_timeline"]["items"]
+    }
+    assert timeline["session-rejected"]["validation_result"] == "rejected"
 
 
 def test_unpublished_nilm_appliance_uses_retained_session_history() -> None:
@@ -546,9 +1074,10 @@ def test_nilm_appliance_detail_includes_assignment_alerts() -> None:
     assert alert["repeated_count"] == 1
 
 
-def test_appliance_detail_view_registers_with_panel_views() -> None:
+def test_appliance_views_register_with_panel_views() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         APPLIANCE_DETAIL_API_PATH,
+        APPLIANCE_INSIGHTS_API_PATH,
         _register_view,
     )
 
@@ -559,9 +1088,13 @@ def test_appliance_detail_view_registers_with_panel_views() -> None:
 
     _register_view(hass)
 
-    assert APPLIANCE_DETAIL_API_PATH in {view.url for view in registered}
+    views_by_url = {view.url: view for view in registered}
+    assert APPLIANCE_DETAIL_API_PATH in views_by_url
+    assert APPLIANCE_INSIGHTS_API_PATH in views_by_url
+    assert views_by_url[APPLIANCE_INSIGHTS_API_PATH].requires_auth is True
     assert {view.name for view in registered} >= {
         f"api:{DOMAIN}:alert_evidence",
         f"api:{DOMAIN}:nilm_workspace",
         f"api:{DOMAIN}:appliance_detail",
+        f"api:{DOMAIN}:appliance_insights",
     }

@@ -12,7 +12,35 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
-PANEL_ASSET = INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js"
+FRONTEND_DIR = INTEGRATION_DIR / "frontend"
+PANEL_ASSET = FRONTEND_DIR / "energy-analyzer-panel.js"
+PANEL_MAIN_ASSET = FRONTEND_DIR / "energy-analyzer-panel-main.js"
+DASHBOARD_GRAPHS_ASSET = FRONTEND_DIR / "energy-analyzer-dashboard-graphs.js"
+PANEL_SHELL_ASSET = FRONTEND_DIR / "energy-analyzer-panel-shell.js"
+APPLIANCE_VIEWS_ASSET = FRONTEND_DIR / "energy-analyzer-appliance-views.js"
+NILM_WORKSPACE_ASSET = FRONTEND_DIR / "energy-analyzer-nilm-workspace.js"
+EVIDENCE_VIEWS_ASSET = FRONTEND_DIR / "energy-analyzer-evidence-views.js"
+PANEL_METHOD_ASSETS = (
+    PANEL_SHELL_ASSET,
+    APPLIANCE_VIEWS_ASSET,
+    NILM_WORKSPACE_ASSET,
+    EVIDENCE_VIEWS_ASSET,
+)
+FRONTEND_ASSETS = (
+    PANEL_MAIN_ASSET,
+    *PANEL_METHOD_ASSETS,
+    DASHBOARD_GRAPHS_ASSET,
+    PANEL_ASSET,
+)
+PANEL_RUNTIME_ASSETS = (
+    PANEL_MAIN_ASSET,
+    *PANEL_METHOD_ASSETS,
+    DASHBOARD_GRAPHS_ASSET,
+)
+
+
+def _frontend_source() -> str:
+    return "\n".join(path.read_text(encoding="utf-8") for path in FRONTEND_ASSETS)
 
 
 def _run_panel_node_script(body: str) -> None:
@@ -25,13 +53,18 @@ def _run_panel_node_script(body: str) -> None:
         ").config_panel.panel;\n"
     )
     panel_class_statement = json.dumps(
-        "this.Panel = class TestPanel extends CircuitSetupEnergyAnalyzerPanel "
+        "const __registered = registerEnergyAnalyzerPanel(registerDashboardGraphs, "
+        "[PanelShellMethods, createApplianceViewMethods(PANEL_METHOD_DEPENDENCIES), "
+        "createNilmWorkspaceMethods(PANEL_METHOD_DEPENDENCIES), "
+        "createEvidenceViewMethods(PANEL_METHOD_DEPENDENCIES)]); "
+        "this.Panel = class TestPanel extends "
+        "__registered.CircuitSetupEnergyAnalyzerPanel "
         "{ constructor() { super(); this.panel = { config: "
         "{ text: __panelText } }; } };\n"
     )
     dashboard_class_statement = json.dumps(
         "this.DashboardGraphs = class TestDashboardGraphs extends "
-        "CircuitSetupEnergyAnalyzerDashboardGraphs "
+        "__registered.CircuitSetupEnergyAnalyzerDashboardGraphs "
         "{ constructor() { super(); this.setConfig({ text: __panelText }); } "
         "setConfig(config) { super.setConfig(Object.assign("
         "{ text: __panelText }, config || {})); } };"
@@ -83,7 +116,11 @@ const context = {{
   }},
 }};
 vm.createContext(context);
-const source = fs.readFileSync({json.dumps(str(PANEL_ASSET))}, "utf8");
+const source = {json.dumps([str(path) for path in PANEL_RUNTIME_ASSETS])}
+  .map((path) => fs.readFileSync(path, "utf8")
+    .replace(/^import .*;$/gm, "")
+    .replace(/^export /gm, ""))
+  .join("\\n");
 vm.runInContext(
   `${{source}}\\n`
   + {json.dumps(panel_text_statement)}
@@ -293,12 +330,15 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "daily_spike_ratio": "Daily Spike Ratio",
     "default_rate_per_kwh": "Default Rate Per kWh",
     "demand_limit_w": "Demand Limit W",
+    "direct_circuit_id": "Direct Circuit ID",
     "duration": "Duration",
     "entry_id": "Entry ID",
     "entity_id": "Analyzer Entity",
     "goal_alert_ratio": "Goal Alert Ratio",
     "ground_truth_entity_id": "Ground Truth Entity",
     "label": "Label",
+    "keep_assignment_for_masking": "Keep Assignment For Masking",
+    "keep_published_estimate": "Keep Published Estimate",
     "interval_id": "Interval ID",
     "assignment_id": "Assignment ID",
     "appliance_id": "Appliance ID",
@@ -1327,7 +1367,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
 
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert PANEL_ASSET.exists()
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     translated_text = json.dumps(_translations()["config_panel"]["panel"])
 
     for expected in (
@@ -1556,16 +1596,19 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     )
 
 
-def test_appliance_detail_renders_cost_values_as_currency() -> None:
+def test_appliance_detail_uses_home_assistant_currency_without_hardcoded_dollars() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
+panel._hass = { config: { currency: "EUR" } };
 panel._applianceDetail = {
   status: "ok",
   detail: {
     activity_state: "Running",
     current_power_w: 820,
     source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "ready", label: "Ready" },
     confidence: null,
     health_state: "Ready",
     electrical_state: "Normal",
@@ -1579,7 +1622,7 @@ panel._applianceDetail = {
     today_vs_normal: [{
       metric_id: "cost_today",
       label: "Cost today",
-      unit: "$",
+      unit: "currency",
       current_value: 0.6,
       normal_low: 0.45,
       normal_high: 0.55,
@@ -1597,16 +1640,213 @@ panel._applianceDetail = {
 const html = panel._renderApplianceDetailBody();
 for (const expected of [
   "Cost Today",
-  "$0.60",
+  "€0.60",
   "Cost today",
-  "Normal $0.45 - $0.55",
+  "Normal €0.45 - €0.55",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
-if (html.includes("0.6 $")) {
-  throw new Error(`cost comparison used suffix currency: ${html}`);
+if (html.includes("$")) {
+  throw new Error(`cost display hardcoded dollars: ${html}`);
+}
+"""
+    )
+
+
+def test_appliance_detail_labels_projected_energy_ranges_and_status() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "daily_energy_kwh",
+  label: "Energy so far",
+  unit: "kWh",
+  current_value: 0.5,
+  normal_low: 0.4,
+  normal_high: 0.7,
+  normal_median: 0.55,
+  comparison_mode: "same_time_of_day",
+  status: "normal",
+  confidence: 0.88,
+  source: "contextual_baseline",
+  projection_value: 1.9,
+  projection_low: 1.7,
+  projection_high: 2.1,
+  projection_confidence: 0.58,
+  full_period_normal_low: 1.4,
+  full_period_normal_high: 1.8,
+  full_period_normal_median: 1.6
+}]);
+for (const expected of [
+  "Energy so far",
+  "Projected end of day",
+  "1.9 kWh",
+  "Projected range 1.7 kWh - 2.1 kWh",
+  "Completed-day normal range 1.4 kWh - 1.8 kWh",
+  "Projected status Higher",
+  "58%",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_shows_full_period_normals_and_limits_without_projection() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "demand_peak_w",
+  label: "Demand peak so far",
+  unit: "W",
+  current_value: 4200,
+  normal_low: null,
+  normal_high: null,
+  normal_median: null,
+  comparison_mode: "same_time_of_day",
+  status: "learning",
+  full_period_normal_low: 3500,
+  full_period_normal_high: 4800,
+  configured_limit_value: 5000,
+  limit_unit: "W"
+}, {
+  metric_id: "capacity_usage_percent",
+  label: "Capacity usage",
+  unit: "%",
+  current_value: 86,
+  status: "higher",
+  configured_warning_value: 80,
+  configured_limit_value: 100,
+  limit_unit: "%"
+}]);
+for (const expected of [
+  "Completed-day normal range 3,500 W - 4,800 W",
+  "Configured limit 5,000 W",
+  "Configured warning 80%",
+  "Configured limit 100%",
+]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
+def test_appliance_detail_explains_missing_cost_friendly() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const value = panel._formatCost(null);
+if (value !== "Cost unavailable") {
+  throw new Error(`expected friendly missing-cost text, got: ${value}`);
+}
+"""
+    )
+
+
+def test_settings_saves_reject_unsaved_api_results() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  async function assertRejected(panel, response, save, current) {
+    const original = current();
+    panel._loadedRouteKey = "/panel";
+    panel._render = () => {};
+    panel._postJson = async () => response;
+    await save();
+    assert.equal(current(), original);
+    assert.match(panel._lastActionMessage, /not_found/);
+  }
+
+  const weekly = new context.Panel();
+  weekly._setupHealth = { weekly_digest_settings: { enabled: false } };
+  weekly.shadowRoot = { querySelector: () => ({ querySelector: (field) => ({
+    "[data-weekly-digest-enabled]": { checked: true },
+    "[data-weekly-digest-delivery]": { value: "panel_only" },
+    "[data-weekly-digest-notify-service]": { value: "" },
+  })[field] }) };
+  await assertRejected(weekly, { status: "not_found", weekly_digest_settings: { enabled: true } },
+    () => weekly._saveWeeklyDigestSettings(), () => weekly._setupHealth.weekly_digest_settings);
+
+  const notifications = new context.Panel();
+  notifications._applianceDetail = { notification_preferences: { delivery_mode: "immediate" } };
+  notifications.shadowRoot = { querySelector: () => ({
+    querySelector: (field) => ({
+      "[data-notification-delivery-mode]": { value: "disabled" },
+      "[data-notification-minimum-confidence]": { value: "0.6" },
+      "[data-notification-cooldown]": { value: "60" },
+      "[data-notification-quiet-start]": { value: "" },
+      "[data-notification-quiet-end]": { value: "" },
+    })[field],
+    querySelectorAll: () => [],
+  }) };
+  await assertRejected(notifications, { status: "not_found", notification_preferences: { delivery_mode: "disabled" } },
+    () => notifications._saveApplianceNotificationPreferences(), () => notifications._applianceDetail.notification_preferences);
+
+  const expected = new context.Panel();
+  expected._applianceDetail = { expected_schedule: { settings: { enabled: false } } };
+  expected._expectedScheduleDraft = { enabled: true, mode: "local", windows: [], minimum_duration_minutes: 15, required_repeats: 3 };
+  expected._readExpectedScheduleForm = () => expected._expectedScheduleDraft;
+  await assertRejected(expected, { status: "not_found", expected_schedule_settings: { enabled: true } },
+    () => expected._saveExpectedSchedule(), () => expected._applianceDetail.expected_schedule.settings);
+
+  const schedulePanel = new context.Panel();
+  const windows = [{ start: "07:30", end: "09:00", weekdays: [0, 2, 4] }];
+  schedulePanel._expectedScheduleDraft = {
+    enabled: true,
+    mode: "local",
+    schedule_entity_id: null,
+    windows,
+    minimum_duration_minutes: 20,
+    required_repeats: 3,
+  };
+  schedulePanel.shadowRoot = { querySelector(selector) {
+    assert.equal(selector, "[data-expected-schedule]");
+    return {
+      querySelector(field) {
+        return {
+          "[data-schedule-mode]:checked": { value: "local" },
+          "[data-schedule-enabled]": { checked: true },
+          "[data-schedule-entity]": { value: "schedule.dishwasher" },
+          "[data-schedule-minimum-duration]": { value: "20" },
+        }[field];
+      },
+      querySelectorAll() { return []; },
+    };
+  } };
+  assert.deepEqual(schedulePanel._readExpectedScheduleForm().windows, windows);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_unavailable_setting_preview_hides_incomplete_impact_claims() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+const html = panel._renderSettingImpactPreview({ impact_preview: {
+  available: false,
+  observations_evaluated: 23,
+  history_start: "2026-07-01T12:00:00Z",
+  history_end: "2026-07-13T12:00:00Z",
+  current_alert_count: 37,
+  candidate_alert_count: 41,
+  current_state_change_count: null,
+  candidate_state_change_count: null,
+  examples_removed: ["old example"],
+  examples_added: ["new example"],
+  limitations: ["A reliable preview is unavailable because retained history contains only alerts selected by the current setting."],
+} });
+assert.match(html, /Limitations/);
+assert.match(html, /current setting/);
+for (const claim of ["23 retained observations", "37 alerts", "41 alerts", "old example", "new example"]) {
+  assert.ok(!html.includes(claim), `unexpected incomplete claim: ${claim}`);
 }
 """
     )
@@ -1622,6 +1862,8 @@ panel._applianceDetail = {
     activity_state: "Running",
     current_power_w: 820,
     source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "ready", label: "Ready" },
     confidence: 0.87,
     health_state: "Ready",
     electrical_state: "Normal",
@@ -1649,6 +1891,8 @@ for (const expected of [
   'icon="mdi:play-circle-outline"',
   'icon="mdi:flash-outline"',
   'icon="mdi:transmission-tower"',
+  'icon="mdi:database-check-outline"',
+  'icon="mdi:school-outline"',
   'icon="mdi:heart-pulse"',
   'icon="mdi:lightning-bolt"',
   'icon="mdi:chart-line"',
@@ -1656,7 +1900,7 @@ for (const expected of [
   'icon="mdi:calendar-today"',
   'icon="mdi:timer-outline"',
   'icon="mdi:counter"',
-  'icon="mdi:currency-usd"',
+  'icon="mdi:cash"',
   'class="appliance-timeline"',
   'class="appliance-comparison-grid"',
   'class="decision-tiles appliance-alert-actions"',
@@ -1673,9 +1917,7 @@ for (const ambiguous of ["Open Evidence", "Mark Expected", "Not Helpful"]) {
 
 
 def test_alert_technical_details_keep_metric_boxes() -> None:
-    asset = (INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js").read_text(
-        encoding="utf-8"
-    )
+    asset = _frontend_source()
 
     assert "[data-evidence-technical] .metric" not in asset
 
@@ -2523,7 +2765,7 @@ def test_focused_nilm_history_request_contracts() -> None:
     )
 
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     graph = asset.index("_renderNilmGraph(workspace, graphWindow, graphBands)")
     lanes = asset.index("_renderNilmWorkspaceLanes(workspace)")
@@ -2899,7 +3141,7 @@ def test_nilm_lane_rendering_contracts() -> None:
     )
 
 def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     command_rule = re.search(r"button, a\.button\s*\{(?P<body>.*?)\}", asset, re.DOTALL)
 
     assert command_rule is not None
@@ -3109,7 +3351,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     )
 
 def test_nilm_lane_count_badge_respects_radius_limit() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     start = asset.index(".nilm-lane strong {")
     end = asset.index("\n        }", start)
     rule = asset[start:end]
@@ -3408,8 +3650,64 @@ if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
     )
 
 
+def test_chart_data_fallback_covers_visible_points_sessions_and_edges() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "Kitchen Fridge", points: [
+      { time: Date.parse("2026-06-24T18:10:00Z"), value: 123.456 },
+      { time: Date.parse("2026-06-24T18:20:00Z"), value: 98.5 },
+    ] },
+    { name: "Basement Freezer", points: [
+      { time: Date.parse("2026-06-24T18:30:00Z"), value: 45.25 },
+    ] },
+  ],
+  {
+    graph_window_start: "2026-06-24T18:00:00Z",
+    graph_window_end: "2026-06-24T19:00:00Z",
+    y_axis_label: "W",
+    nilm_select_interval: true,
+    nilm_sessions: [
+      { session_id: "session-in", display_label: "Dishwasher", start: "2026-06-24T18:05:00Z", end: "2026-06-24T18:25:00Z", confidence: 0.82, selected: true },
+      { session_id: "session-out", display_label: "Out of window", start: "2026-06-24T20:00:00Z", end: "2026-06-24T20:30:00Z", confidence: 0.9 },
+    ],
+    nilm_edges: [
+      { timestamp: "2026-06-24T18:15:00Z", direction: "rising" },
+      { timestamp: "2026-06-24T20:15:00Z", direction: "falling_outside" },
+    ],
+  },
+);
+const svg = html.match(/<svg[\s\S]*?<\/svg>/)[0];
+const fallback = html.match(/<details class="action-disclosure chart-data-fallback">[\s\S]*?<\/details>/)[0];
+assert.match(html, /5 chart data items available/);
+assert.match(fallback, /<summary>View chart data<\/summary>/);
+for (const expected of [
+  "Kitchen Fridge: 123.46 W",
+  "Kitchen Fridge: 98.5 W",
+  "Basement Freezer: 45.25 W",
+  "Dishwasher (session-in): 2026-06-24 6:05PM - 2026-06-24 6:25PM, confidence 82%",
+  "Rising: 2026-06-24 6:15PM",
+]) {
+  assert.ok(fallback.includes(expected), `missing fallback item: ${expected}`);
+}
+for (const excluded of ["session-out", "Out of window", "falling_outside"]) {
+  assert.ok(!fallback.includes(excluded), `unexpected out-of-window item: ${excluded}`);
+}
+for (const attribute of ["data-nilm-", "data-chart-"]) {
+  assert.ok(!fallback.includes(attribute), `fallback copied interactive attribute: ${attribute}`);
+}
+for (const attribute of ['data-nilm-chart-select="1"', 'data-nilm-selected="true"', 'data-nilm-edge-direction="rising"']) {
+  assert.ok(svg.includes(attribute), `SVG lost interactive attribute: ${attribute}`);
+}
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         'customElements.get("circuitsetup-energy-analyzer-dashboard-graphs")',
@@ -3574,6 +3872,11 @@ card._nilmWorkspaceHistorySeries = [[
 ]];
 card._render();
 const html = card.shadowRoot.innerHTML;
+const fallbackIndex = html.indexOf('chart-data-fallback');
+const detailLinkIndex = html.indexOf('data-dashboard-alert-detail');
+if (fallbackIndex < 0 || detailLinkIndex < 0 || fallbackIndex > detailLinkIndex) {
+  throw new Error("dashboard chart fallback must be outside and before the detail link");
+}
 for (const expected of [
   "Latest related notification",
   "Pool pump used more power than expected.",
@@ -3598,13 +3901,7 @@ for (const expected of [
 def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions() -> (
     None
 ):
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_shouldHideUnavailableRecommendationAction(actionKey, action)" in asset
     assert 'if (!action) {\n      return "";' in asset
@@ -3615,13 +3912,7 @@ def test_dynamic_alert_evidence_panel_hides_unavailable_recommendation_actions()
 
 
 def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_recommendationsByStatus(recommendations)" in asset
     assert "_renderRecommendationSection(" in asset
@@ -3639,7 +3930,7 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
 
 
 def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "class CircuitSetupPanelComponent",
@@ -3657,13 +3948,7 @@ def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> Non
 
 
 def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_recommendationValueRows(recommendation)" in asset
     assert 'String((recommendation && recommendation.status) || "pending")' in asset
@@ -3679,7 +3964,7 @@ def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> N
 
 
 def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     formatter_start = asset.index("_formatDuration(value) {")
     formatter_end = asset.index("\n  _formatConfidence(value)", formatter_start)
     formatter = asset[formatter_start:formatter_end]
@@ -3704,7 +3989,7 @@ if (rendered !== "74%") {
 
 
 def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     setup_health_api_path = (
         'const SETUP_HEALTH_API_PATH = '
         '"/api/circuitsetup_energy_analyzer/setup_health";'
@@ -3722,6 +4007,67 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     assert 'routeUrl.searchParams.get("entry_id")' in asset
     assert "SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : \"\"}" in asset
     assert "_renderSetupHealthBody" in asset
+
+
+def test_appliance_insights_panel_route_and_api_contract() -> None:
+    asset = _frontend_source()
+
+    for expected in (
+        'const APPLIANCE_INSIGHTS_API_PATH = '
+        '"/api/circuitsetup_energy_analyzer/appliance_insights";',
+        'const APPLIANCE_INSIGHTS_CALL_API_PATH = '
+        '"circuitsetup_energy_analyzer/appliance_insights";',
+        'const APPLIANCE_INSIGHTS_QUERY_PARAM = "appliance_insights";',
+        "routeUrl.searchParams.get(APPLIANCE_INSIGHTS_QUERY_PARAM) === \"1\"",
+        "_routeRequestsApplianceInsights",
+        "_loadApplianceInsights",
+        "_renderApplianceInsightsBody",
+    ):
+        assert expected in asset
+
+
+def test_appliance_insights_panel_exposes_filter_and_sort_controls() -> None:
+    asset = _frontend_source()
+
+    for expected in (
+        "data-appliance-insights-filter",
+        'this._panelText("appliance_insights.filters.running")',
+        'this._panelText("appliance_insights.filters.needs_attention")',
+        'this._panelText("appliance_insights.filters.nilm_estimated")',
+        'this._panelText("appliance_insights.filters.learning")',
+        'this._panelText("appliance_insights.filters.data_problem")',
+        "data-appliance-insights-sort",
+        'this._panelText("appliance_insights.sorts.highest_energy")',
+        'this._panelText("appliance_insights.sorts.largest_change")',
+    ):
+        assert expected in asset
+
+
+def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks() -> None:
+    asset = _frontend_source()
+
+    for expected in (
+        "data-appliance-insights-detail-path",
+        "data-appliance-insights-source-path",
+        'querySelectorAll("[data-appliance-insights-detail-path]")',
+        'querySelectorAll("[data-appliance-insights-source-path]")',
+    ):
+        assert expected in asset
+
+
+def test_appliance_detail_panel_renders_why_energy_changed() -> None:
+    asset = _frontend_source()
+
+    for expected in (
+        "_renderWhyEnergyChanged",
+        'this._panelText("appliance_detail.why_energy_changed")',
+        "energy_change_explanation",
+        "runtime_contribution_percent",
+        "running_power_contribution_percent",
+        "cycle_count_contribution_percent",
+        "unexplained_percent",
+    ):
+        assert expected in asset
 
 
 def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
@@ -3836,7 +4182,7 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         path.read_text(encoding="utf-8")
         for path in (
             INTEGRATION_DIR / "entities" / "setup_health.py",
-            INTEGRATION_DIR / "frontend" / "energy-analyzer-panel.js",
+            *FRONTEND_ASSETS,
             INTEGRATION_DIR / "panel.py",
         )
     )
@@ -3893,7 +4239,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
     source_text = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (
-            PANEL_ASSET,
+            *FRONTEND_ASSETS,
             INTEGRATION_DIR / "panel.py",
         )
     )
@@ -3987,13 +4333,7 @@ def test_notification_and_dashboard_text_live_in_translations() -> None:
 
 
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_renderSelectedRecommendationEvidence()" in asset
     assert "selected_recommendation" in asset
@@ -4002,7 +4342,7 @@ def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None
 
 
 def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     preview = asset.index(
         'this._recommendationActionButton(recommendation, originalIndex, '
@@ -4029,13 +4369,7 @@ def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
 
 
 def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "_renderAndScrollToTop()" in asset
     assert "_scrollToTop()" in asset
@@ -4044,13 +4378,7 @@ def test_dynamic_alert_evidence_panel_scrolls_after_messages() -> None:
 
 
 def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "this._nilmLabelDrafts = new Map();" in asset
     assert (
@@ -4062,13 +4390,7 @@ def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
 
 
 def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "circuitsetup-energy-analyzer-route-change",
@@ -4084,13 +4406,7 @@ def test_dynamic_alert_evidence_panel_reloads_when_notification_url_changes() ->
 
 
 def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     for expected in (
         "_actionRefreshRouteKey(actionKey)",
@@ -4649,7 +4965,7 @@ def test_nilm_decision_action_contracts() -> None:
     )
 
 def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     scoped_start = asset.index("        .evidence-meta .metric,")
     scoped_style = asset[scoped_start : asset.index("}", scoped_start)]
@@ -4674,7 +4990,7 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
 
 
 def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     surface_rule = re.search(
         r"\.legend\s*\{(?P<body>.*?)\}",
         asset,
@@ -5228,7 +5544,7 @@ def test_nilm_interval_action_contracts() -> None:
     )
 
 def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     summary_start = asset.index(
         "        [data-evidence-technical] > summary {"
@@ -5244,7 +5560,7 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
 
 
 def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
-    asset = PANEL_ASSET.read_text(encoding="utf-8")
+    asset = _frontend_source()
     surface_rule = re.search(
         r"\.section-surface\s*\{(?P<body>.*?)\}",
         asset,
@@ -5512,13 +5828,7 @@ def test_alert_evidence_render_contracts() -> None:
     )
 
 def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> None:
-    asset_path = (
-        INTEGRATION_DIR
-        / "frontend"
-        / "energy-analyzer-panel.js"
-    )
-
-    asset = asset_path.read_text(encoding="utf-8")
+    asset = _frontend_source()
 
     assert "new Date(value)" in asset
     assert "raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})T" not in asset

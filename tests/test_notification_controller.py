@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +10,12 @@ from custom_components.circuitsetup_energy_analyzer.managers import (
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    CircuitEvent,
+    EventType,
     Severity,
+)
+from custom_components.circuitsetup_energy_analyzer.notifications import (
+    notification_id_for_alert,
 )
 
 
@@ -149,3 +154,284 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
     await controller.async_notify_alert(alert)
 
     assert created == [alert]
+
+
+@pytest.mark.asyncio
+async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> None:
+    sent: list[AlertEvidence] = []
+
+    async def create_notification(hass, alert_to_create, *, config=None) -> None:
+        del hass, config
+        sent.append(alert_to_create)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    now = datetime(2026, 7, 14, 3, 30, tzinfo=UTC)
+    alerts = [
+        AlertEvidence(
+            timestamp=now,
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Electrical issue",
+            feature="voltage_sag",
+        ),
+        AlertEvidence(
+            timestamp=now,
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Runtime issue",
+            feature="run_cycle_duration_s",
+        ),
+    ]
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={
+            "circuit:dryer": {
+                "electrical_issue": False,
+                "quiet_hours_start": time(22).isoformat(timespec="minutes"),
+                "quiet_hours_end": time(7).isoformat(timespec="minutes"),
+            }
+        },
+        notification_delivery_state={},
+        alerts=alerts,
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        current_time=lambda: now,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    await controller.async_notify_alert(alerts[0])
+    await controller.async_notify_alert(alerts[1])
+
+    assert sent == []
+    assert len(store_data.notification_delivery_state["deferred"]) == 1
+    assert store_data.notification_delivery_state["deferred"][0][
+        "defer_until"
+    ] == "2026-07-14T07:00:00-04:00"
+
+
+@pytest.mark.asyncio
+async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
+    notification_ids: list[str] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        notification_ids.append(notification_id_for_alert(alert))
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    first_stop = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    events = [
+        CircuitEvent(
+            timestamp=first_stop,
+            circuit_id="dryer",
+            event_type=EventType.STOP,
+        ),
+        CircuitEvent(
+            timestamp=first_stop + timedelta(hours=1),
+            circuit_id="dryer",
+            event_type=EventType.STOP,
+        ),
+    ]
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={
+            "circuit:dryer": {"finished_running": True}
+        },
+        notification_delivery_state={},
+        alerts=[],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    alerts = await controller.async_notify_finished_events(
+        events,
+        first_stop + timedelta(hours=1),
+    )
+
+    assert len(alerts) == 2
+    assert len(notification_ids) == 2
+    assert notification_ids[0] != notification_ids[1]
+
+
+@pytest.mark.asyncio
+async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> None:
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={},
+        notification_delivery_state={
+            "weekly": [
+                {
+                    "alert_id": "runtime-change",
+                    "appliance_key": "circuit:dryer",
+                    "category": "unusual_runtime",
+                    "queued_at": "2026-07-08T12:00:00+00:00",
+                }
+            ]
+        },
+        weekly_digest_settings={"enabled": False, "delivery": "panel_only"},
+        energy_usage_by_circuit={
+            "dryer": {
+                "days": [
+                    {"date": f"2026-07-{day:02d}", "usage_kwh": 1.0}
+                    for day in range(6, 13)
+                ]
+            }
+        },
+        nilm_appliance_assignments_by_circuit={},
+        nilm_session_history_by_circuit={},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        circuit_configs=(
+            SimpleNamespace(
+                circuit_id="dryer",
+                name="Dryer",
+                mode=SimpleNamespace(value="single_phase"),
+            ),
+        ),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_progress_by_circuit={"dryer": {"alert_ready": True}},
+        ),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    await controller.async_refresh_weekly_digest(
+        datetime(2026, 7, 13, 12, tzinfo=UTC)
+    )
+
+    assert store_data.weekly_digest_settings["latest_report"]["week_start"] == (
+        "2026-07-06"
+    )
+    assert store_data.weekly_digest_settings["latest_report"]["unresolved_items"][
+        0
+    ]["appliance_key"] == "circuit:dryer"
+    assert store_data.notification_delivery_state["weekly"] == []
+
+
+@pytest.mark.asyncio
+async def test_weekly_queue_waits_until_its_local_week_has_completed() -> None:
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={},
+        notification_delivery_state={
+            "weekly": [
+                {
+                    "alert_id": "runtime-change",
+                    "appliance_key": "circuit:dryer",
+                    "category": "unusual_runtime",
+                    "queued_at": "2026-07-14T12:00:00+00:00",
+                }
+            ]
+        },
+        weekly_digest_settings={"enabled": False, "delivery": "panel_only"},
+        energy_usage_by_circuit={},
+        nilm_appliance_assignments_by_circuit={},
+        nilm_session_history_by_circuit={},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        circuit_configs=(),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_progress_by_circuit={},
+        ),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    await controller.async_refresh_weekly_digest(
+        datetime(2026, 7, 15, 12, tzinfo=UTC)
+    )
+
+    assert "latest_report" not in store_data.weekly_digest_settings
+    assert len(store_data.notification_delivery_state["weekly"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_daily_queue_waits_for_next_home_assistant_local_day(monkeypatch) -> None:
+    summaries: list[str] = []
+
+    async def create_summary(hass, alerts, *, summary_date) -> None:
+        del hass, alerts
+        summaries.append(summary_date)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_daily_summary_notification",
+        create_summary,
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 13, 23, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Runtime changed",
+        feature="run_cycle_duration_s",
+    )
+    alert_id = notification_id_for_alert(alert)
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        notification_delivery_state={
+            "daily": [
+                {
+                    "alert_id": alert_id,
+                    "queued_at": "2026-07-13T23:00:00+00:00",
+                }
+            ]
+        },
+        alerts=[alert],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    await controller.async_dispatch_due(datetime(2026, 7, 14, 1, tzinfo=UTC))
+
+    assert summaries == []
+    assert store_data.notification_delivery_state["daily"]

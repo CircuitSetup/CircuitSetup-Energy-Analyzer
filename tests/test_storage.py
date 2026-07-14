@@ -23,6 +23,7 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
     migrate_v1_to_v2,
     migrate_v2_to_v3,
     migrate_v3_to_v4,
+    migrate_v5_to_v6,
     prune_events,
 )
 
@@ -1162,6 +1163,7 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     assignment = {
         "assignment_id": "assignment-dishwasher",
+        "appliance_key": "nilm:assignment-dishwasher",
         "appliance_id": "dishwasher",
         "display_name": "Dishwasher",
         "appliance_profile": "dishwasher",
@@ -1187,6 +1189,71 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     assert restored.nilm_appliance_assignments_by_circuit == {
         "mains": [assignment]
     }
+
+
+def test_feature_store_persists_canonical_nilm_identity_with_session_history() -> None:
+    assignment = {
+        "assignment_id": "assignment-dishwasher",
+        "appliance_key": "nilm:assignment-dishwasher",
+        "appliance_id": "dishwasher",
+        "display_name": "Kitchen Dishwasher",
+        "session_ids": ["session-1"],
+        "confirmed_session_ids": ["session-1"],
+        "last_validation": "correct",
+    }
+    session = {
+        "session_id": "session-1",
+        "assignment_id": "assignment-dishwasher",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:30:00+00:00",
+    }
+    data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        nilm_session_history_by_circuit={"mains": [session]},
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+    restored_assignment = restored.nilm_appliance_assignments_by_circuit["mains"][0]
+
+    assert raw["nilm_appliance_assignments_by_circuit"]["mains"][0][
+        "appliance_key"
+    ] == "nilm:assignment-dishwasher"
+    assert restored_assignment["appliance_key"] == "nilm:assignment-dishwasher"
+    assert restored_assignment["display_name"] == "Kitchen Dishwasher"
+    assert restored_assignment["confirmed_session_ids"] == ["session-1"]
+    assert restored.nilm_session_history_by_circuit == {"mains": [session]}
+
+
+async def test_migrate_v5_backfills_nilm_appliance_key_without_losing_history() -> None:
+    session = {
+        "session_id": "session-1",
+        "assignment_id": "assignment-dishwasher",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:30:00+00:00",
+    }
+    migrated = await migrate_v5_to_v6(
+        {
+            "schema_version": 5,
+            "nilm_appliance_assignments_by_circuit": {
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "display_name": "Kitchen Dishwasher",
+                    }
+                ]
+            },
+            "nilm_session_history_by_circuit": {"mains": [session]},
+            "dashboard_status": {"created": True},
+        }
+    )
+
+    assignment = migrated["nilm_appliance_assignments_by_circuit"]["mains"][0]
+    assert migrated["schema_version"] == STORAGE_VERSION
+    assert assignment["appliance_key"] == "nilm:assignment-dishwasher"
+    assert assignment["mains_circuit_id"] == "mains"
+    assert migrated["nilm_session_history_by_circuit"] == {"mains": [session]}
+    assert migrated["dashboard_status"] == {"created": True}
 
 
 def test_feature_store_preserves_settings_recommendations() -> None:
@@ -1249,3 +1316,73 @@ def test_feature_store_preserves_settings_recommendations() -> None:
         serialized["settings_recommendation_notification_episode_key"]
         == raw["settings_recommendation_notification_episode_key"]
     )
+
+
+def test_notification_preferences_and_digest_settings_round_trip() -> None:
+    data = FeatureStoreData(
+        appliance_notification_preferences={
+            "circuit:dryer": {
+                "finished_running": True,
+                "delivery_mode": "daily_summary",
+            }
+        },
+        notification_delivery_state={
+            "cooldowns": {
+                "circuit:dryer|unusual_runtime": "2026-07-13T12:00:00+00:00"
+            },
+            "deferred": [
+                {
+                    "alert_id": "alert-1",
+                    "defer_until": "2026-07-14T07:00:00-04:00",
+                }
+            ],
+        },
+        weekly_digest_settings={"enabled": True, "delivery": "panel_only"},
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert STORAGE_VERSION == 8
+    assert restored.appliance_notification_preferences == (
+        data.appliance_notification_preferences
+    )
+    assert restored.notification_delivery_state == data.notification_delivery_state
+    assert restored.weekly_digest_settings == data.weekly_digest_settings
+
+
+def test_legacy_store_uses_safe_notification_defaults() -> None:
+    restored = feature_store_data_from_dict({"schema_version": 6})
+
+    assert restored.appliance_notification_preferences == {}
+    assert restored.notification_delivery_state == {}
+    assert restored.weekly_digest_settings == {}
+
+
+def test_expected_schedule_settings_and_evidence_round_trip() -> None:
+    data = FeatureStoreData(
+        appliance_schedule_settings={
+            "circuit:pool_pump": {
+                "enabled": True,
+                "schedule_entity_id": "schedule.pool_pump",
+                "minimum_duration_minutes": 30,
+            }
+        },
+        appliance_schedule_evidence={
+            "circuit:pool_pump": {
+                "missed_window_ids": ["window-1", "window-2"],
+                "evaluated_window_ids": ["window-1", "window-2"],
+            }
+        },
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.appliance_schedule_settings == data.appliance_schedule_settings
+    assert restored.appliance_schedule_evidence == data.appliance_schedule_evidence
+
+
+def test_v7_store_uses_safe_expected_schedule_defaults() -> None:
+    restored = feature_store_data_from_dict({"schema_version": 7})
+
+    assert restored.appliance_schedule_settings == {}
+    assert restored.appliance_schedule_evidence == {}

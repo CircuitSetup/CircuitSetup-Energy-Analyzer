@@ -299,6 +299,9 @@ class NilmController:
                 "created_device": False,
                 "publish_entities": False,
             }
+            assignment["appliance_key"] = (
+                f"nilm:{assignment['assignment_id']}"
+            )
             assignments.append(assignment)
         else:
             assignments[:] = [item for item in assignments if item is not assignment]
@@ -308,6 +311,7 @@ class NilmController:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
             assignment["lifecycle_state"] = lifecycle_state
             assignment["updated_at"] = now
+            assignment["appliance_key"] = f"nilm:{assignment['assignment_id']}"
 
         self._append_unique(
             assignment.setdefault("signature_fingerprints", []),
@@ -328,6 +332,40 @@ class NilmController:
         )
         del assignments[:-self._assignment_max_items]
         return assignment
+
+    def assignment_session_history(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return newest-first durable history owned by one assignment."""
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        assignment_id_text = str(assignment.get("assignment_id") or "").strip()
+        session_ids = set(self._clean_string_list(assignment.get("session_ids")))
+        history = (
+            self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id,
+                (),
+            )
+        )
+        sessions = [
+            dict(session)
+            for session in history
+            if isinstance(session, Mapping)
+            and _nilm_session_assignment_matches(
+                session,
+                assignment_id=assignment_id_text,
+                session_ids=session_ids,
+            )
+        ]
+        return sorted(
+            sessions,
+            key=lambda session: self._datetime_or_none(
+                session.get("end") or session.get("start")
+            )
+            or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
 
     async def async_label_nilm_signature(
         self,
@@ -553,6 +591,31 @@ class NilmController:
             session_id=session_id_text,
             lifecycle_state="assigned",
         )
+        assignment_id_text = str(assignment.get("assignment_id") or "").strip()
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        for candidate in assignments:
+            if candidate is assignment:
+                continue
+            candidate["session_ids"] = [
+                value
+                for value in self._clean_string_list(candidate.get("session_ids"))
+                if value != session_id_text
+            ]
+        for session in coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if (
+                isinstance(session, dict)
+                and str(session.get("session_id") or "").strip()
+                == session_id_text
+            ):
+                session["assignment_id"] = assignment_id_text
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(
@@ -677,10 +740,10 @@ class NilmController:
             session_id = str(session.get("session_id") or "").strip()
             if not session_id:
                 continue
-            session_assignment_id = str(session.get("assignment_id") or "").strip()
-            if (
-                session_assignment_id != assignment_id_text
-                and session_id not in assignment_session_ids
+            if not _nilm_session_assignment_matches(
+                session,
+                assignment_id=assignment_id_text,
+                session_ids=assignment_session_ids,
             ):
                 continue
             if not session.get("end"):
@@ -1205,6 +1268,91 @@ class NilmController:
         await self.async_save_assignment_change()
         return dict(assignment)
 
+    async def async_convert_nilm_assignment_to_direct_meter(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        direct_circuit_id: str,
+        keep_assignment_for_masking: bool = True,
+        keep_published_estimate: bool = False,
+    ) -> dict[str, Any]:
+        """Link a NILM identity to a direct circuit without losing history."""
+        direct_id = str(direct_circuit_id or "").strip()
+        if not direct_id:
+            raise ValueError("Missing direct_circuit_id.")
+        if keep_published_estimate and not keep_assignment_for_masking:
+            raise ValueError(
+                "A published NILM estimate requires keeping its assignment."
+            )
+        configs = tuple(getattr(self._coordinator, "circuit_configs", ()) or ())
+        if configs:
+            direct_config = next(
+                (
+                    config
+                    for config in configs
+                    if str(getattr(config, "circuit_id", "")) == direct_id
+                ),
+                None,
+            )
+            if (
+                direct_config is None
+                or getattr(direct_config, "mode", None)
+                in {CircuitMode.MAINS_NILM, CircuitMode.MIXED}
+                or getattr(direct_config, "appliance_profile", None)
+                in {
+                    ApplianceProfile.MAINS_NILM,
+                    ApplianceProfile.MIXED,
+                    ApplianceProfile.SOLAR_INVERTER,
+                }
+            ):
+                raise ValueError(
+                    f"Direct circuit '{direct_id}' is not a configured "
+                    "direct-meter circuit."
+                )
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        previous = dict(assignment)
+        assignment["appliance_key"] = (
+            f"nilm:{str(assignment.get('assignment_id') or '').strip()}"
+        )
+        assignment["conversion_state"] = "direct_meter"
+        assignment["direct_circuit_id"] = direct_id
+        assignment["converted_at"] = self._coordinator.current_time().isoformat()
+        assignment.setdefault(
+            "pre_conversion_lifecycle_state",
+            assignment.get("lifecycle_state"),
+        )
+        assignment["keep_assignment_for_masking"] = bool(
+            keep_assignment_for_masking
+        )
+        assignment["keep_published_estimate"] = bool(keep_published_estimate)
+        assignment["publish_entities"] = bool(keep_published_estimate)
+        assignment["created_device"] = bool(keep_published_estimate)
+        assignment["lifecycle_state"] = (
+            "published"
+            if keep_published_estimate
+            else "converted"
+            if keep_assignment_for_masking
+            else "retired"
+        )
+        await self.async_save_assignment_change()
+        if (
+            not keep_published_estimate
+            and await self._async_wait_for_assignment_entities(
+                str(assignment.get("assignment_id") or ""),
+                False,
+            )
+            is True
+        ):
+            assignment.clear()
+            assignment.update(previous)
+            await self.async_save_assignment_change()
+            raise ValueError(
+                "Converting the NILM assignment did not remove its estimated "
+                "Home Assistant entities."
+            )
+        return dict(assignment)
+
     async def async_merge_nilm_assignments(
         self,
         circuit_id: str,
@@ -1318,6 +1466,10 @@ class NilmController:
     ) -> dict[str, Any]:
         """Publish estimated HA entities for a NILM assignment."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
+        if assignment.get("conversion_state") == "direct_meter":
+            raise ValueError(
+                "A direct-meter conversion cannot republish duplicate NILM entities."
+            )
         previous = dict(assignment)
         assignment["publish_entities"] = True
         assignment["created_device"] = True
@@ -1410,7 +1562,7 @@ class NilmController:
         *,
         expected: bool,
     ) -> bool | None:
-        hass = self._coordinator.hass
+        hass = getattr(self._coordinator, "hass", None)
         entry_id = str(getattr(self._coordinator, "entry_id", "") or "")
         try:
             from homeassistant.helpers import device_registry as dr
@@ -1646,6 +1798,18 @@ def _nilm_assignment_id(circuit_id: str, appliance_id: str) -> str:
     seed = f"{circuit_id}|{appliance_id}"
     digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
     return f"assignment-{digest}"
+
+
+def _nilm_session_assignment_matches(
+    session: Mapping[str, Any],
+    *,
+    assignment_id: str,
+    session_ids: set[str],
+) -> bool:
+    owner = str(session.get("assignment_id") or "").strip()
+    if owner:
+        return owner == assignment_id
+    return str(session.get("session_id") or "").strip() in session_ids
 
 
 def _append_unique(values: Any, value: Any) -> None:

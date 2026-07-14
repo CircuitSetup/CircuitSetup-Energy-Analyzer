@@ -751,6 +751,57 @@ change_nilm_appliance_profile:
       example: dishwasher_heated_dry
       selector:
         text:
+convert_nilm_appliance_to_direct_meter:
+  name: Use direct meter for NILM appliance
+  description: "Advanced/script action: link a NILM appliance identity and its validation history to a configured direct-meter circuit. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier, such as mains.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the mains NILM circuit.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment identifier to link.
+      required: true
+      example: assignment-abc123def456
+      selector:
+        text:
+    direct_circuit_id:
+      name: Direct Circuit ID
+      description: Configured direct-meter circuit that now represents this appliance.
+      required: true
+      example: kitchen_dishwasher
+      selector:
+        text:
+    keep_assignment_for_masking:
+      name: Keep Assignment For Masking
+      description: Keep the NILM assignment available for known-load masking and validation.
+      required: false
+      default: true
+      selector:
+        boolean:
+    keep_published_estimate:
+      name: Keep Published Estimate
+      description: Keep publishing duplicate estimated entities. Disabled by default.
+      required: false
+      default: false
+      selector:
+        boolean:
 merge_nilm_assignments:
   name: Merge NILM assignments
   description: "Advanced/script action: merge one duplicate NILM appliance assignment into another. The normal user path is the NILM workspace panel."

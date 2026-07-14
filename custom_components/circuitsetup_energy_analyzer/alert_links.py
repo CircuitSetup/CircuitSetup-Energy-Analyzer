@@ -73,13 +73,24 @@ def alert_evidence_path(
     from .notifications import notification_id_for_alert
 
     feature = _feature_for_alert(alert)
-    params = urlencode(
-        {
-            "alert_id": notification_id_for_alert(alert),
-            "circuit_id": alert.circuit_id,
-            "feature": feature,
-        }
-    )
+    assignment_id = str(alert.features.get("assignment_id") or "").strip()
+    mains_circuit_id = str(
+        alert.features.get("mains_circuit_id") or alert.circuit_id
+    ).strip()
+    values = {
+        "circuit_id": mains_circuit_id,
+        "alert_id": notification_id_for_alert(alert),
+        "feature": feature,
+    }
+    if assignment_id:
+        values.update(
+            {
+                "assignment_id": assignment_id,
+                "nilm_workspace": "1",
+                "appliance_detail": "1",
+            }
+        )
+    params = urlencode(values)
     return f"{dashboard_path}?{params}"
 
 

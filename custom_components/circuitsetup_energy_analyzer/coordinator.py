@@ -3,8 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Self
 
 from . import notifications as notifications  # compatibility for tests
@@ -12,93 +11,55 @@ from . import repairs as repairs  # compatibility for test monkeypatching
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
-from .alerting import alert_anomaly_score
 from .config_parsing import (
     circuit_configs_from_entry_data as _circuit_configs_from_entry_data,
 )
-from .config_parsing import (
-    retention_mode_from_sources as _retention_mode_from_sources,
-)
 from .const import (
-    CONF_DASHBOARD_LAYOUT,
-    DEFAULT_DASHBOARD_LAYOUT,
     DOMAIN,
 )
-from .dashboard import normalize_dashboard_layout
-from .events import CircuitEventDetector
-from .managers.alert_policies import AlertPolicyManager
-from .managers.circuit_registry import CircuitRegistry
-from .managers.config_entry_controller import ConfigEntryController
-from .managers.context import ProcessingContextBuilder
-from .managers.dashboard_controller import DashboardController
-from .managers.demo_data import DemoDataSeeder
-from .managers.entity_profile_controller import EntityProfileController
-from .managers.environmental_context import (
-    WATER_CONTEXT_HISTORY_MAX_SAMPLES,
-    WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
-    EnvironmentalContextManager,
-)
-from .managers.evidence_actions import EvidenceActionController
-from .managers.export_manager import ExportManager
-from .managers.nilm_controller import NilmController
-from .managers.notification_controller import NotificationController
-from .managers.processing_pipeline import ProcessingPipeline
-from .managers.processor_runtime import ProcessorRuntimeManager
-from .managers.settings_controller import (
-    SettingsController,
-    material_recommendation_evidence_key,
-)
-from .managers.setup_health import SetupHealthAggregator
-from .managers.source_samples import (
-    SourceSampleBuilder,
-)
-from .managers.source_updates import SourceUpdateManager
-from .managers.state_reducer import StateReducer, apply_state_update
-from .managers.store_persistence import StorePersistenceManager
+from .expected_schedule import refresh_expected_schedule_contexts
 from .managers.utility_energy_sources import (
-    UtilityEnergySourceManager,
     _ha_recorder_get_instance,
     _ha_statistics_during_period,
 )
-from .managers.ux_state import UxStateManager
 from .models import (
     AlertEvidence,
     CircuitConfig,
     CircuitEvent,
     RetentionMode,
 )
-from .nilm import (
-    NilmEdge,
-    NilmEdgeDetector,
-)
 from .normalize import NormalizedCircuitSample, SourceState
 from .processors import (
-    ActivityAlertProcessor,
-    BillingCycleProcessor,
-    CapacityProcessor,
-    CircuitEventProcessor,
-    CostProcessor,
-    DemandProcessor,
-    EnergyGoalProcessor,
-    EnergyUsageProcessor,
     FeatureResult,
-    LegImbalanceProcessor,
-    MainsBalanceProcessor,
-    MetricConsistencyProcessor,
-    NilmSampleProcessor,
-    NilmTopologyProcessor,
-    PowerQualityProcessor,
-    RunCycleProcessor,
-    SolarFlowProcessor,
-    StandbyProcessor,
-    UtilityComparisonProcessor,
-    WaterContextAlertProcessor,
+)
+from .runtime_factory import (
+    ALERT_FEEDBACK_MAX_AGE,
+    ALERT_FEEDBACK_MAX_ITEMS,
+    ALERT_HISTORY_MAX_AGE,
+    ALERT_HISTORY_MAX_ITEMS,
+    NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
+    NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
+    NILM_SESSION_HISTORY_MAX_AGE,
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+    NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
+    NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
+    RECOMMENDATION_DECISIONS_MAX_AGE,
+    RECOMMENDATION_DECISIONS_MAX_ITEMS,
+    RECOMMENDATION_HISTORY_MAX_AGE,
+    RECOMMENDATION_HISTORY_MAX_ITEMS,
+    initialize_runtime,
+)
+from .state import (
+    AnalyzerState,
+    process_events_into_state,
+)
+from .state import (
+    _apply_state_update as _apply_state_update,
 )
 from .storage import (
-    RETENTION_WINDOWS,
     FeatureStoreData,
 )
-from .utility_comparison import effective_electricity_rate
 from .ux import (
     canonicalize_sensitivity_config,
 )
@@ -107,26 +68,32 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
-ALERT_HISTORY_MAX_ITEMS = 500
-ALERT_HISTORY_MAX_AGE = timedelta(days=180)
-ALERT_FEEDBACK_MAX_ITEMS = 500
-ALERT_FEEDBACK_MAX_AGE = timedelta(days=365)
-NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT = 64
-NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT = 32
-NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT = 64
-NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT = 500
-NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2000
-NILM_SESSION_HISTORY_MAX_AGE = timedelta(days=45)
-NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT = 512
-RECOMMENDATION_HISTORY_MAX_ITEMS = 200
-RECOMMENDATION_HISTORY_MAX_AGE = timedelta(days=180)
-RECOMMENDATION_DECISIONS_MAX_ITEMS = 500
-RECOMMENDATION_DECISIONS_MAX_AGE = timedelta(days=365)
+_RUNTIME_COMPATIBILITY_EXPORTS = (
+    ALERT_FEEDBACK_MAX_AGE,
+    ALERT_FEEDBACK_MAX_ITEMS,
+    ALERT_HISTORY_MAX_AGE,
+    ALERT_HISTORY_MAX_ITEMS,
+    NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
+    NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
+    NILM_SESSION_HISTORY_MAX_AGE,
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+    NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+    NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
+    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
+    RECOMMENDATION_DECISIONS_MAX_AGE,
+    RECOMMENDATION_DECISIONS_MAX_ITEMS,
+    RECOMMENDATION_HISTORY_MAX_AGE,
+    RECOMMENDATION_HISTORY_MAX_ITEMS,
+)
 try:
-    from homeassistant.helpers.event import async_track_state_change_event
+    from homeassistant.helpers.event import (
+        async_track_state_change_event,
+        async_track_time_interval,
+    )
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 except ModuleNotFoundError:
     async_track_state_change_event = None
+    async_track_time_interval = None
 
     class DataUpdateCoordinator:
         """Small fallback so helper tests can import without Home Assistant."""
@@ -146,231 +113,6 @@ except ModuleNotFoundError:
 
         def async_set_updated_data(self, data: Any) -> None:
             self.data = data
-
-
-@dataclass(slots=True)
-class AnalyzerState:
-    """Runtime state exposed by the energy analyzer coordinator."""
-
-    last_event_by_circuit: dict[str, CircuitEvent] = field(default_factory=dict)
-    active_alerts_by_circuit: dict[str, list[AlertEvidence]] = field(
-        default_factory=dict
-    )
-    anomaly_score_by_circuit: dict[str, float] = field(default_factory=dict)
-    learning_by_circuit: dict[str, bool] = field(default_factory=dict)
-    data_quality_by_circuit: dict[str, str] = field(default_factory=dict)
-    power_quality_score_by_circuit: dict[str, float] = field(default_factory=dict)
-    power_quality_evidence_by_circuit: dict[str, str] = field(default_factory=dict)
-    reactive_power_drift_by_circuit: dict[str, float] = field(default_factory=dict)
-    apparent_power_drift_by_circuit: dict[str, float] = field(default_factory=dict)
-    power_factor_drift_by_circuit: dict[str, float] = field(default_factory=dict)
-    nilm_signature_count_by_circuit: dict[str, int] = field(default_factory=dict)
-    nilm_unmatched_load_percentage_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    nilm_topology_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    nilm_topology_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    health_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    health_summary_by_circuit: dict[str, str] = field(default_factory=dict)
-    readiness_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
-    learning_progress_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    data_quality_checklist_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    energy_dashboard_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    energy_dashboard_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    alert_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
-    recent_activity_by_circuit: dict[str, str] = field(default_factory=dict)
-    recent_activity_count_by_circuit: dict[str, int] = field(default_factory=dict)
-    recent_activity_timeline_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    recent_observations_by_circuit: dict[str, list[dict[str, Any]]] = field(
-        default_factory=dict
-    )
-    sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
-    circuit_mode_by_circuit: dict[str, str] = field(default_factory=dict)
-    power_flow_by_circuit: dict[str, str] = field(default_factory=dict)
-    maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
-    latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    operating_state_by_circuit: dict[str, str] = field(default_factory=dict)
-    operating_state_snapshot_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    nilm_review_by_circuit: dict[str, list[dict[str, Any]]] = field(
-        default_factory=dict
-    )
-    nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    weather_context_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    rain_pump_context_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    water_flow_context_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    water_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
-        default_factory=dict
-    )
-    daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
-    energy_usage_share_by_circuit: dict[str, float] = field(default_factory=dict)
-    energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    energy_goal_usage_by_circuit: dict[str, float] = field(default_factory=dict)
-    energy_goal_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    energy_goal_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    run_cycle_count_by_circuit: dict[str, int] = field(default_factory=dict)
-    run_cycle_runtime_seconds_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    run_cycle_duty_cycle_by_circuit: dict[str, float] = field(default_factory=dict)
-    run_cycle_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    run_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
-    billing_cycle_forecast_kwh_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    billing_cycle_budget_usage_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    billing_cycle_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    billing_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    cost_current_rate_by_circuit: dict[str, float] = field(default_factory=dict)
-    cost_cycle_by_circuit: dict[str, float] = field(default_factory=dict)
-    cost_cycle_forecast_by_circuit: dict[str, float] = field(default_factory=dict)
-    cost_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    cost_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
-    utility_cost_rate_by_circuit: dict[str, float] = field(default_factory=dict)
-    current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    demand_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
-    demand_peak_rank_by_circuit: dict[str, int] = field(default_factory=dict)
-    demand_peak_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    demand_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    capacity_usage_by_circuit: dict[str, float] = field(default_factory=dict)
-    capacity_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    capacity_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    leg_imbalance_percent_by_circuit: dict[str, float] = field(default_factory=dict)
-    leg_imbalance_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    leg_imbalance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    metric_consistency_score_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    metric_consistency_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    metric_consistency_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    balance_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    monitored_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    monitored_coverage_percent_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    balance_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    balance_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    solar_generation_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_site_consumption_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_grid_import_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_grid_export_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_self_consumption_percent_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    solar_powered_percent_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_surplus_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_load_shift_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    solar_flexible_load_power_w_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    solar_flexible_load_coverage_percent_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    solar_flow_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    solar_surplus_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    solar_load_shift_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    solar_flow_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    solar_load_shift_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    utility_comparison_difference_kwh_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    utility_comparison_difference_percent_by_circuit: dict[str, float] = field(
-        default_factory=dict
-    )
-    utility_comparison_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    utility_comparison_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    always_on_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    standby_threshold_w_by_circuit: dict[str, float] = field(default_factory=dict)
-    standby_status_by_circuit: dict[str, str] = field(default_factory=dict)
-    always_on_limit_usage_by_circuit: dict[str, float] = field(default_factory=dict)
-    standby_evidence_by_circuit: dict[str, dict[str, Any]] = field(
-        default_factory=dict
-    )
-    settings_recommendations_by_circuit: dict[str, list[dict[str, Any]]] = field(
-        default_factory=dict
-    )
-    settings_recommendation_count_by_circuit: dict[str, int] = field(
-        default_factory=dict
-    )
-
-
-def process_events_into_state(
-    state: AnalyzerState,
-    events: Iterable[CircuitEvent],
-    alerts: Iterable[AlertEvidence],
-) -> AnalyzerState:
-    """Fold newly detected events and alerts into analyzer runtime state."""
-    for event in events:
-        previous = state.last_event_by_circuit.get(event.circuit_id)
-        if previous is None or event.timestamp >= previous.timestamp:
-            state.last_event_by_circuit[event.circuit_id] = event
-
-    alerts_by_circuit: defaultdict[str, list[AlertEvidence]] = defaultdict(list)
-    for alert in alerts:
-        alerts_by_circuit[alert.circuit_id].append(alert)
-
-    state.active_alerts_by_circuit = dict(alerts_by_circuit)
-    state.anomaly_score_by_circuit = {
-        circuit_id: max(alert_anomaly_score(alert) for alert in circuit_alerts)
-        for circuit_id, circuit_alerts in alerts_by_circuit.items()
-    }
-
-    for circuit_id in state.last_event_by_circuit:
-        state.anomaly_score_by_circuit.setdefault(circuit_id, 0.0)
-
-    return state
-
-
-def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
-    """Apply a processor-requested update to AnalyzerState."""
-    apply_state_update(state, path, value)
 
 
 def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
@@ -428,286 +170,108 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.circuit_configs
         )
         self._known_source_entity_ids = frozenset(self._source_circuit_ids_by_entity)
-        self.circuit_registry = CircuitRegistry(self)
-        self._now_fn = now_fn or (lambda: datetime.now(UTC))
-        self._entry_retention_mode = _retention_mode_from_sources(
-            self.entry_data,
-            self.options,
-        )
-        self.source_samples = SourceSampleBuilder(hass, entry_id=entry_id)
-        self.dashboard_layout = normalize_dashboard_layout(
-            self.options.get(
-                CONF_DASHBOARD_LAYOUT,
-                self.entry_data.get(CONF_DASHBOARD_LAYOUT, DEFAULT_DASHBOARD_LAYOUT),
-            )
-        )
-        self.last_dashboard_create_request: dict[str, Any] | None = None
-        self.last_dashboard_remove_request: dict[str, Any] | None = None
-        self.dashboard_status: dict[str, Any] | None = (
-            dict(self.store_data.dashboard_status)
-            if self.store_data.dashboard_status
-            else None
-        )
-        self.config_entry_controller = ConfigEntryController(self)
-        self.dashboard_controller = DashboardController(self)
-        self.entity_profile_controller = EntityProfileController(self)
-        self.evidence_actions = EvidenceActionController(self)
-        self.nilm_controller = NilmController(
+        initialize_runtime(
             self,
-            label_interval_max_items=NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
-            assignment_max_items=NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
-        )
-        self.settings_controller = SettingsController(self)
-        self.alert_policies = AlertPolicyManager(self)
-        self.processor_runtime = ProcessorRuntimeManager(self)
-        self.export_manager = ExportManager(self)
-        self.context_builder = ProcessingContextBuilder(self)
-        self.demo_data = DemoDataSeeder(self)
-        self.pipeline = ProcessingPipeline(self)
-        self.state_reducer = StateReducer()
-        self.utility_energy_sources = UtilityEnergySourceManager(
-            self,
+            hass=hass,
+            entry_id=entry_id,
+            now_fn=now_fn,
             statistics_during_period=_ha_statistics_during_period,
             recorder_get_instance=_ha_recorder_get_instance,
-        )
-        self.environment_context = EnvironmentalContextManager(self)
-        self.settings_controller.apply_config_entry_settings()
-        self._detectors = {
-            config.circuit_id: CircuitEventDetector()
-            for config in self.circuit_configs
-        }
-        self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
-        self._event_processor = CircuitEventProcessor(self._detectors)
-        self._power_quality_processor = PowerQualityProcessor(
-            alert_policy_for_circuit=self.alert_policies.alert_policy_for_circuit,
-            learning_mature=self.processor_runtime.learning_mature,
-            seed_demo_event_history=self.demo_data.seed_event_history,
-            seed_demo_power_quality_baselines=(
-                self.demo_data.seed_power_quality_baselines
-            ),
-            baseline_values=self._baseline_values,
-        )
-        self._energy_usage_processor = EnergyUsageProcessor(
-            settings_for_config=(
-                self.processor_runtime.energy_usage_settings_for_config
-            ),
-            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(circuit_id)
-            ].days,
-            alert_policy_for_circuit=self.alert_policies.usage_alert_policy_for_circuit,
-            seed_demo_history=self.demo_data.seed_energy_usage_history,
-        )
-        self._energy_goal_processor = EnergyGoalProcessor(
-            settings_for_config=self.processor_runtime.energy_goal_settings_for_config,
-            alert_policy_for_circuit=self.alert_policies.goal_alert_policy_for_circuit,
-        )
-        self._run_cycle_processor = RunCycleProcessor(
-            alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
-            learning_mature=self.processor_runtime.learning_mature,
-        )
-        self._activity_alert_processor = ActivityAlertProcessor(
-            settings_for_config=(
-                self.processor_runtime.activity_alert_settings_for_config
-            ),
-            alert_policy_for_circuit=(
-                self.alert_policies.activity_alert_policy_for_circuit
-            ),
-        )
-        self._billing_cycle_processor = BillingCycleProcessor(
-            settings_for_config=(
-                self.processor_runtime.billing_cycle_settings_for_config
-            ),
-            alert_policy_for_circuit=(
-                self.alert_policies.billing_alert_policy_for_circuit
-            ),
-        )
-        self._cost_processor = CostProcessor(
-            settings_for_config=self.processor_runtime.cost_settings_for_config,
-            utility_rate_for_circuit=lambda _circuit_id: (
-                effective_electricity_rate(
-                    self.state.utility_cost_rate_by_circuit,
-                )
-                or None
-            ),
-        )
-        self._demand_processor = DemandProcessor(
-            settings_for_config=self.processor_runtime.demand_settings_for_config,
-            alert_policy_for_circuit=self.alert_policies.demand_alert_policy_for_circuit,
-            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(circuit_id)
-            ].days,
-        )
-        self._capacity_processor = CapacityProcessor(
-            settings_for_config=self.processor_runtime.capacity_settings_for_config,
-            alert_policy_for_circuit=(
-                self.alert_policies.capacity_alert_policy_for_circuit
-            ),
-            retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-                self._retention_mode_for_circuit(circuit_id)
-            ].days,
-            source_states_for=self._source_states_for,
-        )
-        self._leg_imbalance_processor = LegImbalanceProcessor(
-            alert_policy_for_circuit=(
-                self.alert_policies.leg_imbalance_alert_policy_for_circuit
-            ),
-        )
-        self._metric_consistency_processor = MetricConsistencyProcessor()
-        self._standby_processor = StandbyProcessor(
-            settings_for_config=self.processor_runtime.standby_settings_for_config,
-            alert_policy_for_circuit=(
-                self.alert_policies.standby_alert_policy_for_circuit
-            ),
-            seed_demo_history=self.demo_data.seed_standby_history,
-        )
-        self._utility_comparison_processor = UtilityComparisonProcessor(
-            settings_for_circuit=(
-                self.processor_runtime.utility_comparison_settings_for_circuit
-            ),
-            alert_policy_for_circuit=(
-                self.alert_policies.utility_comparison_alert_policy_for_circuit
-            ),
-            energy_kwh_for_entity=self.utility_energy_sources.energy_kwh_for_entity,
-            energy_kwh_sum_for_entities=(
-                self.utility_energy_sources.energy_kwh_sum_for_entities
-            ),
-            statistics_kwh_for_id=self.utility_energy_sources.statistics_kwh_for_id,
-            statistics_kwh_sum_for_entities=(
-                self.utility_energy_sources.statistics_kwh_sum_for_entities
-            ),
-            load_energy_entity_ids_for_sum=(
-                self.utility_energy_sources.load_energy_entity_ids_for_sum
-            ),
-            numeric_value_for_entity=self.context_builder.numeric_entity_value,
-        )
-        self._mains_balance_processor = MainsBalanceProcessor(
-            settings_for_circuit=lambda circuit_id: (
-                self.store_data.balance_settings_by_circuit.get(circuit_id, {})
-            ),
-        )
-        self._solar_flow_processor = SolarFlowProcessor(
-            settings_for_circuit=lambda circuit_id: (
-                self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
-            ),
-        )
-        self.pipeline.configure_processors(
-            event_processor=self._event_processor,
-            power_quality_processor=self._power_quality_processor,
-            energy_usage_processor=self._energy_usage_processor,
-            energy_goal_processor=self._energy_goal_processor,
-            run_cycle_processor=self._run_cycle_processor,
-            activity_alert_processor=self._activity_alert_processor,
-            billing_cycle_processor=self._billing_cycle_processor,
-            cost_processor=self._cost_processor,
-            demand_processor=self._demand_processor,
-            capacity_processor=self._capacity_processor,
-            leg_imbalance_processor=self._leg_imbalance_processor,
-            metric_consistency_processor=self._metric_consistency_processor,
-            standby_processor=self._standby_processor,
-            mains_balance_processor=self._mains_balance_processor,
-            solar_flow_processor=self._solar_flow_processor,
-            utility_comparison_processor=self._utility_comparison_processor,
-            clear_power_quality_state=lambda circuit_id: (
-                self.state_reducer.clear_power_quality_state(self.state, circuit_id)
-            ),
-            clear_standby_state=lambda circuit_id: (
-                self.state_reducer.clear_standby_state(self.state, circuit_id)
-            ),
-            sync_setup_health_repairs=self._sync_setup_health_repairs,
-        )
-        self._nilm_topology_processor = NilmTopologyProcessor(
-            known_config_for_circuit=self.circuit_registry.config_for_circuit,
-            alert_policy_for_circuit=(
-                self.alert_policies.nilm_topology_alert_policy_for_circuit
-            ),
-        )
-        self._nilm_detectors: dict[str, NilmEdgeDetector] = {}
-        self._nilm_unmatched_edges: defaultdict[str, list[NilmEdge]] = defaultdict(list)
-        self._nilm_total_events_by_circuit: defaultdict[str, int] = defaultdict(int)
-        self.ignored_nilm_signatures: set[tuple[str, str]] = set()
-        self._nilm_sample_processor = NilmSampleProcessor(
-            nilm_enabled=self.nilm_controller.enabled_for_config,
-            seed_demo_nilm_state=self.nilm_controller.seed_demo_state,
-            min_delta_w_for_circuit=self.settings_controller.nilm_min_delta_w,
-            detectors=self._nilm_detectors,
-            total_events_by_circuit=self._nilm_total_events_by_circuit,
-            unmatched_edges_by_circuit=self._nilm_unmatched_edges,
-            ignored_signatures=self.ignored_nilm_signatures,
-            known_load_events=self.nilm_controller.known_load_events,
-            observe_topology=(
-                lambda config, match, context: [
-                    alert
-                    for alert in [
-                        self.nilm_controller.observe_known_load_topology(
-                            config,
-                            match,
-                            context,
-                        )
-                    ]
-                    if alert is not None
-                ]
-            ),
-            unmatched_edges_max_items=NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
-        )
-        self.nilm_controller.configure_processors(
-            sample_processor=self._nilm_sample_processor,
-            topology_processor=self._nilm_topology_processor,
-            total_events_by_circuit=self._nilm_total_events_by_circuit,
-            unmatched_edges_by_circuit=self._nilm_unmatched_edges,
-        )
-        self._water_context_alert_processor = WaterContextAlertProcessor(
-            alert_policy_for_circuit=(
-                self.alert_policies.water_context_alert_policy_for_circuit
-            ),
-        )
-        self.store_persistence = StorePersistenceManager(
-            self,
-            retention_mode_for_circuit=self._retention_mode_for_circuit,
-            ha_time_zone=self.context_builder.time_zone,
-            weather_context_history_max_samples=WEATHER_CONTEXT_HISTORY_MAX_SAMPLES,
-            water_context_history_max_samples=WATER_CONTEXT_HISTORY_MAX_SAMPLES,
-            alert_history_max_age=ALERT_HISTORY_MAX_AGE,
-            alert_history_max_items=ALERT_HISTORY_MAX_ITEMS,
-            alert_feedback_max_age=ALERT_FEEDBACK_MAX_AGE,
-            alert_feedback_max_items=ALERT_FEEDBACK_MAX_ITEMS,
-            nilm_signatures_max_items=NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
-            nilm_unknown_loads_max_items=NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
-            nilm_session_history_max_age=NILM_SESSION_HISTORY_MAX_AGE,
-            nilm_session_history_max_items=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
-            recommendation_history_max_age=RECOMMENDATION_HISTORY_MAX_AGE,
-            recommendation_history_max_items=RECOMMENDATION_HISTORY_MAX_ITEMS,
-            recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
-            recommendation_decisions_max_items=RECOMMENDATION_DECISIONS_MAX_ITEMS,
-        )
-        self.notification_controller = NotificationController(
-            self,
-            material_evidence_key=material_recommendation_evidence_key,
-        )
-        self.setup_health = SetupHealthAggregator(self)
-        self.paused_circuits: set[str] = set()
-        self.last_exported_diagnostics: dict[str, Any] = {}
-        self.last_exported_history_csv: str = ""
-        self.mapping_checks_run = 0
-        self._last_settings_recommendation_source_refresh_at: datetime | None = None
-        self.state = AnalyzerState()
-        self.started = False
-        self.source_updates = SourceUpdateManager(
-            self,
             track_state_change_event=async_track_state_change_event,
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
-        self.ux_state = UxStateManager(self)
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
-        await self.source_updates.async_start(source_entities)
+        entities = [
+            str(entity_id)
+            for entity_id in source_entities
+            if str(entity_id) and not str(entity_id).startswith("schedule.")
+        ]
+        schedule_settings = getattr(
+            self.store_data,
+            "appliance_schedule_settings",
+            {},
+        )
+        for raw in (
+            schedule_settings.values()
+            if isinstance(schedule_settings, Mapping)
+            else ()
+        ):
+            if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
+                continue
+            entity_id = str(raw.get("schedule_entity_id") or "").strip()
+            if entity_id.startswith("schedule."):
+                entities.append(entity_id)
+        await self.source_updates.async_start(tuple(dict.fromkeys(entities)))
+        self._refresh_expected_schedule_interval_listener()
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
+        if self._unsub_expected_schedule_interval is not None:
+            self._unsub_expected_schedule_interval()
+            self._unsub_expected_schedule_interval = None
         await self.source_updates.async_stop()
+
+    def _refresh_expected_schedule_interval_listener(self: Self) -> None:
+        """Refresh periodic evaluation for local expected-schedule windows."""
+        if self._unsub_expected_schedule_interval is not None:
+            self._unsub_expected_schedule_interval()
+            self._unsub_expected_schedule_interval = None
+        if async_track_time_interval is None or not self._has_local_schedule_windows():
+            return
+        self._unsub_expected_schedule_interval = async_track_time_interval(
+            self.hass,
+            self.async_refresh_expected_schedules,
+            timedelta(minutes=5),
+        )
+
+    def _has_local_schedule_windows(self: Self) -> bool:
+        """Return whether any enabled schedule uses locally configured windows."""
+        schedule_settings = getattr(
+            self.store_data,
+            "appliance_schedule_settings",
+            {},
+        )
+        for raw in (
+            schedule_settings.values()
+            if isinstance(schedule_settings, Mapping)
+            else ()
+        ):
+            if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
+                continue
+            if str(raw.get("schedule_entity_id") or "").strip():
+                continue
+            windows = raw.get("windows")
+            if isinstance(windows, list) and bool(windows):
+                return True
+        return False
+
+    async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
+        """Evaluate local schedule boundaries without a source state change."""
+        alerts = await self._async_apply_expected_schedule_contexts(now)
+        if alerts:
+            process_events_into_state(self.state, (), alerts)
+        self.async_set_updated_data(self.state)
+        await self._async_save_store(now, force=False)
+
+    async def _async_apply_expected_schedule_contexts(
+        self: Self,
+        now: datetime,
+    ) -> list[AlertEvidence]:
+        """Evaluate schedule context and persist any new evidence."""
+        active_alerts: list[AlertEvidence] = []
+        for schedule_alert in refresh_expected_schedule_contexts(self, now):
+            schedule_alert = self.evidence_actions.alert_with_feedback(schedule_alert)
+            if schedule_alert.feedback_status != "expected":
+                active_alerts.append(schedule_alert)
+            self.store_data.alerts.append(schedule_alert)
+            self._mark_store_dirty()
+            await self._notify_alert(schedule_alert)
+        return active_alerts
 
     @property
     def _source_update_task(self: Self) -> Any | None:
@@ -876,6 +440,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(nilm_alert)
         alerts.extend(await self._notify_nilm_virtual_appliances(now))
         alerts.extend(await self.pipeline.async_process_cross_circuit(samples, context))
+        alerts.extend(
+            await self.notification_controller.async_notify_finished_events(
+                events,
+                now,
+            )
+        )
 
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
@@ -896,6 +466,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
+        alerts.extend(await self._async_apply_expected_schedule_contexts(now))
         if alerts:
             process_events_into_state(self.state, events, alerts)
         recommendation_refresh_due = self._settings_recommendation_refresh_due(
@@ -905,6 +476,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
             self._mark_store_dirty()
+        await self.notification_controller.async_dispatch_due(now)
+        await self.notification_controller.async_refresh_weekly_digest(now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:
@@ -1516,6 +1089,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             assignment_id,
             appliance_profile=appliance_profile,
+        )
+
+    async def async_convert_nilm_assignment_to_direct_meter(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        direct_circuit_id: str,
+        keep_assignment_for_masking: bool = True,
+        keep_published_estimate: bool = False,
+    ) -> dict[str, Any]:
+        """Link a NILM appliance to a configured direct-meter circuit."""
+        return await self.nilm_controller.async_convert_nilm_assignment_to_direct_meter(
+            circuit_id,
+            assignment_id,
+            direct_circuit_id=direct_circuit_id,
+            keep_assignment_for_masking=keep_assignment_for_masking,
+            keep_published_estimate=keep_published_estimate,
         )
 
     async def async_merge_nilm_assignments(
