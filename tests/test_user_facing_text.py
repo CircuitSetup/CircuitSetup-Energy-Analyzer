@@ -1826,6 +1826,32 @@ def test_settings_saves_reject_unsaved_api_results() -> None:
     )
 
 
+def test_unavailable_setting_preview_hides_incomplete_impact_claims() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+const html = panel._renderSettingImpactPreview({ impact_preview: {
+  available: false,
+  observations_evaluated: 23,
+  history_start: "2026-07-01T12:00:00Z",
+  history_end: "2026-07-13T12:00:00Z",
+  current_alert_count: 37,
+  candidate_alert_count: 41,
+  current_state_change_count: null,
+  candidate_state_change_count: null,
+  examples_removed: ["old example"],
+  examples_added: ["new example"],
+  limitations: ["A reliable preview is unavailable because retained history contains only alerts selected by the current setting."],
+} });
+assert.match(html, /Limitations/);
+assert.match(html, /current setting/);
+for (const claim of ["23 retained observations", "37 alerts", "41 alerts", "old example", "new example"]) {
+  assert.ok(!html.includes(claim), `unexpected incomplete claim: ${claim}`);
+}
+"""
+    )
+
+
 def test_appliance_detail_uses_icons_grids_timeline_and_alert_action_tiles() -> None:
     _run_panel_node_script(
         """

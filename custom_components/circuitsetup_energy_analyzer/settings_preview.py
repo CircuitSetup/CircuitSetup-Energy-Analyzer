@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
 
+from .localized_text import translation_text
+
 PREVIEW_HISTORY_DAYS = 14
 PREVIEW_SAMPLE_LIMIT = 500
 PREVIEW_EXAMPLE_LIMIT = 5
@@ -70,6 +72,7 @@ class _Observation:
     timestamp: datetime
     value: float
     label: str
+    threshold_selected: bool
 
 
 def setting_preview_observations(
@@ -133,11 +136,15 @@ def setting_preview_observations(
         value = _alert_preview_value(alert, setting_key)
         timestamp = getattr(alert, "timestamp", None)
         if value is not None and isinstance(timestamp, datetime):
-            observations.append(_preview_observation(timestamp, value))
+            observations.append(
+                _preview_observation(timestamp, value, threshold_selected=True)
+            )
 
-    deduplicated = {
-        (str(item["timestamp"]), float(item["value"])): item for item in observations
-    }
+    deduplicated: dict[tuple[str, float], dict[str, Any]] = {}
+    for item in observations:
+        deduplicated.setdefault(
+            (str(item["timestamp"]), float(item["value"])), item
+        )
     return sorted(
         deduplicated.values(),
         key=lambda item: _instant(datetime.fromisoformat(str(item["timestamp"]))),
@@ -195,6 +202,27 @@ def build_setting_impact_preview(
         ),
         key=lambda item: _instant(item.timestamp),
     )
+    raw_retained = [item for item in retained if not item.threshold_selected]
+    if raw_retained:
+        retained = raw_retained
+    elif retained:
+        limitations.insert(
+            0,
+            translation_text(
+                "panel",
+                "recommendations",
+                "preview_alert_selected_history",
+            ),
+        )
+        return _empty_preview(
+            setting_key,
+            current_value,
+            candidate_value,
+            window_start,
+            now,
+            limitations,
+            available=False,
+        )
     if len(retained) > PREVIEW_SAMPLE_LIMIT:
         retained = retained[-PREVIEW_SAMPLE_LIMIT:]
         limitations.append("Preview is limited to the newest 500 observations.")
@@ -293,7 +321,12 @@ def _observation_from_mapping(raw: Mapping[str, Any]) -> _Observation | None:
     if timestamp is None or value is None:
         return None
     label = str(raw.get("label") or timestamp.date().isoformat())
-    return _Observation(timestamp=timestamp, value=value, label=label)
+    return _Observation(
+        timestamp=timestamp,
+        value=value,
+        label=label,
+        threshold_selected=raw.get("threshold_selected") is True,
+    )
 
 
 def _matches(setting_key: str, value: float, threshold: float) -> bool:
@@ -375,12 +408,20 @@ def _number_or_none(value: Any) -> float | None:
     return number if isfinite(number) else None
 
 
-def _preview_observation(timestamp: datetime, value: float) -> dict[str, Any]:
-    return {
+def _preview_observation(
+    timestamp: datetime,
+    value: float,
+    *,
+    threshold_selected: bool = False,
+) -> dict[str, Any]:
+    observation = {
         "timestamp": timestamp.isoformat(),
         "value": value,
         "label": f"{timestamp.strftime('%b')} {timestamp.day}",
     }
+    if threshold_selected:
+        observation["threshold_selected"] = True
+    return observation
 
 
 def _first_number(values: Mapping[str, Any], *keys: str) -> float | None:

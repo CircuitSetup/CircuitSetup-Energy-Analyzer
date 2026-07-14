@@ -723,13 +723,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const limitations = Array.isArray(preview.limitations) && preview.limitations.length
       ? `<p class="muted"><strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong> ${this._escape(preview.limitations.join(" "))}</p>`
       : "";
-    return `<details class="disclosure setting-impact-preview">
-      <summary>${this._escape(this._panelText("recommendations.preview_history"))}</summary>
-      <div class="disclosure-content">
+    const impact = preview.available === false ? "" : `
         ${window}
         <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
         <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
-        ${examples}
+        ${examples}`;
+    return `<details class="disclosure setting-impact-preview">
+      <summary>${this._escape(this._panelText("recommendations.preview_history"))}</summary>
+      <div class="disclosure-content">
+        ${impact}
         ${limitations}
       </div>
     </details>`;

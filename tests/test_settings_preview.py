@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
@@ -191,6 +192,88 @@ def test_retained_contextual_samples_feed_setting_preview() -> None:
         now=now,
     )
 
+    assert preview.observations_evaluated == 2
+    assert preview.current_alert_count == 1
+    assert preview.candidate_alert_count == 0
+    assert preview.available is True
+
+
+def test_alert_selected_history_is_not_presented_as_complete_preview() -> None:
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    store = FeatureStoreData(
+        alerts=[
+            SimpleNamespace(
+                timestamp=now - timedelta(hours=index),
+                circuit_id="ev",
+                feature="circuit_capacity",
+                features={"capacity_usage_percent": 91 + (index % 5)},
+            )
+            for index in range(20)
+        ]
+    )
+
+    preview = build_setting_impact_preview(
+        "warning_ratio",
+        0.9,
+        0.8,
+        setting_preview_observations(store, "ev", "warning_ratio"),
+        now=now,
+    )
+
+    assert preview.available is False
+    assert preview.observations_evaluated == 0
+    assert preview.current_alert_count == 0
+    assert preview.candidate_alert_count == 0
+    assert preview.confidence == 0.0
+    assert any("current setting" in item for item in preview.limitations)
+
+
+def test_raw_preview_history_wins_alert_collision_and_excludes_alerts() -> None:
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    collision_time = now - timedelta(days=1)
+    store = FeatureStoreData(
+        contextual_baseline_samples_by_circuit={
+            "ev": [
+                {
+                    "timestamp": (now - timedelta(days=2)).isoformat(),
+                    "feature": "peak_demand_w",
+                    "value": 1800.0,
+                },
+                {
+                    "timestamp": collision_time.isoformat(),
+                    "feature": "peak_demand_w",
+                    "value": 2400.0,
+                },
+            ]
+        },
+        alerts=[
+            SimpleNamespace(
+                timestamp=collision_time,
+                circuit_id="ev",
+                feature="demand_limit",
+                observed_value=2400.0,
+            ),
+            SimpleNamespace(
+                timestamp=now - timedelta(hours=12),
+                circuit_id="ev",
+                feature="demand_limit",
+                observed_value=3000.0,
+            ),
+        ],
+    )
+
+    observations = setting_preview_observations(store, "ev", "demand_limit_w")
+    collision = next(item for item in observations if item["value"] == 2400.0)
+    preview = build_setting_impact_preview(
+        "demand_limit_w",
+        2000.0,
+        2500.0,
+        observations,
+        now=now,
+    )
+
+    assert "threshold_selected" not in collision
+    assert preview.available is True
     assert preview.observations_evaluated == 2
     assert preview.current_alert_count == 1
     assert preview.candidate_alert_count == 0

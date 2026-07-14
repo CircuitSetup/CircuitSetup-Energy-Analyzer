@@ -1450,7 +1450,8 @@
         "preview_count": "{label}: {count} {metric}",
         "preview_removed": "Would no longer trigger: {examples}",
         "preview_added": "Would newly trigger: {examples}",
-        "preview_limitations": "Limitations"
+        "preview_limitations": "Limitations",
+        "preview_alert_selected_history": "A reliable preview is unavailable because retained history contains only alerts selected by the current setting."
       },
       "nilm_workspace": {
         "loading": "Loading NILM workspace...",
