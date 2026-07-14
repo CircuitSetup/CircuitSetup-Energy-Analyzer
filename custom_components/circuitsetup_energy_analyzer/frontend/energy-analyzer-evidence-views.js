@@ -500,25 +500,18 @@ export function createEvidenceViewMethods({
     const selectAttrs = alert.nilm_select_interval
       ? ` tabindex="0" data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
       : "";
-    const dataItems = [
-      ...series.flatMap((item) => item.points.map((point) => pointTitle(item, point))),
-      ...sessionItems.map(({ session, start, end, confidenceValue }) => {
-        const label = this._nilmSessionGraphLabel(session);
-        const sessionId = session.session_id || this._panelText("nilm_workspace.nilm_session");
-        const title = label ? this._panelTextFormat("chart.session_title", { label, session_id: sessionId }) : sessionId;
-        const confidence = confidenceValue !== null ? this._panelTextFormat("chart.session_confidence", { confidence: Math.round(confidenceValue * 100) }) : "";
-        return `${title}: ${this._formatDateTime(new Date(start))} - ${this._formatDateTime(new Date(end))}${confidence}`;
-      }),
-      ...edgeItems.map((edge) => `${this._friendlyFeature(edge.direction)}: ${this._formatDateTime(new Date(edge.time))}`),
-    ];
-    const dataFallback = `<p class="muted chart-data-summary">${this._escape(this._panelTextFormat("chart.data_summary", { count: dataItems.length }))}</p>
-      <details class="action-disclosure chart-data-fallback">
-        <summary>${this._escape(this._panelText("chart.data_fallback"))}</summary>
-        <ul>${dataItems.map((item) => `<li>${this._escape(item)}</li>`).join("")}</ul>
-      </details>`;
+    const ariaLabel = this._panelTextFormat("chart.accessible_summary", {
+      series_count: series.length,
+      point_count: allPoints.length,
+      min: minLabel,
+      max: maxLabel,
+      unit,
+      start: this._formatDateTime(new Date(minTime)),
+      end: this._formatDateTime(new Date(maxTime)),
+    });
 
     return `
-      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(this._panelText("chart.alert_evidence_label"))}"${selectAttrs}>
+      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${selectAttrs}>
         <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
         <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
@@ -533,7 +526,6 @@ export function createEvidenceViewMethods({
       </svg>
       <div class="legend">${legend}</div>
       <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
-      ${dataFallback}
     `;
   }
 

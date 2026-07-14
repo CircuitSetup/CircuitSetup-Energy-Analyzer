@@ -133,13 +133,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             font-weight: 600;
             margin-top: 8px;
           }
-          .action-disclosure > summary {
-            box-sizing: border-box;
-            cursor: pointer;
-            line-height: 20px;
-            min-height: 44px;
-            padding: 12px 0;
-          }
           .chart {
             height: auto;
             max-width: 100%;
