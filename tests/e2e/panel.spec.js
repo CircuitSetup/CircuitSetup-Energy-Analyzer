@@ -90,7 +90,6 @@ async function openDashboardGraphs(page) {
     window.__panel = dashboard;
   });
   const dashboard = page.locator("circuitsetup-energy-analyzer-dashboard-graphs");
-  await expect(dashboard.locator(".chart-data-fallback")).toBeVisible();
   return dashboard;
 }
 
@@ -151,26 +150,18 @@ test("major panel routes pass automated accessibility checks", async ({ page }) 
   }
 });
 
-test("dashboard chart data fallback is keyboard accessible and responsive", async ({ page, isMobile }) => {
+test("dashboard chart keeps detail link without chart data disclosure", async ({ page, isMobile }) => {
   await mockPanelApi(page);
   const dashboard = await openDashboardGraphs(page);
-  const disclosure = dashboard.locator(".chart-data-fallback");
-  const summary = disclosure.locator(":scope > summary");
   const detailLink = dashboard.locator("[data-dashboard-alert-detail]");
 
-  await expect(dashboard.locator("svg.chart")).toBeVisible();
+  const chart = dashboard.locator("svg.chart");
+  await expect(chart).toBeVisible();
+  await expect(chart).toHaveAttribute("aria-label", /Alert evidence chart with 1 series and 3 points\./);
   await expect(detailLink).toBeVisible();
-  await expect(disclosure.locator("[data-dashboard-alert-detail]")).toHaveCount(0);
-  await expect(summary).toHaveCSS("cursor", "pointer");
-  expect((await summary.boundingBox()).height).toBeGreaterThanOrEqual(44);
-
-  await summary.focus();
-  await expect(summary).toBeFocused();
-  await summary.press("Enter");
-  await expect(disclosure).toHaveAttribute("open", "");
-  await expect(disclosure.locator("li")).toHaveCount(3);
-  await summary.press("Space");
-  await expect(disclosure).not.toHaveAttribute("open", "");
+  await expect(dashboard.locator(".chart-data-fallback")).toHaveCount(0);
+  await expect(dashboard.locator(".chart-data-summary")).toHaveCount(0);
+  await expect(dashboard.getByText("View chart data")).toHaveCount(0);
 
   const layout = await dashboard.evaluate((host) => {
     const chart = host.shadowRoot.querySelector("svg.chart").getBoundingClientRect();

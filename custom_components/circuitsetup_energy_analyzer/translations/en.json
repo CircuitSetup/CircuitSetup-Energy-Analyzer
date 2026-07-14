@@ -1511,15 +1511,13 @@
         "sensor_count": "{count} {noun}"
       },
       "chart": {
-        "alert_evidence_label": "Alert evidence chart",
+        "accessible_summary": "Alert evidence chart with {series_count} series and {point_count} points. Values range from {min}{unit} to {max}{unit}, from {start} to {end}.",
         "loading_history": "Loading history samples...",
         "no_history": "No history samples were available for this graph window.",
         "graph_times": "Graph times shown in {time_zone}.",
         "point_title": "{name}: {value}{unit} at {time}",
         "session_title": "{label} ({session_id})",
         "session_confidence": ", confidence {confidence}%",
-        "data_summary": "{count} chart data items available.",
-        "data_fallback": "View chart data",
         "changed_by": "{feature} changed by {percent}%.",
         "changed_metrics": "Changed metrics: {metrics}.",
         "change_fallback": "The analyzer found a repeated change.",
