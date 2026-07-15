@@ -113,3 +113,22 @@ def test_context_builder_normalizes_temperature_readings() -> None:
         "display_unit": "°C",
         "source_unit": "°C",
     }
+
+
+def test_context_builder_reuses_contextual_samples_cache() -> None:
+    now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(),
+        store_data=SimpleNamespace(),
+        options={},
+        entry_data={},
+        circuit_registry=SimpleNamespace(known_load_circuit_ids=frozenset()),
+        settings_controller=SimpleNamespace(default_sensitivity="balanced"),
+    )
+    builder = ProcessingContextBuilder(coordinator)
+
+    first = builder.build(now)
+    second = builder.build(now + timedelta(seconds=10))
+
+    assert first.contextual_samples_cache is second.contextual_samples_cache
