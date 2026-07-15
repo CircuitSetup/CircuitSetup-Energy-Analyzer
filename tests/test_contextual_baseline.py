@@ -365,6 +365,86 @@ def test_contextual_sample_serialization_normalizes_invalid_weight() -> None:
     assert restored.weight == 0.0
 
 
+def test_stored_contextual_samples_reuses_update_cache(monkeypatch) -> None:
+    raw_samples = [
+        {
+            "timestamp": datetime(2026, 6, 1, tzinfo=UTC).isoformat(),
+            "feature": "daily_energy_kwh",
+            "value": 12.0,
+            "context": {"season": "summer"},
+        }
+    ]
+    calls = 0
+    original = contextual_baseline.contextual_sample_from_dict
+
+    def counting_sample_from_dict(circuit_id: str, raw: dict[str, object]):
+        nonlocal calls
+        calls += 1
+        return original(circuit_id, raw)
+
+    monkeypatch.setattr(
+        contextual_baseline,
+        "contextual_sample_from_dict",
+        counting_sample_from_dict,
+    )
+    cache = {}
+
+    first = contextual_baseline.stored_contextual_samples(
+        "hvac",
+        raw_samples,
+        cache=cache,
+    )
+    second = contextual_baseline.stored_contextual_samples(
+        "hvac",
+        raw_samples,
+        cache=cache,
+    )
+
+    assert first == second
+    assert calls == 1
+
+
+def test_upsert_contextual_sample_reuses_update_cache(monkeypatch) -> None:
+    raw_samples = [
+        {
+            "timestamp": datetime(2026, 6, 1, tzinfo=UTC).isoformat(),
+            "feature": "daily_energy_kwh",
+            "value": 12.0,
+            "context": {"season": "summer"},
+        }
+    ]
+    calls = 0
+    original = contextual_baseline.contextual_sample_from_dict
+
+    def counting_sample_from_dict(circuit_id: str, raw: dict[str, object]):
+        nonlocal calls
+        calls += 1
+        return original(circuit_id, raw)
+
+    monkeypatch.setattr(
+        contextual_baseline,
+        "contextual_sample_from_dict",
+        counting_sample_from_dict,
+    )
+    cache = {}
+    contextual_baseline.stored_contextual_samples("hvac", raw_samples, cache=cache)
+
+    contextual_baseline.upsert_contextual_sample(
+        raw_samples,
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=13.0,
+            context=ContextKey.from_mapping({"season": "summer"}),
+        ),
+        cache=cache,
+    )
+
+    assert calls == 1
+    assert len(raw_samples) == 2
+
+
 def test_exact_context_requires_matching_dimension_set() -> None:
     less_specific = ContextKey.from_mapping({"season": "summer"})
     more_specific = ContextKey.from_mapping(

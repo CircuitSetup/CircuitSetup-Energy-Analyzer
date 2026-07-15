@@ -42,6 +42,11 @@ class ProcessingContext:
     known_load_circuit_ids: frozenset[str]
     sensitivity: str
     time_zone: str | None = None
+    contextual_samples_cache: dict[tuple[str, tuple[int, ...]], Any] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass(slots=True)

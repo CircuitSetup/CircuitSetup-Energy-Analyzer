@@ -136,6 +136,7 @@ class RunCycleProcessor:
                     context_key=context_key,
                     now=context.now,
                     time_zone=context.time_zone,
+                    contextual_samples_cache=context.contextual_samples_cache,
                 )
             )
             return feature_result
@@ -145,6 +146,7 @@ class RunCycleProcessor:
             feature=evidence.feature,
             observed_value=evidence.observed_value,
             context_key=context_key,
+            contextual_samples_cache=context.contextual_samples_cache,
         )
         feature_result.store_dirty = (
             feature_result.store_dirty
@@ -155,6 +157,7 @@ class RunCycleProcessor:
                 context_key=context_key,
                 now=context.now,
                 time_zone=context.time_zone,
+                contextual_samples_cache=context.contextual_samples_cache,
             )
         )
         if contextual_comparison.get("comparison_basis") == "contextual":
@@ -255,6 +258,7 @@ def _record_contextual_cycle_samples(
     context_key: Any,
     now: datetime,
     time_zone: str | None = None,
+    contextual_samples_cache: Any | None = None,
 ) -> bool:
     if not context_allows_baseline_learning(context_key):
         return False
@@ -277,6 +281,7 @@ def _record_contextual_cycle_samples(
                 source="run_cycle",
             ),
             time_zone=time_zone,
+            cache=contextual_samples_cache,
         )
     return before != samples
 
@@ -288,6 +293,7 @@ def _contextual_cycle_comparison(
     feature: str,
     observed_value: float,
     context_key: Any,
+    contextual_samples_cache: Any,
 ) -> dict[str, Any]:
     raw_samples = store_data.contextual_baseline_samples_by_circuit.get(
         circuit_id,
@@ -296,7 +302,11 @@ def _contextual_cycle_comparison(
     selected = select_contextual_baseline(
         circuit_id=circuit_id,
         feature=feature,
-        samples=stored_contextual_samples(circuit_id, raw_samples),
+        samples=stored_contextual_samples(
+            circuit_id,
+            raw_samples,
+            cache=contextual_samples_cache,
+        ),
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
     if selected is None:

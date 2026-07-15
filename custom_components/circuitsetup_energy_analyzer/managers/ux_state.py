@@ -142,6 +142,9 @@ class UxStateManager:
                 summary=cycle_summary,
                 now=now,
                 time_zone=coordinator.context_builder.time_zone(),
+                contextual_samples_cache=(
+                    context.contextual_samples_cache if context is not None else None
+                ),
             )
         )
         coordinator.state.run_cycle_evidence_by_circuit[circuit_id] = cycle_evidence
@@ -235,6 +238,7 @@ def _same_time_cycle_evidence(
     summary: Any,
     now: datetime,
     time_zone: str | None,
+    contextual_samples_cache: Any | None = None,
 ) -> dict[str, Any]:
     context_sample = sample or NormalizedCircuitSample(
         timestamp=now,
@@ -247,7 +251,11 @@ def _same_time_cycle_evidence(
     )
     historical = [
         item
-        for item in stored_contextual_samples(config.circuit_id, raw_samples)
+        for item in stored_contextual_samples(
+            config.circuit_id,
+            raw_samples,
+            cache=contextual_samples_cache,
+        )
         if local_date(item.timestamp, time_zone) < current_date
     ]
     evidence: dict[str, Any] = {

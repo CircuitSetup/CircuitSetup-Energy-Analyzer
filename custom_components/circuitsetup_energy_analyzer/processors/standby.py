@@ -218,7 +218,11 @@ def _contextual_standby_comparison(
     selected = select_contextual_baseline(
         circuit_id=circuit_config.circuit_id,
         feature=STANDBY_POWER_FEATURE,
-        samples=stored_contextual_samples(circuit_config.circuit_id, raw_samples),
+        samples=stored_contextual_samples(
+            circuit_config.circuit_id,
+            raw_samples,
+            cache=context.contextual_samples_cache,
+        ),
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
@@ -244,9 +248,14 @@ def _contextual_standby_comparison(
                 source="standby",
             ),
             time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
         )
         sample_recorded = before != samples
-        updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)
+        updated_samples = stored_contextual_samples(
+            circuit_config.circuit_id,
+            samples,
+            cache=context.contextual_samples_cache,
+        )
         exact = select_contextual_baseline(
             circuit_id=circuit_config.circuit_id,
             feature=STANDBY_POWER_FEATURE,

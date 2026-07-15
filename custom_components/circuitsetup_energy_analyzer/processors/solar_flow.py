@@ -232,7 +232,11 @@ def _solar_contextual_evidence(
     selected = select_contextual_baseline(
         circuit_id=config.circuit_id,
         feature=SOLAR_SURPLUS_CONTEXT_FEATURE,
-        samples=stored_contextual_samples(config.circuit_id, raw_samples),
+        samples=stored_contextual_samples(
+            config.circuit_id,
+            raw_samples,
+            cache=context.contextual_samples_cache,
+        ),
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
     evidence: dict[str, Any] = {}
@@ -271,6 +275,7 @@ def _solar_contextual_evidence(
                     source="solar_flow",
                 ),
                 time_zone=context.time_zone,
+                cache=context.contextual_samples_cache,
             )
         return evidence, store_dirty or before != samples
     return evidence, store_dirty

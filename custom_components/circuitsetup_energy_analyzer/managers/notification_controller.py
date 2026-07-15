@@ -90,6 +90,9 @@ class NotificationController:
         pending = state.get("deferred", [])
         if not isinstance(pending, list):
             pending = []
+        daily_queue = state.get("daily", [])
+        if not pending and (not isinstance(daily_queue, list) or not daily_queue):
+            return
         remaining: list[dict[str, Any]] = []
         alerts_by_id = {
             notifications.notification_id_for_alert(alert): alert
