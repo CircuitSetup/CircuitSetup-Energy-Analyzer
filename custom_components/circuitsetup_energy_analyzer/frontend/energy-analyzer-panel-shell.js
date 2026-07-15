@@ -123,7 +123,7 @@ export class PanelShellMethods {
           padding: 16px 0 0;
         }
         .comparison-scale {
-          min-height: 160px;
+          min-height: 96px;
           margin: 4px 64px 0;
           position: relative;
         }
@@ -134,7 +134,7 @@ export class PanelShellMethods {
           left: 0;
           position: absolute;
           right: 0;
-          top: 61px;
+          top: 42px;
         }
         .comparison-marker {
           bottom: 0;
@@ -147,10 +147,10 @@ export class PanelShellMethods {
         .comparison-marker::before {
           background: var(--primary-color, #0b6bcb);
           content: "";
-          height: 28px;
+          height: 22px;
           left: 0;
           position: absolute;
-          top: 50px;
+          top: 32px;
           width: 2px;
         }
         .comparison-marker span,
@@ -173,10 +173,21 @@ export class PanelShellMethods {
         }
         .comparison-marker.expected span { top: 0; }
         .comparison-marker.expected strong { top: 18px; }
-        .comparison-marker.threshold span { top: 84px; }
-        .comparison-marker.threshold strong { top: 102px; }
-        .comparison-marker.observed span { top: 122px; }
-        .comparison-marker.observed strong { top: 140px; }
+        .comparison-marker.align-left span,
+        .comparison-marker.align-left strong {
+          left: auto;
+          right: 6px;
+          transform: none;
+        }
+        .comparison-marker.align-right span,
+        .comparison-marker.align-right strong {
+          left: 6px;
+          transform: none;
+        }
+        .comparison-marker.threshold span,
+        .comparison-marker.observed span { top: 60px; }
+        .comparison-marker.threshold strong,
+        .comparison-marker.observed strong { top: 78px; }
         .comparison-marker.threshold::before {
           background: var(--warning-color, #f4b400);
         }

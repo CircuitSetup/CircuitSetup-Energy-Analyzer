@@ -20,7 +20,7 @@ export const evidence = {
     what_to_check_first: "Confirm the appliance ran when expected.",
     graph_entities: ["sensor.kitchen_power"],
     graph_window_start: "2026-07-13T17:00:00Z",
-    graph_window_end: "2026-07-13T20:00:00Z",
+    graph_window_end: "2026-07-13T19:30:00Z",
     y_axis_label: "W",
   },
   actions: {
@@ -76,7 +76,7 @@ export const evidence = {
 export const chartHistory = [[
   { entity_id: "sensor.kitchen_power", state: "420", last_changed: "2026-07-13T17:00:00Z" },
   { entity_id: "sensor.kitchen_power", state: "980", last_changed: "2026-07-13T18:30:00Z" },
-  { entity_id: "sensor.kitchen_power", state: "610", last_changed: "2026-07-13T20:00:00Z" },
+  { entity_id: "sensor.kitchen_power", state: "610", last_changed: "2026-07-13T19:30:00Z" },
 ]];
 
 export const applianceInsights = {
