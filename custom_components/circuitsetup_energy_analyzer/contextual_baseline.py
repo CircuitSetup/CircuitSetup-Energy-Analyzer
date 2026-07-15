@@ -655,6 +655,18 @@ def contextual_stats_storage_key(stats: ContextualBaselineStats) -> str:
     return f"{stats.feature}|{stats.context_fingerprint}"
 
 
+def _set_cached_contextual_samples(
+    cache: ContextualSamplesCache,
+    circuit_id: str,
+    raw_samples: Sequence[Mapping[str, Any]],
+    parsed_samples: list[ContextualBaselineSample],
+) -> None:
+    for key in tuple(cache):
+        if key[0] == circuit_id:
+            cache.pop(key, None)
+    cache[(circuit_id, tuple(id(raw) for raw in raw_samples))] = parsed_samples
+
+
 def stored_contextual_samples(
     circuit_id: str,
     raw_samples: Iterable[Mapping[str, Any]],
@@ -672,7 +684,7 @@ def stored_contextual_samples(
         if sample is not None:
             samples.append(sample)
     if cache is not None:
-        cache[cache_key] = samples
+        _set_cached_contextual_samples(cache, circuit_id, raw_items, samples)
     return samples
 
 
@@ -692,7 +704,8 @@ def upsert_contextual_sample(
         samples,
         cache=cache,
     )
-    if len(existing_samples) == len(samples):
+    all_samples_valid = len(existing_samples) == len(samples)
+    if all_samples_valid:
         indexed_samples = enumerate(existing_samples)
     else:
         indexed_samples = (
@@ -714,8 +727,24 @@ def upsert_contextual_sample(
             and existing_sample.context.fingerprint() == fingerprint
         ):
             samples[index] = payload
+            if cache is not None and all_samples_valid:
+                updated_samples = list(existing_samples)
+                updated_samples[index] = sample
+                _set_cached_contextual_samples(
+                    cache,
+                    sample.circuit_id,
+                    samples,
+                    updated_samples,
+                )
             return
     samples.append(payload)
+    if cache is not None and all_samples_valid:
+        _set_cached_contextual_samples(
+            cache,
+            sample.circuit_id,
+            samples,
+            [*existing_samples, sample],
+        )
 
 
 def context_allows_baseline_learning(context: ContextKey) -> bool:

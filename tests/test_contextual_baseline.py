@@ -404,7 +404,9 @@ def test_stored_contextual_samples_reuses_update_cache(monkeypatch) -> None:
     assert calls == 1
 
 
-def test_upsert_contextual_sample_reuses_update_cache(monkeypatch) -> None:
+def test_upsert_contextual_sample_keeps_update_cache_synchronized(
+    monkeypatch,
+) -> None:
     raw_samples = [
         {
             "timestamp": datetime(2026, 6, 1, tzinfo=UTC).isoformat(),
@@ -427,7 +429,11 @@ def test_upsert_contextual_sample_reuses_update_cache(monkeypatch) -> None:
         counting_sample_from_dict,
     )
     cache = {}
-    contextual_baseline.stored_contextual_samples("hvac", raw_samples, cache=cache)
+    contextual_baseline.stored_contextual_samples(
+        "hvac",
+        raw_samples,
+        cache=cache,
+    )
 
     contextual_baseline.upsert_contextual_sample(
         raw_samples,
@@ -440,9 +446,33 @@ def test_upsert_contextual_sample_reuses_update_cache(monkeypatch) -> None:
         ),
         cache=cache,
     )
+    after_append = contextual_baseline.stored_contextual_samples(
+        "hvac",
+        raw_samples,
+        cache=cache,
+    )
+
+    contextual_baseline.upsert_contextual_sample(
+        raw_samples,
+        ContextualBaselineSample(
+            timestamp=datetime(2026, 6, 2, tzinfo=UTC),
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=14.0,
+            context=ContextKey.from_mapping({"season": "summer"}),
+        ),
+        cache=cache,
+    )
+    after_replace = contextual_baseline.stored_contextual_samples(
+        "hvac",
+        raw_samples,
+        cache=cache,
+    )
 
     assert calls == 1
-    assert len(raw_samples) == 2
+    assert [sample.value for sample in after_append] == [12.0, 13.0]
+    assert [sample.value for sample in after_replace] == [12.0, 14.0]
+    assert len(cache) == 1
 
 
 def test_exact_context_requires_matching_dimension_set() -> None:

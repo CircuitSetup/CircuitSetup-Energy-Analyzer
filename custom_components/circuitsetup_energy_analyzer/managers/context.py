@@ -17,6 +17,10 @@ class ProcessingContextBuilder:
 
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
+        self._contextual_samples_cache: dict[
+            tuple[str, tuple[int, ...]],
+            Any,
+        ] = {}
 
     def time_zone(self) -> str | None:
         value = getattr(
@@ -38,6 +42,7 @@ class ProcessingContextBuilder:
             known_load_circuit_ids=coordinator.circuit_registry.known_load_circuit_ids,
             sensitivity=coordinator.settings_controller.default_sensitivity,
             time_zone=self.time_zone(),
+            contextual_samples_cache=self._contextual_samples_cache,
         )
 
     def configured_context_entity(self, key: str) -> str:
