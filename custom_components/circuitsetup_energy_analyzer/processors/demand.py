@@ -295,7 +295,11 @@ def _contextual_demand_comparison(
     current_local_date = local_date(context.now, context.time_zone)
     historical_samples = [
         item
-        for item in stored_contextual_samples(circuit_config.circuit_id, raw_samples)
+        for item in stored_contextual_samples(
+            circuit_config.circuit_id,
+            raw_samples,
+            cache=context.contextual_samples_cache,
+        )
         if local_date(item.timestamp, context.time_zone) < current_local_date
     ]
     selected = select_contextual_baseline(
@@ -325,9 +329,14 @@ def _contextual_demand_comparison(
                 source="demand",
             ),
             time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
         )
         sample_recorded = before != samples
-        updated_samples = stored_contextual_samples(circuit_config.circuit_id, samples)
+        updated_samples = stored_contextual_samples(
+            circuit_config.circuit_id,
+            samples,
+            cache=context.contextual_samples_cache,
+        )
         exact = select_contextual_baseline(
             circuit_id=circuit_config.circuit_id,
             feature=DEMAND_PEAK_FEATURE,

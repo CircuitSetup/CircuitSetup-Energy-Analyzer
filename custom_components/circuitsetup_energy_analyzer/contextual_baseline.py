@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from math import isfinite
@@ -112,6 +112,12 @@ class ContextualBaselineSample:
     context: ContextKey
     source: str = "processor"
     weight: float = 1.0
+
+
+ContextualSamplesCache = MutableMapping[
+    tuple[str, tuple[int, ...]],
+    list[ContextualBaselineSample],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -652,12 +658,21 @@ def contextual_stats_storage_key(stats: ContextualBaselineStats) -> str:
 def stored_contextual_samples(
     circuit_id: str,
     raw_samples: Iterable[Mapping[str, Any]],
+    *,
+    cache: ContextualSamplesCache | None = None,
 ) -> list[ContextualBaselineSample]:
+    raw_items = list(raw_samples)
+    if cache is not None:
+        cache_key = (circuit_id, tuple(id(raw) for raw in raw_items))
+        if cache_key in cache:
+            return cache[cache_key]
     samples: list[ContextualBaselineSample] = []
-    for raw in raw_samples:
+    for raw in raw_items:
         sample = contextual_sample_from_dict(circuit_id, raw)
         if sample is not None:
             samples.append(sample)
+    if cache is not None:
+        cache[cache_key] = samples
     return samples
 
 
@@ -666,15 +681,32 @@ def upsert_contextual_sample(
     sample: ContextualBaselineSample,
     *,
     time_zone: TimeZone = None,
+    cache: ContextualSamplesCache | None = None,
 ) -> None:
     """Insert or replace one feature sample for the same local date/context."""
     payload = contextual_sample_to_dict(sample)
     fingerprint = sample.context.fingerprint()
     sample_date = _sample_calendar_date(sample.timestamp, time_zone)
-    for index, existing in enumerate(samples):
-        existing_sample = contextual_sample_from_dict(sample.circuit_id, existing)
-        if existing_sample is None:
-            continue
+    existing_samples = stored_contextual_samples(
+        sample.circuit_id,
+        samples,
+        cache=cache,
+    )
+    if len(existing_samples) == len(samples):
+        indexed_samples = enumerate(existing_samples)
+    else:
+        indexed_samples = (
+            (index, existing_sample)
+            for index, existing in enumerate(samples)
+            if (
+                existing_sample := contextual_sample_from_dict(
+                    sample.circuit_id,
+                    existing,
+                )
+            )
+            is not None
+        )
+    for index, existing_sample in indexed_samples:
         if (
             existing_sample.feature == sample.feature
             and _sample_calendar_date(existing_sample.timestamp, time_zone)

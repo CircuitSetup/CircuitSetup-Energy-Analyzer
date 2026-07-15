@@ -435,3 +435,28 @@ async def test_daily_queue_waits_for_next_home_assistant_local_day(monkeypatch) 
 
     assert summaries == []
     assert store_data.notification_delivery_state["daily"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_due_skips_alert_history_when_queues_are_empty() -> None:
+    class AlertHistory:
+        def __iter__(self):
+            raise AssertionError("alert history should not be scanned")
+
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        notification_delivery_state={},
+        alerts=AlertHistory(),
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
+    )
+
+    await controller.async_dispatch_due(datetime(2026, 7, 14, 1, tzinfo=UTC))
