@@ -766,8 +766,18 @@ export function createEvidenceViewMethods({
       percentChange: expected === 0 ? null : ((observed - expected) / Math.abs(expected)) * 100,
       markers: [
         { key: "expected", value: expected, position: position(expected) },
-        ...(threshold === null ? [] : [{ key: "threshold", value: threshold, position: position(threshold) }]),
-        { key: "observed", value: observed, position: position(observed) },
+        ...(threshold === null ? [] : [{
+          key: "threshold",
+          value: threshold,
+          position: position(threshold),
+          labelClass: threshold <= observed ? "align-left" : "align-right",
+        }]),
+        {
+          key: "observed",
+          value: observed,
+          position: position(observed),
+          labelClass: threshold !== null && threshold > observed ? "align-left" : "align-right",
+        },
       ],
     };
   }
@@ -811,7 +821,7 @@ export function createEvidenceViewMethods({
       ${alert && alert.value_label ? `<p class="comparison-metric">${this._escape(alert.value_label)}</p>` : ""}
       <div class="comparison-scale" role="img" aria-label="${this._escape(summary)}">
         <div class="comparison-track"></div>
-        ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatAlertMetricValue(alert, marker.value))}</strong></span>`).join("")}
+        ${scale.markers.map((marker) => `<span class="comparison-marker ${marker.key} ${marker.labelClass || ""}" data-comparison-marker="${marker.key}" style="left:${marker.position}%"><span>${this._escape(this._panelText(`evidence.labels.${marker.key}`))}</span><strong>${this._escape(this._formatAlertMetricValue(alert, marker.value))}</strong></span>`).join("")}
       </div>
     </section>`;
   }

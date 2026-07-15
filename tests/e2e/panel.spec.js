@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { apiPayload } from "./panel-fixtures.js";
+import { apiPayload, evidence } from "./panel-fixtures.js";
 
 const HARNESS = "/tests/e2e/panel.html";
 const browserLogs = new WeakMap();
@@ -148,6 +148,59 @@ test("major panel routes pass automated accessibility checks", async ({ page }) 
     await openPanel(page, query);
     await toHaveNoViolations(page);
   }
+});
+
+test("matched alert graph ends at evidence and keeps comparison compact", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?alert_id=alert-kitchen-energy");
+  const chart = panel.locator("svg.chart");
+  await expect(chart).toBeVisible();
+  await expect(chart).toHaveAttribute("aria-label", /7:30PM/);
+
+  const layout = await panel.locator(".comparison-scale").evaluate((scale) => {
+    const track = scale.querySelector(".comparison-track").getBoundingClientRect();
+    const observed = scale.querySelector(".comparison-marker.observed strong").getBoundingClientRect();
+    const thresholdLabel = scale.querySelector(".comparison-marker.threshold span").getBoundingClientRect();
+    const observedLabel = scale.querySelector(".comparison-marker.observed span").getBoundingClientRect();
+    const thresholdValue = scale.querySelector(".comparison-marker.threshold strong").getBoundingClientRect();
+    return {
+      height: scale.getBoundingClientRect().height,
+      observedGap: observed.top - track.bottom,
+      markersOverlap: (
+        thresholdLabel.right > observedLabel.left
+        || thresholdValue.right > observed.left
+      ),
+    };
+  });
+  expect(layout.height).toBeLessThanOrEqual(100);
+  expect(layout.observedGap).toBeLessThanOrEqual(35);
+  expect(layout.markersOverlap).toBe(false);
+});
+
+test("matched low-side alert keeps comparison markers apart", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/alert_evidence")) return false;
+    await route.fulfill({
+      json: {
+        ...evidence,
+        alert: {
+          ...evidence.alert,
+          observed_value: 1.6,
+          expected_value: 2.0,
+          baseline_value: 2.0,
+          threshold: 1.8,
+        },
+      },
+    });
+    return true;
+  });
+  const panel = await openPanel(page, "?alert_id=alert-kitchen-energy");
+  const markersOverlap = await panel.locator(".comparison-scale").evaluate((scale) => {
+    const threshold = scale.querySelector(".comparison-marker.threshold span").getBoundingClientRect();
+    const observed = scale.querySelector(".comparison-marker.observed span").getBoundingClientRect();
+    return threshold.right > observed.left && observed.right > threshold.left;
+  });
+  expect(markersOverlap).toBe(false);
 });
 
 test("dashboard chart keeps detail link without chart data disclosure", async ({ page, isMobile }) => {
