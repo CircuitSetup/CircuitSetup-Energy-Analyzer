@@ -235,7 +235,7 @@ def test_alert_source_entities_returns_empty_without_config() -> None:
     assert alert_source_entities(None) == ()
 
 
-def test_alert_graph_window_wraps_first_and_last_seen() -> None:
+def test_alert_graph_window_adds_context_before_first_seen() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,
     )
@@ -244,7 +244,7 @@ def test_alert_graph_window_wraps_first_and_last_seen() -> None:
 
     assert window == (
         datetime(2026, 6, 5, 8, 0, tzinfo=UTC),
-        datetime(2026, 6, 5, 14, 30, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
     )
 
 
@@ -263,5 +263,5 @@ def test_alert_graph_window_adds_proportional_context_for_longer_evidence() -> N
 
     assert window == (
         datetime(2026, 6, 3, 18, 0, tzinfo=UTC),
-        datetime(2026, 6, 4, 18, 0, tzinfo=UTC),
+        datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
     )

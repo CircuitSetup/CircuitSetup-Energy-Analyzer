@@ -136,14 +136,14 @@ def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
 def alert_graph_window(
     alert: AlertEvidence, *, padding: timedelta = timedelta(hours=2)
 ) -> tuple[datetime, datetime]:
-    """Return the graph start/end datetimes around the alert evidence window."""
+    """Return the graph window ending at the alert evidence."""
     raw_start = alert.first_seen or alert.timestamp
     raw_end = alert.last_seen or alert.timestamp
     start = min(raw_start, raw_end)
     end = max(raw_start, raw_end)
     span_padding = min((end - start) / 2, MAX_GRAPH_CONTEXT_PADDING)
     context_padding = max(padding, span_padding)
-    return (start - context_padding, end + context_padding)
+    return (start - context_padding, end)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
