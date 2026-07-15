@@ -157,29 +157,15 @@ questions instead of raw diagnostic entity lists:
   appliance findings, and NILM validation work. Findings are ranked, limited
   to three per appliance, and semantically deduplicated so repeated energy
   wording does not crowd out electrical or data-quality issues.
-- **Session Timeline** pairs retained start/stop transitions for direct meters
-  and uses assignment-only NILM sessions for estimates. Solid blocks are
-  direct, dashed blocks are estimated, open runs have an open edge, and
-  maintenance or alert markers remain visible with a text detail fallback.
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
   and reset/apply/dismiss actions. Supported threshold suggestions also include
   a bounded, non-mutating preview of the alerts or operating-state changes the
   candidate would have produced from up to 14 days and 500 retained samples.
   The preview is historical guidance, not a prediction of future behavior.
-- **Appliance Notifications** in Appliance Detail controls finished, runtime,
-  energy, electrical, capacity/demand, data-quality, and NILM-review categories
-  without creating one entity per preference. Delivery can be immediate, a
-  daily queue, weekly-digest-only, or disabled, with local quiet hours,
-  cooldown, and a NILM-only confidence floor.
 - **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
   each appliance's own normal separately from top energy users and can stay in
   the panel or use a persistent/mobile notification target.
-- **Expected Schedule** is optional per appliance. Use a Home
-  Assistant Schedule entity or local weekday/time windows for loads such as a
-  pool pump or EV charger. One missed window stays in learning; outside-window
-  or missed-window findings require repeated evidence, fresh source data, and
-  no active maintenance before an alert is promoted.
 - **Appliance Insights** is the evidence panel's integration-level appliance
   index. It lists direct-meter and NILM appliances together, defaults to
   needs-attention and running appliances first, and supports running,

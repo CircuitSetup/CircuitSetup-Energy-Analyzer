@@ -1149,9 +1149,7 @@
         "action_unavailable_reason": "Action unavailable: {reason}.",
         "action_service_missing": "Action unavailable: {label}. The panel did not receive a service to call.",
         "service_calls_unavailable": "Home Assistant service calls are not available in this panel session. Reload Home Assistant and try again.",
-        "notification_preferences_save": "Could not save appliance notification preferences: {message}",
-        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}",
-        "expected_schedule_save": "Could not save the expected schedule: {message}"
+        "weekly_digest_settings_save": "Could not save weekly digest settings: {message}"
       },
       "messages": {
         "saved_label": "Saved label: {label}.",
@@ -1193,9 +1191,7 @@
         "showing_selected_signature": "Showing graph sessions for selected signature.",
         "no_paired_sessions": "No paired sessions matched this signature yet.",
         "updated_nilm_graph_window": "Updated NILM graph window.",
-        "notification_preferences_saved": "Appliance notification preferences saved.",
-        "weekly_digest_settings_saved": "Weekly digest settings saved.",
-        "expected_schedule_saved": "Expected schedule saved."
+        "weekly_digest_settings_saved": "Weekly digest settings saved."
       },
       "actions": {
         "groups": {
@@ -1280,11 +1276,7 @@
         "runtime_today": "Runtime Today",
         "runs_today": "Runs Today",
         "cost_today": "Cost Today",
-        "session_timeline": "Session Timeline",
         "recent_timeline": "Appliance Activity History",
-        "no_sessions": "No appliance sessions are available yet.",
-        "running_now": "Running now",
-        "maintenance_session": "Overlapped maintenance",
         "today_vs_normal": "Today vs Normal",
         "why_energy_changed": "Why Energy Changed",
         "energy_change_insufficient": "Not enough evidence is available to separate the causes of today's energy change.",
@@ -1298,7 +1290,6 @@
         "behavior_expectations": "Behavior Expectations",
         "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
-        "actions": "Actions",
         "learning_ranges": "Learning normal ranges for this appliance.",
         "comparison_summary": "Normal {normal}. Status {status}.",
         "projected_end_of_day": "Projected end of day",
@@ -1318,14 +1309,12 @@
         "expected_prefix": "Expected: {expected}",
         "no_active_alerts": "No active appliance alerts were found.",
         "repeated_count": "Repeated {count} times.",
-        "no_actions": "No actions are available for this appliance right now.",
         "no_history": "No recorded appliance energy data is available.",
         "time_period": "Time period",
         "history_24_hours": "Past 24 hours",
         "history_7_days": "Past 7 days",
         "history_30_days": "Past 30 days",
-        "history_window": "Showing {start} to {end}.",
-        "notifications": "Appliance Notifications"
+        "history_window": "Showing {start} to {end}."
       },
       "appliance_insights": {
         "loading": "Loading Appliance Insights...",
@@ -1358,28 +1347,6 @@
           "needs_attention": "Needs Attention"
         }
       },
-      "notifications": {
-        "delivery_mode": "Delivery mode",
-        "minimum_confidence": "Minimum NILM confidence",
-        "cooldown_minutes": "Cooldown minutes",
-        "quiet_hours_start": "Quiet hours start",
-        "quiet_hours_end": "Quiet hours end",
-        "categories": {
-          "finished_running": "Finished running",
-          "unusual_runtime": "Unusual runtime",
-          "high_daily_energy": "High daily energy",
-          "electrical_issue": "Electrical issue",
-          "capacity_demand_issue": "Capacity or demand issue",
-          "data_quality_issue": "Data quality issue",
-          "nilm_review_needed": "NILM review needed"
-        },
-        "delivery_modes": {
-          "immediate": "Immediate",
-          "daily_summary": "Daily summary",
-          "weekly_digest": "Weekly digest only",
-          "disabled": "Disabled"
-        }
-      },
       "weekly_digest": {
         "heading": "Weekly Appliance Digest",
         "enabled": "Create a weekly appliance digest",
@@ -1396,29 +1363,6 @@
           "panel_only": "Panel only",
           "persistent_notification": "Persistent notification",
           "mobile_notification": "Mobile notification"
-        }
-      },
-      "expected_schedule": {
-        "heading": "Expected Schedule",
-        "enabled": "Use an expected operating schedule",
-        "mode": "Schedule source",
-        "schedule_entity": "Home Assistant Schedule entity",
-        "local_windows": "Local time windows",
-        "select_schedule": "Select a Schedule entity",
-        "start": "Start",
-        "end": "End",
-        "weekdays": "Expected days",
-        "minimum_duration": "Minimum expected runtime (minutes)",
-        "add_window": "Add window",
-        "remove_window": "Remove window",
-        "days": {
-          "mon": "Mon",
-          "tue": "Tue",
-          "wed": "Wed",
-          "thu": "Thu",
-          "fri": "Fri",
-          "sat": "Sat",
-          "sun": "Sun"
         }
       },
       "attention": {

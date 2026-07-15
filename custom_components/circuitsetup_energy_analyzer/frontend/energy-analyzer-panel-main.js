@@ -152,7 +152,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data_problem: false,
     };
     this._applianceInsightsSort = "default";
-    this._expectedScheduleDraft = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailChartSeries = [];
     this._applianceDetailHistoryParsed = false;
@@ -282,7 +281,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryLoading = false;
     this._nilmWorkspace = null;
     this._applianceDetail = null;
-    this._expectedScheduleDraft = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailHistoryHours = 0;
     this._applianceDetailHistoryBounds = null;
@@ -644,48 +642,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return {};
   }
 
-  _renderSessionTimeline(sessions) {
-    const items = Array.isArray(sessions) ? sessions : [];
-    if (!items.length) {
-      return `<p class="muted">${this._escape(this._panelText("appliance_detail.no_sessions"))}</p>`;
-    }
-    return `<div class="session-strip-list">${items.map((session) => {
-      const start = new Date(session.start);
-      const end = session.end ? new Date(session.end) : new Date();
-      const startClock = this._timelineClockParts(start);
-      const endClock = this._timelineClockParts(end);
-      const crossesDay = startClock.dateKey !== endClock.dateKey || endClock.minutes < startClock.minutes;
-      const left = Math.max(0, Math.min(startClock.minutes / 14.4, 99.5));
-      const width = crossesDay
-        ? Math.max(0.5, 100 - left)
-        : Math.max(0.5, Math.min((endClock.minutes - startClock.minutes) / 14.4, 100 - left));
-      const hasAlerts = Array.isArray(session.alert_ids) && session.alert_ids.length;
-      const classes = [session.source_type, session.status, session.maintenance ? "maintenance" : "", hasAlerts ? "has-alert" : "", session.end ? "" : "running"].filter(Boolean).join(" ");
-      const source = this._sourceLabel(session.source_type);
-      const summary = `${this._formatDateTime(session.start)} - ${session.end ? this._formatDateTime(session.end) : this._panelText("appliance_detail.running_now")}`;
-      const alertId = hasAlerts ? session.alert_ids[0] : "";
-      const maintenanceText = session.maintenance ? this._panelText("appliance_detail.maintenance_session") : "";
-      const block = `<span class="session-strip-block ${this._escape(classes)}" style="left:${left}%;width:${width}%"></span>`;
-      const continuation = crossesDay
-        ? `<span class="session-strip-block ${this._escape(classes)}" style="left:0;width:${Math.max(0.5, Math.min(endClock.minutes / 14.4, 100))}%"></span>`
-        : "";
-      return `<details class="session-strip" data-session-id="${this._escape(session.session_id || "")}">
-        <summary>
-          <span class="session-strip-track" role="img" aria-label="${this._escape([source, this._friendlyFeature(session.status), maintenanceText, summary].filter(Boolean).join(", "))}">${block}${continuation}</span>
-          <strong>${this._escape(summary)}</strong>
-        </summary>
-        <div class="session-strip-detail">
-          <span>${this._escape(source)} · ${this._escape(this._friendlyFeature(session.status))}</span>
-          ${maintenanceText ? `<span>${this._escape(maintenanceText)}</span>` : ""}
-          ${session.duration_seconds !== null && session.duration_seconds !== undefined ? `<span>${this._escape(this._formatDuration(session.duration_seconds))}</span>` : ""}
-          ${session.estimated_energy_kwh !== null && session.estimated_energy_kwh !== undefined ? `<span>${this._escape(this._formatKwh(session.estimated_energy_kwh))}</span>` : ""}
-          ${session.confidence !== null && session.confidence !== undefined ? `<span>${this._escape(this._formatConfidence(session.confidence))}</span>` : ""}
-          ${alertId ? `<a class="button secondary" href="/${PANEL_URL_PATH}?alert_id=${encodeURIComponent(alertId)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
-        </div>
-      </details>`;
-    }).join("")}</div>`;
-  }
-
   _renderSimpleList(items, emptyText) {
     const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
     if (!safeItems.length) {
@@ -994,31 +950,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       const day = String(date.getDate()).padStart(2, "0");
       const minute = String(date.getMinutes()).padStart(2, "0");
       return this._formatDateParts(year, month, day, date.getHours(), minute);
-    }
-  }
-
-  _timelineClockParts(date) {
-    try {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat("en-CA", {
-          timeZone: this._timeZone(),
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hourCycle: "h23",
-        }).formatToParts(date).map((part) => [part.type, part.value]),
-      );
-      return {
-        dateKey: `${parts.year}-${parts.month}-${parts.day}`,
-        minutes: Number(parts.hour) * 60 + Number(parts.minute),
-      };
-    } catch (_error) {
-      return {
-        dateKey: `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`,
-        minutes: date.getHours() * 60 + date.getMinutes(),
-      };
     }
   }
 

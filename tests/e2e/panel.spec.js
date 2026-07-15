@@ -112,17 +112,17 @@ for (const route of [
   });
 }
 
-test("appliance action calls the Home Assistant service", async ({ page }) => {
+test("Appliance Detail omits session timeline and page-level controls", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
-  await panel.locator('[data-appliance-detail-action="relearn_baseline"]').click();
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls)).toEqual([
-    {
-      domain: "circuitsetup_energy_analyzer",
-      service: "relearn_baseline",
-      data: { circuit_id: "kitchen" },
-    },
-  ]);
+  await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
+  await expect(panel.getByText("Session Timeline")).toHaveCount(0);
+  await expect(panel.locator(".session-strip")).toHaveCount(0);
+  await expect(panel.getByText("Appliance Notifications")).toHaveCount(0);
+  await expect(panel.locator("[data-appliance-notifications]")).toHaveCount(0);
+  await expect(panel.getByText("Expected Schedule")).toHaveCount(0);
+  await expect(panel.locator("[data-expected-schedule]")).toHaveCount(0);
+  await expect(panel.locator("[data-appliance-detail-action]")).toHaveCount(0);
 });
 
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
@@ -201,16 +201,13 @@ test("Appliance Insights filters attention and NILM appliances", async ({ page, 
   await expect(panel.locator("tbody")).toContainText("Dishwasher Estimate");
 });
 
-test("Appliance Detail exposes ranges, comparisons, and session evidence", async ({ page, isMobile }) => {
+test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile }) => {
   test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
 
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.getByText("Projected end of day")).toBeVisible();
-  const session = panel.locator('[data-session-id="direct-session-1"]');
-  await session.locator("summary").click();
-  await expect(session.getByRole("link", { name: "Open Evidence" })).toBeVisible();
 
   const period = panel.locator("[data-appliance-history-period]");
   await period.selectOption("24");

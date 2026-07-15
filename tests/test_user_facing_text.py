@@ -1388,8 +1388,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderApplianceDetailBody",
         "_panelText(\"headers.appliance_detail\")",
         "_panelText(\"appliance_detail.today_vs_normal\")",
-        "_renderApplianceTimeline",
         "detail.recent_timeline",
+        "_renderApplianceTimeline",
         "_panelText(\"appliance_detail.behavior_expectations\")",
         "_panelText(\"common.source\")",
         "_panelText(\"common.confidence\")",
@@ -1582,6 +1582,16 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert '(item.entity_ids || []).join(", ")' not in asset
     assert "data-nilm-workspace-action" not in asset
     assert "_openSourceEntity" not in asset
+    assert "_renderSessionTimeline" not in asset
+    assert "_renderApplianceActions" not in asset
+    assert "_callApplianceDetailAction" not in asset
+    assert "_renderApplianceNotificationPreferences" not in asset
+    assert "_saveApplianceNotificationPreferences" not in asset
+    assert "_renderExpectedSchedule" not in asset
+    assert "_saveExpectedSchedule" not in asset
+    assert "data-appliance-detail-action" not in asset
+    assert "data-appliance-notifications" not in asset
+    assert "data-expected-schedule" not in asset
     assert "${this._escape(item.entity_id)}" not in asset
     assert "this._escape(signature.signature_id)}</strong>" not in asset
     assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
@@ -1750,7 +1760,7 @@ if (value !== "Cost unavailable") {
     )
 
 
-def test_settings_saves_reject_unsaved_api_results() -> None:
+def test_weekly_digest_save_rejects_unsaved_api_results() -> None:
     _run_panel_node_script(
         r"""
 (async () => {
@@ -1774,53 +1784,6 @@ def test_settings_saves_reject_unsaved_api_results() -> None:
   await assertRejected(weekly, { status: "not_found", weekly_digest_settings: { enabled: true } },
     () => weekly._saveWeeklyDigestSettings(), () => weekly._setupHealth.weekly_digest_settings);
 
-  const notifications = new context.Panel();
-  notifications._applianceDetail = { notification_preferences: { delivery_mode: "immediate" } };
-  notifications.shadowRoot = { querySelector: () => ({
-    querySelector: (field) => ({
-      "[data-notification-delivery-mode]": { value: "disabled" },
-      "[data-notification-minimum-confidence]": { value: "0.6" },
-      "[data-notification-cooldown]": { value: "60" },
-      "[data-notification-quiet-start]": { value: "" },
-      "[data-notification-quiet-end]": { value: "" },
-    })[field],
-    querySelectorAll: () => [],
-  }) };
-  await assertRejected(notifications, { status: "not_found", notification_preferences: { delivery_mode: "disabled" } },
-    () => notifications._saveApplianceNotificationPreferences(), () => notifications._applianceDetail.notification_preferences);
-
-  const expected = new context.Panel();
-  expected._applianceDetail = { expected_schedule: { settings: { enabled: false } } };
-  expected._expectedScheduleDraft = { enabled: true, mode: "local", windows: [], minimum_duration_minutes: 15, required_repeats: 3 };
-  expected._readExpectedScheduleForm = () => expected._expectedScheduleDraft;
-  await assertRejected(expected, { status: "not_found", expected_schedule_settings: { enabled: true } },
-    () => expected._saveExpectedSchedule(), () => expected._applianceDetail.expected_schedule.settings);
-
-  const schedulePanel = new context.Panel();
-  const windows = [{ start: "07:30", end: "09:00", weekdays: [0, 2, 4] }];
-  schedulePanel._expectedScheduleDraft = {
-    enabled: true,
-    mode: "local",
-    schedule_entity_id: null,
-    windows,
-    minimum_duration_minutes: 20,
-    required_repeats: 3,
-  };
-  schedulePanel.shadowRoot = { querySelector(selector) {
-    assert.equal(selector, "[data-expected-schedule]");
-    return {
-      querySelector(field) {
-        return {
-          "[data-schedule-mode]:checked": { value: "local" },
-          "[data-schedule-enabled]": { checked: true },
-          "[data-schedule-entity]": { value: "schedule.dishwasher" },
-          "[data-schedule-minimum-duration]": { value: "20" },
-        }[field];
-      },
-      querySelectorAll() { return []; },
-    };
-  } };
-  assert.deepEqual(schedulePanel._readExpectedScheduleForm().windows, windows);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
@@ -1852,7 +1815,7 @@ for (const claim of ["23 retained observations", "37 alerts", "41 alerts", "old 
     )
 
 
-def test_appliance_detail_uses_icons_grids_timeline_and_alert_action_tiles() -> None:
+def test_appliance_detail_uses_icons_grids_and_omits_cumbersome_controls() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -1879,6 +1842,15 @@ panel._applianceDetail = {
     what_to_check_first: [],
     active_alerts: [{ message: "Power is above normal.", severity: "warning" }]
   },
+  notification_preferences: {
+    finished_running: true,
+    delivery_mode: "immediate",
+    minimum_confidence: 0.5,
+    cooldown_minutes: 60
+  },
+  expected_schedule: {
+    settings: { enabled: true, windows: [{ start: "08:00", end: "10:00", weekdays: [0] }] }
+  },
   actions: {
     open_evidence: { type: "navigate", path: "/evidence" },
     mark_expected: { domain: "test", service: "expected" },
@@ -1903,14 +1875,24 @@ for (const expected of [
   'icon="mdi:cash"',
   'class="appliance-timeline"',
   'class="appliance-comparison-grid"',
-  'class="decision-tiles appliance-alert-actions"',
 ]) {
   if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
 }
-panel._applianceDetail.actions = { relearn_baseline: { domain: "test", service: "relearn" } };
-const noAlertActions = panel._renderApplianceActions(panel._applianceDetail.actions);
-for (const ambiguous of ["Open Evidence", "Mark Expected", "Not Helpful"]) {
-  if (noAlertActions.includes(ambiguous)) throw new Error(`unexpected ${ambiguous}: ${noAlertActions}`);
+for (const removed of [
+  "Session Timeline",
+  "session-strip",
+  "data-session-id",
+  "Appliance Notifications",
+  "data-appliance-notifications",
+  "Expected Schedule",
+  "data-expected-schedule",
+  "<h2>Actions</h2>",
+  "data-appliance-detail-action",
+  "appliance-alert-actions",
+  "appliance-general-actions",
+  "Relearn Baseline",
+]) {
+  if (html.includes(removed)) throw new Error(`unexpected appliance-detail control ${removed}: ${html}`);
 }
 """
     )
@@ -2524,7 +2506,7 @@ def test_alert_decision_action_contracts() -> None:
     }
     name = "test_shared_panel_action_completions_ignore_replacement_routes";
     context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
-    for (const kind of ["alert", "appliance", "recommendation"]) {
+    for (const kind of ["alert", "recommendation"]) {
       for (const outcome of ["resolve", "reject"]) {
         context.window.location.search = "?circuit_id=a";
         let settle;
@@ -2549,10 +2531,6 @@ def test_alert_decision_action_contracts() -> None:
             actions: { mark_expected: action },
           };
           operation = panel._callAction("mark_expected", { feedbackScope: "alert-response" });
-        } else if (kind === "appliance") {
-          panel._payload = { circuit: { circuit_id: "a" }, actions: {} };
-          panel._applianceDetail = { actions: { pause_alerts: action } };
-          operation = panel._callApplianceDetailAction("pause_alerts");
         } else {
           panel._payload = {
             circuit: { circuit_id: "a" },
@@ -4251,7 +4229,6 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
         "Behavior Expectations",
         "What To Check First",
         "Alerts and Evidence",
-        "No actions are available for this appliance right now.",
         "NILM Signatures",
         "Estimated Appliances",
         "Label appliance interval",
