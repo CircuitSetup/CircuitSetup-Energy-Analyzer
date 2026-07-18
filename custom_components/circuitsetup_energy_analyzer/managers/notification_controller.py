@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -28,17 +27,11 @@ class NotificationController:
     def __init__(
         self,
         coordinator: Any,
-        *,
-        material_evidence_key: Callable[
-            [str, dict[str, Any]],
-            tuple[tuple[str, Any], ...],
-        ],
     ) -> None:
         self._coordinator = coordinator
         self._compact_settings_recommendation_episode_key = (
             compact_settings_recommendation_episode_key
         )
-        self._material_evidence_key = material_evidence_key
         self.notified_alert_ids: set[str] = set()
         self.settings_recommendation_notification_episode_key = (
             self._stored_settings_recommendation_episode_key()
@@ -291,7 +284,7 @@ class NotificationController:
         return alerts
 
     async def async_notify_settings_recommendations_if_needed(self) -> None:
-        """Notify once for each material set of pending setting recommendations."""
+        """Notify again only when the pending set gains a new recommendation."""
         total_pending = sum(
             self._coordinator.state.settings_recommendation_count_by_circuit.values(),
         )
@@ -301,6 +294,16 @@ class NotificationController:
 
         episode_key = self.settings_recommendation_episode_key()
         if episode_key == self.settings_recommendation_notification_episode_key:
+            return
+        recommendation_ids = _recommendation_ids(episode_key)
+        notified_ids = _recommendation_ids(
+            self.settings_recommendation_notification_episode_key
+        )
+        if (
+            recommendation_ids is not None
+            and notified_ids is not None
+            and recommendation_ids <= notified_ids
+        ):
             return
 
         self.set_settings_recommendation_notification_episode_key(episode_key)
@@ -323,24 +326,7 @@ class NotificationController:
             self._coordinator.settings_controller.pending_settings_recommendations
         )
         for recommendation in pending_recommendations(self._coordinator.current_time()):
-            evidence_key = repr(
-                self._material_evidence_key(
-                    recommendation.feature,
-                    recommendation.evidence,
-                ),
-            )
-            parts.append(
-                (
-                    str(recommendation.recommendation_id),
-                    str(recommendation.circuit_id),
-                    str(recommendation.setting_key),
-                    repr(recommendation.current_value),
-                    repr(recommendation.suggested_value),
-                    repr(sorted(dict(recommendation.apply_payload).items())),
-                    str(recommendation.reason),
-                    evidence_key,
-                )
-            )
+            parts.append((str(recommendation.recommendation_id),))
         return self._compact_settings_recommendation_episode_key(tuple(sorted(parts)))
 
     def set_settings_recommendation_notification_episode_key(
@@ -522,6 +508,15 @@ class NotificationController:
             return value.astimezone(ZoneInfo(configured_zone))
         except (KeyError, ValueError):
             return value.astimezone(ZoneInfo("UTC"))
+
+
+def _recommendation_ids(
+    episode_key: tuple[tuple[str, ...], ...],
+) -> set[str] | None:
+    """Return recommendation IDs when the stored key is not compacted."""
+    if episode_key and episode_key[0][:1] == ("version",):
+        return None
+    return {part[0] for part in episode_key if part}
 
 
 def _datetime_or_none(value: Any) -> datetime | None:
