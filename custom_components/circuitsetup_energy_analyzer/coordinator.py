@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -438,6 +439,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(nilm_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(nilm_alert)
+            await asyncio.sleep(0)
         alerts.extend(await self._notify_nilm_virtual_appliances(now))
         alerts.extend(await self.pipeline.async_process_cross_circuit(samples, context))
         alerts.extend(
@@ -450,6 +452,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         process_events_into_state(self.state, events, alerts)
         for config, sample in samples:
             self._refresh_ux_state(config, sample, now, context)
+            await asyncio.sleep(0)
             if config.circuit_id not in processing_circuit_ids:
                 continue
             await self._sync_setup_health_repairs(config.circuit_id)
