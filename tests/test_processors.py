@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -202,6 +203,10 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         def process(self, *args: object, **kwargs: object) -> FeatureResult:
             del args, kwargs
             calls.append(self.name)
+            asyncio.get_running_loop().call_soon(
+                calls.append,
+                f"tick:{self.name}",
+            )
             return self.result
 
     class _Coordinator:
@@ -248,7 +253,7 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         SimpleNamespace(),
     )
 
-    assert calls == [
+    processor_names = [
         "event",
         "power_quality",
         "usage",
@@ -262,6 +267,11 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         "leg_imbalance",
         "metric_consistency",
         "standby",
+    ]
+    assert calls == [
+        entry
+        for name in processor_names
+        for entry in (name, f"tick:{name}")
     ]
     assert cleared_power_quality == ["fridge"]
     assert cleared_standby == []
