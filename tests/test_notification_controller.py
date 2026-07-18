@@ -49,7 +49,6 @@ def test_notification_controller_episode_key_uses_public_current_time() -> None:
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     key = controller.settings_recommendation_episode_key()
@@ -85,7 +84,6 @@ def test_notification_controller_owns_episode_key_compaction() -> None:
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     key = controller.settings_recommendation_episode_key()
@@ -96,6 +94,74 @@ def test_notification_controller_owns_episode_key_compaction() -> None:
         ("fingerprint", key[2][1]),
     )
     assert len(key[2][1]) == 64
+
+
+@pytest.mark.asyncio
+async def test_settings_notification_repeats_only_for_new_suggestions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+
+    def recommendation(recommendation_id: str, *, evidence: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            recommendation_id=recommendation_id,
+            circuit_id="fridge",
+            setting_key="daily_spike_ratio",
+            current_value=0.25,
+            suggested_value=0.35,
+            apply_payload={},
+            reason=f"Observed variation {evidence}.",
+            feature="energy_usage",
+            evidence={"days": evidence},
+        )
+
+    pending = [recommendation("rec-1", evidence=7)]
+    notifications_created: list[int] = []
+
+    async def create_notification(hass, entry_id, *, total_pending):
+        del hass, entry_id
+        notifications_created.append(total_pending)
+
+    async def save_if_dirty(timestamp):
+        assert timestamp == now
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_settings_recommendation_notification",
+        create_notification,
+    )
+    state = SimpleNamespace(settings_recommendation_count_by_circuit={"fridge": 1})
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        hass=SimpleNamespace(),
+        entry_id="entry-1",
+        state=state,
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+        ),
+        settings_controller=SimpleNamespace(
+            pending_settings_recommendations=lambda timestamp: pending,
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=save_if_dirty,
+        ),
+    )
+    controller = notification_controller.NotificationController(
+        coordinator,
+    )
+
+    await controller.async_notify_settings_recommendations_if_needed()
+    pending[0] = recommendation("rec-1", evidence=8)
+    await controller.async_notify_settings_recommendations_if_needed()
+    pending.append(recommendation("rec-2", evidence=7))
+    state.settings_recommendation_count_by_circuit = {"fridge": 2}
+    await controller.async_notify_settings_recommendations_if_needed()
+    pending.pop(0)
+    state.settings_recommendation_count_by_circuit = {"fridge": 1}
+    await controller.async_notify_settings_recommendations_if_needed()
+
+    assert notifications_created == [1, 2]
 
 
 def test_settings_recommendation_notification_opens_panel_review() -> None:
@@ -148,7 +214,6 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_notify_alert(alert)
@@ -211,7 +276,6 @@ async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> No
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_notify_alert(alerts[0])
@@ -270,7 +334,6 @@ async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     alerts = await controller.async_notify_finished_events(
@@ -328,7 +391,6 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_refresh_weekly_digest(
@@ -376,7 +438,6 @@ async def test_weekly_queue_waits_until_its_local_week_has_completed() -> None:
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_refresh_weekly_digest(
@@ -428,7 +489,6 @@ async def test_daily_queue_waits_for_next_home_assistant_local_day(monkeypatch) 
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_dispatch_due(datetime(2026, 7, 14, 1, tzinfo=UTC))
@@ -456,7 +516,6 @@ async def test_dispatch_due_skips_alert_history_when_queues_are_empty() -> None:
     )
     controller = notification_controller.NotificationController(
         coordinator,
-        material_evidence_key=lambda feature, evidence: tuple(evidence.items()),
     )
 
     await controller.async_dispatch_due(datetime(2026, 7, 14, 1, tzinfo=UTC))

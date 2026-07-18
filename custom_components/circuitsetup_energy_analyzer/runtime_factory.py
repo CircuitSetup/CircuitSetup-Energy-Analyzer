@@ -30,10 +30,7 @@ from .managers.nilm_controller import NilmController
 from .managers.notification_controller import NotificationController
 from .managers.processing_pipeline import ProcessingPipeline
 from .managers.processor_runtime import ProcessorRuntimeManager
-from .managers.settings_controller import (
-    SettingsController,
-    material_recommendation_evidence_key,
-)
+from .managers.settings_controller import SettingsController
 from .managers.setup_health import SetupHealthAggregator
 from .managers.source_samples import SourceSampleBuilder
 from .managers.source_updates import SourceUpdateManager
@@ -349,10 +346,7 @@ def initialize_runtime(
         recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
         recommendation_decisions_max_items=RECOMMENDATION_DECISIONS_MAX_ITEMS,
     )
-    self.notification_controller = NotificationController(
-        self,
-        material_evidence_key=material_recommendation_evidence_key,
-    )
+    self.notification_controller = NotificationController(self)
     self.setup_health = SetupHealthAggregator(self)
     self.paused_circuits: set[str] = set()
     self.last_exported_diagnostics: dict[str, Any] = {}
