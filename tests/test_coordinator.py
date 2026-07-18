@@ -2493,6 +2493,41 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 18, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    calls: list[str] = []
+
+    def fake_refresh_ux_state(config, sample, now, context=None):
+        del sample, now, context
+        calls.append(config.circuit_id)
+        asyncio.get_running_loop().call_soon(
+            calls.append,
+            f"tick:{config.circuit_id}",
+        )
+
+    coordinator._refresh_ux_state = fake_refresh_ux_state
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert calls == [
+        "fridge",
+        "tick:fridge",
+        "hvac",
+        "tick:hvac",
+        "well_pump",
+        "tick:well_pump",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_source_update_unknown_entity_falls_back_to_full_processing() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

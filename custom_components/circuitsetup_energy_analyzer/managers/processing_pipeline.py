@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ..models import ApplianceProfile, PowerFlowMode
@@ -54,18 +55,25 @@ class ProcessingPipeline:
         self._clear_standby_state = clear_standby_state
         self._sync_setup_health_repairs = sync_setup_health_repairs
 
+    async def _async_apply_feature_result(
+        self,
+        result: Any,
+    ) -> tuple[list[Any], list[Any]]:
+        applied = await self._coordinator.async_apply_feature_result(result)
+        await asyncio.sleep(0)
+        return applied
+
     async def async_process_circuit(
         self,
         config: Any,
         sample: Any,
         context: Any,
     ) -> tuple[list[Any], list[Any]]:
-        coordinator = self._coordinator
         events: list[Any] = []
         alerts: list[Any] = []
 
         event_result = self._event_processor.process(sample, config, context)
-        new_events, _ = await coordinator.async_apply_feature_result(event_result)
+        new_events, _ = await self._async_apply_feature_result(event_result)
         events.extend(new_events)
 
         power_quality_result = self._power_quality_processor.process(
@@ -75,7 +83,7 @@ class ProcessingPipeline:
         )
         if power_quality_result.clear_power_quality_state is not None:
             self._clear_power_quality_state(power_quality_result.clear_power_quality_state)
-        _, power_quality_alerts = await coordinator.async_apply_feature_result(
+        _, power_quality_alerts = await self._async_apply_feature_result(
             power_quality_result
         )
         alerts.extend(power_quality_alerts)
@@ -85,7 +93,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, usage_alerts = await coordinator.async_apply_feature_result(usage_result)
+        _, usage_alerts = await self._async_apply_feature_result(usage_result)
         alerts.extend(usage_alerts)
 
         goal_result = self._energy_goal_processor.process(
@@ -93,11 +101,11 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, goal_alerts = await coordinator.async_apply_feature_result(goal_result)
+        _, goal_alerts = await self._async_apply_feature_result(goal_result)
         alerts.extend(goal_alerts)
 
         cycle_result = self._run_cycle_processor.process(sample, config, context)
-        _, cycle_alerts = await coordinator.async_apply_feature_result(cycle_result)
+        _, cycle_alerts = await self._async_apply_feature_result(cycle_result)
         alerts.extend(cycle_alerts)
 
         activity_result = self._activity_alert_processor.process(
@@ -105,7 +113,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, activity_alerts = await coordinator.async_apply_feature_result(
+        _, activity_alerts = await self._async_apply_feature_result(
             activity_result
         )
         alerts.extend(activity_alerts)
@@ -115,14 +123,14 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, billing_alerts = await coordinator.async_apply_feature_result(billing_result)
+        _, billing_alerts = await self._async_apply_feature_result(billing_result)
         alerts.extend(billing_alerts)
 
         cost_result = self._cost_processor.process(sample, config, context)
-        await coordinator.async_apply_feature_result(cost_result)
+        await self._async_apply_feature_result(cost_result)
 
         demand_result = self._demand_processor.process(sample, config, context)
-        _, demand_alerts = await coordinator.async_apply_feature_result(demand_result)
+        _, demand_alerts = await self._async_apply_feature_result(demand_result)
         alerts.extend(demand_alerts)
 
         capacity_result = self._capacity_processor.process(
@@ -130,7 +138,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, capacity_alerts = await coordinator.async_apply_feature_result(
+        _, capacity_alerts = await self._async_apply_feature_result(
             capacity_result
         )
         alerts.extend(capacity_alerts)
@@ -140,7 +148,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        _, leg_imbalance_alerts = await coordinator.async_apply_feature_result(
+        _, leg_imbalance_alerts = await self._async_apply_feature_result(
             leg_imbalance_result
         )
         alerts.extend(leg_imbalance_alerts)
@@ -150,7 +158,7 @@ class ProcessingPipeline:
             config,
             context,
         )
-        await coordinator.async_apply_feature_result(metric_consistency_result)
+        await self._async_apply_feature_result(metric_consistency_result)
 
         if (
             config.power_flow is PowerFlowMode.GENERATION
@@ -163,7 +171,7 @@ class ProcessingPipeline:
                 config,
                 context,
             )
-            _, standby_alerts = await coordinator.async_apply_feature_result(
+            _, standby_alerts = await self._async_apply_feature_result(
                 standby_result
             )
             alerts.extend(standby_alerts)
@@ -182,14 +190,14 @@ class ProcessingPipeline:
             samples,
             context,
         )
-        _, balance_alerts = await coordinator.async_apply_feature_result(balance_result)
+        _, balance_alerts = await self._async_apply_feature_result(balance_result)
         alerts.extend(balance_alerts)
 
         solar_result = self._solar_flow_processor.process(
             samples,
             context,
         )
-        _, solar_alerts = await coordinator.async_apply_feature_result(solar_result)
+        _, solar_alerts = await self._async_apply_feature_result(solar_result)
         alerts.extend(solar_alerts)
 
         for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
@@ -200,7 +208,7 @@ class ProcessingPipeline:
                 config,
                 context,
             )
-            _, new_alerts = await coordinator.async_apply_feature_result(result)
+            _, new_alerts = await self._async_apply_feature_result(result)
             await self._sync_setup_health_repairs(circuit_id)
             alerts.extend(new_alerts)
         return alerts
