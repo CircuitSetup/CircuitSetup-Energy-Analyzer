@@ -4604,7 +4604,7 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_skips_store_write_when_update_has_no_persisted_changes() -> None:
+async def test_runtime_persists_standby_history_once_per_save_interval() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -4666,7 +4666,17 @@ async def test_runtime_skips_store_write_when_update_has_no_persisted_changes() 
     await coordinator.async_process_update()
     await coordinator.async_process_update()
 
-    assert fake_store.save_count == 0
+    assert fake_store.save_count == 1
+    assert coordinator.store_data.standby_by_circuit["fridge"] == {
+        "standby_sample_format": "1m-min-v1",
+        "samples": [
+            {
+                "timestamp": now.isoformat(),
+                "real_power_w": 0.0,
+                "sample_count": 2,
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
