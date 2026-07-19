@@ -130,12 +130,10 @@ from .const import (
     CONF_DEMO_SOURCE_BUNDLE_ENABLED,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
-    CONF_ENTITY_MODEL_VERSION,
     CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
-    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
@@ -169,7 +167,6 @@ from .const import (
     ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
-    ENTITY_MODEL_COMPACT,
 )
 from .dashboard import normalize_dashboard_layout
 from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
@@ -185,11 +182,7 @@ from .entity import (
     apply_entity_profile_to_registry,
     normalize_entity_detail_level,
 )
-from .entity_catalog import (
-    EntityGroup,
-    compact_migration_preview_for_hass,
-    remove_legacy_entity_registry_entries,
-)
+from .entity_catalog import EntityGroup
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .mapping import DualPhaseSuggestion
 from .metric_consistency import (
@@ -294,12 +287,6 @@ FIELD_CYCLE_START_DAY = "cycle_start_day"
 FIELD_BUDGET_KWH = "budget_kwh"
 FIELD_BUDGET_ALERT_RATIO = "budget_alert_ratio"
 FIELD_BILLING_MIN_ELAPSED_DAYS = "billing_min_elapsed_days"
-FIELD_DEFAULT_RATE_PER_KWH = "default_rate_per_kwh"
-FIELD_TOU_RATE_PER_KWH = "tou_rate_per_kwh"
-FIELD_TOU_START = "tou_start"
-FIELD_TOU_END = "tou_end"
-FIELD_TOU_WEEKDAYS = "tou_weekdays"
-FIELD_TOU_NAME = "tou_name"
 FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
@@ -379,7 +366,6 @@ FIELD_SETTING_SUGGESTION_IDS = "setting_suggestion_ids"
 FIELD_RECOMMENDATION_ID = "recommendation_id"
 FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
-FIELD_CONFIRM_COMPACT_MIGRATION = "confirm_compact_migration"
 FIELD_REMOVE_DASHBOARD = "remove_dashboard"
 FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
 RECOMMENDATION_ACTION_APPLY = "apply"
@@ -578,19 +564,6 @@ class SetupValidationError(ValueError):
 
 _DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
 _DEMO_CURRENT_SOURCE_ENTITY_IDS = set(_DEMO_SOURCE_ENTITY_IDS)
-_DEMO_SPLIT_SOURCE_CIRCUITS = {"hvac", "water_heater", "dryer", "car_charger"}
-_DEMO_SOURCE_METRIC_ALIASES = {
-    "power": "active_power",
-    "real_power": "active_power",
-}
-_DEMO_SPLIT_SOURCE_METRICS = {
-    "energy",
-    "active_power",
-    "current",
-    "power_factor",
-    "reactive_power",
-    "apparent_power",
-}
 
 
 def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> str:
@@ -620,14 +593,14 @@ def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> st
 
 
 def _normalize_demo_source_entity_ids(entity_ids: Iterable[str]) -> list[str]:
-    normalized: list[str] = []
-    for entity_id in entity_ids:
-        replacements = _current_demo_source_entity_ids(entity_id)
-        if replacements:
-            normalized.extend(replacements)
-        elif not str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX):
-            normalized.append(str(entity_id))
-    return list(dict.fromkeys(normalized))
+    return list(
+        dict.fromkeys(
+            str(entity_id)
+            for entity_id in entity_ids
+            if str(entity_id) in _DEMO_CURRENT_SOURCE_ENTITY_IDS
+            or not str(entity_id).startswith(_DEMO_SOURCE_ENTITY_PREFIX)
+        )
+    )
 
 
 def _resolve_discovered_demo_source_entity_ids(
@@ -720,74 +693,16 @@ def _demo_source_bundle_enabled_for_entry_values(
     )
 
 
-def _current_demo_source_entity_ids(entity_id: str) -> tuple[str, ...]:
-    entity_id = str(entity_id).strip()
-    if entity_id in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
-        return (entity_id,)
-    if not entity_id.startswith(_DEMO_SOURCE_ENTITY_PREFIX):
-        return ()
-    if _demo_unsuffixed_source_entity_id(entity_id) in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
-        return (entity_id,)
-
-    object_id = entity_id.removeprefix(_DEMO_SOURCE_ENTITY_PREFIX)
-    if replacement := _demo_power_alias_source_entity_id(object_id):
-        return (replacement,)
-    if replacement := _demo_split_source_entity_ids(object_id):
-        return replacement
-    if replacement := _demo_voltage_source_entity_ids(object_id):
-        return replacement
-    return ()
 
 
 def _demo_unsuffixed_source_entity_id(entity_id: str) -> str:
     return re.sub(r"_\d+$", "", entity_id)
 
 
-def _demo_power_alias_source_entity_id(object_id: str) -> str:
-    for suffix, replacement_suffix in _DEMO_SOURCE_METRIC_ALIASES.items():
-        if not object_id.endswith(f"_{suffix}"):
-            continue
-        replacement = (
-            f"{_DEMO_SOURCE_ENTITY_PREFIX}"
-            f"{object_id[: -len(suffix)]}{replacement_suffix}"
-        )
-        if replacement in _DEMO_CURRENT_SOURCE_ENTITY_IDS:
-            return replacement
-    return ""
 
 
-def _demo_split_source_entity_ids(object_id: str) -> tuple[str, ...]:
-    for circuit in _DEMO_SPLIT_SOURCE_CIRCUITS:
-        prefix = f"{circuit}_"
-        if not object_id.startswith(prefix):
-            continue
-        metric = object_id.removeprefix(prefix)
-        metric = _DEMO_SOURCE_METRIC_ALIASES.get(metric, metric)
-        if metric not in _DEMO_SPLIT_SOURCE_METRICS:
-            return ()
-        replacements = tuple(
-            f"{_DEMO_SOURCE_ENTITY_PREFIX}{circuit}_{leg}_{metric}"
-            for leg in ("l1", "l2")
-        )
-        return tuple(
-            replacement
-            for replacement in replacements
-            if replacement in _DEMO_CURRENT_SOURCE_ENTITY_IDS
-        )
-    return ()
 
 
-def _demo_voltage_source_entity_ids(object_id: str) -> tuple[str, ...]:
-    if not object_id.endswith("_voltage"):
-        return ()
-    circuit = object_id.removesuffix("_voltage")
-    replacements = (
-        "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-        "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
-    )
-    if circuit in _DEMO_SPLIT_SOURCE_CIRCUITS:
-        return replacements
-    return replacements[:1]
 
 
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
@@ -806,14 +721,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
     if demo_source_bundle_enabled:
         extra_source_entities = _with_demo_source_bundle(extra_source_entities)
-    legacy_source_entities = _strict_string_list(
-        user_input.get(CONF_SOURCE_ENTITIES, []),
-        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-    )
-    legacy_source_entities = _normalize_demo_source_entity_ids(legacy_source_entities)
-    source_entities = list(
-        dict.fromkeys([*extra_source_entities, *legacy_source_entities])
-    )
+    source_entities = list(extra_source_entities)
     if demo_source_bundle_enabled:
         source_entities = _with_demo_source_bundle(source_entities)
     mains_source_entities = _normalize_demo_source_entity_ids(
@@ -865,7 +773,6 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENTITY_DETAIL_LEVEL: normalize_entity_detail_level(
             user_input.get(CONF_ENTITY_DETAIL_LEVEL, DEFAULT_ENTITY_DETAIL_LEVEL)
         ),
-        CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
         CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
         CONF_SENSITIVITY: normalize_sensitivity(
             user_input.get(CONF_SENSITIVITY, DEFAULT_SENSITIVITY)
@@ -953,17 +860,6 @@ def validate_options_input(
     if water_flow_sensor_entities:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     merged_source_entities = list(extra_source_entities)
-    if CONF_SOURCE_ENTITIES in user_input:
-        source_entities = _strict_string_list(
-            user_input.get(CONF_SOURCE_ENTITIES),
-            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-        )
-        source_entities = _normalize_demo_source_entity_ids(source_entities)
-        if demo_source_bundle_enabled:
-            source_entities = _with_demo_source_bundle(source_entities)
-        elif remove_demo_source_bundle:
-            source_entities = _without_demo_source_bundle(source_entities)
-        merged_source_entities.extend(source_entities)
     merged_source_entities = list(dict.fromkeys(merged_source_entities))
     if demo_source_bundle_enabled:
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
@@ -3131,70 +3027,21 @@ def _circuits_from_assignment_text(
 
 
 def _normalize_assignment_profile(raw_profile: str) -> str:
-    normalized = _slugify(raw_profile)
-    aliases = {
-        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "blower": ApplianceProfile.HVAC_BLOWER.value,
-        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
-        "well_pump": ApplianceProfile.WATER_PUMP.value,
-        "booster_pump": ApplianceProfile.WATER_PUMP.value,
-        "clothes_washer": ApplianceProfile.WASHER.value,
-        "laundry_washer": ApplianceProfile.WASHER.value,
-        "washing_machine": ApplianceProfile.WASHER.value,
-        "clothes_dryer": ApplianceProfile.DRYER.value,
-        "electric_dryer": ApplianceProfile.DRYER.value,
-        "gas_dryer": ApplianceProfile.DRYER.value,
-        "microwave_oven": ApplianceProfile.MICROWAVE.value,
-        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
-        "car_charger": ApplianceProfile.EV_CHARGER.value,
-    }
-    return aliases.get(normalized, normalized)
+    return _slugify(raw_profile)
 
 
 def _normalize_assignment_mode(raw_mode: str) -> str:
     normalized = _slugify(raw_mode)
-    aliases = {
-        "single": CircuitMode.SINGLE_PHASE.value,
-        "single_phase": CircuitMode.SINGLE_PHASE.value,
-        "dual": CircuitMode.DUAL_PHASE.value,
-        "dual_phase": CircuitMode.DUAL_PHASE.value,
-        "split_phase": CircuitMode.DUAL_PHASE.value,
-        "mixed": CircuitMode.MIXED.value,
-        "mains": CircuitMode.MAINS_NILM.value,
-        "mains_nilm": CircuitMode.MAINS_NILM.value,
-    }
-    mode = aliases.get(normalized, normalized)
-    if mode not in _ASSIGNMENT_MODE_OPTIONS:
+    if normalized not in _ASSIGNMENT_MODE_OPTIONS:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
-    return mode
+    return normalized
 
 
 def _normalize_power_flow(raw_power_flow: str) -> str:
     normalized = _slugify(raw_power_flow)
-    aliases = {
-        "bidirectional": PowerFlowMode.MAINS_NET.value,
-        "net": PowerFlowMode.MAINS_NET.value,
-        "mains": PowerFlowMode.MAINS_NET.value,
-        "mains_net": PowerFlowMode.MAINS_NET.value,
-        "import_export": PowerFlowMode.MAINS_NET.value,
-        "solar": PowerFlowMode.GENERATION.value,
-        "export": PowerFlowMode.GENERATION.value,
-        "generation": PowerFlowMode.GENERATION.value,
-        "generator": PowerFlowMode.GENERATION.value,
-        "load": PowerFlowMode.LOAD.value,
-    }
-    value = aliases.get(normalized, normalized)
-    if value not in {mode.value for mode in PowerFlowMode}:
+    if normalized not in {mode.value for mode in PowerFlowMode}:
         return PowerFlowMode.LOAD.value
-    return value
+    return normalized
 
 
 def _normalize_retention_mode(raw_retention_mode: str) -> str:
@@ -3582,10 +3429,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 "utility",
                 "dashboard",
                 "entity_detail",
+                "recommendations",
+                "advanced",
             ]
-            if _compact_migration_has_legacy_entities(self):
-                menu_options.append("compact_migration")
-            menu_options.extend(["recommendations", "advanced"])
             return self.async_show_menu(
                 step_id="init",
                 menu_options=menu_options,
@@ -3992,37 +3838,6 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             data_schema=_entity_detail_schema(self._config_entry),
             errors={},
         )
-
-    async def async_step_compact_migration(
-        self,
-        user_input: dict[str, Any] | None = None,
-    ) -> config_entries.ConfigFlowResult:
-        """Preview and confirm removal of legacy compact-model registry rows."""
-        if user_input is not None:
-            if not bool(user_input.get(FIELD_CONFIRM_COMPACT_MIGRATION, False)):
-                return _compact_migration_form(
-                    self,
-                    errors={"base": "confirm_required"},
-                )
-
-            remove_legacy_entity_registry_entries(
-                getattr(self, "hass", None),
-                entry_id=getattr(self._config_entry, "entry_id", ""),
-            )
-            updated_options = _options_with_updates(
-                self._config_entry,
-                {
-                    CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_COMPACT,
-                    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [],
-                },
-            )
-            await _async_save_options_flow_config(self, updated_options)
-            return self.async_create_entry(
-                title="",
-                data=updated_options,
-            )
-
-        return _compact_migration_form(self)
 
     async def async_step_dashboard(
         self,
@@ -4706,83 +4521,6 @@ def _entity_detail_schema(config_entry: config_entries.ConfigEntry) -> Any:
             ): _multi_select_selector(entity_group_options()),
         }
     )
-
-
-def _compact_migration_schema() -> Any:
-    return vol.Schema(
-        {
-            vol.Optional(
-                FIELD_CONFIRM_COMPACT_MIGRATION,
-                default=False,
-            ): bool,
-        }
-    )
-
-
-def _compact_migration_form(
-    flow: Any,
-    errors: dict[str, str] | None = None,
-) -> config_entries.ConfigFlowResult:
-    return flow.async_show_form(
-        step_id="compact_migration",
-        data_schema=_compact_migration_schema(),
-        errors=errors or {},
-        description_placeholders=_compact_migration_placeholders(flow),
-    )
-
-
-def _compact_migration_has_legacy_entities(flow: Any) -> bool:
-    preview = compact_migration_preview_for_hass(
-        getattr(flow, "hass", None),
-        entry_id=getattr(getattr(flow, "_config_entry", None), "entry_id", ""),
-    )
-    return int(preview.get("remove_count", 0) or 0) > 0
-
-
-def _compact_migration_placeholders(flow: Any) -> dict[str, str]:
-    preview = compact_migration_preview_for_hass(
-        getattr(flow, "hass", None),
-        entry_id=getattr(getattr(flow, "_config_entry", None), "entry_id", ""),
-    )
-    will_remove = preview.get("will_remove", [])
-    will_remain = preview.get("will_remain", [])
-    new_switches = preview.get("new_maintenance_switches", [])
-    customized_count = int(preview.get("customized_count", 0) or 0)
-    warning = (
-        "Some legacy entities are customized; after removal, re-enabled optional "
-        "entities may return with default entity IDs."
-        if customized_count
-        else "No customized legacy registry rows were detected."
-    )
-    return {
-        "will_remove": _compact_migration_lines(
-            (
-                f"{item['entity_id']} -> {item['replacement']}"
-                for item in will_remove
-            ),
-            empty="No legacy entities detected.",
-        ),
-        "will_remain": _compact_migration_lines(
-            (str(entity_id) for entity_id in will_remain),
-            empty="No existing analyzer entities will remain registered.",
-        ),
-        "new_maintenance_switch": _compact_migration_lines(
-            (str(unique_id) for unique_id in new_switches),
-            empty="Alert pause switch already exists where applicable.",
-        ),
-        "before_count": str(preview.get("before_count", 0)),
-        "after_count": str(preview.get("after_count", 0)),
-        "warning": warning,
-    }
-
-
-def _compact_migration_lines(
-    values: Iterable[str],
-    *,
-    empty: str,
-) -> str:
-    lines = [value for value in values if value]
-    return "\n".join(lines) if lines else empty
 
 
 def _dashboard_schema(
@@ -5519,12 +5257,6 @@ def _advanced_settings_from_input(
         FIELD_BILLING_MIN_ELAPSED_DAYS,
         "min_elapsed_days",
     )
-    _set_optional_float(settings, user_input, FIELD_DEFAULT_RATE_PER_KWH)
-    _set_optional_float(settings, user_input, FIELD_TOU_RATE_PER_KWH)
-    _set_optional_string(settings, user_input, FIELD_TOU_START)
-    _set_optional_string(settings, user_input, FIELD_TOU_END)
-    _set_optional_tou_weekdays(settings, user_input)
-    _set_optional_string(settings, user_input, FIELD_TOU_NAME)
     _set_optional_int(settings, user_input, FIELD_WINDOW_MINUTES)
     _set_optional_float(settings, user_input, FIELD_DEMAND_LIMIT_W)
     _set_optional_float(settings, user_input, FIELD_BREAKER_AMPS)
@@ -5658,17 +5390,6 @@ def _tou_weekday_selection(value: Any) -> list[str]:
     return _weekday_values(value)
 
 
-def _set_optional_tou_weekdays(
-    settings: dict[str, Any],
-    user_input: Mapping[str, Any],
-) -> None:
-    if FIELD_TOU_WEEKDAYS not in user_input:
-        return
-    selected = _weekday_values(user_input.get(FIELD_TOU_WEEKDAYS))
-    if selected:
-        settings[FIELD_TOU_WEEKDAYS] = ",".join(selected)
-
-
 def _weekday_values(value: Any) -> list[str]:
     if value is None:
         return []
@@ -5781,10 +5502,6 @@ async def _async_source_selection_with_device_entities(
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     )
-    legacy_source_entities = _strict_string_list(
-        user_input.get(CONF_SOURCE_ENTITIES, []),
-        invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-    )
     device_source_entities = await _async_discover_energy_source_entities_for_devices(
         hass,
         source_devices,
@@ -5794,7 +5511,6 @@ async def _async_source_selection_with_device_entities(
             [
                 *device_source_entities,
                 *extra_source_entities,
-                *legacy_source_entities,
             ]
         )
     )

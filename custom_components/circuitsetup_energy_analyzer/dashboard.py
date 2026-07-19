@@ -86,11 +86,6 @@ SOLAR_FLOW_ENTITY_SPECS = (
 UTILITY_COMPARISON_ENTITY_SPECS = (
     (
         "sensor",
-        "utility_comparison_difference",
-        _dashboard_text("entity_labels", "utility_difference"),
-    ),
-    (
-        "sensor",
         "utility_comparison_status",
         _dashboard_text("entity_labels", "utility_status"),
     ),
@@ -617,26 +612,6 @@ def _todays_energy_section(
         if cost_rows:
             cards.append(
                 _entities_card(_dashboard_text("cards", "cost_estimate"), cost_rows)
-            )
-        solar_rows = _resolved_rows_for_circuits(
-            circuits,
-            (
-                "sensor",
-                "solar_flexible_load_coverage",
-                _dashboard_text("entity_labels", "solar_covered_share"),
-            ),
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        )
-        if solar_rows:
-            cards.append(
-                {
-                    "type": "glance",
-                    "title": _dashboard_text("entity_labels", "solar_covered_share"),
-                    "columns": _glance_columns(solar_rows[:5]),
-                    "entities": solar_rows[:5],
-                }
             )
     else:
         cards.append(

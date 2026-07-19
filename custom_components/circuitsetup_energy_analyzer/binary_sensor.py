@@ -424,8 +424,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             descriptions,
             raw_circuit,
             coordinator,
-            hass=hass,
-            entry_id=entry_id,
         )
         entities.extend(
             CircuitAnalyzerBinarySensor(

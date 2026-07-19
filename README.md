@@ -277,7 +277,7 @@ The integration has an **Entity Detail Level** option under **Settings > Devices
 - **Standard**: also enables configured feature-status entities, such as energy goals, billing/cost, weather context, water-flow context, and other features you turned on.
 - **Expert**: creates only the diagnostic or graph groups you select under **Expert Entity Groups**, useful for troubleshooting and custom diagnostic dashboards.
 
-Changing **Entity Detail Level** reloads the integration so the entity set matches the selected profile. Expert creates only the diagnostic or graph groups you select, such as Developer Diagnostics, Energy Detail, Demand and Capacity, Mains and Solar Detail, NILM Detail, Cycle Metrics, Electrical Scores, Power Quality Drift, Billing Forecasts, Standby, Weather, and Water. Existing manual entity-registry customizations are respected; use **Migrate To Compact Entity Model** when you want to remove preserved legacy rows.
+Changing **Entity Detail Level** reloads the integration so the entity set matches the selected profile. Expert creates only the diagnostic or graph groups you select, such as Developer Diagnostics, Energy Detail, Demand and Capacity, Mains and Solar Detail, NILM Detail, Cycle Metrics, Electrical Scores, Power Quality Drift, Billing Forecasts, Standby, Weather, and Water. Existing manual entity-registry customizations are respected.
 
 ![Entity Detail Level options showing Simple, Standard, and Expert entity profiles](docs/images/readme/entity-detail-level.png)
 
@@ -438,7 +438,7 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 - Activity-alert sensitivity
 - Rain, pump, and water-flow context
 
-Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and **Sensitive**. Older stored presets are automatically migrated to those names.
+Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and **Sensitive**.
 
 Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
 
@@ -460,7 +460,7 @@ Dashboard create, update, and remove actions are available from **Configure > Cr
 
 ## Normal User Paths
 
-The integration still exposes service actions for scripts, blueprints, dashboards, backups, and Developer Tools. Those actions intentionally keep fields such as `circuit_id`, `alert_id`, `signature_id`, and `recommendation_id` for backwards compatibility and automation use.
+The integration exposes service actions for scripts, blueprints, dashboards, backups, and Developer Tools. Actions use identifiers such as `circuit_id`, `alert_id`, `signature_id`, and `recommendation_id` to select their target.
 
 For day-to-day use, prefer these paths instead:
 
@@ -946,29 +946,7 @@ entities instead of every intermediate calculation as a standalone entity.
 - **Standard** adds canonical status and graph entities for features you configured.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
 
-See `docs/entity-model.md` for the full compact model and migration notes.
-
-Existing installs can keep enabled legacy entities for one compatibility release
-so dashboards and automations do not break during upgrade. To migrate explicitly,
-open **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure >
-Migrate To Compact Entity Model**. The preview lists entities that will be
-removed, replacements, entities that will remain, the new maintenance switch,
-before/after counts, and any customization warning.
-
-Legacy replacement highlights:
-
-| Legacy replacement | Compact location |
-|---|---|
-| Sensitivity sensor | `select.<circuit>_alert_sensitivity` |
-| Readiness and learning progress | `sensor.<circuit>_health_summary` attributes |
-| Data quality checklist | Setup Health, Repairs, and Health Summary attributes |
-| Alert evidence and last event | Dynamic Alert Evidence panel and recent activity |
-| Power-quality evidence and metric/leg status | `sensor.<circuit>_electrical_health` attributes |
-| Run-cycle status | `sensor.<circuit>_activity_summary` and `binary_sensor.<circuit>_running` |
-| Billing and cost forecast/status details | `sensor.<circuit>_billing_cycle_usage` and `sensor.<circuit>_cost_cycle` attributes |
-| Standby threshold | Advanced Circuit Settings and `sensor.<circuit>_standby_status` attributes |
-| Outdoor temperature mirror | configured outdoor temperature source entity and Weather Context attributes |
-| Pause/Resume Alerts controls | `switch.<circuit>_maintenance` |
+See `docs/entity-model.md` for the full compact model.
 
 ## Sensor reference
 
@@ -979,7 +957,6 @@ In the **Visibility** column:
 - **Core/default visible** means created in Simple, Standard, and Expert when the circuit has the required source data.
 - **Standard feature entity** means created in Standard and Expert when the related feature, circuit type, and source data apply.
 - **Expert group** means created only when Entity Detail Level is Expert and that Expert Entity Group is selected.
-- **Legacy compatibility** means preserved for existing installs during the compatibility window; new dashboards should use the listed replacement.
 
 In the patterns below, `<circuit>` is the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, `solar`, or `mains`.
 
@@ -1073,7 +1050,7 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **NILM Discovered Signatures** | `sensor.<circuit>_nilm_discovered_signatures` | Count of recurring aggregate NILM signatures. | Expert NILM Detail group. | Integer counts |
+| **NILM Signature Count** | `sensor.<circuit>_nilm_signature_count` | Count of recurring aggregate NILM signatures. | Core/default visible for mains NILM circuits. | Integer counts |
 | **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes show a bounded preview of up to five unknown loads with signature ID, display name, likely type, typical watts, confidence, and first seen time. Open the evidence panel for the full review inventory and actions. | Expert NILM Detail group. | `0`, `1`, or higher counts |
 | **NILM Unmatched Load Percentage** | `sensor.<circuit>_nilm_unmatched_load_percentage` | Share of current aggregate mains power not matched to known loads. | Expert NILM Detail group. | Percentage values |
 | **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Expert NILM Detail group. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
@@ -1082,19 +1059,9 @@ These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with
 | **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Expert Mains and Solar Detail group. | Percentage values |
 | **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Expert Mains and Solar Detail group. | `missing_mains`, `tracking`, `negative_balance` |
 | **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Expert Mains and Solar Detail group. | Watts |
-| **Solar Site Consumption Power** | `sensor.<circuit>_solar_site_consumption_power` | Estimated site consumption from solar generation plus signed grid power. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
-| **Solar Grid Import Power** | `sensor.<circuit>_solar_grid_import_power` | Current grid import. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
-| **Solar Grid Export Power** | `sensor.<circuit>_solar_grid_export_power` | Current grid export. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Watts |
-| **Solar Self Consumption** | `sensor.<circuit>_solar_self_consumption` | Percent of generated solar consumed on site. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Percentage values |
-| **Solar Powered** | `sensor.<circuit>_solar_powered` | Percent of current site load powered by solar. | Legacy compatibility; use Solar Flow Status attributes and the evidence panel. | Percentage values |
 | **Solar Flow Status** | `sensor.<circuit>_solar_flow_status` | Instantaneous solar-flow state. | Expert Mains and Solar Detail group. | `missing_mains`, `missing_generation`, `no_generation`, `importing`, `exporting`, `self_powered`, `inconsistent_export` |
 | **Solar Surplus Power** | `sensor.<circuit>_solar_surplus_power` | Exported solar available as surplus. | Expert Mains and Solar Detail group. | Watts |
-| **Solar Load Shift Power** | `sensor.<circuit>_solar_load_shift_power` | Surplus power above the configured load-shift threshold. Attributes show a bounded preview of up to five flexible-load candidates with counts for hidden candidates. | Legacy compatibility; use Solar Surplus Power and the evidence panel. | Watts |
-| **Solar Flexible Load Power** | `sensor.<circuit>_solar_flexible_load_power` | Current power used by flexible loads such as EV chargers, water heaters, HVAC, or pool pumps. | Legacy compatibility; use load-shift evidence. | Watts |
-| **Solar Flexible Load Coverage** | `sensor.<circuit>_solar_flexible_load_coverage` | Percent of active flexible-load power estimated to be solar-covered. | Legacy compatibility; use load-shift evidence. | Percentage values |
-| **Solar Load Shift Status** | `sensor.<circuit>_solar_load_shift_status` | Flexible-load solar support state. Attributes show the same bounded flexible-load candidate preview as Solar Load Shift Power. | Legacy compatibility; use Solar Surplus Status and the evidence panel. | `not_applicable`, `waiting_for_surplus`, `surplus_candidate`, `active_solar_supported`, `active_grid_supported` |
 | **Solar Surplus Status** | `sensor.<circuit>_solar_surplus_status` | Solar surplus state. | Expert Mains and Solar Detail group. | `missing_mains`, `missing_generation`, `no_generation`, `no_surplus`, `surplus_available`, `high_surplus`, `inconsistent_export` |
-| **Utility Comparison Difference** | `sensor.<circuit>_utility_comparison_difference` | Difference between measured kWh and utility/Opower kWh. | Legacy compatibility; use Utility Comparison Status attributes. | Percentage difference |
 | **Utility Comparison Status** | `sensor.<circuit>_utility_comparison_status` | Utility comparison state. | Expert Mains and Solar Detail group. | `unconfigured`, `missing_utility`, `missing_measured`, `tracking`, `mismatch` |
 
 ### Standby and Always On sensors
@@ -1115,7 +1082,6 @@ Diagnostic binary sensors are created for configured circuits. Operational binar
 |---|---|---|---|---|
 | **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Expert Developer Diagnostics group. | `on`, `off` |
 | **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Expert Developer Diagnostics group. | `on`, `off` |
-| **Maintenance** | `binary_sensor.<circuit>_maintenance` | Legacy diagnostic state for maintenance; use `switch.<circuit>_maintenance` for normal maintenance control. | Expert Developer Diagnostics group. | `on`, `off` |
 | **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Core/default visible for appliance circuits. | `on`, `off` |
 | **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Standard feature entity for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `on`, `off` |
 

@@ -1075,10 +1075,10 @@ def test_nilm_appliance_detail_includes_assignment_alerts() -> None:
 
 
 def test_appliance_views_register_with_panel_views() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel import _register_view
+    from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
         APPLIANCE_DETAIL_API_PATH,
         APPLIANCE_INSIGHTS_API_PATH,
-        _register_view,
     )
 
     registered = []

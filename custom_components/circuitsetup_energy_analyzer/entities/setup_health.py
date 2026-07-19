@@ -1382,48 +1382,13 @@ def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
         if isinstance(circuit, Mapping)
         else getattr(circuit, "appliance_profile", None)
     )
-    raw_profile = _appliance_profile_alias(str(raw_profile or ""))
+    raw_profile = str(raw_profile or "").strip().lower()
     try:
         return ApplianceProfile(raw_profile)
     except (TypeError, ValueError):
         return None
 
 
-def _appliance_profile_alias(raw_profile: str) -> str:
-    normalized = raw_profile.strip().lower()
-    aliases = {
-        "hvac_system": ApplianceProfile.HVAC.value,
-        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "blower": ApplianceProfile.HVAC_BLOWER.value,
-        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
-        "well_pump": ApplianceProfile.WATER_PUMP.value,
-        "booster_pump": ApplianceProfile.WATER_PUMP.value,
-        "clothes_washer": ApplianceProfile.WASHER.value,
-        "laundry_washer": ApplianceProfile.WASHER.value,
-        "washing_machine": ApplianceProfile.WASHER.value,
-        "clothes_dryer": ApplianceProfile.DRYER.value,
-        "electric_dryer": ApplianceProfile.DRYER.value,
-        "gas_dryer": ApplianceProfile.DRYER.value,
-        "microwave_oven": ApplianceProfile.MICROWAVE.value,
-        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
-        "car_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charging": ApplianceProfile.EV_CHARGER.value,
-        "level2_charger": ApplianceProfile.EV_CHARGER.value,
-        "level_2_charger": ApplianceProfile.EV_CHARGER.value,
-        "wall_connector": ApplianceProfile.EV_CHARGER.value,
-    }
-    return aliases.get(normalized, normalized)
 
 
 def _circuit_mode(circuit: Any) -> CircuitMode | None:

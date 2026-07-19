@@ -432,7 +432,6 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility",
         "dashboard",
         "entity_detail",
-        "compact_migration",
         "recommendations",
         "advanced",
     ]
@@ -443,7 +442,6 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
         "entity_detail": "👁️ Entity Detail Level",
-        "compact_migration": "🧹 Migrate To Compact Entity Model",
         "recommendations": "💡 Review Suggested Settings",
         "advanced": "🛠️ Advanced Circuit Settings",
     }
@@ -481,16 +479,6 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "expert"
         in entity_detail["data_description"]["selected_entity_groups"].lower()
     )
-    compact_migration = strings["options"]["step"]["compact_migration"]
-    assert (
-        compact_migration["data"]["confirm_compact_migration"]
-        == "Remove Legacy Entities"
-    )
-    assert "{will_remove}" in compact_migration["description"]
-    assert "{will_remain}" in compact_migration["description"]
-    assert "{before_count}" in compact_migration["description"]
-    assert "{after_count}" in compact_migration["description"]
-    assert "customized" in compact_migration["description"].lower()
     dashboard = strings["options"]["step"]["dashboard"]
     assert dashboard["data"]["dashboard_layout"] == "Dashboard Layout"
     assert (
@@ -673,7 +661,6 @@ def test_runtime_english_translation_is_the_single_source() -> None:
             ("options", "nilm"),
             ("options", "utility"),
             ("options", "entity_detail"),
-            ("options", "compact_migration"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),
@@ -787,14 +774,6 @@ def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
     assert "`standard`, `high`, `low`" not in readme_text
 
 
-def test_cost_rate_selectors_allow_any_decimal_precision() -> None:
-    services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
-    fields = services["set_cost_settings"]["fields"]
-
-    assert fields["default_rate_per_kwh"]["selector"]["number"]["step"] == "any"
-    assert fields["tou_rate_per_kwh"]["selector"]["number"]["step"] == "any"
-
-
 def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     cards = _dashboard_cards(dashboard)
@@ -847,11 +826,10 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
         "sensor.mains_nilm_balance_power",
         "sensor.mains_nilm_monitored_coverage",
         "sensor.mains_nilm_monitored_power",
-        "sensor.mains_nilm_nilm_discovered_signatures",
+        "sensor.mains_nilm_nilm_signature_count",
         "sensor.mains_nilm_nilm_unknown_loads",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_difference",
         "sensor.mains_nilm_utility_comparison_status",
         "sensor.water_heater_water_flow_correlation",
         "sensor.washer_water_flow_correlation",
@@ -1152,10 +1130,9 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
         "sensor.mains_nilm_monitored_coverage",
         "sensor.mains_nilm_monitored_power",
         "sensor.mains_nilm_nilm_unknown_loads",
-        "sensor.mains_nilm_nilm_discovered_signatures",
+        "sensor.mains_nilm_nilm_signature_count",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_difference",
         "sensor.mains_nilm_utility_comparison_status",
         "sensor.water_heater_water_flow_correlation",
         "sensor.washer_water_flow_correlation",
@@ -1188,7 +1165,6 @@ def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
         "sensor.outdoor_temperature",
         "sensor.mains_nilm_solar_flow_status",
         "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_difference",
         "sensor.mains_nilm_utility_comparison_status",
     }
 
@@ -1205,7 +1181,7 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "Electrical Health" in readme
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
-    assert "Power-quality evidence and metric/leg status" in readme
+    assert "power-quality, metric-consistency, and leg-balance evidence" in readme
     assert "Expert creates only the diagnostic or graph groups you select" in readme
     assert "Expert Entity Groups" in readme
 
@@ -6344,22 +6320,18 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "adds small action cards" not in readme_text
 
 
-def test_readme_documents_compact_entity_model_and_migration() -> None:
+def test_readme_documents_current_compact_entity_model() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "Compact entity model" in readme_text
-    assert "Migrate To Compact Entity Model" in readme_text
     assert "docs/entity-model.md" in readme_text
-    assert "docs/entity-model-migration.md" not in readme_text
     assert "`switch.<circuit>_maintenance`" in readme_text
     assert "`button.<circuit>_start_maintenance`" not in readme_text
     assert "`button.<circuit>_end_maintenance`" not in readme_text
     assert "`button.<circuit>_pause_alerts`" not in readme_text
     assert "`sensor.<circuit>_sensitivity`" not in readme_text
     assert "`sensor.<circuit>_standby_threshold`" not in readme_text
-    assert "Legacy replacement" in readme_text
     assert "sensor.<circuit>_health_summary" in readme_text
-    assert "configured outdoor temperature source entity" in readme_text
 
 
 def test_entity_model_docs_keep_counts_without_inventory_scripts() -> None:
@@ -6395,8 +6367,8 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
     assert "- Health Summary:" not in readme_text
     assert "Known Load Share" in readme_text
-    assert "`sensor.<circuit>_nilm_discovered_signatures`" in readme_text
-    assert "`sensor.<circuit>_nilm_signature_count`" not in readme_text
+    assert "`sensor.<circuit>_nilm_signature_count`" in readme_text
+    assert "`sensor.<circuit>_nilm_discovered_signatures`" not in readme_text
     assert "Expert Energy Detail group" in readme_text
     assert "Expert Demand and Capacity group" in readme_text
     assert "Expert Mains and Solar Detail group" in readme_text

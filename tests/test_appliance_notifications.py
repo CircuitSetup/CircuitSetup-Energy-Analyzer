@@ -15,7 +15,7 @@ from custom_components.circuitsetup_energy_analyzer.appliance_notifications impo
 LOCAL = ZoneInfo("America/New_York")
 
 
-def test_legacy_preferences_use_safe_defaults_and_category_choices() -> None:
+def test_default_preferences_use_safe_defaults_and_category_choices() -> None:
     preferences = preferences_from_dict({}, appliance_key="circuit:fridge")
 
     assert preferences == ApplianceNotificationPreferences(

@@ -870,7 +870,7 @@ def _energy_usage_projection_evidence(
     return updates[("energy_usage_evidence_by_circuit", "fridge")]
 
 
-def test_energy_usage_projection_rejects_unmarked_legacy_days() -> None:
+def test_energy_usage_projection_rejects_incomplete_days() -> None:
     evidence = _energy_usage_projection_evidence(
         [
             {"date": f"2026-07-{day:02d}", "usage_kwh": usage}
@@ -3024,7 +3024,7 @@ def test_capacity_processor_records_current_and_returns_capacity_alert() -> None
     ]
 
 
-def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
+def test_capacity_history_discards_unsupported_sample_format() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import capacity
 
     now = datetime(2026, 7, 19, 12, 4, 50, tzinfo=UTC)
@@ -3053,9 +3053,8 @@ def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
     assert histories["ev"]["capacity_current_sample_format"] == "5m-max-v1"
     assert histories["ev"]["capacity_current_samples"] == [
         {
-            "timestamp": "2026-07-19T12:03:00+00:00",
-            "current_amps": 18.0,
-            "sample_count": 4,
+            "timestamp": "2026-07-19T12:04:50+00:00",
+            "current_amps": 16.0,
         }
     ]
 
@@ -3068,9 +3067,8 @@ def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
     )
     assert histories["ev"]["capacity_current_samples"] == [
         {
-            "timestamp": "2026-07-19T12:03:00+00:00",
-            "current_amps": 18.0,
-            "sample_count": 4,
+            "timestamp": "2026-07-19T12:04:50+00:00",
+            "current_amps": 16.0,
         },
         {"timestamp": "2026-07-19T12:05:00+00:00", "current_amps": 20.0},
     ]
@@ -3148,6 +3146,7 @@ def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() ->
     store_data = FeatureStoreData(
         demand_by_circuit={
             "hvac": {
+                "capacity_current_sample_format": "5m-max-v1",
                 "capacity_current_samples": [
                     {
                         "timestamp": (now - timedelta(days=46)).isoformat(),
@@ -4569,6 +4568,7 @@ def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
     store_data = FeatureStoreData(
         standby_by_circuit={
             "office": {
+                "standby_sample_format": "1m-min-v1",
                 "samples": [
                     {
                         "timestamp": (now - timedelta(hours=offset + 1)).isoformat(),
@@ -4655,6 +4655,7 @@ def test_standby_processor_alert_features_include_contextual_baseline_details() 
     store_data = FeatureStoreData(
         standby_by_circuit={
             "water_heater": {
+                "standby_sample_format": "1m-min-v1",
                 "samples": [
                     {
                         "timestamp": (now - timedelta(hours=offset + 1)).isoformat(),
@@ -4752,6 +4753,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
         store_data=FeatureStoreData(
             standby_by_circuit={
                 "office": {
+                    "standby_sample_format": "1m-min-v1",
                     "samples": [
                         {
                             "timestamp": (now - timedelta(seconds=30)).isoformat(),
@@ -4802,13 +4804,16 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     assert result.store_dirty is True
     assert result.alerts == []
     assert context.store_data.standby_by_circuit["office"] == {
-        "standby_sample_format": "1m-min-v1",
-        "samples": [
-            {
-                "timestamp": (now - timedelta(seconds=10)).isoformat(),
-                "real_power_w": 3.0,
-                "sample_count": 2,
-            },
+            "standby_sample_format": "1m-min-v1",
+            "samples": [
+                {
+                    "timestamp": (now - timedelta(seconds=30)).isoformat(),
+                    "real_power_w": 5.0,
+                },
+                {
+                    "timestamp": (now - timedelta(seconds=10)).isoformat(),
+                    "real_power_w": 3.0,
+                },
             {"timestamp": now.isoformat(), "real_power_w": 4.0},
         ],
     }

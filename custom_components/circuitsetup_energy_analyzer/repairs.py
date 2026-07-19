@@ -9,7 +9,6 @@ from .ids import tuple_id as _tuple_id
 from .models import Severity
 
 REPAIR_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
-COMPACT_ENTITY_MODEL_REPAIR = "compact_entity_model_available"
 
 _REPAIR_FIXES: dict[str, str] = {
     "missing_source_entities": "Add at least one source sensor in integration options.",
@@ -57,11 +56,6 @@ def issue_id_for_circuit_problem(circuit_id: str, problem: str) -> str:
     return _tuple_id(DOMAIN, circuit_id, problem)
 
 
-def issue_id_for_compact_entity_model(entry_id: str) -> str:
-    """Return the Repairs issue id for an entry's compact-model migration."""
-    return f"{COMPACT_ENTITY_MODEL_REPAIR}_{entry_id}"
-
-
 def existing_circuit_problem_issues(
     hass: Any,
     circuit_id: str,
@@ -93,96 +87,6 @@ def existing_circuit_problem_issues(
         if get_issue(DOMAIN, issue_id_for_circuit_problem(circuit_id, problem_text)):
             existing.add((circuit_id, problem_text))
     return existing
-
-
-async def async_create_compact_entity_model_issue(
-    hass: Any,
-    entry_id: str,
-    *,
-    legacy_count: int,
-) -> None:
-    """Create the integration-level compact entity model migration Repair."""
-    try:
-        from homeassistant.helpers import issue_registry as ir
-    except ModuleNotFoundError:
-        return
-
-    create_issue = getattr(ir, "async_create_issue", None)
-    if create_issue is None:
-        return
-
-    recommended_action = (
-        "Open integration options and choose Migrate To Compact Entity Model."
-    )
-    issue_data = {
-        "entry_id": entry_id,
-        "legacy_count": int(legacy_count),
-        "open_path": REPAIR_OPEN_PATH,
-        "recommended_action": recommended_action,
-        "reason": "Existing legacy entity rows can be migrated to the compact model.",
-    }
-    kwargs: dict[str, Any] = {
-        "is_fixable": False,
-        "is_persistent": True,
-        "severity": _ha_issue_severity(ir, Severity.WARNING),
-        "translation_key": COMPACT_ENTITY_MODEL_REPAIR,
-        "data": issue_data,
-    }
-    if _call_accepts_keyword(create_issue, "translation_placeholders"):
-        kwargs["translation_placeholders"] = {
-            "entry_id": entry_id,
-            "legacy_count": str(int(legacy_count)),
-            "open_path": REPAIR_OPEN_PATH,
-            "recommended_action": recommended_action,
-            "reason": str(issue_data["reason"]),
-        }
-
-    _call_issue_registry(
-        create_issue,
-        hass,
-        DOMAIN,
-        issue_id_for_compact_entity_model(entry_id),
-        **kwargs,
-    )
-
-
-async def async_delete_compact_entity_model_issue(
-    hass: Any,
-    entry_id: str,
-) -> None:
-    """Delete the compact-model migration Repair for an entry."""
-    try:
-        from homeassistant.helpers import issue_registry as ir
-    except ModuleNotFoundError:
-        return
-
-    delete_issue = getattr(ir, "async_delete_issue", None)
-    if delete_issue is None:
-        return
-
-    _call_issue_registry(
-        delete_issue,
-        hass,
-        DOMAIN,
-        issue_id_for_compact_entity_model(entry_id),
-    )
-
-
-async def async_sync_compact_entity_model_issue(
-    hass: Any,
-    entry_id: str,
-    *,
-    legacy_count: int,
-) -> None:
-    """Create or clear the compact-model migration Repair for one entry."""
-    if legacy_count > 0:
-        await async_create_compact_entity_model_issue(
-            hass,
-            entry_id,
-            legacy_count=legacy_count,
-        )
-        return
-    await async_delete_compact_entity_model_issue(hass, entry_id)
 
 
 async def async_create_data_quality_issue(

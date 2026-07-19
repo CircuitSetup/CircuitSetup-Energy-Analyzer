@@ -64,20 +64,18 @@ def test_setup_health_aggregator_builds_data_quality_repair_data() -> None:
 
 @pytest.mark.asyncio
 async def test_setup_health_aggregator_runs_mapping_checks(monkeypatch) -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
+    from custom_components.circuitsetup_energy_analyzer import repairs
 
     async def fake_create(*args, **kwargs) -> None:
         del args, kwargs
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "existing_circuit_problem_issues",
         lambda hass, circuit_id, problems: set(),
     )
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_data_quality_issue",
         fake_create,
     )

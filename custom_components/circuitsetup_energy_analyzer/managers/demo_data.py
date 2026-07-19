@@ -21,6 +21,7 @@ from ..models import (
     PowerFlowMode,
 )
 from ..profiles import get_profile_definition
+from ..standby import STANDBY_SAMPLE_FORMAT
 
 if TYPE_CHECKING:
     from ..processors.base import ProcessingContext
@@ -326,6 +327,7 @@ class DemoDataSeeder:
                 }
             )
         history["samples"] = seeded
+        history["standby_sample_format"] = STANDBY_SAMPLE_FORMAT
         self._mark_store_dirty()
 
     def _mark_store_dirty(self) -> None:

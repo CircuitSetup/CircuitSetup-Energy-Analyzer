@@ -12,7 +12,6 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
-    CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
@@ -884,21 +883,18 @@ def test_sync_entity_registry_categories_updates_existing_sensor_categories(
 def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         activity_summary_value,
-        alert_evidence_value,
         always_on_limit_usage_value,
         always_on_power_value,
         anomaly_score_value,
         apparent_power_drift_value,
         balance_power_value,
         balance_status_value,
-        billing_cycle_budget_usage_value,
         billing_cycle_forecast_value,
         billing_cycle_status_value,
         billing_cycle_usage_value,
         capacity_status_value,
         capacity_usage_value,
         circuit_mode_value,
-        cost_current_rate_value,
         cost_cycle_forecast_value,
         cost_cycle_value,
         cost_status_value,
@@ -917,7 +913,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         energy_usage_share_value,
         energy_usage_status_value,
         health_summary_value,
-        last_event_value,
         learning_progress_value,
         leg_imbalance_status_value,
         leg_imbalance_value,
@@ -937,7 +932,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         power_quality_score_value,
         reactive_power_drift_value,
         readiness_value,
-        recent_activity_count_value,
         recent_activity_value,
         run_cycle_count_value,
         run_cycle_duty_cycle_value,
@@ -946,22 +940,11 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         sensitivity_value,
         settings_suggestions_attributes,
         settings_suggestions_value,
-        solar_flexible_load_coverage_value,
-        solar_flexible_load_power_value,
         solar_flow_status_value,
         solar_generation_power_value,
-        solar_grid_export_power_value,
-        solar_grid_import_power_value,
-        solar_load_shift_power_value,
-        solar_load_shift_status_value,
-        solar_powered_value,
-        solar_self_consumption_value,
-        solar_site_consumption_power_value,
         solar_surplus_power_value,
         solar_surplus_status_value,
         standby_status_value,
-        standby_threshold_value,
-        utility_comparison_difference_value,
         utility_comparison_status_value,
     )
 
@@ -1191,7 +1174,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     )
 
     assert anomaly_score_value(state, "fridge") == 0.42
-    assert last_event_value(state, "fridge") == "start"
     assert power_quality_score_value(state, "fridge") == 3.25
     assert (
         power_quality_evidence_value(state, "fridge")
@@ -1226,9 +1208,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert data_quality_checklist_value(state, "fridge") == "ok"
     assert data_quality_checklist_value(state, "well_pump") == "problem"
     assert energy_dashboard_status_value(state, "fridge") == "ready"
-    assert alert_evidence_value(state, "fridge") == "Reactive Power"
     assert recent_activity_value(state, "fridge") == "Possible issue: Cycle Duration"
-    assert recent_activity_count_value(state, "fridge") == 2
     assert sensitivity_value(state, "fridge") == "Quiet"
     assert circuit_mode_value(state, "fridge") == "Dual Phase"
     assert power_flow_value(state, "fridge") == "Generation / Solar Export"
@@ -1264,30 +1244,17 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_coverage_value(state, "fridge") == 54.0
     assert balance_status_value(state, "fridge") == "tracking"
     assert solar_generation_power_value(state, "fridge") == 2000.0
-    assert solar_site_consumption_power_value(state, "fridge") == 1500.0
-    assert solar_grid_import_power_value(state, "fridge") == 0.0
-    assert solar_grid_export_power_value(state, "fridge") == 500.0
-    assert solar_self_consumption_value(state, "fridge") == 75.0
-    assert solar_powered_value(state, "fridge") == 100.0
     assert solar_flow_status_value(state, "fridge") == "exporting"
     assert solar_surplus_power_value(state, "fridge") == 500.0
-    assert solar_load_shift_power_value(state, "fridge") == 500.0
-    assert solar_flexible_load_power_value(state, "fridge") == 800.0
-    assert solar_flexible_load_coverage_value(state, "fridge") == 100.0
     assert solar_surplus_status_value(state, "fridge") == "surplus_available"
-    assert solar_load_shift_status_value(state, "fridge") == "active_solar_supported"
-    assert utility_comparison_difference_value(state, "fridge") == 12.5
     assert utility_comparison_status_value(state, "fridge") == "mismatch"
     assert billing_cycle_usage_value(state, "fridge") == 100.0
     assert billing_cycle_forecast_value(state, "fridge") == 300.0
-    assert billing_cycle_budget_usage_value(state, "fridge") == 40.0
     assert billing_cycle_status_value(state, "fridge") == "projected_over_budget"
-    assert cost_current_rate_value(state, "fridge") == 0.3
     assert cost_cycle_value(state, "fridge") == 6.2
     assert cost_cycle_forecast_value(state, "fridge") == 18.6
     assert cost_status_value(state, "fridge") == "tou_peak"
     assert always_on_power_value(state, "fridge") == 45.0
-    assert standby_threshold_value(state, "fridge") == 8.0
     assert standby_status_value(state, "fridge") == "standby"
     assert always_on_limit_usage_value(state, "fridge") == 180.0
     assert settings_suggestions_value(state, "fridge") == 2
@@ -1310,7 +1277,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     }
 
     assert anomaly_score_value(state, "unknown") == 0.0
-    assert last_event_value(state, "unknown") is None
     assert power_quality_score_value(state, "unknown") == 0.0
     assert power_quality_evidence_value(state, "unknown") == ""
     assert reactive_power_drift_value(state, "unknown") == 0.0
@@ -1326,9 +1292,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert learning_progress_value(state, "unknown") == 0.0
     assert data_quality_checklist_value(state, "unknown") == "problem"
     assert energy_dashboard_status_value(state, "unknown") == "needs_energy_source"
-    assert alert_evidence_value(state, "unknown") == ""
     assert recent_activity_value(state, "unknown") == "No recent activity"
-    assert recent_activity_count_value(state, "unknown") == 0
     assert sensitivity_value(state, "unknown") == "Balanced"
     assert activity_summary_value(state, "unknown") == "No Activity"
     assert electrical_health_value(state, "unknown") == "Needs Metrics"
@@ -1359,30 +1323,17 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert monitored_coverage_value(state, "unknown") == 0.0
     assert balance_status_value(state, "unknown") == "missing_mains"
     assert solar_generation_power_value(state, "unknown") == 0.0
-    assert solar_site_consumption_power_value(state, "unknown") == 0.0
-    assert solar_grid_import_power_value(state, "unknown") == 0.0
-    assert solar_grid_export_power_value(state, "unknown") == 0.0
-    assert solar_self_consumption_value(state, "unknown") == 0.0
-    assert solar_powered_value(state, "unknown") == 0.0
     assert solar_flow_status_value(state, "unknown") == "missing_mains"
     assert solar_surplus_power_value(state, "unknown") == 0.0
-    assert solar_load_shift_power_value(state, "unknown") == 0.0
-    assert solar_flexible_load_power_value(state, "unknown") == 0.0
-    assert solar_flexible_load_coverage_value(state, "unknown") == 0.0
     assert solar_surplus_status_value(state, "unknown") == "missing_mains"
-    assert solar_load_shift_status_value(state, "unknown") == "not_applicable"
-    assert utility_comparison_difference_value(state, "unknown") == 0.0
     assert utility_comparison_status_value(state, "unknown") == "unconfigured"
     assert billing_cycle_usage_value(state, "unknown") == 0.0
     assert billing_cycle_forecast_value(state, "unknown") == 0.0
-    assert billing_cycle_budget_usage_value(state, "unknown") == 0.0
     assert billing_cycle_status_value(state, "unknown") == "no_budget"
-    assert cost_current_rate_value(state, "unknown") == 0.0
     assert cost_cycle_value(state, "unknown") == 0.0
     assert cost_cycle_forecast_value(state, "unknown") == 0.0
     assert cost_status_value(state, "unknown") == "unconfigured"
     assert always_on_power_value(state, "unknown") == 0.0
-    assert standby_threshold_value(state, "unknown") == 0.0
     assert standby_status_value(state, "unknown") == "learning"
     assert always_on_limit_usage_value(state, "unknown") == 0.0
     assert settings_suggestions_value(state, "unknown") == 0
@@ -1435,52 +1386,6 @@ def test_nilm_unknown_load_attributes_are_bounded() -> None:
         "signature-4",
     ]
     assert all("sample_history" not in load for load in attrs["unknown_loads"])
-
-
-def test_data_quality_checklist_attributes_hide_full_issue_list() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-        CircuitAnalyzerSensor,
-    )
-
-    description = next(
-        item for item in SENSOR_DESCRIPTIONS if item.key == "data_quality_checklist"
-    )
-    state = AnalyzerState(
-        data_quality_checklist_by_circuit={
-            "panel": {
-                "quality_issues": [
-                    f"sensor.panel_source_{index:02d} stale" for index in range(5)
-                ],
-                "quality_issues_full": [
-                    *(f"sensor.panel_source_{index:02d} stale" for index in range(5)),
-                    "sensor.panel_power negative_real_power_load",
-                ],
-                "quality_issue_count": 6,
-                "quality_issues_has_more": True,
-                "quality_issues_omitted_count": 1,
-            }
-        }
-    )
-    entity = CircuitAnalyzerSensor(
-        SimpleNamespace(data=state),
-        entry_id="entry-1",
-        circuit=SimpleNamespace(
-            circuit_id="panel",
-            name="Panel",
-            appliance_profile=ApplianceProfile.MIXED,
-        ),
-        description=description,
-    )
-
-    attrs = entity.extra_state_attributes
-
-    assert attrs is not None
-    assert "quality_issues_full" not in attrs
-    assert attrs["quality_issue_count"] == 6
-    assert attrs["quality_issues_has_more"] is True
-
-
 def test_recent_activity_attributes_are_bounded() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1530,111 +1435,6 @@ def test_recent_activity_attributes_are_bounded() -> None:
             for index in range(5)
         ],
     }
-
-
-def test_learning_progress_attributes_are_bounded() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-    )
-
-    description = next(
-        item for item in SENSOR_DESCRIPTIONS if item.key == "learning_progress"
-    )
-    pending_samples = {
-        f"feature_{index:02d}": 100 + index for index in range(12)
-    }
-    state = AnalyzerState(
-        learning_progress_by_circuit={
-            "fridge": {
-                "baseline_age_days": 3,
-                "cycle_count": 2,
-                "learned_feature_count": 1,
-                "pending_feature_samples": pending_samples,
-                "alert_ready": False,
-            }
-        }
-    )
-
-    attrs = description.attributes_fn(state, "fridge")
-
-    assert attrs == {
-        "baseline_age_days": 3,
-        "cycle_count": 2,
-        "learned_feature_count": 1,
-        "pending_feature_sample_count": 1266,
-        "pending_feature_samples_shown_count": 5,
-        "pending_feature_samples_has_more": True,
-        "pending_feature_samples": {
-            f"feature_{index:02d}": 100 + index for index in range(5)
-        },
-        "alert_ready": False,
-    }
-
-
-def test_solar_load_shift_attributes_are_bounded() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-    )
-
-    description = next(
-        item for item in SENSOR_DESCRIPTIONS if item.key == "solar_load_shift_status"
-    )
-    candidate_loads = [
-        {
-            "circuit_id": f"load_{index}",
-            "name": f"Flexible Load {index}",
-            "appliance_profile": "pool_pump",
-            "current_power_w": 120.0 + index,
-            "state": "idle",
-            "debug_samples": [index] * 20,
-        }
-        for index in range(8)
-    ]
-    state = AnalyzerState(
-        solar_load_shift_evidence_by_circuit={
-            "mains": {
-                "status": "surplus_candidate",
-                "solar_surplus_status": "high_surplus",
-                "active_flexible_load_power_w": 0.0,
-                "solar_load_shift_available_w": 500.0,
-                "grid_import_w": 0.0,
-                "solar_coverage_percent": 0.0,
-                "active_flexible_load_count": 0,
-                "idle_flexible_load_count": 8,
-                "unavailable_flexible_load_count": 0,
-                "candidate_loads": candidate_loads,
-            }
-        }
-    )
-
-    attrs = description.attributes_fn(state, "mains")
-
-    assert attrs == {
-        "status": "surplus_candidate",
-        "solar_surplus_status": "high_surplus",
-        "active_flexible_load_power_w": 0.0,
-        "solar_load_shift_available_w": 500.0,
-        "grid_import_w": 0.0,
-        "solar_coverage_percent": 0.0,
-        "active_flexible_load_count": 0,
-        "idle_flexible_load_count": 8,
-        "unavailable_flexible_load_count": 0,
-        "candidate_load_count": 8,
-        "candidate_loads_shown_count": 5,
-        "candidate_loads_has_more": True,
-        "candidate_loads": [
-            {
-                "circuit_id": f"load_{index}",
-                "name": f"Flexible Load {index}",
-                "appliance_profile": "pool_pump",
-                "current_power_w": 120.0 + index,
-                "state": "idle",
-            }
-            for index in range(5)
-        ],
-    }
-
-
 def test_setup_health_prioritizes_missing_energy_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -2833,7 +2633,6 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "nilm_signature_count",
         "nilm_unknown_loads",
         "weather_context",
-        "outdoor_temperature",
         "rain_pump_correlation",
         "water_flow_correlation",
     }
@@ -2858,7 +2657,6 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "settings_suggestions",
         "daily_energy_usage",
         "weather_context",
-        "outdoor_temperature",
         "rain_pump_correlation",
         "water_flow_correlation",
         "water_flow_mismatch_minutes",
@@ -2877,30 +2675,15 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "monitored_power",
         "monitored_coverage",
         "solar_generation_power",
-        "solar_site_consumption_power",
-        "solar_grid_import_power",
-        "solar_grid_export_power",
-        "solar_self_consumption",
-        "solar_powered",
         "solar_flow_status",
         "solar_surplus_power",
-        "solar_load_shift_power",
-        "solar_flexible_load_power",
-        "solar_flexible_load_coverage",
-        "solar_load_shift_status",
         "solar_surplus_status",
-        "utility_comparison_difference",
         "utility_comparison_status",
         "billing_cycle_usage",
         "billing_cycle_forecast",
-        "billing_cycle_budget_usage",
-        "billing_cycle_status",
-        "cost_current_rate",
         "cost_cycle",
         "cost_cycle_forecast",
-        "cost_status",
         "always_on_power",
-        "standby_threshold",
         "standby_status",
         "always_on_limit_usage",
     }
@@ -2916,18 +2699,16 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert descriptions["energy_goal_status"].entity_tier is EntityTier.FEATURE
     assert descriptions["power_quality_score"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["power_quality_score"].entity_registry_enabled_default is False
-    assert descriptions["metric_consistency_status"].entity_tier is (
+    assert descriptions["metric_consistency_score"].entity_tier is (
         EntityTier.DIAGNOSTIC
     )
     assert (
-        descriptions["metric_consistency_status"].entity_registry_enabled_default
+        descriptions["metric_consistency_score"].entity_registry_enabled_default
         is False
     )
     for diagnostic_status_key in {
-        "run_cycle_status",
         "demand_status",
         "capacity_status",
-        "leg_imbalance_status",
         "balance_status",
     }:
         assert descriptions[diagnostic_status_key].entity_tier is (
@@ -2960,7 +2741,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         coordinator,
         entry_id="entry-1",
         circuit=circuit,
-        description=descriptions["power_quality_evidence"],
+        description=descriptions["power_quality_score"],
     )
     assert normal_entity._attr_entity_category is None
     assert normal_entity._attr_entity_registry_enabled_default is True
@@ -2985,13 +2766,13 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         standard_coordinator,
         entry_id="entry-1",
         circuit=circuit,
-        description=descriptions["power_quality_evidence"],
+        description=descriptions["power_quality_score"],
     )
     expert_diagnostic_entity = CircuitAnalyzerSensor(
         expert_coordinator,
         entry_id="entry-1",
         circuit=circuit,
-        description=descriptions["power_quality_evidence"],
+        description=descriptions["power_quality_score"],
     )
     assert standard_feature_entity._attr_entity_registry_enabled_default is True
     assert standard_diagnostic_entity._attr_entity_registry_enabled_default is False
@@ -3015,7 +2796,6 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
     expected_icons = {
         "activity_summary": "mdi:fridge-outline",
         "health_summary": "mdi:heart-pulse",
-        "learning_progress": "mdi:school-outline",
         "circuit_mode": "mdi:transmission-tower",
         "power_flow": "mdi:swap-horizontal",
         "settings_suggestions": "mdi:tune-variant",
@@ -3024,7 +2804,7 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
         "power_factor_drift": "mdi:cosine-wave",
         "daily_energy_usage": "mdi:counter",
         "current_demand": "mdi:gauge",
-        "metric_consistency_status": "mdi:clipboard-check-outline",
+        "metric_consistency_score": "mdi:clipboard-check-outline",
         "standby_status": "mdi:power-sleep",
     }
 
@@ -3130,51 +2910,6 @@ def test_weather_context_attributes_are_bounded() -> None:
     assert attrs["temperature_bins"] == {
         f"bin_{index:02d}": {"sample_count": index} for index in range(5)
     }
-
-
-def test_outdoor_temperature_sensor_exposes_graphable_display_temperature() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-        CircuitAnalyzerSensor,
-        outdoor_temperature_attributes,
-        outdoor_temperature_value,
-    )
-
-    state = SimpleNamespace(
-        weather_context_by_circuit={
-            "hvac": {
-                "status": "weather_correlated",
-                "temperature_f": 77.0,
-                "current_outdoor_temperature": 25.0,
-                "temperature_unit": "°C",
-            }
-        }
-    )
-
-    assert outdoor_temperature_value(state, "hvac") == 25.0
-    assert outdoor_temperature_attributes(state, "hvac") == {
-        "temperature_f": 77.0,
-        "temperature_unit": "°C",
-    }
-
-    description = {
-        description.key: description for description in SENSOR_DESCRIPTIONS
-    }["outdoor_temperature"]
-    entity = CircuitAnalyzerSensor(
-        SimpleNamespace(data=state),
-        entry_id="entry-1",
-        circuit=SimpleNamespace(
-            circuit_id="hvac",
-            name="HVAC",
-            appliance_profile="hvac",
-        ),
-        description=description,
-    )
-
-    assert entity.native_value == 25.0
-    assert entity.native_unit_of_measurement == "°C"
-
-
 def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -3198,33 +2933,6 @@ def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     assert description.entity_registry_visible_default is True
     assert entity.icon == "mdi:thermometer-lines"
     assert entity._attr_entity_category is None
-
-
-def test_outdoor_temperature_sensor_metadata_is_graphable_and_visible() -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-        CircuitAnalyzerSensor,
-    )
-
-    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
-    description = descriptions["outdoor_temperature"]
-    coordinator = SimpleNamespace(data=AnalyzerState())
-    circuit = SimpleNamespace(circuit_id="hvac", name="HVAC", appliance_profile="hvac")
-
-    entity = CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=description,
-    )
-
-    assert description.name_suffix == "Outdoor Temperature"
-    assert description.entity_category is None
-    assert description.entity_registry_visible_default is True
-    assert entity.icon == "mdi:thermometer"
-    assert entity._attr_entity_category is None
-
-
 def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -3233,7 +2941,6 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     weather_description = descriptions["weather_context"]
-    outdoor_temperature_description = descriptions["outdoor_temperature"]
     coordinator_with_options = SimpleNamespace(
         options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature"},
         entry_data={},
@@ -3261,42 +2968,18 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
             coordinator_with_options,
         )
         assert sensor_description_applies(
-            outdoor_temperature_description,
-            circuit,
-            coordinator_with_options,
-        )
-        assert sensor_description_applies(
             weather_description,
-            circuit,
-            coordinator_with_entry_data,
-        )
-        assert sensor_description_applies(
-            outdoor_temperature_description,
             circuit,
             coordinator_with_entry_data,
         )
         assert not sensor_description_applies(
             weather_description,
-            circuit,
-            coordinator_without_temperature,
-        )
-        assert not sensor_description_applies(
-            outdoor_temperature_description,
             circuit,
             coordinator_without_temperature,
         )
 
     assert not sensor_description_applies(
         weather_description,
-        SimpleNamespace(
-            circuit_id="fridge",
-            name="Fridge",
-            appliance_profile=ApplianceProfile.REFRIGERATOR,
-        ),
-        coordinator_with_options,
-    )
-    assert not sensor_description_applies(
-        outdoor_temperature_description,
         SimpleNamespace(
             circuit_id="fridge",
             name="Fridge",
@@ -3372,11 +3055,6 @@ def test_utility_comparison_sensors_merge_config_sources_per_circuit() -> None:
 
     assert sensor_description_applies(
         descriptions["utility_comparison_status"],
-        mains,
-        coordinator,
-    )
-    assert sensor_description_applies(
-        descriptions["utility_comparison_difference"],
         mains,
         coordinator,
     )
@@ -3514,14 +3192,6 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     state = AnalyzerState(
-        metric_consistency_status_by_circuit={"pool": "missing_metrics"},
-        metric_consistency_evidence_by_circuit={
-            "pool": {
-                "status": "missing_metrics",
-                "missing_roles": ["voltage", "current", "apparent_power"],
-            }
-        },
-        leg_imbalance_status_by_circuit={"pool": "not_dual_phase"},
         solar_flow_status_by_circuit={"pool": "inconsistent_export"},
     )
     coordinator = SimpleNamespace(data=state)
@@ -3530,37 +3200,6 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
         name="Pool Pump",
         appliance_profile="pool_pump",
     )
-
-    metric_status = CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["metric_consistency_status"],
-    )
-    assert metric_status.native_value == "Missing Metrics"
-    assert metric_status.extra_state_attributes == {
-        "status": "missing_metrics",
-        "missing_roles": ["voltage", "current", "apparent_power"],
-        "raw_status": "missing_metrics",
-        "status_label": "Missing Metrics",
-        "status_explanation": (
-            "This check needs more matching voltage, current, real power, "
-            "apparent power, or power factor sensors."
-        ),
-    }
-
-    leg_status = CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["leg_imbalance_status"],
-    )
-    assert leg_status.native_value == "Not Dual Phase"
-    assert leg_status.extra_state_attributes == {
-        "raw_status": "not_dual_phase",
-        "status_label": "Not Dual Phase",
-        "status_explanation": "This check only applies to dual-phase circuits.",
-    }
 
     solar_status = CircuitAnalyzerSensor(
         coordinator,
@@ -3705,472 +3344,6 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
         )
         assert entity.icon == icon
         assert entity.icon != "mdi:eye"
-
-
-def test_sensor_extra_attributes_return_runtime_diagnostics() -> None:
-    from custom_components.circuitsetup_energy_analyzer.safety import (
-        ELECTRICAL_SAFETY_NOTICE,
-    )
-    from custom_components.circuitsetup_energy_analyzer.sensor import (
-        SENSOR_DESCRIPTIONS,
-        CircuitAnalyzerSensor,
-    )
-
-    readiness = {
-        "health_status": "possible_issue",
-        "health_summary": "Possible issue",
-    }
-    progress = {
-        "learned_feature_count": 5,
-        "pending_feature_samples": {"reactive_power": 3},
-    }
-    checklist = {"quality_issues": [], "required_sensors_present": True}
-    energy_dashboard = {
-        "status": "ready",
-        "ready_energy_entities": ["sensor.fridge_energy"],
-    }
-    evidence = {"feature": "reactive_power", "change_ratio": 0.42}
-    recent_activity = {
-        "status": "activity",
-        "total_count": 2,
-        "shown_count": 1,
-        "has_more": False,
-        "items": [{"title": "Possible issue: Cycle Duration"}],
-    }
-    energy_evidence = {
-        "status": "tracking",
-        "daily_usage_kwh": 8.2,
-        "baseline_total_kwh": 50.0,
-    }
-    energy_goal_evidence = {
-        "status": "over_goal",
-        "daily_usage_kwh": 13.2,
-        "daily_goal_kwh": 12.0,
-    }
-    run_cycle_evidence = {
-        "status": "idle",
-        "start_count": 4,
-        "runtime_seconds": 3600.0,
-    }
-    demand_evidence = {
-        "status": "over_limit",
-        "current_demand_w": 2400.0,
-        "demand_limit_w": 2000.0,
-    }
-    capacity_evidence = {
-        "status": "over_limit",
-        "capacity_usage_percent": 85.0,
-        "breaker_amps": 40.0,
-    }
-    demand_evidence_with_notice = {
-        **demand_evidence,
-        "safety_notice": ELECTRICAL_SAFETY_NOTICE,
-    }
-    capacity_evidence_with_notice = {
-        **capacity_evidence,
-        "safety_notice": ELECTRICAL_SAFETY_NOTICE,
-    }
-    leg_imbalance_evidence = {
-        "status": "imbalanced",
-        "leg_imbalance_percent": 66.7,
-        "left_real_power_w": 2400.0,
-        "right_real_power_w": 1200.0,
-    }
-    metric_consistency_evidence = {
-        "status": "apparent_power_mismatch",
-        "mismatch_score_percent": 50.0,
-        "expected_apparent_power_va": 1200.0,
-        "reported_apparent_power_va": 600.0,
-    }
-    balance_evidence = {
-        "status": "tracking",
-        "balance_power_w": 2300.0,
-        "monitored_coverage_percent": 54.0,
-    }
-    solar_flow_evidence = {
-        "status": "exporting",
-        "solar_surplus_status": "surplus_available",
-        "solar_generation_w": 2000.0,
-        "site_consumption_w": 1500.0,
-        "solar_surplus_w": 500.0,
-        "load_shift_available_w": 500.0,
-    }
-    solar_load_shift_evidence = {
-        "status": "active_solar_supported",
-        "active_flexible_load_power_w": 800.0,
-        "solar_coverage_percent": 100.0,
-        "candidate_load_count": 1,
-        "candidate_loads_shown_count": 1,
-        "candidate_loads_has_more": False,
-        "candidate_loads": [{"circuit_id": "pool", "state": "active"}],
-    }
-    utility_comparison_evidence = {
-        "status": "mismatch",
-        "utility_kwh": 120.0,
-        "measured_kwh": 135.0,
-    }
-    nilm_topology_evidence = {
-        "status": "topology_mismatch",
-        "observed_split_phase_type": "balanced_240v",
-        "configured_mode": "single_phase",
-    }
-    billing_cycle_evidence = {
-        "status": "projected_over_budget",
-        "cycle_usage_kwh": 100.0,
-        "projected_cycle_kwh": 300.0,
-    }
-    cost_evidence = {
-        "status": "tou_peak",
-        "active_rate_name": "Peak",
-        "current_rate_per_kwh": 0.3,
-    }
-    standby_evidence = {
-        "status": "standby",
-        "always_on_power_w": 45.0,
-        "standby_threshold_w": 8.0,
-    }
-    state = AnalyzerState(
-        readiness_by_circuit={"fridge": readiness},
-        learning_progress_by_circuit={"fridge": progress},
-        data_quality_checklist_by_circuit={"fridge": checklist},
-        energy_dashboard_evidence_by_circuit={"fridge": energy_dashboard},
-        alert_evidence_by_circuit={"fridge": evidence},
-        recent_activity_timeline_by_circuit={"fridge": recent_activity},
-        sensitivity_by_circuit={"fridge": "quiet"},
-        energy_usage_evidence_by_circuit={"fridge": energy_evidence},
-        energy_goal_evidence_by_circuit={"fridge": energy_goal_evidence},
-        run_cycle_evidence_by_circuit={"fridge": run_cycle_evidence},
-        demand_evidence_by_circuit={"fridge": demand_evidence},
-        capacity_evidence_by_circuit={"fridge": capacity_evidence},
-        leg_imbalance_evidence_by_circuit={"fridge": leg_imbalance_evidence},
-        metric_consistency_evidence_by_circuit={
-            "fridge": metric_consistency_evidence
-        },
-        balance_evidence_by_circuit={"fridge": balance_evidence},
-        solar_flow_evidence_by_circuit={"fridge": solar_flow_evidence},
-        solar_load_shift_evidence_by_circuit={
-            "fridge": solar_load_shift_evidence
-        },
-        utility_comparison_evidence_by_circuit={
-            "fridge": utility_comparison_evidence
-        },
-        nilm_topology_evidence_by_circuit={
-            "fridge": nilm_topology_evidence
-        },
-        billing_cycle_evidence_by_circuit={"fridge": billing_cycle_evidence},
-        cost_evidence_by_circuit={"fridge": cost_evidence},
-        standby_evidence_by_circuit={"fridge": standby_evidence},
-    )
-    coordinator = SimpleNamespace(data=state)
-    circuit = SimpleNamespace(
-        circuit_id="fridge",
-        name="Kitchen Fridge",
-        appliance_profile="refrigerator",
-    )
-    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
-
-    def assert_status_attributes(
-        sensor_key: str,
-        evidence_mapping: dict[str, object],
-    ) -> None:
-        attributes = CircuitAnalyzerSensor(
-            coordinator,
-            entry_id="entry-1",
-            circuit=circuit,
-            description=descriptions[sensor_key],
-        ).extra_state_attributes
-
-        assert attributes is not None
-        for key, value in evidence_mapping.items():
-            assert attributes[key] == value
-        assert attributes["raw_status"] == evidence_mapping["status"]
-        assert attributes["status_label"] != evidence_mapping["status"]
-        assert attributes["status_explanation"]
-
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["readiness"],
-    ).extra_state_attributes == readiness
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["learning_progress"],
-    ).extra_state_attributes == {
-        "learned_feature_count": 5,
-        "pending_feature_sample_count": 3,
-        "pending_feature_samples_shown_count": 1,
-        "pending_feature_samples_has_more": False,
-        "pending_feature_samples": {"reactive_power": 3},
-    }
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["data_quality_checklist"],
-    ).extra_state_attributes == checklist
-    assert_status_attributes("energy_dashboard_status", energy_dashboard)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["alert_evidence"],
-    ).extra_state_attributes == evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["recent_activity"],
-    ).extra_state_attributes == recent_activity
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["recent_activity_count"],
-    ).extra_state_attributes == recent_activity
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["sensitivity"],
-    ).extra_state_attributes == {"preset": "Quiet"}
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["daily_energy_usage"],
-    ).extra_state_attributes == energy_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["energy_usage_share"],
-    ).extra_state_attributes == energy_evidence
-    assert_status_attributes("energy_usage_status", energy_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["energy_goal_usage"],
-    ).extra_state_attributes == energy_goal_evidence
-    assert_status_attributes("energy_goal_status", energy_goal_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["run_cycle_count"],
-    ).extra_state_attributes == run_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["run_cycle_runtime"],
-    ).extra_state_attributes == run_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["run_cycle_duty_cycle"],
-    ).extra_state_attributes == run_cycle_evidence
-    assert_status_attributes("run_cycle_status", run_cycle_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["current_demand"],
-    ).extra_state_attributes == demand_evidence_with_notice
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["peak_demand"],
-    ).extra_state_attributes == demand_evidence_with_notice
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["demand_limit_usage"],
-    ).extra_state_attributes == demand_evidence_with_notice
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["demand_peak_rank"],
-    ).extra_state_attributes == demand_evidence_with_notice
-    assert_status_attributes("demand_peak_status", demand_evidence_with_notice)
-    assert_status_attributes("demand_status", demand_evidence_with_notice)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["capacity_usage"],
-    ).extra_state_attributes == capacity_evidence_with_notice
-    assert_status_attributes("capacity_status", capacity_evidence_with_notice)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["leg_imbalance"],
-    ).extra_state_attributes == leg_imbalance_evidence
-    assert_status_attributes("leg_imbalance_status", leg_imbalance_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["metric_consistency_score"],
-    ).extra_state_attributes == metric_consistency_evidence
-    assert_status_attributes("metric_consistency_status", metric_consistency_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["balance_power"],
-    ).extra_state_attributes == balance_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["monitored_power"],
-    ).extra_state_attributes == balance_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["monitored_coverage"],
-    ).extra_state_attributes == balance_evidence
-    assert_status_attributes("balance_status", balance_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_generation_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_site_consumption_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_grid_import_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_grid_export_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_self_consumption"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_powered"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert_status_attributes("solar_flow_status", solar_flow_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_surplus_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_load_shift_power"],
-    ).extra_state_attributes == solar_flow_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_flexible_load_power"],
-    ).extra_state_attributes == solar_load_shift_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["solar_flexible_load_coverage"],
-    ).extra_state_attributes == solar_load_shift_evidence
-    assert_status_attributes("solar_load_shift_status", solar_load_shift_evidence)
-    assert_status_attributes("solar_surplus_status", solar_flow_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["utility_comparison_difference"],
-    ).extra_state_attributes == utility_comparison_evidence
-    assert_status_attributes("utility_comparison_status", utility_comparison_evidence)
-    assert_status_attributes("nilm_topology_status", nilm_topology_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["billing_cycle_usage"],
-    ).extra_state_attributes == billing_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["billing_cycle_forecast"],
-    ).extra_state_attributes == billing_cycle_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["billing_cycle_budget_usage"],
-    ).extra_state_attributes == billing_cycle_evidence
-    assert_status_attributes("billing_cycle_status", billing_cycle_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["cost_current_rate"],
-    ).extra_state_attributes == cost_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["cost_cycle"],
-    ).extra_state_attributes == cost_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["cost_cycle_forecast"],
-    ).extra_state_attributes == cost_evidence
-    assert_status_attributes("cost_status", cost_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["always_on_power"],
-    ).extra_state_attributes == standby_evidence
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["standby_threshold"],
-    ).extra_state_attributes == standby_evidence
-    assert_status_attributes("standby_status", standby_evidence)
-    assert CircuitAnalyzerSensor(
-        coordinator,
-        entry_id="entry-1",
-        circuit=circuit,
-        description=descriptions["always_on_limit_usage"],
-    ).extra_state_attributes == standby_evidence
-
-
 @pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
@@ -4576,7 +3749,7 @@ async def test_nilm_virtual_publish_flags_control_entity_setup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_omits_core_duplicate_legacy_sensors() -> None:
+async def test_sensor_setup_entry_omits_non_current_sensors() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
@@ -4616,140 +3789,8 @@ async def test_sensor_setup_entry_omits_core_duplicate_legacy_sensors() -> None:
     }.isdisjoint(unique_ids)
 
 
-@pytest.mark.parametrize(
-    ("entry_data", "options", "expected_kept_unique_ids"),
-    (
-        (
-            {},
-            {CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["sensor:sensitivity"]},
-            {"entry-1_fridge_sensitivity"},
-        ),
-        (
-            {CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: ["readiness"]},
-            {},
-            {"entry-1_fridge_readiness"},
-        ),
-    ),
-)
-@pytest.mark.asyncio
-async def test_sensor_setup_entry_preserves_legacy_compatibility_sensor_keys(
-    entry_data: dict[str, object],
-    options: dict[str, object],
-    expected_kept_unique_ids: set[str],
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
-
-    circuit = CircuitConfig(
-        circuit_id="fridge",
-        name="Kitchen Fridge",
-        appliance_profile=ApplianceProfile.REFRIGERATOR,
-        mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
-    )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        entry_data=entry_data,
-        options=options,
-    )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
-    entry = SimpleNamespace(entry_id="entry-1", data={})
-    added_entities = []
-
-    await async_setup_entry(hass, entry, added_entities.extend)
-
-    unique_ids = {entity.unique_id for entity in added_entities}
-    assert expected_kept_unique_ids <= unique_ids
-    assert {
-        "entry-1_fridge_sensitivity",
-        "entry-1_fridge_readiness",
-        "entry-1_fridge_learning_progress",
-        "entry-1_fridge_data_quality_checklist",
-        "entry-1_fridge_alert_evidence",
-        "entry-1_fridge_last_event",
-        "entry-1_fridge_recent_activity_count",
-    }.isdisjoint(unique_ids - expected_kept_unique_ids)
 
 
-@pytest.mark.asyncio
-async def test_sensor_setup_entry_preserves_enabled_legacy_registry_rows(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
-
-    class FakeRegistry:
-        def __init__(self) -> None:
-            self.entities = {
-                "sensor.fridge_sensitivity": SimpleNamespace(
-                    entity_id="sensor.fridge_sensitivity",
-                    unique_id="entry-1_fridge_sensitivity",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                    hidden_by=None,
-                    entity_category=None,
-                ),
-                "sensor.fridge_readiness": SimpleNamespace(
-                    entity_id="sensor.fridge_readiness",
-                    unique_id="entry-1_fridge_readiness",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="integration",
-                    hidden_by=None,
-                    entity_category=None,
-                ),
-            }
-            self.removed: list[str] = []
-
-        def async_remove(self, entity_id: str) -> None:
-            self.removed.append(entity_id)
-
-        def async_update_entity(self, *args, **kwargs) -> None:
-            pass
-
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry_module.async_get = lambda hass: hass.entity_registry
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    circuit = CircuitConfig(
-        circuit_id="fridge",
-        name="Kitchen Fridge",
-        appliance_profile=ApplianceProfile.REFRIGERATOR,
-        mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
-    )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        entry_data={},
-        options={},
-    )
-    fake_registry = FakeRegistry()
-    hass = SimpleNamespace(
-        data={DOMAIN: {"entry-1": coordinator}},
-        entity_registry=fake_registry,
-    )
-    entry = SimpleNamespace(entry_id="entry-1", data={})
-    added_entities = []
-
-    await async_setup_entry(hass, entry, added_entities.extend)
-
-    unique_ids = {entity.unique_id for entity in added_entities}
-    assert "entry-1_fridge_sensitivity" in unique_ids
-    assert "entry-1_fridge_readiness" not in unique_ids
-    assert fake_registry.removed == ["sensor.fridge_readiness"]
 
 
 @pytest.mark.asyncio
@@ -4896,7 +3937,6 @@ async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities
         appliance_profile=ApplianceProfile.HVAC,
         mode=CircuitMode.DUAL_PHASE,
         billing_cycle_budget_kwh=400.0,
-        default_rate_per_kwh=0.15,
         standby_threshold_w=12.0,
         sensors=(
             SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
@@ -4908,6 +3948,11 @@ async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities
         SimpleNamespace(
             data=AnalyzerState(),
             circuit_configs=(circuit,),
+            store_data=FeatureStoreData(
+                cost_settings_by_circuit={
+                    "__global__": {"default_rate_per_kwh": 0.15},
+                },
+            ),
             options={CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature"},
         ),
         ENTITY_DETAIL_STANDARD,
@@ -4951,7 +3996,6 @@ async def test_sensor_setup_entry_adds_selected_billing_forecast_group_only() ->
         appliance_profile=ApplianceProfile.HVAC,
         mode=CircuitMode.DUAL_PHASE,
         billing_cycle_budget_kwh=400.0,
-        default_rate_per_kwh=0.15,
         standby_threshold_w=12.0,
         sensors=(
             SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
@@ -4962,6 +4006,11 @@ async def test_sensor_setup_entry_adds_selected_billing_forecast_group_only() ->
     coordinator = SimpleNamespace(
         data=AnalyzerState(),
         circuit_configs=(circuit,),
+        store_data=FeatureStoreData(
+            cost_settings_by_circuit={
+                "__global__": {"default_rate_per_kwh": 0.15},
+            },
+        ),
         options={
             CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
             CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature",
@@ -4991,59 +4040,6 @@ async def test_sensor_setup_entry_adds_selected_billing_forecast_group_only() ->
     } & unique_ids
 
 
-@pytest.mark.parametrize(
-    ("compatibility_key", "expected_unique_id"),
-    (
-        ("sensor:cost_status", "entry-1_hvac_cost_status"),
-        ("standby_threshold", "entry-1_hvac_standby_threshold"),
-        ("sensor:outdoor_temperature", "entry-1_hvac_outdoor_temperature"),
-    ),
-)
-@pytest.mark.asyncio
-async def test_sensor_setup_entry_preserves_phase_four_legacy_sensor_keys(
-    compatibility_key: str,
-    expected_unique_id: str,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
-
-    circuit = CircuitConfig(
-        circuit_id="hvac",
-        name="HVAC",
-        appliance_profile=ApplianceProfile.HVAC,
-        mode=CircuitMode.DUAL_PHASE,
-        billing_cycle_budget_kwh=400.0,
-        default_rate_per_kwh=0.15,
-        standby_threshold_w=12.0,
-        sensors=(
-            SensorRef("sensor.hvac_power_l1", SensorRole.REAL_POWER, leg="a"),
-            SensorRef("sensor.hvac_power_l2", SensorRole.REAL_POWER, leg="b"),
-            SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
-        ),
-    )
-    coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(circuit,),
-        options={
-            CONF_LEGACY_ENTITY_COMPATIBILITY_KEYS: [compatibility_key],
-            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.backyard_temperature",
-        },
-    )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
-    entry = SimpleNamespace(entry_id="entry-1", data={})
-    added_entities = []
-
-    await async_setup_entry(hass, entry, added_entities.extend)
-
-    unique_ids = {entity.unique_id for entity in added_entities}
-    assert expected_unique_id in unique_ids
-    assert not {
-        "entry-1_hvac_billing_cycle_budget_usage",
-        "entry-1_hvac_billing_cycle_status",
-        "entry-1_hvac_cost_current_rate",
-        "entry-1_hvac_cost_status",
-        "entry-1_hvac_standby_threshold",
-        "entry-1_hvac_outdoor_temperature",
-    }.difference({expected_unique_id}) & unique_ids
 
 
 @pytest.mark.asyncio

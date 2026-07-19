@@ -711,7 +711,7 @@ def test_settings_controller_applies_config_entry_settings() -> None:
     }
 
 
-def test_settings_controller_clears_advanced_setting_aliases() -> None:
+def test_settings_controller_clears_mapped_advanced_settings() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
@@ -886,16 +886,7 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
     controller = settings_controller.SettingsController(coordinator)
 
     await controller.async_set_billing_cycle_settings("fridge", 15, 300.0, 0.9)
-    await controller.async_set_cost_settings(
-        "fridge",
-        1,
-        0.20,
-        0.30,
-        "17:00",
-        "21:00",
-        "0,1,2,3,4",
-        "Peak",
-    )
+    await controller.async_set_cost_settings("fridge", 1)
     await controller.async_set_utility_comparison_settings(
         "mains",
         utility_energy_entity="sensor.opower_current_bill_usage",
@@ -914,12 +905,6 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
     }
     assert coordinator.store_data.cost_settings_by_circuit["fridge"] == {
         "cycle_start_day": 1,
-        "default_rate_per_kwh": 0.20,
-        "tou_rate_per_kwh": 0.30,
-        "tou_start": "17:00",
-        "tou_end": "21:00",
-        "tou_weekdays": "0,1,2,3,4",
-        "tou_name": "Peak",
     }
     assert coordinator.store_data.utility_comparison_settings_by_circuit["mains"] == {
         "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -976,7 +961,7 @@ async def test_settings_controller_sets_circuit_sensitivity() -> None:
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
 
-    await controller.async_set_circuit_sensitivity("fridge", "high")
+    await controller.async_set_circuit_sensitivity("fridge", "sensitive")
 
     assert coordinator.store_data.sensitivity_by_circuit["fridge"] == "sensitive"
     assert coordinator.dirty_count == 1
@@ -989,7 +974,7 @@ def test_settings_controller_reads_circuit_sensitivity() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
-    coordinator.store_data.sensitivity_by_circuit["fridge"] = "high"
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "sensitive"
     coordinator.options[CONF_SENSITIVITY] = "quiet"
 
     assert controller.sensitivity_for_circuit("fridge") == "sensitive"
@@ -1056,12 +1041,6 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
         billing_cycle_budget_alert_ratio=0.85,
         billing_cycle_min_elapsed_days=5,
         cost_cycle_start_day=10,
-        default_rate_per_kwh=0.18,
-        tou_rate_per_kwh=0.35,
-        tou_start="16:00",
-        tou_end="20:00",
-        tou_weekdays=(0, 1, 2, 3, 4),
-        tou_name="Peak",
         demand_window_minutes=30,
         demand_limit_w=1200.0,
         standby_window_hours=72,
@@ -1079,7 +1058,11 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
     coordinator.store_data.billing_settings_by_circuit["fridge"] = {
         "budget_kwh": "95.0"
     }
-    coordinator.store_data.cost_settings_by_circuit["fridge"] = {
+    coordinator.store_data.cost_settings_by_circuit["__global__"] = {
+        "default_rate_per_kwh": 0.18,
+        "tou_rate_per_kwh": 0.35,
+        "tou_start": "16:00",
+        "tou_end": "20:00",
         "tou_weekdays": "1,3,5",
         "tou_name": "Critical Peak",
     }
@@ -1149,28 +1132,14 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
     assert utility.tolerance_percent == 8.5
 
 
-def test_global_cost_rate_overrides_circuit_cost_rates() -> None:
+def test_global_cost_settings_are_used_for_each_circuit() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
     config = SimpleNamespace(
         cost_cycle_start_day=1,
-        default_rate_per_kwh=0.18,
-        tou_rate_per_kwh=None,
-        tou_start=None,
-        tou_end=None,
-        tou_weekdays=(),
-        tou_name="Peak",
     )
     coordinator.store_data.cost_settings_by_circuit = {
-        "fridge": {
-            "default_rate_per_kwh": 0.22,
-            "tou_rate_per_kwh": 0.24,
-            "tou_start": "10:00",
-            "tou_end": "14:00",
-            "tou_weekdays": "5,6",
-            "tou_name": "Legacy",
-        },
         "__global__": {
             "default_rate_per_kwh": 0.31,
             "tou_rate_per_kwh": 0.42,
@@ -1191,28 +1160,6 @@ def test_global_cost_rate_overrides_circuit_cost_rates() -> None:
     assert cost.tou_name == "Peak"
 
 
-def test_global_tou_does_not_mix_with_legacy_circuit_schedule() -> None:
-    coordinator = _SettingsCoordinator(_recommendation())
-    controller = settings_controller.SettingsController(coordinator)
-    config = coordinator.circuit_configs[0]
-    coordinator.store_data.cost_settings_by_circuit = {
-        "fridge": {
-            "tou_rate_per_kwh": 0.24,
-            "tou_start": "10:00",
-            "tou_end": "14:00",
-            "tou_weekdays": "5,6",
-            "tou_name": "Legacy",
-        },
-        "__global__": {"tou_rate_per_kwh": 0.42},
-    }
-
-    cost = controller.cost_settings_for_config(config, "fridge")
-
-    assert cost.tou_rate_per_kwh == 0.42
-    assert cost.tou_start == ""
-    assert cost.tou_end == ""
-    assert cost.tou_weekdays == ()
-    assert cost.tou_name == "Peak"
 
 
 @pytest.mark.asyncio

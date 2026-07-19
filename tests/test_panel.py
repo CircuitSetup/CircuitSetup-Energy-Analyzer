@@ -1274,7 +1274,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     None
 ):
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1558,7 +1558,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
 
 
 def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1694,7 +1694,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
 
 
 def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
         _nilm_workspace_session_specs,
     )
@@ -1735,7 +1735,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
 
 
 def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_visible_sessions,
     )
 
@@ -1749,7 +1749,7 @@ def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
 
 
 def test_nilm_workspace_keeps_merged_signature_sessions_on_visible_assignment() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_visible_sessions,
     )
 
@@ -1798,7 +1798,7 @@ def _nilm_workspace_coordinator(
 def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() -> (
     None
 ):
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1885,7 +1885,7 @@ async def test_nilm_workspace_history_view_forwards_requested_entry_id(
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1913,7 +1913,7 @@ def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
 
 
 def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1935,7 +1935,7 @@ def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
 
 
 def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1970,7 +1970,7 @@ def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> 
 
 
 def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -1992,7 +1992,7 @@ def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
 
 
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2050,7 +2050,7 @@ def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
 
 def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2110,7 +2110,7 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
 
 def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2254,7 +2254,7 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
 
 def test_nilm_workspace_validation_uses_uncapped_data() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         MAX_NILM_WORKSPACE_LABEL_INTERVALS,
         MAX_NILM_WORKSPACE_SESSIONS,
         nilm_workspace_payload,
@@ -2339,7 +2339,7 @@ def test_nilm_workspace_validation_uses_uncapped_data() -> None:
 
 def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2420,7 +2420,7 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
 
 def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2498,7 +2498,7 @@ def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> No
 
 
 def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2542,7 +2542,7 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
 
 
 def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2607,7 +2607,7 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
 
 
 def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -2660,7 +2660,7 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
 
 def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         MAX_NILM_WORKSPACE_EDGES,
         MAX_NILM_WORKSPACE_SESSIONS,
         nilm_workspace_payload,
@@ -3193,18 +3193,20 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
 @pytest.mark.asyncio
 async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
+        PANEL_ELEMENT_NAME,
+        PANEL_MODULE_VERSION,
+        PANEL_URL_PATH,
+        STATIC_URL_PATH,
+        async_setup_panel,
+        async_unload_panel,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
         APPLIANCE_DETAIL_API_PATH,
         APPLIANCE_INSIGHTS_API_PATH,
         EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
-        PANEL_ELEMENT_NAME,
-        PANEL_MODULE_VERSION,
-        PANEL_URL_PATH,
         SETUP_HEALTH_API_PATH,
-        STATIC_URL_PATH,
-        async_setup_panel,
-        async_unload_panel,
     )
 
     class FakeHttp:

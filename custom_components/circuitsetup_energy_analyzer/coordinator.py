@@ -7,8 +7,6 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any, Self
 
-from . import notifications as notifications  # compatibility for tests
-from . import repairs as repairs  # compatibility for test monkeypatching
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
@@ -33,30 +31,10 @@ from .normalize import NormalizedCircuitSample, SourceState
 from .processors import (
     FeatureResult,
 )
-from .runtime_factory import (
-    ALERT_FEEDBACK_MAX_AGE,
-    ALERT_FEEDBACK_MAX_ITEMS,
-    ALERT_HISTORY_MAX_AGE,
-    ALERT_HISTORY_MAX_ITEMS,
-    NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
-    NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
-    NILM_SESSION_HISTORY_MAX_AGE,
-    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
-    NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
-    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
-    NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
-    RECOMMENDATION_DECISIONS_MAX_AGE,
-    RECOMMENDATION_DECISIONS_MAX_ITEMS,
-    RECOMMENDATION_HISTORY_MAX_AGE,
-    RECOMMENDATION_HISTORY_MAX_ITEMS,
-    initialize_runtime,
-)
+from .runtime_factory import initialize_runtime
 from .state import (
     AnalyzerState,
     process_events_into_state,
-)
-from .state import (
-    _apply_state_update as _apply_state_update,
 )
 from .storage import (
     FeatureStoreData,
@@ -69,23 +47,6 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
-_RUNTIME_COMPATIBILITY_EXPORTS = (
-    ALERT_FEEDBACK_MAX_AGE,
-    ALERT_FEEDBACK_MAX_ITEMS,
-    ALERT_HISTORY_MAX_AGE,
-    ALERT_HISTORY_MAX_ITEMS,
-    NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
-    NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
-    NILM_SESSION_HISTORY_MAX_AGE,
-    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
-    NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
-    NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
-    NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
-    RECOMMENDATION_DECISIONS_MAX_AGE,
-    RECOMMENDATION_DECISIONS_MAX_ITEMS,
-    RECOMMENDATION_HISTORY_MAX_AGE,
-    RECOMMENDATION_HISTORY_MAX_ITEMS,
-)
 try:
     from homeassistant.helpers.event import (
         async_track_state_change_event,
@@ -273,11 +234,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._mark_store_dirty()
             await self._notify_alert(schedule_alert)
         return active_alerts
-
-    @property
-    def _source_update_task(self: Self) -> Any | None:
-        """Compatibility accessor for lifecycle wait helpers."""
-        return self.source_updates.source_update_task
 
     @property
     def source_entities(self: Self) -> tuple[str, ...]:
@@ -669,23 +625,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         circuit_id: str,
         cycle_start_day: Any = None,
-        default_rate_per_kwh: Any = None,
-        tou_rate_per_kwh: Any = None,
-        tou_start: Any = None,
-        tou_end: Any = None,
-        tou_weekdays: Any = None,
-        tou_name: Any = None,
     ) -> None:
-        """Persist cost and Time-of-Use settings for one circuit."""
+        """Persist the cost-cycle start day for one circuit."""
         await self.settings_controller.async_set_cost_settings(
             circuit_id,
             cycle_start_day,
-            default_rate_per_kwh,
-            tou_rate_per_kwh,
-            tou_start,
-            tou_end,
-            tou_weekdays,
-            tou_name,
         )
 
     async def async_set_global_cost_rate(

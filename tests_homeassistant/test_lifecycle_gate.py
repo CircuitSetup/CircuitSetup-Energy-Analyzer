@@ -372,8 +372,10 @@ def _assert_appliance_workflow_payloads(
     )
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
-        nilm_workspace_payload,
         setup_health_payload,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
     )
 
     appliance = appliance_detail_payload([coordinator], circuit_id="fridge")
@@ -973,7 +975,7 @@ async def _wait_for_runtime_update(
         await asyncio.sleep(0)
         await hass.async_block_till_done()
         if coordinator.last_source_update_entities == changed_entities:
-            task = getattr(coordinator, "_source_update_task", None)
+            task = coordinator.source_updates.source_update_task
             state_ready = (
                 expected_operating_state is None
                 or coordinator.state.operating_state_by_circuit.get(circuit_id)

@@ -21,18 +21,10 @@ from .models import (
     SensorRole,
 )
 from .notifications import notification_id_for_alert
-from .power_quality import MIN_RELATIONSHIP_SCORE
 from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
 
-FRIENDLY_SENSITIVITY_ALIASES = {
-    "low": "quiet",
-    "quiet": "quiet",
-    "standard": "balanced",
-    "balanced": "balanced",
-    "high": "sensitive",
-    "sensitive": "sensitive",
-}
-POLICY_SENSITIVITY_ALIASES = {
+SENSITIVITY_VALUES = frozenset({"quiet", "balanced", "sensitive"})
+POLICY_NAME_BY_SENSITIVITY = {
     "quiet": "low",
     "balanced": "standard",
     "sensitive": "high",
@@ -110,21 +102,6 @@ POWER_QUALITY_RELATIONSHIP_METRICS = (
     "apparent_to_real_ratio",
     "apparent_power",
 )
-LEGACY_POWER_QUALITY_VALUE_CANDIDATES = {
-    "resistive_load_became_reactive": (
-        "reactive_to_real_ratio",
-        "power_factor_deficit",
-        "power_factor",
-    ),
-    "reactive_shift_under_stable_real_power": (
-        "reactive_to_real_ratio",
-        "reactive_power",
-    ),
-    "power_factor_shift_under_load": ("power_factor_deficit", "power_factor"),
-    "apparent_power_shift": ("apparent_to_real_ratio", "apparent_power"),
-    "split_phase_relationship_changed": POWER_QUALITY_RELATIONSHIP_METRICS,
-    "motor_relationship_changed": POWER_QUALITY_RELATIONSHIP_METRICS,
-}
 MAX_CONTRIBUTING_METRICS = 5
 MAX_ALERT_SOURCE_ENTITIES = 5
 MAX_QUALITY_ISSUES = 5
@@ -159,17 +136,18 @@ FEATURE_TOKEN_LABELS = {
 
 
 def normalize_sensitivity(value: Any) -> str:
-    """Return the friendly sensitivity preset for a user or legacy value."""
-    return FRIENDLY_SENSITIVITY_ALIASES.get(str(value).strip().lower(), "balanced")
+    """Return a supported sensitivity preset."""
+    normalized = str(value).strip().lower()
+    return normalized if normalized in SENSITIVITY_VALUES else "balanced"
 
 
 def alert_policy_name_for_sensitivity(value: Any) -> str:
     """Return the existing alert policy name for a friendly sensitivity value."""
-    return POLICY_SENSITIVITY_ALIASES[normalize_sensitivity(value)]
+    return POLICY_NAME_BY_SENSITIVITY[normalize_sensitivity(value)]
 
 
 def friendly_sensitivity_label(value: Any) -> str:
-    """Return the user-facing label for a friendly or legacy sensitivity value."""
+    """Return the user-facing label for a sensitivity value."""
     return SENSITIVITY_LABELS[normalize_sensitivity(value)]
 
 
@@ -304,23 +282,7 @@ def alert_evidence_detail(
 
 def _alert_value_metric(alert: AlertEvidence, feature: str) -> str:
     explicit = str(alert.value_metric).strip()
-    if explicit or feature in ALERT_VALUE_METADATA:
-        return explicit or feature
-    candidates = LEGACY_POWER_QUALITY_VALUE_CANDIDATES.get(feature, ())
-    ranked = [
-        (metric, float(alert.features[metric]))
-        for metric in candidates
-        if isinstance(alert.features.get(metric), (int, float))
-    ]
-    if not ranked:
-        return feature
-    selected = max(ranked, key=lambda item: item[1])
-    if (
-        feature == "resistive_load_became_reactive"
-        and selected[1] < MIN_RELATIONSHIP_SCORE
-    ):
-        return "reactive_power"
-    return selected[0]
+    return explicit or feature
 
 
 def _alert_what_happened(

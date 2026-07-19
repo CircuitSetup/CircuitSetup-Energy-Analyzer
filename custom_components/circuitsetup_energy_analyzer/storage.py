@@ -6,11 +6,8 @@ from datetime import datetime, timedelta
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Self
 
-from .alerting import ALERT_FINGERPRINT_SCHEMA_VERSION
 from .const import STORAGE_KEY, STORAGE_VERSION
 from .contextual_baseline import (
-    CONTEXT_FINGERPRINT_SCHEMA_VERSION,
-    ContextKey,
     contextual_sample_from_dict,
 )
 from .models import (
@@ -318,7 +315,7 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_label_intervals_by_circuit": _dict_of_list_dicts(
             data.nilm_label_intervals_by_circuit
         ),
-        "nilm_appliance_assignments_by_circuit": _nilm_assignments_with_identity(
+        "nilm_appliance_assignments_by_circuit": _dict_of_list_dicts(
             data.nilm_appliance_assignments_by_circuit
         ),
         "weather_context_by_circuit": _dict_of_dicts(
@@ -430,8 +427,6 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
     """Deserialize the full feature store payload from Home Assistant storage."""
     if raw is None:
         return FeatureStoreData()
-    raw = _migrated_feature_store_payload(raw)
-
     return FeatureStoreData(
         events=_events_from_raw(raw.get("events", [])),
         baselines=_baselines_from_raw(raw.get("baselines", {})),
@@ -446,7 +441,7 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         nilm_label_intervals_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_label_intervals_by_circuit", {})
         ),
-        nilm_appliance_assignments_by_circuit=_nilm_assignments_with_identity(
+        nilm_appliance_assignments_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_appliance_assignments_by_circuit", {})
         ),
         weather_context_by_circuit=_dict_of_dicts(
@@ -557,349 +552,6 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         dashboard_status=_dict_of_jsonable_values(raw.get("dashboard_status", {})),
     )
-
-
-async def migrate_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v1 feature-store payload to current storage semantics."""
-
-    return _migrate_v7_to_v8_payload(
-        _migrate_v6_to_v7_payload(
-            _migrate_v5_to_v6_payload(
-                _migrate_v4_to_v5_payload(
-                    _migrate_v3_to_v4_payload(
-                        _migrate_v2_to_v3_payload(_migrate_v1_to_v2_payload(data))
-                    )
-                )
-            )
-        )
-    )
-
-
-async def migrate_v2_to_v3(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v2 feature-store payload to current storage semantics."""
-
-    return _migrate_v7_to_v8_payload(
-        _migrate_v6_to_v7_payload(
-            _migrate_v5_to_v6_payload(
-                _migrate_v4_to_v5_payload(
-                    _migrate_v3_to_v4_payload(_migrate_v2_to_v3_payload(data))
-                )
-            )
-        )
-    )
-
-
-async def migrate_v3_to_v4(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v3 feature-store payload to current storage semantics."""
-
-    return _migrate_v7_to_v8_payload(
-        _migrate_v6_to_v7_payload(
-            _migrate_v5_to_v6_payload(
-                _migrate_v4_to_v5_payload(_migrate_v3_to_v4_payload(data))
-            )
-        )
-    )
-
-
-async def migrate_v4_to_v5(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v4 feature-store payload to current storage semantics."""
-
-    return _migrate_v7_to_v8_payload(
-        _migrate_v6_to_v7_payload(
-            _migrate_v5_to_v6_payload(_migrate_v4_to_v5_payload(data))
-        )
-    )
-
-
-async def migrate_v5_to_v6(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v5 feature-store payload to canonical NILM identities."""
-
-    return _migrate_v7_to_v8_payload(
-        _migrate_v6_to_v7_payload(_migrate_v5_to_v6_payload(data))
-    )
-
-
-async def migrate_v6_to_v7(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v6 store to notification preferences and digest state."""
-
-    return _migrate_v7_to_v8_payload(_migrate_v6_to_v7_payload(data))
-
-
-async def migrate_v7_to_v8(data: dict[str, Any]) -> dict[str, Any]:
-    """Migrate a v7 store to expected-schedule settings and evidence."""
-
-    return _migrate_v7_to_v8_payload(data)
-
-
-def _migrated_feature_store_payload(raw: Any) -> dict[str, Any]:
-    if not isinstance(raw, Mapping):
-        return {"schema_version": STORAGE_VERSION}
-
-    version = _schema_version(raw)
-    payload = _copy_payload(raw)
-    if version < 2:
-        payload = _migrate_v1_to_v2_payload(payload)
-    if version < 3:
-        payload = _migrate_v2_to_v3_payload(payload)
-    if version < 4:
-        payload = _migrate_v3_to_v4_payload(payload)
-    if version < 5:
-        payload = _migrate_v4_to_v5_payload(payload)
-    if version < 6:
-        payload = _migrate_v5_to_v6_payload(payload)
-    if version < 7:
-        payload = _migrate_v6_to_v7_payload(payload)
-    if version < 8:
-        payload = _migrate_v7_to_v8_payload(payload)
-    payload["schema_version"] = STORAGE_VERSION
-    return payload
-
-
-def _schema_version(raw: Mapping[str, Any]) -> int:
-    try:
-        return max(int(raw.get("schema_version", 1)), 1)
-    except (TypeError, ValueError):
-        return 1
-
-
-def _migrate_v1_to_v2_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 2
-    payload["alert_feedback"] = _migrate_alert_feedback_v1_to_v2(
-        payload.get("alert_feedback", {})
-    )
-    payload["contextual_baselines_by_circuit"] = (
-        _migrate_contextual_baselines_v1_to_v2(
-            payload.get("contextual_baselines_by_circuit", {})
-        )
-    )
-    return payload
-
-
-def _migrate_v2_to_v3_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 3
-    payload["nilm_label_intervals_by_circuit"] = _dict_of_list_dicts(
-        payload.get("nilm_label_intervals_by_circuit", {})
-    )
-    return payload
-
-
-def _migrate_v3_to_v4_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 4
-    assignments = _dict_of_list_dicts(
-        payload.get("nilm_appliance_assignments_by_circuit", {})
-    )
-    if not assignments:
-        assignments = _nilm_assignments_from_legacy_review_states(
-            payload.get("nilm_signatures", {})
-        )
-    payload["nilm_appliance_assignments_by_circuit"] = assignments
-    return payload
-
-
-def _migrate_v4_to_v5_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 5
-    payload["nilm_session_history_by_circuit"] = _dict_of_list_dicts(
-        payload.get("nilm_session_history_by_circuit", {})
-    )
-    return payload
-
-
-def _migrate_v5_to_v6_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 6
-    payload["nilm_appliance_assignments_by_circuit"] = (
-        _nilm_assignments_with_identity(
-            payload.get("nilm_appliance_assignments_by_circuit", {})
-        )
-    )
-    return payload
-
-
-def _migrate_v6_to_v7_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 7
-    payload["appliance_notification_preferences"] = _dict_of_dicts(
-        payload.get("appliance_notification_preferences", {})
-    )
-    payload["notification_delivery_state"] = _json_mapping(
-        payload.get("notification_delivery_state", {})
-    )
-    payload["weekly_digest_settings"] = _json_mapping(
-        payload.get("weekly_digest_settings", {})
-    )
-    return payload
-
-
-def _migrate_v7_to_v8_payload(data: Any) -> dict[str, Any]:
-    payload = _copy_payload(data) if isinstance(data, Mapping) else {}
-    payload["schema_version"] = 8
-    payload["appliance_schedule_settings"] = _dict_of_dicts(
-        payload.get("appliance_schedule_settings", {})
-    )
-    payload["appliance_schedule_evidence"] = _dict_of_dicts(
-        payload.get("appliance_schedule_evidence", {})
-    )
-    return payload
-
-
-def _nilm_assignments_with_identity(
-    value: Any,
-) -> dict[str, list[dict[str, Any]]]:
-    assignments_by_circuit = _dict_of_list_dicts(value)
-    for circuit_id, assignments in assignments_by_circuit.items():
-        for assignment in assignments:
-            assignment_id = str(assignment.get("assignment_id") or "").strip()
-            if not assignment_id:
-                continue
-            assignment["appliance_key"] = f"nilm:{assignment_id}"
-            assignment.setdefault("mains_circuit_id", circuit_id)
-    return assignments_by_circuit
-
-
-def _nilm_assignments_from_legacy_review_states(
-    signatures_by_circuit: Any,
-) -> dict[str, list[dict[str, Any]]]:
-    migrated: dict[str, list[dict[str, Any]]] = {}
-    for circuit_id, signatures in _mapping_items(signatures_by_circuit):
-        circuit_assignments = []
-        for signature in _list_items(signatures):
-            if not isinstance(signature, Mapping):
-                continue
-            assignment = _legacy_nilm_signature_assignment(str(circuit_id), signature)
-            if assignment:
-                circuit_assignments.append(assignment)
-        if circuit_assignments:
-            migrated[str(circuit_id)] = circuit_assignments
-    return migrated
-
-
-def _legacy_nilm_signature_assignment(
-    circuit_id: str,
-    signature: Mapping[str, Any],
-) -> dict[str, Any] | None:
-    signature_id = str(signature.get("signature_id") or "").strip()
-    fingerprint = str(
-        signature.get("feedback_fingerprint") or signature_id
-    ).strip()
-    if not fingerprint:
-        return None
-    lifecycle_state = _legacy_nilm_assignment_state(signature)
-    if lifecycle_state is None:
-        return None
-    label = (
-        str(signature.get("user_label") or "").strip()
-        or str(signature.get("display_name") or "").strip()
-        or str(signature.get("likely_type") or "").strip()
-        or signature_id
-    )
-    appliance_id = _slug_value(label)
-    now = str(
-        signature.get("updated_at")
-        or signature.get("last_seen")
-        or signature.get("first_seen")
-        or ""
-    )
-    return {
-        "assignment_id": (
-            f"assignment-{_slug_value(circuit_id)}-{_slug_value(fingerprint)}"
-        ),
-        "appliance_id": appliance_id,
-        "display_name": label,
-        "appliance_profile": str(signature.get("likely_type") or "").strip() or None,
-        "mains_circuit_id": circuit_id,
-        "signature_fingerprints": [fingerprint],
-        "session_ids": [],
-        "label_interval_ids": [],
-        "lifecycle_state": lifecycle_state,
-        "confidence": _bounded_float_value(signature.get("confidence"), 1.0),
-        "created_at": now,
-        "updated_at": now,
-        "created_device": False,
-        "publish_entities": False,
-    }
-
-
-def _legacy_nilm_assignment_state(signature: Mapping[str, Any]) -> str | None:
-    review_state = str(signature.get("review_state") or "").strip()
-    if review_state in {"assigned", "expected", "ignored", "retired"}:
-        return review_state
-    if signature.get("ignored") is True:
-        return "ignored"
-    if signature.get("expected") is True:
-        return "expected"
-    if signature.get("merged_into"):
-        return "retired"
-    if str(signature.get("user_label") or "").strip():
-        return "assigned"
-    return None
-
-
-def _slug_value(value: Any) -> str:
-    slug = "".join(
-        character.lower() if character.isalnum() else "_"
-        for character in str(value or "").strip()
-    ).strip("_")
-    return "_".join(part for part in slug.split("_") if part)[:64] or "nilm"
-
-
-def _bounded_float_value(value: Any, default: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(min(number, 1.0), 0.0)
-
-
-def _migrate_alert_feedback_v1_to_v2(values: Any) -> dict[str, dict[str, Any]]:
-    migrated: dict[str, dict[str, Any]] = {}
-    for key, value in _mapping_items(values):
-        if not isinstance(value, Mapping):
-            continue
-        feedback = dict(value)
-        fingerprint = str(feedback.get("fingerprint") or key)
-        if not fingerprint.startswith(ALERT_FINGERPRINT_SCHEMA_VERSION):
-            continue
-        feedback.setdefault("fingerprint", fingerprint)
-        migrated[fingerprint] = feedback
-    return migrated
-
-
-def _migrate_contextual_baselines_v1_to_v2(
-    values: Any,
-) -> dict[str, dict[str, Any]]:
-    migrated: dict[str, dict[str, Any]] = {}
-    for circuit_id, stats_by_key in _mapping_items(values):
-        if not isinstance(stats_by_key, Mapping):
-            continue
-        migrated_stats: dict[str, Any] = {}
-        for _key, raw_stats in _mapping_items(stats_by_key):
-            if not isinstance(raw_stats, Mapping):
-                continue
-            stats = dict(raw_stats)
-            feature = str(stats.get("feature") or "")
-            if not feature:
-                continue
-            stats["context_fingerprint"] = _v2_context_fingerprint(stats)
-            migrated_stats[f"{feature}|{stats['context_fingerprint']}"] = stats
-        if migrated_stats:
-            migrated[str(circuit_id)] = migrated_stats
-    return migrated
-
-
-def _v2_context_fingerprint(stats: Mapping[str, Any]) -> str:
-    fingerprint = str(stats.get("context_fingerprint") or "")
-    if fingerprint.startswith(CONTEXT_FINGERPRINT_SCHEMA_VERSION):
-        return fingerprint
-    if fingerprint:
-        return f"{CONTEXT_FINGERPRINT_SCHEMA_VERSION}|{fingerprint}"
-    context = stats.get("context", {})
-    if isinstance(context, Mapping):
-        return ContextKey.from_mapping(context).fingerprint()
-    return CONTEXT_FINGERPRINT_SCHEMA_VERSION
 
 
 def _copy_payload(value: Any) -> Any:
@@ -1109,32 +761,7 @@ class FeatureStore:
     def __init__(self: Self, hass: HomeAssistant, entry_id: str) -> None:
         from homeassistant.helpers.storage import Store as HAStore
 
-        class CircuitSetupFeatureStore(HAStore):
-            async def _async_migrate_func(
-                self,
-                old_major_version: int,
-                old_minor_version: int,
-                old_data: dict[str, Any],
-            ) -> dict[str, Any]:
-                if old_major_version == 1:
-                    return await migrate_v1_to_v2(old_data)
-                if old_major_version == 2:
-                    return await migrate_v2_to_v3(old_data)
-                if old_major_version == 3:
-                    return await migrate_v3_to_v4(old_data)
-                if old_major_version == 4:
-                    return await migrate_v4_to_v5(old_data)
-                if old_major_version == 5:
-                    return await migrate_v5_to_v6(old_data)
-                if old_major_version == 6:
-                    return await migrate_v6_to_v7(old_data)
-                if old_major_version == 7:
-                    return await migrate_v7_to_v8(old_data)
-                if old_major_version == STORAGE_VERSION:
-                    return _migrated_feature_store_payload(old_data)
-                raise NotImplementedError
-
-        self._store: Store[dict[str, Any]] = CircuitSetupFeatureStore(
+        self._store: Store[dict[str, Any]] = HAStore(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY}.{entry_id}",
@@ -1149,6 +776,7 @@ class FeatureStore:
     async def async_save(self: Self) -> None:
         """Persist the current in-memory payload."""
         await self._store.async_save(feature_store_data_to_dict(self.data))
+
 
 def _features_to_dict(features: Any) -> dict[str, Any]:
     return {

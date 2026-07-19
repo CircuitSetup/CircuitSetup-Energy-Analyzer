@@ -113,7 +113,6 @@
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
           "entity_detail": "👁️ Entity Detail Level",
-          "compact_migration": "🧹 Migrate To Compact Entity Model",
           "recommendations": "💡 Review Suggested Settings",
           "advanced": "🛠️ Advanced Circuit Settings"
         }
@@ -204,16 +203,6 @@
         "data_description": {
           "entity_detail_level": "Simple creates summary entities only. Standard also creates configured feature status entities. Expert creates selected detailed diagnostic entities for troubleshooting and custom dashboards.",
           "selected_entity_groups": "Choose the diagnostic and graph groups created when Entity Detail Level is Expert. These groups are ignored for Simple and Standard."
-        }
-      },
-      "compact_migration": {
-        "title": "Migrate To Compact Entity Model",
-        "description": "Review the compact entity model migration preview before removing legacy analyzer entities.\n\nRemove:\n{will_remove}\n\nRemain:\n{will_remain}\n\nNew alert pause switch:\n{new_maintenance_switch}\n\nExpected count: {before_count} before, {after_count} after. Customized row warning: {warning}",
-        "data": {
-          "confirm_compact_migration": "Remove Legacy Entities"
-        },
-        "data_description": {
-          "confirm_compact_migration": "Confirm that the listed legacy entities can be removed now. Re-enabled optional entities may return later with default IDs."
         }
       },
       "dashboard": {
@@ -501,8 +490,7 @@
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
-      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
-      "confirm_required": "Check Remove Legacy Entities to confirm this compact entity model migration."
+      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
     }
   },
   "entity": {
@@ -512,9 +500,6 @@
       },
       "anomaly_score": {
         "name": "Anomaly score"
-      },
-      "last_event": {
-        "name": "Last event"
       },
       "health_summary": {
         "name": "Health summary"
@@ -528,29 +513,11 @@
       "energy_summary": {
         "name": "Energy summary"
       },
-      "readiness": {
-        "name": "Readiness"
-      },
-      "learning_progress": {
-        "name": "Learning progress"
-      },
-      "data_quality_checklist": {
-        "name": "Data quality checklist"
-      },
       "energy_dashboard_status": {
         "name": "Energy Dashboard status"
       },
-      "alert_evidence": {
-        "name": "Alert evidence"
-      },
       "recent_activity": {
         "name": "Recent activity"
-      },
-      "recent_activity_count": {
-        "name": "Recent activity count"
-      },
-      "sensitivity": {
-        "name": "Sensitivity"
       },
       "settings_suggestions": {
         "name": "Settings suggestions"
@@ -561,9 +528,6 @@
       "nilm_unknown_loads": {
         "name": "NILM unknown loads"
       },
-      "nilm_discovered_signatures": {
-        "name": "NILM discovered signatures"
-      },
       "nilm_unmatched_load_percentage": {
         "name": "NILM unmatched load percentage"
       },
@@ -572,9 +536,6 @@
       },
       "weather_context": {
         "name": "Weather Context"
-      },
-      "outdoor_temperature": {
-        "name": "Outdoor Temperature"
       },
       "rain_pump_correlation": {
         "name": "Rain pump correlation"
@@ -609,9 +570,6 @@
       "run_cycle_duty_cycle": {
         "name": "Run cycle duty cycle"
       },
-      "run_cycle_status": {
-        "name": "Run cycle status"
-      },
       "current_demand": {
         "name": "Current demand"
       },
@@ -639,14 +597,8 @@
       "leg_imbalance": {
         "name": "Leg imbalance"
       },
-      "leg_imbalance_status": {
-        "name": "Leg imbalance status"
-      },
       "metric_consistency_score": {
         "name": "Metric consistency score"
-      },
-      "metric_consistency_status": {
-        "name": "Metric consistency status"
       },
       "balance_power": {
         "name": "Balance power"
@@ -663,44 +615,14 @@
       "solar_generation_power": {
         "name": "Solar generation power"
       },
-      "solar_site_consumption_power": {
-        "name": "Solar site consumption power"
-      },
-      "solar_grid_import_power": {
-        "name": "Solar grid import power"
-      },
-      "solar_grid_export_power": {
-        "name": "Solar grid export power"
-      },
-      "solar_self_consumption": {
-        "name": "Solar self consumption"
-      },
-      "solar_powered": {
-        "name": "Solar powered"
-      },
       "solar_flow_status": {
         "name": "Solar flow status"
       },
       "solar_surplus_power": {
         "name": "Solar surplus power"
       },
-      "solar_load_shift_power": {
-        "name": "Solar load shift power"
-      },
-      "solar_flexible_load_power": {
-        "name": "Solar flexible load power"
-      },
-      "solar_flexible_load_coverage": {
-        "name": "Solar flexible load coverage"
-      },
-      "solar_load_shift_status": {
-        "name": "Solar load shift status"
-      },
       "solar_surplus_status": {
         "name": "Solar surplus status"
-      },
-      "utility_comparison_difference": {
-        "name": "Utility comparison difference"
       },
       "utility_comparison_status": {
         "name": "Utility comparison status"
@@ -711,29 +633,14 @@
       "billing_cycle_forecast": {
         "name": "Billing cycle forecast"
       },
-      "billing_cycle_budget_usage": {
-        "name": "Billing cycle budget usage"
-      },
-      "billing_cycle_status": {
-        "name": "Billing cycle status"
-      },
-      "cost_current_rate": {
-        "name": "Cost current rate"
-      },
       "cost_cycle": {
         "name": "Cost cycle"
       },
       "cost_cycle_forecast": {
         "name": "Cost cycle forecast"
       },
-      "cost_status": {
-        "name": "Cost status"
-      },
       "always_on_power": {
         "name": "Always On power"
-      },
-      "standby_threshold": {
-        "name": "Standby threshold"
       },
       "standby_status": {
         "name": "Standby status"
@@ -833,10 +740,6 @@
     "low_nilm_confidence": {
       "title": "Energy Analyzer NILM confidence is low",
       "description": "Experimental NILM is seeing too many overlapping aggregate events for confident signature discovery. The integration will keep these as observations instead of sending appliance notifications. Suggested fix: {fix}"
-    },
-    "compact_entity_model_available": {
-      "title": "Compact entity model available",
-      "description": "This integration entry has {legacy_count} legacy analyzer entities that can be migrated to the compact entity model. Next step: {recommended_action}"
     }
   },
   "config_panel": {
@@ -892,7 +795,6 @@
         "signatures": "Signatures",
         "solar_flow": "Solar Flow",
         "solar_surplus": "Solar Surplus",
-        "utility_difference": "Utility Difference",
         "utility_status": "Utility Status",
         "cost_so_far": "Cost so far",
         "projected_cost": "Projected cost",
@@ -900,7 +802,6 @@
         "total_monitored_power": "Total Monitored Power",
         "nilm_review_count": "NILM Review Count",
         "unknown_load_inventory": "Unknown Load Inventory",
-        "solar_covered_share": "Solar-covered share",
         "activity_summary": "Activity Summary",
         "outdoor_weather_context": "Outdoor Weather Context",
         "outdoor_temperature": "Outdoor Temperature",

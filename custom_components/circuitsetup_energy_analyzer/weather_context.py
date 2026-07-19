@@ -225,16 +225,9 @@ def _distinct_local_date_count(
 
 
 def _sample_calendar_date(timestamp: datetime, time_zone: TimeZone) -> date:
-    if time_zone is None or _is_naive_datetime(timestamp):
+    if time_zone is None:
         return timestamp.date()
     return local_date(timestamp, time_zone)
-
-
-def _is_naive_datetime(timestamp: datetime) -> bool:
-    return (
-        timestamp.tzinfo is None
-        or timestamp.tzinfo.utcoffset(timestamp) is None
-    )
 
 
 def _baseline_confidence(distinct_date_count: int, fallback_level: str) -> float:

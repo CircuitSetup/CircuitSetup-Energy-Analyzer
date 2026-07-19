@@ -14,9 +14,9 @@ from custom_components.circuitsetup_energy_analyzer.alerting import (
     ConservativeAlertPolicy,
 )
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
-from custom_components.circuitsetup_energy_analyzer.coordinator import (
-    AnalyzerState,
-    _apply_state_update,
+from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+    apply_state_update as _apply_state_update,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
