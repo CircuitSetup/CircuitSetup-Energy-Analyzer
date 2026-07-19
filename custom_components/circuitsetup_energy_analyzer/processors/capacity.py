@@ -20,6 +20,9 @@ type SourceStatesProvider = Callable[
     Mapping[str, SourceState],
 ]
 
+_CAPACITY_BUCKET_MINUTES = 5
+_CAPACITY_SAMPLE_FORMAT = "5m-max-v1"
+
 
 class CapacityProcessor:
     """Track circuit current samples and configured breaker capacity alerts."""
@@ -193,17 +196,18 @@ def _record_capacity_current_sample(
 
     history = demand_by_circuit.setdefault(circuit_id, {})
     cutoff = timestamp - timedelta(days=retention_days)
-    samples = [
-        sample
-        for sample in _coerce_timestamped_dicts(history.get("capacity_current_samples"))
-        if _sample_timestamp_is_at_or_after(sample, cutoff)
-    ]
-    samples.append(
-        {
-            "timestamp": timestamp.isoformat(),
-            "current_amps": round(parsed, 2),
-        }
-    )
+    raw_samples = history.get("capacity_current_samples")
+    if (
+        history.get("capacity_current_sample_format") == _CAPACITY_SAMPLE_FORMAT
+        and isinstance(raw_samples, list)
+    ):
+        samples = raw_samples
+        _drop_expired_capacity_samples(samples, cutoff)
+    else:
+        samples = _compact_capacity_samples(raw_samples, cutoff)
+        history["capacity_current_sample_format"] = _CAPACITY_SAMPLE_FORMAT
+
+    _upsert_capacity_sample(samples, timestamp, parsed)
     history["capacity_current_samples"] = samples
     return True
 
@@ -226,15 +230,74 @@ def _capacity_voltage_v(
     return abs(float(voltage)) * multiplier
 
 
-def _coerce_timestamped_dicts(raw_items: Any) -> list[dict[str, Any]]:
-    if not isinstance(raw_items, list):
+def _compact_capacity_samples(
+    raw_samples: Any,
+    cutoff: datetime,
+) -> list[dict[str, Any]]:
+    if not isinstance(raw_samples, list):
         return []
-    return [
-        dict(item)
-        for item in raw_items
-        if isinstance(item, Mapping)
-        and _datetime_or_none(item.get("timestamp")) is not None
-    ]
+    buckets: dict[datetime, dict[str, Any]] = {}
+    for raw_sample in raw_samples:
+        if not isinstance(raw_sample, Mapping):
+            continue
+        sample_time = _datetime_or_none(raw_sample.get("timestamp"))
+        if sample_time is None or sample_time < cutoff:
+            continue
+        try:
+            current_amps = abs(float(raw_sample.get("current_amps")))
+        except (TypeError, ValueError):
+            continue
+        bucket = _capacity_bucket_start(sample_time)
+        existing = buckets.get(bucket)
+        if existing is None or current_amps > float(existing["current_amps"]):
+            buckets[bucket] = {
+                "timestamp": sample_time.isoformat(),
+                "current_amps": round(current_amps, 2),
+            }
+    return [buckets[bucket] for bucket in sorted(buckets)]
+
+
+def _drop_expired_capacity_samples(
+    samples: list[dict[str, Any]],
+    cutoff: datetime,
+) -> None:
+    first_retained = 0
+    while first_retained < len(samples):
+        sample_time = _datetime_or_none(samples[first_retained].get("timestamp"))
+        if sample_time is not None and sample_time >= cutoff:
+            break
+        first_retained += 1
+    if first_retained:
+        del samples[:first_retained]
+
+
+def _upsert_capacity_sample(
+    samples: list[dict[str, Any]],
+    timestamp: datetime,
+    current_amps: float,
+) -> None:
+    sample = {
+        "timestamp": timestamp.isoformat(),
+        "current_amps": round(current_amps, 2),
+    }
+    if samples:
+        last_time = _datetime_or_none(samples[-1].get("timestamp"))
+        if (
+            last_time is not None
+            and _capacity_bucket_start(last_time) == _capacity_bucket_start(timestamp)
+        ):
+            if current_amps >= float(samples[-1]["current_amps"]):
+                samples[-1] = sample
+            return
+    samples.append(sample)
+
+
+def _capacity_bucket_start(timestamp: datetime) -> datetime:
+    return timestamp.replace(
+        minute=timestamp.minute - timestamp.minute % _CAPACITY_BUCKET_MINUTES,
+        second=0,
+        microsecond=0,
+    )
 
 
 def _datetime_or_none(value: Any) -> datetime | None:
@@ -246,13 +309,6 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
-
-
-def _sample_timestamp_is_at_or_after(sample: Any, cutoff: datetime) -> bool:
-    if not isinstance(sample, dict):
-        return False
-    sample_time = _datetime_or_none(sample.get("timestamp"))
-    return sample_time is not None and sample_time >= cutoff
 
 
 def _normalized_leg(leg: str | None) -> str | None:

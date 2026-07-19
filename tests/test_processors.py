@@ -3012,11 +3012,59 @@ def test_capacity_processor_records_current_and_returns_capacity_alert() -> None
         "warning_ratio": 0.8,
         "current_source": "current_sensor",
     }
+    assert (
+        context.store_data.demand_by_circuit["ev"]["capacity_current_sample_format"]
+        == "5m-max-v1"
+    )
     assert context.store_data.demand_by_circuit["ev"]["capacity_current_samples"] == [
         {
             "timestamp": now.isoformat(),
             "current_amps": 28.0,
         }
+    ]
+
+
+def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import capacity
+
+    now = datetime(2026, 7, 19, 12, 4, 50, tzinfo=UTC)
+    histories = {
+        "ev": {
+            "capacity_current_samples": [
+                {
+                    "timestamp": (now - timedelta(days=46)).isoformat(),
+                    "current_amps": 30.0,
+                },
+                {"timestamp": "2026-07-19T12:00:10+00:00", "current_amps": 10.0},
+                {"timestamp": "2026-07-19T12:03:00+00:00", "current_amps": 18.0},
+                {"timestamp": "2026-07-19T12:03:30+00:00", "current_amps": 15.0},
+                {"timestamp": "invalid", "current_amps": 99.0},
+            ]
+        }
+    }
+
+    assert capacity._record_capacity_current_sample(
+        histories,
+        circuit_id="ev",
+        timestamp=now,
+        current_amps=16.0,
+        retention_days=45,
+    )
+    assert histories["ev"]["capacity_current_sample_format"] == "5m-max-v1"
+    assert histories["ev"]["capacity_current_samples"] == [
+        {"timestamp": "2026-07-19T12:03:00+00:00", "current_amps": 18.0}
+    ]
+
+    assert capacity._record_capacity_current_sample(
+        histories,
+        circuit_id="ev",
+        timestamp=datetime(2026, 7, 19, 12, 5, tzinfo=UTC),
+        current_amps=20.0,
+        retention_days=45,
+    )
+    assert histories["ev"]["capacity_current_samples"] == [
+        {"timestamp": "2026-07-19T12:03:00+00:00", "current_amps": 18.0},
+        {"timestamp": "2026-07-19T12:05:00+00:00", "current_amps": 20.0},
     ]
 
 
@@ -3168,6 +3216,10 @@ def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() ->
     evidence = updates[("capacity_evidence_by_circuit", "hvac")]
     assert evidence["current_amps"] == 34.0
     assert evidence["capacity_usage_percent"] == 85.0
+    assert (
+        store_data.demand_by_circuit["hvac"]["capacity_current_sample_format"]
+        == "5m-max-v1"
+    )
     assert store_data.demand_by_circuit["hvac"]["capacity_current_samples"] == [
         {
             "timestamp": (now - timedelta(days=2)).isoformat(),
