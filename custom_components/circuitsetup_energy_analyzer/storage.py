@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
 else:
     HomeAssistant = Any
     Store = Any
+
+_LOGGER = logging.getLogger(__name__)
 
 
 RETENTION_WINDOWS: dict[RetentionMode, timedelta] = {
@@ -761,7 +764,24 @@ class FeatureStore:
     def __init__(self: Self, hass: HomeAssistant, entry_id: str) -> None:
         from homeassistant.helpers.storage import Store as HAStore
 
-        self._store: Store[dict[str, Any]] = HAStore(
+        class _CurrentOnlyStore(HAStore):
+            async def _async_migrate_func(
+                self,
+                old_major_version: int,
+                old_minor_version: int,
+                _old_data: dict[str, Any],
+            ) -> dict[str, Any]:
+                _LOGGER.warning(
+                    "Discarding unsupported %s storage schema %s.%s; "
+                    "starting with schema %s",
+                    self.key,
+                    old_major_version,
+                    old_minor_version,
+                    STORAGE_VERSION,
+                )
+                return {}
+
+        self._store: Store[dict[str, Any]] = _CurrentOnlyStore(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY}.{entry_id}",

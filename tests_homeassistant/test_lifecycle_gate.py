@@ -78,6 +78,34 @@ LIFECYCLE_LOG_BLOCKLIST = (
 )
 
 
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_feature_store_discards_unsupported_major_version(
+    hass: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from homeassistant.helpers.storage import Store
+
+    _point_custom_components_at_worktree(monkeypatch)
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        STORAGE_KEY,
+        STORAGE_VERSION,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import (
+        FeatureStore,
+        FeatureStoreData,
+    )
+
+    entry_id = "unsupported-store-version"
+    key = f"{STORAGE_KEY}.{entry_id}"
+    await Store(hass, STORAGE_VERSION - 1, key).async_save({"old": "data"})
+
+    loaded = await FeatureStore(hass, entry_id).async_load()
+
+    assert loaded == FeatureStoreData()
+    assert await Store(hass, STORAGE_VERSION, key).async_load() == {}
+
+
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_reload_unload_lifecycle(
