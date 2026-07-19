@@ -295,6 +295,32 @@ async def test_source_selection_merges_source_devices_and_extras(
     ]
 
 
+@pytest.mark.parametrize(
+    "validator_name",
+    ["validate_setup_input", "validate_options_input"],
+)
+def test_validate_input_preserves_device_expanded_sources(
+    validator_name: str,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    validated = getattr(config_flow, validator_name)(
+        {
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.device_l1_power",
+                "sensor.device_l2_power",
+            ],
+        }
+    )
+
+    assert validated[CONF_EXTRA_SOURCE_ENTITIES] == []
+    assert validated[CONF_SOURCE_ENTITIES] == [
+        "sensor.device_l1_power",
+        "sensor.device_l2_power",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_user_flow_auto_routes_mains_sources_to_mains_sensors() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (

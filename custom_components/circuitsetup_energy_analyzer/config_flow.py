@@ -721,7 +721,15 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
     extra_source_entities = _normalize_demo_source_entity_ids(extra_source_entities)
     if demo_source_bundle_enabled:
         extra_source_entities = _with_demo_source_bundle(extra_source_entities)
-    source_entities = list(extra_source_entities)
+    source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            user_input.get(CONF_SOURCE_ENTITIES, []),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
+    source_entities = list(
+        dict.fromkeys([*source_entities, *extra_source_entities])
+    )
     if demo_source_bundle_enabled:
         source_entities = _with_demo_source_bundle(source_entities)
     mains_source_entities = _normalize_demo_source_entity_ids(
@@ -859,8 +867,15 @@ def validate_options_input(
     validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
     if water_flow_sensor_entities:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
-    merged_source_entities = list(extra_source_entities)
-    merged_source_entities = list(dict.fromkeys(merged_source_entities))
+    source_entities = _normalize_demo_source_entity_ids(
+        _strict_string_list(
+            user_input.get(CONF_SOURCE_ENTITIES, []),
+            invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
+        )
+    )
+    merged_source_entities = list(
+        dict.fromkeys([*source_entities, *extra_source_entities])
+    )
     if demo_source_bundle_enabled:
         merged_source_entities = _with_demo_source_bundle(merged_source_entities)
     elif remove_demo_source_bundle:
