@@ -111,8 +111,7 @@ class StandbyProcessor:
                     standby_evidence_payload(result, contextual_comparison),
                 ),
             ],
-            store_dirty=result.limit_exceeded is not None
-            or bool(contextual_comparison.get("sample_recorded")),
+            store_dirty=True,
         )
         if result.limit_exceeded is not None:
             alert = self._standby_limit_alert(

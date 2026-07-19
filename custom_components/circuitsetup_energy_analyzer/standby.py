@@ -6,6 +6,8 @@ from typing import Any
 
 DEFAULT_STANDBY_WINDOW_HOURS = 48
 DEFAULT_STANDBY_THRESHOLD_W = 8.0
+_STANDBY_BUCKET_MINUTES = 1
+_STANDBY_SAMPLE_FORMAT = "1m-min-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,19 +64,25 @@ def record_standby_sample(
         return None
 
     window_hours = max(int(settings.window_hours), 1)
-    samples = _coerce_samples(history.get("samples"))
-    samples.append(
-        {
-            "timestamp": timestamp.isoformat(),
-            "real_power_w": _round_w(max(float(real_power_w), 0.0)),
-        }
-    )
-    samples = _prune_samples(samples, timestamp, timedelta(hours=window_hours))
+    window = timedelta(hours=window_hours)
+    cutoff = timestamp - window
+    current_power = _round_w(max(float(real_power_w), 0.0))
+    raw_samples = history.get("samples")
+    if (
+        history.get("standby_sample_format") == _STANDBY_SAMPLE_FORMAT
+        and isinstance(raw_samples, list)
+    ):
+        samples = raw_samples
+        _drop_expired_standby_samples(samples, cutoff)
+    else:
+        samples = _compact_standby_samples(raw_samples, cutoff)
+        history["standby_sample_format"] = _STANDBY_SAMPLE_FORMAT
+
+    _upsert_standby_sample(samples, timestamp, current_power)
     history["samples"] = samples
 
-    current_power = _round_w(max(float(real_power_w), 0.0))
     standby_threshold = max(float(settings.standby_threshold_w), 0.0)
-    sample_count = len(samples)
+    sample_count = sum(_stored_sample_count(sample) for sample in samples)
     min_samples = max(int(settings.min_samples), 1)
 
     if sample_count < min_samples:
@@ -166,40 +174,93 @@ def _result(
     )
 
 
-def _coerce_samples(raw_samples: Any) -> list[dict[str, float | str]]:
-    samples: list[dict[str, float | str]] = []
+def _compact_standby_samples(
+    raw_samples: Any,
+    cutoff: datetime,
+) -> list[dict[str, Any]]:
     if not isinstance(raw_samples, list):
-        return samples
+        return []
+    buckets: dict[datetime, dict[str, Any]] = {}
     for raw_sample in raw_samples:
         if not isinstance(raw_sample, dict):
             continue
-        timestamp = raw_sample.get("timestamp")
+        sample_time = _datetime_or_none(raw_sample.get("timestamp"))
         power = _float_or_none(raw_sample.get("real_power_w"))
-        if not isinstance(timestamp, str) or power is None:
+        if sample_time is None or sample_time < cutoff or power is None:
             continue
-        if _datetime_or_none(timestamp) is None:
-            continue
-        samples.append(
-            {
-                "timestamp": timestamp,
+        bucket = _standby_bucket_start(sample_time)
+        count = _stored_sample_count(raw_sample)
+        existing = buckets.get(bucket)
+        if existing is None:
+            compacted = {
+                "timestamp": sample_time.isoformat(),
                 "real_power_w": _round_w(max(power, 0.0)),
             }
-        )
-    return sorted(samples, key=lambda sample: str(sample["timestamp"]))
+            if count > 1:
+                compacted["sample_count"] = count
+            buckets[bucket] = compacted
+            continue
+
+        total_count = _stored_sample_count(existing) + count
+        if power < float(existing["real_power_w"]):
+            existing["timestamp"] = sample_time.isoformat()
+            existing["real_power_w"] = _round_w(max(power, 0.0))
+        existing["sample_count"] = total_count
+    return [buckets[bucket] for bucket in sorted(buckets)]
 
 
-def _prune_samples(
-    samples: list[dict[str, float | str]],
+def _drop_expired_standby_samples(
+    samples: list[dict[str, Any]],
+    cutoff: datetime,
+) -> None:
+    # ponytail: cutoff is bucket-granular; retain raw boundary data only if
+    # exact sub-minute retention semantics become necessary.
+    first_retained = 0
+    while first_retained < len(samples):
+        sample_time = _datetime_or_none(samples[first_retained].get("timestamp"))
+        if sample_time is not None and sample_time >= cutoff:
+            break
+        first_retained += 1
+    if first_retained:
+        del samples[:first_retained]
+
+
+def _upsert_standby_sample(
+    samples: list[dict[str, Any]],
     timestamp: datetime,
-    window: timedelta,
-) -> list[dict[str, float | str]]:
-    cutoff = timestamp - window
-    return [
-        sample
-        for sample in samples
-        if (sample_time := _datetime_or_none(sample["timestamp"])) is not None
-        and sample_time >= cutoff
-    ]
+    real_power_w: float,
+) -> None:
+    sample = {
+        "timestamp": timestamp.isoformat(),
+        "real_power_w": real_power_w,
+    }
+    if samples:
+        last_time = _datetime_or_none(samples[-1].get("timestamp"))
+        if (
+            last_time is not None
+            and _standby_bucket_start(last_time) == _standby_bucket_start(timestamp)
+        ):
+            count = _stored_sample_count(samples[-1]) + 1
+            if real_power_w < float(samples[-1]["real_power_w"]):
+                samples[-1].update(sample)
+            samples[-1]["sample_count"] = count
+            return
+    samples.append(sample)
+
+
+def _stored_sample_count(sample: dict[str, Any]) -> int:
+    try:
+        return max(int(sample.get("sample_count", 1)), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _standby_bucket_start(timestamp: datetime) -> datetime:
+    return timestamp.replace(
+        minute=timestamp.minute - timestamp.minute % _STANDBY_BUCKET_MINUTES,
+        second=0,
+        microsecond=0,
+    )
 
 
 def _low_watermark(values: list[float]) -> float:

@@ -245,7 +245,9 @@ class SettingsController:
             "operating_idle_samples": [],
             "operating_start_samples": [],
             "standby_samples_w": [],
+            "standby_sample_counts": [],
             "current_samples": [],
+            "current_sample_counts": [],
             "leg_imbalance_ratios": [],
             "dual_phase_total_power_w": [],
             "apparent_power_residual_percent": [],
@@ -296,10 +298,14 @@ class SettingsController:
                 for sample in standby_samples
                 if isinstance(sample, Mapping)
             ]
-        feature_history["standby_samples_w"] = _numeric_items(
+        standby_values = _numeric_items_with_counts(
             standby_samples,
             keys=("real_power_w",),
         )
+        feature_history["standby_samples_w"] = [value for value, _ in standby_values]
+        feature_history["standby_sample_counts"] = [
+            count for _, count in standby_values
+        ]
 
         feature_history["operating_start_samples"] = [
             {
@@ -315,16 +321,21 @@ class SettingsController:
         ]
 
         demand_history = coordinator.store_data.demand_by_circuit.get(circuit_id, {})
-        feature_history["current_samples"] = _numeric_items(
+        current_values = _numeric_items_with_counts(
             demand_history.get("capacity_current_samples"),
             keys=("current_amps", "current_a", "amps"),
         )
-        feature_history["current_samples"].extend(
-            _numeric_items(
+        current_values.extend(
+            (value, 1)
+            for value in _numeric_items(
                 demand_history.get("samples"),
                 keys=("current_a", "current_amps", "amps"),
             )
         )
+        feature_history["current_samples"] = [value for value, _ in current_values]
+        feature_history["current_sample_counts"] = [
+            count for _, count in current_values
+        ]
 
         leg_evidence = coordinator.state.leg_imbalance_evidence_by_circuit.get(
             circuit_id,
@@ -2395,6 +2406,37 @@ def _numeric_items(
                     break
             continue
         _append_float(values, item)
+    return values
+
+
+def _numeric_items_with_counts(
+    raw_items: Any,
+    *,
+    keys: tuple[str, ...],
+) -> list[tuple[float, int]]:
+    if raw_items is None:
+        return []
+    try:
+        items = list(raw_items)
+    except TypeError:
+        items = [raw_items]
+
+    values: list[tuple[float, int]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        for key in keys:
+            if key in item:
+                try:
+                    value = float(item[key])
+                except (TypeError, ValueError):
+                    break
+                try:
+                    count = max(int(item.get("sample_count", 1)), 1)
+                except (TypeError, ValueError):
+                    count = 1
+                values.append((value, count))
+                break
     return values
 
 

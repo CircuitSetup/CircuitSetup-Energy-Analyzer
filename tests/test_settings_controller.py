@@ -317,12 +317,16 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     }
     coordinator.store_data.standby_by_circuit["fridge"] = {
         "samples": [
-            {"timestamp": coordinator.now.isoformat(), "real_power_w": "4.5"},
+            {
+                "timestamp": coordinator.now.isoformat(),
+                "real_power_w": "4.5",
+                "sample_count": 3,
+            },
             {"real_power_w": "bad"},
         ]
     }
     coordinator.store_data.demand_by_circuit["fridge"] = {
-        "capacity_current_samples": [{"current_amps": "7.25"}],
+        "capacity_current_samples": [{"current_amps": "7.25", "sample_count": 4}],
         "samples": [{"current_a": "8.5"}],
     }
     coordinator.store_data.events = [
@@ -371,7 +375,9 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     ]
     assert history["cycles"] == [{"duration_minutes": 15.0}]
     assert history["standby_samples_w"] == [4.5]
+    assert history["standby_sample_counts"] == [3]
     assert history["current_samples"] == [7.25, 8.5]
+    assert history["current_sample_counts"] == [4, 1]
     assert history["operating_start_samples"] == [
         {"timestamp": coordinator.now.isoformat(), "power_w": 610.0}
     ]
