@@ -6233,8 +6233,10 @@ def test_readme_documents_assignment_defaults() -> None:
         "choose the appliance type, circuit mode, power-flow mode" not in readme_text
     )
     for expected in (
-        "choose the appliance type and source sensors",
-        "The integration derives circuit mode and power-flow mode",
+        "integration suggests an appliance type",
+        "Home Assistant friendly name as a",
+        "fallback. You confirm the appliance type and source sensors",
+        "derives circuit mode and power-flow mode",
         "| Profile | Default phase/topology | Default power flow |",
         "| `refrigerator` | Single phase | Load |",
         "| `hvac` | Dual phase when both legs are selected; "

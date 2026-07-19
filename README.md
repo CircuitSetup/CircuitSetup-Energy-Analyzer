@@ -213,9 +213,10 @@ questions instead of raw diagnostic entity lists:
 
 Correct circuit classification is the most important part of setup.
 
-In **Appliance Circuit Assignments**, you choose the appliance type and source
-sensors. The integration derives circuit mode and power-flow mode from that
-selection.
+In **Appliance Circuit Assignments**, the integration suggests an appliance type
+from each source entity ID, then uses its Home Assistant friendly name as a
+fallback. You confirm the appliance type and source sensors before the integration
+derives circuit mode and power-flow mode from that selection.
 
 | Mode | Use for | Notes |
 |---|---|---|

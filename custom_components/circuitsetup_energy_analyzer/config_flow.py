@@ -2402,11 +2402,13 @@ def _assignment_entities_have_both_legs(entity_ids: Iterable[str]) -> bool:
 def assignment_groups_from_sources(
     source_entities: Iterable[str],
     *,
+    source_names: Mapping[str, str] | None = None,
     mains_source_entities: Iterable[str] = (),
     existing_circuits: Iterable[Mapping[str, Any]] = (),
 ) -> list[dict[str, Any]]:
     """Build guided assignment groups with automatic or saved classification."""
     source_entity_list = list(dict.fromkeys(source_entities))
+    source_name_by_entity = source_names or {}
     mains_entities = set(mains_source_entities)
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
@@ -2424,6 +2426,19 @@ def assignment_groups_from_sources(
     assignment_groups: list[dict[str, Any]] = []
     for circuit_id, entity_ids in groups.items():
         profile, mode = _suggest_assignment_profile_mode(circuit_id, entity_ids)
+        if profile == ApplianceProfile.MIXED.value:
+            friendly_names = [
+                _slugify(name)
+                for entity_id in entity_ids
+                if (name := str(source_name_by_entity.get(entity_id) or "").strip())
+            ]
+            friendly_profile, _ = _suggest_assignment_profile_mode(
+                circuit_id,
+                friendly_names,
+            )
+            if friendly_profile != ApplianceProfile.MIXED.value:
+                profile = friendly_profile
+                mode = _assignment_mode_for_profile_and_entities(profile, entity_ids)
         group = {
             "group_id": circuit_id,
             "entity_ids": tuple(entity_ids),
@@ -2617,8 +2632,25 @@ def _start_assignment_review(
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
+    source_entities = _assignment_review_source_entities(pending_config)
+    states = getattr(getattr(flow, "hass", None), "states", None)
+    source_names = (
+        {
+            entity_id: name
+            for entity_id in source_entities
+            if (state := states.get(entity_id)) is not None
+            if (
+                name := str(
+                    getattr(state, "attributes", {}).get("friendly_name") or ""
+                ).strip()
+            )
+        }
+        if states is not None
+        else {}
+    )
     groups = assignment_groups_from_sources(
-        _assignment_review_source_entities(pending_config),
+        source_entities,
+        source_names=source_names,
         mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
         existing_circuits=existing_circuit_list,
     )

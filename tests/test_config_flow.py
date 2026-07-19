@@ -4043,6 +4043,40 @@ async def test_assignment_step_auto_suggests_microwave_profile() -> None:
     assert "circuit_mode" not in _schema_keys(result["data_schema"])
 
 
+@pytest.mark.parametrize(
+    ("entity_id", "expected_profile"),
+    [
+        ("sensor.channel_1_active_power", "refrigerator"),
+        ("sensor.garage_freezer_active_power", "freezer"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_assignment_step_uses_friendly_name_only_as_profile_fallback(
+    entity_id: str,
+    expected_profile: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+    flow.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda _entity_id: SimpleNamespace(
+                attributes={"friendly_name": "Kitchen Refrigerator Power"}
+            )
+        )
+    )
+
+    result = await flow.async_step_user({CONF_EXTRA_SOURCE_ENTITIES: [entity_id]})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert _schema_default(result["data_schema"], "appliance_profile") == (
+        expected_profile
+    )
+
+
 @pytest.mark.asyncio
 async def test_assignment_step_uses_clean_demo_circuit_names() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
