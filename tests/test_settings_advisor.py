@@ -234,6 +234,7 @@ def _operating_detection_inputs(
     circuit_mode: str = "single_phase",
     power_flow: str = "load",
     idle_samples: list[float] | None = None,
+    idle_sample_counts: list[int] | None = None,
     start_samples: list[float] | None = None,
 ) -> Any:
     base = datetime(2026, 5, 25, 12, 0, tzinfo=UTC)
@@ -262,6 +263,11 @@ def _operating_detection_inputs(
                 {
                     "timestamp": (base + timedelta(hours=index * 16)).isoformat(),
                     "real_power_w": value,
+                    **(
+                        {"sample_count": idle_sample_counts[index]}
+                        if idle_sample_counts is not None
+                        else {}
+                    ),
                 }
                 for index, value in enumerate(idle_values)
             ],
@@ -394,6 +400,23 @@ def test_operating_detection_recommendations_use_idle_and_start_separation() -> 
     }
 
 
+def test_operating_detection_counts_compacted_idle_samples() -> None:
+    advisor = _advisor()
+    inputs = _operating_detection_inputs(
+        advisor,
+        idle_samples=[5.0, 7.0],
+        idle_sample_counts=[9, 1],
+    )
+
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "operating_on_threshold_w",
+    )
+
+    assert recommendation.evidence["idle_sample_count"] == 10
+    assert recommendation.evidence["idle_p95_w"] == 7.0
+
+
 def test_operating_detection_recommendations_require_clear_separation() -> None:
     advisor = _advisor()
     inputs = _operating_detection_inputs(
@@ -523,6 +546,65 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
     assert recommendation.suggested_value == 7.0
     assert recommendation.group == "Standby"
     assert recommendation.evidence["p95_standby_w"] == 5.2
+
+
+def test_advisor_uses_compacted_sample_counts() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="ev",
+            circuit_name="EV Charger",
+            appliance_profile="ev_charger",
+            circuit_mode="single_phase",
+            power_flow="load",
+            advanced_settings={"warning_ratio": 0.9},
+        ),
+        feature_history={
+            "current_samples": [24.0, 32.0],
+            "current_sample_counts": [6, 1],
+        },
+    )
+
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "warning_ratio",
+    )
+
+    assert recommendation.evidence == {
+        "observed_samples": 7,
+        "p95_current_amps": 32.0,
+    }
+
+
+def test_standby_recommendation_uses_compacted_sample_counts() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="refrigerator",
+            circuit_name="Refrigerator",
+            appliance_profile="refrigerator",
+            circuit_mode="single_phase",
+            power_flow="load",
+            advanced_settings={"standby_threshold_w": 8.0},
+        ),
+        feature_history={
+            "standby_samples_w": [4.0, 5.0],
+            "standby_sample_counts": [6, 1],
+        },
+    )
+
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "standby_threshold_w",
+    )
+
+    assert recommendation.evidence == {
+        "observed_samples": 7,
+        "median_standby_w": 4.0,
+        "p95_standby_w": 5.0,
+    }
 
 
 def test_dual_phase_recommendation_uses_observed_leg_balance() -> None:

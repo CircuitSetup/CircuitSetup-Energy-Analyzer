@@ -397,9 +397,13 @@ def _cycle_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendation]
 
 def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendation]:
     current_samples = _numeric_values(inputs.feature_history.get("current_samples"))
+    current_counts = _sample_counts(
+        current_samples,
+        inputs.feature_history.get("current_sample_counts"),
+    )
     if (
         inputs.context.appliance_profile != "ev_charger"
-        or len(current_samples) < 7
+        or sum(current_counts) < 7
     ):
         return []
 
@@ -426,8 +430,11 @@ def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendati
                 "warning ratio without inferring breaker size."
             ),
             evidence={
-                "observed_samples": len(current_samples),
-                "p95_current_amps": round(_percentile(current_samples, 95), 1),
+                "observed_samples": sum(current_counts),
+                "p95_current_amps": round(
+                    _weighted_percentile(current_samples, current_counts, 95),
+                    1,
+                ),
             },
         )
     ]
@@ -437,10 +444,14 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
     standby_samples = _numeric_values(
         inputs.feature_history.get("standby_samples_w"),
     )
-    if len(standby_samples) < MIN_ADVISOR_DAYS:
+    standby_counts = _sample_counts(
+        standby_samples,
+        inputs.feature_history.get("standby_sample_counts"),
+    )
+    if sum(standby_counts) < MIN_ADVISOR_DAYS:
         return []
 
-    p95 = _percentile(standby_samples, 95)
+    p95 = _weighted_percentile(standby_samples, standby_counts, 95)
     suggested_value = float(_round_to_nearest(max(5.0, p95 * 1.3), 1))
     current_value = _float_setting(
         inputs.context.advanced_settings,
@@ -466,8 +477,11 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
                 "low-power cluster."
             ),
             evidence={
-                "observed_samples": len(standby_samples),
-                "median_standby_w": round(_median(standby_samples), 1),
+                "observed_samples": sum(standby_counts),
+                "median_standby_w": round(
+                    _weighted_median(standby_samples, standby_counts),
+                    1,
+                ),
                 "p95_standby_w": round(p95, 1),
             },
         )
@@ -494,8 +508,10 @@ def _operating_detection_recommendations(
         key="power_w",
     )
     if (
-        len(idle_samples) < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
-        or len(start_samples) < OPERATING_THRESHOLD_MIN_START_SAMPLES
+        _timestamped_sample_count(idle_samples)
+        < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
+        or _timestamped_sample_count(start_samples)
+        < OPERATING_THRESHOLD_MIN_START_SAMPLES
     ):
         return []
 
@@ -503,10 +519,12 @@ def _operating_detection_recommendations(
     if learning_days < MIN_ADVISOR_DAYS:
         return []
 
-    idle_values = [value for _, value in idle_samples]
-    start_values = [value for _, value in start_samples]
-    idle_p95 = round(_percentile(idle_values, 95), 1)
-    running_p10 = round(_percentile(start_values, 10), 1)
+    idle_values = [value for _, value, _ in idle_samples]
+    idle_counts = [count for _, _, count in idle_samples]
+    start_values = [value for _, value, _ in start_samples]
+    start_counts = [count for _, _, count in start_samples]
+    idle_p95 = round(_weighted_percentile(idle_values, idle_counts, 95), 1)
+    running_p10 = round(_weighted_percentile(start_values, start_counts, 10), 1)
     separation = running_p10 - idle_p95
     if separation <= OPERATING_THRESHOLD_MIN_SEPARATION_W:
         return []
@@ -524,8 +542,8 @@ def _operating_detection_recommendations(
 
     current_on, current_off = _current_operating_thresholds(inputs)
     evidence = {
-        "idle_sample_count": len(idle_values),
-        "running_sample_count": len(start_values),
+        "idle_sample_count": sum(idle_counts),
+        "running_sample_count": sum(start_counts),
         "distinct_run_sessions": len(start_values),
         "learning_days": learning_days,
         "idle_p95_w": idle_p95,
@@ -959,6 +977,52 @@ def _percentile(values: list[float], percentile: float) -> float:
     return sorted_values[int(_clamp(rank, 0, len(sorted_values) - 1))]
 
 
+def _sample_counts(values: list[float], raw_counts: Any) -> list[int]:
+    if not isinstance(raw_counts, list) or len(raw_counts) != len(values):
+        return [1] * len(values)
+    counts: list[int] = []
+    for raw_count in raw_counts:
+        try:
+            counts.append(max(int(raw_count), 1))
+        except (TypeError, ValueError):
+            counts.append(1)
+    return counts
+
+
+def _weighted_percentile(
+    values: list[float],
+    counts: list[int],
+    percentile: float,
+) -> float:
+    total = sum(counts)
+    if not values or total <= 0:
+        return 0.0
+    rank = math.ceil((percentile / 100) * total) - 1
+    return _weighted_value_at_rank(values, counts, int(_clamp(rank, 0, total - 1)))
+
+
+def _weighted_value_at_rank(
+    values: list[float],
+    counts: list[int],
+    rank: int,
+) -> float:
+    remaining = rank
+    for value, count in sorted(zip(values, counts, strict=True)):
+        if remaining < count:
+            return value
+        remaining -= count
+    return values[-1]
+
+
+def _weighted_median(values: list[float], counts: list[int]) -> float:
+    total = sum(counts)
+    if not values or total <= 0:
+        return 0.0
+    lower = _weighted_value_at_rank(values, counts, (total - 1) // 2)
+    upper = _weighted_value_at_rank(values, counts, total // 2)
+    return (lower + upper) / 2
+
+
 def _float_setting(
     settings: Mapping[str, Any],
     setting_key: str,
@@ -1027,11 +1091,11 @@ def _timestamped_numeric_values(
     values: Any,
     *,
     key: str,
-) -> list[tuple[datetime, float]]:
+) -> list[tuple[datetime, float, int]]:
     if values is None:
         return []
 
-    samples: list[tuple[datetime, float]] = []
+    samples: list[tuple[datetime, float, int]] = []
     for item in values:
         if not isinstance(item, Mapping):
             continue
@@ -1043,14 +1107,22 @@ def _timestamped_numeric_values(
         except (TypeError, ValueError):
             continue
         if math.isfinite(value):
-            samples.append((timestamp, value))
+            try:
+                count = max(int(item.get("sample_count", 1)), 1)
+            except (TypeError, ValueError):
+                count = 1
+            samples.append((timestamp, value, count))
     return samples
 
 
-def _learning_days(samples: list[tuple[datetime, float]]) -> int:
+def _timestamped_sample_count(samples: list[tuple[datetime, float, int]]) -> int:
+    return sum(count for _, _, count in samples)
+
+
+def _learning_days(samples: list[tuple[datetime, float, int]]) -> int:
     if not samples:
         return 0
-    timestamps = sorted(timestamp for timestamp, _ in samples)
+    timestamps = sorted(timestamp for timestamp, _, _ in samples)
     return int((timestamps[-1] - timestamps[0]).total_seconds() // 86400) + 1
 
 

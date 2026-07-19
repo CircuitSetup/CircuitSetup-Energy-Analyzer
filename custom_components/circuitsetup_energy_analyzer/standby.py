@@ -213,6 +213,8 @@ def _drop_expired_standby_samples(
     samples: list[dict[str, Any]],
     cutoff: datetime,
 ) -> None:
+    # ponytail: cutoff is bucket-granular; retain raw boundary data only if
+    # exact sub-minute retention semantics become necessary.
     first_retained = 0
     while first_retained < len(samples):
         sample_time = _datetime_or_none(samples[first_retained].get("timestamp"))

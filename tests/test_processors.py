@@ -3052,7 +3052,11 @@ def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
     )
     assert histories["ev"]["capacity_current_sample_format"] == "5m-max-v1"
     assert histories["ev"]["capacity_current_samples"] == [
-        {"timestamp": "2026-07-19T12:03:00+00:00", "current_amps": 18.0}
+        {
+            "timestamp": "2026-07-19T12:03:00+00:00",
+            "current_amps": 18.0,
+            "sample_count": 4,
+        }
     ]
 
     assert capacity._record_capacity_current_sample(
@@ -3063,7 +3067,11 @@ def test_capacity_history_compacts_legacy_samples_and_upserts_bucket() -> None:
         retention_days=45,
     )
     assert histories["ev"]["capacity_current_samples"] == [
-        {"timestamp": "2026-07-19T12:03:00+00:00", "current_amps": 18.0},
+        {
+            "timestamp": "2026-07-19T12:03:00+00:00",
+            "current_amps": 18.0,
+            "sample_count": 4,
+        },
         {"timestamp": "2026-07-19T12:05:00+00:00", "current_amps": 20.0},
     ]
 

@@ -970,7 +970,11 @@ def test_feature_store_round_trips_user_experience_state() -> None:
             "hvac": {
                 "capacity_current_sample_format": "5m-max-v1",
                 "capacity_current_samples": [
-                    {"timestamp": now.isoformat(), "current_amps": 28.0}
+                    {
+                        "timestamp": now.isoformat(),
+                        "current_amps": 28.0,
+                        "sample_count": 4,
+                    }
                 ],
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
                 "daily_peaks": [{"date": "2026-06-02", "peak_demand_w": 3200.0}],
@@ -1046,7 +1050,11 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "capacity_current_sample_format"
     ] == "5m-max-v1"
     assert restored.demand_by_circuit["hvac"]["capacity_current_samples"] == [
-        {"timestamp": now.isoformat(), "current_amps": 28.0}
+        {
+            "timestamp": now.isoformat(),
+            "current_amps": 28.0,
+            "sample_count": 4,
+        }
     ]
     assert restored.capacity_settings_by_circuit["ev"] == {
         "breaker_amps": 40.0,

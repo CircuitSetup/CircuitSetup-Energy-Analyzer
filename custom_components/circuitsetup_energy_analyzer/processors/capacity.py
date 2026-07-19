@@ -249,11 +249,19 @@ def _compact_capacity_samples(
             continue
         bucket = _capacity_bucket_start(sample_time)
         existing = buckets.get(bucket)
-        if existing is None or current_amps > float(existing["current_amps"]):
+        if existing is None:
             buckets[bucket] = {
                 "timestamp": sample_time.isoformat(),
                 "current_amps": round(current_amps, 2),
             }
+            if (count := _stored_sample_count(raw_sample)) > 1:
+                buckets[bucket]["sample_count"] = count
+            continue
+        count = _stored_sample_count(existing) + _stored_sample_count(raw_sample)
+        if current_amps > float(existing["current_amps"]):
+            existing["timestamp"] = sample_time.isoformat()
+            existing["current_amps"] = round(current_amps, 2)
+        existing["sample_count"] = count
     return [buckets[bucket] for bucket in sorted(buckets)]
 
 
@@ -261,6 +269,8 @@ def _drop_expired_capacity_samples(
     samples: list[dict[str, Any]],
     cutoff: datetime,
 ) -> None:
+    # ponytail: cutoff is bucket-granular; retain raw boundary data only if
+    # exact sub-five-minute retention semantics become necessary.
     first_retained = 0
     while first_retained < len(samples):
         sample_time = _datetime_or_none(samples[first_retained].get("timestamp"))
@@ -286,10 +296,19 @@ def _upsert_capacity_sample(
             last_time is not None
             and _capacity_bucket_start(last_time) == _capacity_bucket_start(timestamp)
         ):
+            count = _stored_sample_count(samples[-1]) + 1
             if current_amps >= float(samples[-1]["current_amps"]):
-                samples[-1] = sample
+                samples[-1].update(sample)
+            samples[-1]["sample_count"] = count
             return
     samples.append(sample)
+
+
+def _stored_sample_count(sample: Mapping[str, Any]) -> int:
+    try:
+        return max(int(sample.get("sample_count", 1)), 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def _capacity_bucket_start(timestamp: datetime) -> datetime:
