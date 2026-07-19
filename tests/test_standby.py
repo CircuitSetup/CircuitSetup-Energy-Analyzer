@@ -170,3 +170,45 @@ def test_record_standby_sample_prunes_old_samples_and_waits_for_learning() -> No
         {"timestamp": "2026-06-03T11:00:00+00:00", "real_power_w": 4.0},
         {"timestamp": "2026-06-03T12:00:00+00:00", "real_power_w": 5.0},
     ]
+
+
+def test_record_standby_sample_compacts_minutes_and_preserves_sample_count() -> None:
+    history = {
+        "samples": [
+            {"timestamp": "2026-07-19T12:00:05+00:00", "real_power_w": 8.0},
+            {"timestamp": "2026-07-19T12:00:20+00:00", "real_power_w": 3.0},
+            {"timestamp": "2026-07-19T12:00:55+00:00", "real_power_w": 5.0},
+            {"timestamp": "invalid", "real_power_w": 1.0},
+        ]
+    }
+
+    result = record_standby_sample(
+        history,
+        circuit_id="office",
+        timestamp=datetime(2026, 7, 19, 12, 0, 58, tzinfo=UTC),
+        real_power_w=4.0,
+        settings=StandbySettings(min_samples=4),
+    )
+
+    assert result is not None
+    assert result.sample_count == 4
+    assert result.always_on_power_w == 3.0
+    assert history["standby_sample_format"] == "1m-min-v1"
+    assert history["samples"] == [
+        {
+            "timestamp": "2026-07-19T12:00:20+00:00",
+            "real_power_w": 3.0,
+            "sample_count": 4,
+        }
+    ]
+
+    next_result = record_standby_sample(
+        history,
+        circuit_id="office",
+        timestamp=datetime(2026, 7, 19, 12, 1, tzinfo=UTC),
+        real_power_w=9.0,
+        settings=StandbySettings(min_samples=4),
+    )
+    assert next_result is not None
+    assert next_result.sample_count == 5
+    assert len(history["samples"]) == 2
