@@ -947,7 +947,14 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         },
         standby_by_circuit={
             "office": {
-                "samples": [{"timestamp": now.isoformat(), "real_power_w": 6.0}],
+                "standby_sample_format": "1m-min-v1",
+                "samples": [
+                    {
+                        "timestamp": now.isoformat(),
+                        "real_power_w": 6.0,
+                        "sample_count": 4,
+                    }
+                ],
             }
         },
         operating_detection_settings_by_circuit={
@@ -961,6 +968,10 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         },
         demand_by_circuit={
             "hvac": {
+                "capacity_current_sample_format": "5m-max-v1",
+                "capacity_current_samples": [
+                    {"timestamp": now.isoformat(), "current_amps": 28.0}
+                ],
                 "samples": [{"timestamp": now.isoformat(), "real_power_w": 3200.0}],
                 "daily_peaks": [{"date": "2026-06-02", "peak_demand_w": 3200.0}],
             }
@@ -1031,6 +1042,12 @@ def test_feature_store_round_trips_user_experience_state() -> None:
     assert restored.demand_by_circuit["hvac"]["daily_peaks"] == [
         {"date": "2026-06-02", "peak_demand_w": 3200.0}
     ]
+    assert restored.demand_by_circuit["hvac"][
+        "capacity_current_sample_format"
+    ] == "5m-max-v1"
+    assert restored.demand_by_circuit["hvac"]["capacity_current_samples"] == [
+        {"timestamp": now.isoformat(), "current_amps": 28.0}
+    ]
     assert restored.capacity_settings_by_circuit["ev"] == {
         "breaker_amps": 40.0,
         "warning_ratio": 0.8,
@@ -1045,9 +1062,16 @@ def test_feature_store_round_trips_user_experience_state() -> None:
         "standby_threshold_w": 8.0,
         "always_on_alert_w": 25.0,
     }
-    assert restored.standby_by_circuit["office"]["samples"] == [
-        {"timestamp": now.isoformat(), "real_power_w": 6.0}
-    ]
+    assert restored.standby_by_circuit["office"] == {
+        "standby_sample_format": "1m-min-v1",
+        "samples": [
+            {
+                "timestamp": now.isoformat(),
+                "real_power_w": 6.0,
+                "sample_count": 4,
+            }
+        ],
+    }
     assert restored.operating_detection_settings_by_circuit["fridge"] == {
         "operating_on_threshold_w": 25.0,
         "operating_off_threshold_w": 10.0,
