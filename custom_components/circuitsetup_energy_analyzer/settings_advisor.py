@@ -432,7 +432,7 @@ def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendati
             evidence={
                 "observed_samples": sum(current_counts),
                 "p95_current_amps": round(
-                    _weighted_percentile(current_samples, current_counts, 95),
+                    _percentile(current_samples, 95),
                     1,
                 ),
             },
@@ -451,7 +451,7 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
     if sum(standby_counts) < MIN_ADVISOR_DAYS:
         return []
 
-    p95 = _weighted_percentile(standby_samples, standby_counts, 95)
+    p95 = _percentile(standby_samples, 95)
     suggested_value = float(_round_to_nearest(max(5.0, p95 * 1.3), 1))
     current_value = _float_setting(
         inputs.context.advanced_settings,
@@ -478,10 +478,7 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
             ),
             evidence={
                 "observed_samples": sum(standby_counts),
-                "median_standby_w": round(
-                    _weighted_median(standby_samples, standby_counts),
-                    1,
-                ),
+                "median_standby_w": round(_median(standby_samples), 1),
                 "p95_standby_w": round(p95, 1),
             },
         )
@@ -523,8 +520,8 @@ def _operating_detection_recommendations(
     idle_counts = [count for _, _, count in idle_samples]
     start_values = [value for _, value, _ in start_samples]
     start_counts = [count for _, _, count in start_samples]
-    idle_p95 = round(_weighted_percentile(idle_values, idle_counts, 95), 1)
-    running_p10 = round(_weighted_percentile(start_values, start_counts, 10), 1)
+    idle_p95 = round(_percentile(idle_values, 95), 1)
+    running_p10 = round(_percentile(start_values, 10), 1)
     separation = running_p10 - idle_p95
     if separation <= OPERATING_THRESHOLD_MIN_SEPARATION_W:
         return []
@@ -987,40 +984,6 @@ def _sample_counts(values: list[float], raw_counts: Any) -> list[int]:
         except (TypeError, ValueError):
             counts.append(1)
     return counts
-
-
-def _weighted_percentile(
-    values: list[float],
-    counts: list[int],
-    percentile: float,
-) -> float:
-    total = sum(counts)
-    if not values or total <= 0:
-        return 0.0
-    rank = math.ceil((percentile / 100) * total) - 1
-    return _weighted_value_at_rank(values, counts, int(_clamp(rank, 0, total - 1)))
-
-
-def _weighted_value_at_rank(
-    values: list[float],
-    counts: list[int],
-    rank: int,
-) -> float:
-    remaining = rank
-    for value, count in sorted(zip(values, counts, strict=True)):
-        if remaining < count:
-            return value
-        remaining -= count
-    return values[-1]
-
-
-def _weighted_median(values: list[float], counts: list[int]) -> float:
-    total = sum(counts)
-    if not values or total <= 0:
-        return 0.0
-    lower = _weighted_value_at_rank(values, counts, (total - 1) // 2)
-    upper = _weighted_value_at_rank(values, counts, total // 2)
-    return (lower + upper) / 2
 
 
 def _float_setting(

@@ -404,8 +404,8 @@ def test_operating_detection_counts_compacted_idle_samples() -> None:
     advisor = _advisor()
     inputs = _operating_detection_inputs(
         advisor,
-        idle_samples=[5.0, 7.0],
-        idle_sample_counts=[9, 1],
+        idle_samples=[5.0, 7.0, 9.0],
+        idle_sample_counts=[20, 1, 1],
     )
 
     recommendation = _only_setting(
@@ -413,8 +413,8 @@ def test_operating_detection_counts_compacted_idle_samples() -> None:
         "operating_on_threshold_w",
     )
 
-    assert recommendation.evidence["idle_sample_count"] == 10
-    assert recommendation.evidence["idle_p95_w"] == 7.0
+    assert recommendation.evidence["idle_sample_count"] == 22
+    assert recommendation.evidence["idle_p95_w"] == 9.0
 
 
 def test_operating_detection_recommendations_require_clear_separation() -> None:
@@ -561,8 +561,8 @@ def test_advisor_uses_compacted_sample_counts() -> None:
             advanced_settings={"warning_ratio": 0.9},
         ),
         feature_history={
-            "current_samples": [24.0, 32.0],
-            "current_sample_counts": [6, 1],
+            "current_samples": [24.0, 32.0, 40.0],
+            "current_sample_counts": [100, 1, 1],
         },
     )
 
@@ -572,8 +572,8 @@ def test_advisor_uses_compacted_sample_counts() -> None:
     )
 
     assert recommendation.evidence == {
-        "observed_samples": 7,
-        "p95_current_amps": 32.0,
+        "observed_samples": 102,
+        "p95_current_amps": 40.0,
     }
 
 
@@ -591,7 +591,7 @@ def test_standby_recommendation_uses_compacted_sample_counts() -> None:
         ),
         feature_history={
             "standby_samples_w": [4.0, 5.0],
-            "standby_sample_counts": [6, 1],
+            "standby_sample_counts": [100, 1],
         },
     )
 
@@ -601,8 +601,8 @@ def test_standby_recommendation_uses_compacted_sample_counts() -> None:
     )
 
     assert recommendation.evidence == {
-        "observed_samples": 7,
-        "median_standby_w": 4.0,
+        "observed_samples": 101,
+        "median_standby_w": 4.5,
         "p95_standby_w": 5.0,
     }
 

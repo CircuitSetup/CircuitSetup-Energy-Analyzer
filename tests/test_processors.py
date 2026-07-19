@@ -4749,7 +4749,22 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
         state=AnalyzerState(),
-        store_data=FeatureStoreData(),
+        store_data=FeatureStoreData(
+            standby_by_circuit={
+                "office": {
+                    "samples": [
+                        {
+                            "timestamp": (now - timedelta(seconds=30)).isoformat(),
+                            "real_power_w": 5.0,
+                        },
+                        {
+                            "timestamp": (now - timedelta(seconds=10)).isoformat(),
+                            "real_power_w": 3.0,
+                        },
+                    ]
+                }
+            }
+        ),
         options={},
         entry_data={},
         known_load_circuit_ids=frozenset(),
@@ -4771,11 +4786,11 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     ) -> None:
         seeded.append(seeded_config.circuit_id)
         assert seeded_context is context
-        assert settings.min_samples == 3
+        assert settings.min_samples == 4
 
     processor = processors.StandbyProcessor(
         settings_for_config=lambda _config, _circuit_id: StandbySettings(
-            min_samples=3,
+            min_samples=4,
         ),
         alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
         seed_demo_history=seed_demo_history,
@@ -4784,8 +4799,19 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     result = processor.process(_sample(0, 4.0), config, context)
 
     assert seeded == ["office"]
-    assert result.store_dirty is False
+    assert result.store_dirty is True
     assert result.alerts == []
+    assert context.store_data.standby_by_circuit["office"] == {
+        "standby_sample_format": "1m-min-v1",
+        "samples": [
+            {
+                "timestamp": (now - timedelta(seconds=10)).isoformat(),
+                "real_power_w": 3.0,
+                "sample_count": 2,
+            },
+            {"timestamp": now.isoformat(), "real_power_w": 4.0},
+        ],
+    }
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("always_on_power_w_by_circuit", "office")] == 0.0
     assert updates[("standby_status_by_circuit", "office")] == "learning"
@@ -4793,7 +4819,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
         "always_on_power_w": 0.0,
         "current_power_w": 4.0,
         "standby_threshold_w": 8.0,
-        "sample_count": 1,
+        "sample_count": 3,
         "window_hours": 48,
         "always_on_alert_w": None,
         "always_on_limit_usage_percent": 0.0,
