@@ -218,6 +218,12 @@ from each source entity ID, then uses its Home Assistant friendly name as a
 fallback. You confirm the appliance type and source sensors before the integration
 derives circuit mode and power-flow mode from that selection.
 
+The assignment editor offers every eligible selected source sensor, so a newly
+discovered or previously removed sensor can be added to an existing appliance or
+grouped with other sensors. The assignment picker can also remove several
+appliances together. Unassigned sources remain available for later assignment but
+do not create analyzer appliances on their own.
+
 | Mode | Use for | Notes |
 |---|---|---|
 | **Single Phase** | One CT/channel tracking one main 120 V load, such as a refrigerator, washer, sump pump, microwave, or water pump. | Best for dedicated appliance circuits. |
@@ -910,10 +916,10 @@ These are the sensors you select during setup. The analyzer does not require eve
 | **Apparent Power** | VA relationship checks with watts and power factor. |
 
 ATM90E32 harmonic active power is not ordinary active power or a THD percentage.
-Automatic assignment leaves harmonic sensors unassigned rather than treating them as
-standalone mixed circuits. A future dedicated role can use harmonic-to-active-power
-trends for nonlinear-load fingerprints or learned drift without corrupting watts-based
-appliance analysis.
+Automatic assignment leaves harmonic sensors and sensors with `total` in their name
+unassigned rather than treating them as standalone mixed circuits. A future dedicated
+role can use harmonic-to-active-power trends for nonlinear-load fingerprints or
+learned drift without corrupting watts-based appliance analysis.
 
 Example source entity names commonly look like this:
 

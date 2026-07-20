@@ -67,6 +67,54 @@ def test_config_parser_groups_peak_current_under_mac_suffixed_channel() -> None:
     ]
 
 
+def test_config_parser_does_not_create_orphan_configs_for_unassigned_sources() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "refrigerator",
+                    "name": "Refrigerator",
+                    "appliance_profile": "refrigerator",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.refrigerator_power"],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.car_charger_l1_harmonic_power",
+                "sensor.house_total_power",
+                "sensor.new_unassigned_power",
+            ],
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["refrigerator"]
+
+
+def test_config_parser_excludes_harmonic_and_total_automatic_configs() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.car_charger_l1_harmonic_power",
+                "sensor.house_total_power",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["refrigerator"]
+
+
 def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

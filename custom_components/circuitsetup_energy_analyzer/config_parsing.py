@@ -153,6 +153,9 @@ def _source_entity_configs_from_sources(
     retention_mode: RetentionMode,
     existing_configs: Iterable[CircuitConfig],
 ) -> tuple[CircuitConfig, ...]:
+    if any(existing_configs):
+        return ()
+
     source_entities = _string_list_from_sources(
         entry_data,
         options,
@@ -164,18 +167,15 @@ def _source_entity_configs_from_sources(
     mains_entities = set(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
-    existing_circuit_ids = {config.circuit_id for config in existing_configs}
-    existing_source_entities = {
-        sensor.entity_id
-        for config in existing_configs
-        for sensor in config.sensors
-    }
     sensors_by_circuit_id: dict[str, list[SensorRef]] = {}
     for entity_id in source_entities:
-        if entity_id in mains_entities or entity_id in existing_source_entities:
+        if (
+            entity_id in mains_entities
+            or _automatic_source_entity_excluded(entity_id)
+        ):
             continue
         circuit_id = _source_circuit_id_from_entity_id(entity_id)
-        if not circuit_id or circuit_id in existing_circuit_ids:
+        if not circuit_id:
             continue
         sensors_by_circuit_id.setdefault(circuit_id, []).append(
             SensorRef(
@@ -199,6 +199,11 @@ def _source_entity_configs_from_sources(
             )
         )
     return tuple(configs)
+
+
+def _automatic_source_entity_excluded(entity_id: str) -> bool:
+    tokens = set(_entity_object_id(entity_id).split("_"))
+    return bool(tokens & {"harmonic", "total"})
 
 
 def _experimental_nilm_enabled(
