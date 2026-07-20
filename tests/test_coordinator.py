@@ -8325,7 +8325,7 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
 
 
 @pytest.mark.asyncio
-async def test_runtime_enabled_rain_context_without_source_creates_repair(
+async def test_runtime_without_rain_source_disables_optional_correlation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -8382,11 +8382,12 @@ async def test_runtime_enabled_rain_context_without_source_creates_repair(
 
     await coordinator.async_process_update()
 
-    assert ("sump_pump", "missing_rain_context_source") in issues
+    assert ("sump_pump", "missing_rain_context_source") not in issues
+    assert "sump_pump" not in coordinator.state.rain_pump_context_by_circuit
 
 
 @pytest.mark.asyncio
-async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
+async def test_runtime_without_water_flow_source_disables_optional_correlation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -8443,7 +8444,8 @@ async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
 
     await coordinator.async_process_update()
 
-    assert ("washer", "missing_water_flow_source") in issues
+    assert ("washer", "missing_water_flow_source") not in issues
+    assert "washer" not in coordinator.state.water_flow_context_by_circuit
 
 
 @pytest.mark.asyncio

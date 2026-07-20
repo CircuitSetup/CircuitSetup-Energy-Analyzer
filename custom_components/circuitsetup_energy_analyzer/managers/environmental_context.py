@@ -21,7 +21,11 @@ from ..const import (
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
 )
-from ..context_sources import flow_entities_for_settings, strings_from_any
+from ..context_sources import (
+    flow_entities_for_settings,
+    has_rain_context_source_configured,
+    strings_from_any,
+)
 from ..contextual_baseline import rain_context
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
@@ -174,6 +178,9 @@ class EnvironmentalContextManager:
                 CONF_RAIN_PUMP_CORRELATION_ENABLED,
                 DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
             )
+        ) and has_rain_context_source_configured(
+            coordinator.entry_data,
+            coordinator.options,
         ):
             rain_evidence = self.rain_pump_context_evidence(
                 config,
@@ -205,6 +212,10 @@ class EnvironmentalContextManager:
                 CONF_WATER_FLOW_CORRELATION_ENABLED,
                 DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
             )
+        ) and flow_entities_for_settings(
+            coordinator.entry_data,
+            coordinator.options,
+            advanced_settings,
         ):
             flow_evidence = self.water_flow_context_evidence(
                 config,

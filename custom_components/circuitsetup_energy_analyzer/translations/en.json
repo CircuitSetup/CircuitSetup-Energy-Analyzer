@@ -24,10 +24,10 @@
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
-          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
-          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
+          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions. Leave blank to disable weather correlation.",
+          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity; leave blank to disable rain correlation.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
-          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
+          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -135,10 +135,10 @@
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
-          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions.",
-          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity.",
+          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions. Leave blank to disable weather correlation.",
+          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity; leave blank to disable rain correlation.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
-          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0.",
+          "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -382,7 +382,7 @@
             },
             "data_description": {
               "reset_water_context_settings_to_defaults": "Turn this on when saving to remove custom rain, pump, and water-flow context settings.",
-              "rain_pump_correlation_enabled": "Compare pump activity with rain and HVAC compressor activity before flagging unusual pump runtime.",
+              "rain_pump_correlation_enabled": "Compare pump activity with rain and lower-weight HVAC compressor activity before flagging unusual pump runtime. A rain source is required.",
               "rain_response_window_minutes": "Minutes after rain starts or continues where higher pump activity may be expected.",
               "rain_activity_delta_threshold_pct": "Percent above the weather-adjusted expected pump runtime before repeated possible-issue evidence can be raised.",
               "water_flow_correlation_enabled": "Compare binary or numeric water-flow sensors with mapped water-using appliances.",

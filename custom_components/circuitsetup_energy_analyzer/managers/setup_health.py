@@ -3,19 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .. import repairs
-from ..const import (
-    CONF_EXPECTS_WATER_FLOW,
-    CONF_RAIN_PUMP_CORRELATION_ENABLED,
-    CONF_WATER_FLOW_CORRELATION_ENABLED,
-    DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
-    DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
-)
-from ..context_sources import (
-    flow_entities_for_settings,
-    has_mains_source_configured,
-    has_rain_context_source_configured,
-)
-from ..models import ApplianceProfile
+from ..context_sources import has_mains_source_configured
 
 _DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
     {
@@ -44,23 +32,6 @@ _UTILITY_COMPARISON_SETUP_REPAIR_PROBLEM_BY_STATUS = {
     "missing_utility": "utility_comparison_missing_utility_source",
     "missing_measured": "utility_comparison_missing_measured_source",
 }
-_PUMP_WATER_CONTEXT_PROFILES = frozenset(
-    {
-        ApplianceProfile.SUMP_PUMP,
-        ApplianceProfile.WATER_PUMP,
-        ApplianceProfile.WELL_PUMP,
-    }
-)
-_FLOW_WATER_CONTEXT_PROFILES = frozenset(
-    {
-        ApplianceProfile.WATER_PUMP,
-        ApplianceProfile.WELL_PUMP,
-        ApplianceProfile.WATER_HEATER,
-        ApplianceProfile.WASHER,
-    }
-)
-
-
 class SetupHealthAggregator:
     """Own setup-health repair issue lifecycle side effects."""
 
@@ -174,10 +145,6 @@ class SetupHealthAggregator:
                 == "missing_leg_power"
             ):
                 desired.add((circuit_id, "dual_phase_missing_leg"))
-            if self.has_missing_rain_context_source(circuit_id):
-                desired.add((circuit_id, "missing_rain_context_source"))
-            if self.has_missing_water_flow_source(circuit_id):
-                desired.add((circuit_id, "missing_water_flow_source"))
             utility_comparison_problem = self.utility_comparison_repair_problem(
                 circuit_id
             )
@@ -423,55 +390,6 @@ class SetupHealthAggregator:
             }:
                 return True
         return False
-
-    def has_missing_rain_context_source(self, circuit_id: str) -> bool:
-        coordinator = self._coordinator
-        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
-        if (
-            config is None
-            or config.appliance_profile not in _PUMP_WATER_CONTEXT_PROFILES
-        ):
-            return False
-        advanced_settings = (
-            coordinator.settings_controller.advanced_settings_for_circuit(circuit_id)
-        )
-        if not bool(
-            advanced_settings.get(
-                CONF_RAIN_PUMP_CORRELATION_ENABLED,
-                DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
-            )
-        ):
-            return False
-        return not has_rain_context_source_configured(
-            coordinator.entry_data,
-            coordinator.options,
-        )
-
-    def has_missing_water_flow_source(self, circuit_id: str) -> bool:
-        coordinator = self._coordinator
-        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
-        if (
-            config is None
-            or config.appliance_profile not in _FLOW_WATER_CONTEXT_PROFILES
-        ):
-            return False
-        advanced_settings = (
-            coordinator.settings_controller.advanced_settings_for_circuit(circuit_id)
-        )
-        if not bool(
-            advanced_settings.get(
-                CONF_WATER_FLOW_CORRELATION_ENABLED,
-                DEFAULT_WATER_FLOW_CORRELATION_ENABLED,
-            )
-        ):
-            return False
-        if not bool(advanced_settings.get(CONF_EXPECTS_WATER_FLOW, True)):
-            return False
-        return not flow_entities_for_settings(
-            coordinator.entry_data,
-            coordinator.options,
-            advanced_settings,
-        )
 
     def utility_comparison_repair_problem(self, circuit_id: str) -> str | None:
         status = self._coordinator.state.utility_comparison_status_by_circuit.get(

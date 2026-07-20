@@ -63,6 +63,8 @@ You need:
 - A rain sensor if you want sump, well, or water-pump activity compared with rainfall and HVAC condensate context.
 - A binary water-flow sensor or numeric flow-rate sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity. Numeric flow sensors are treated as off at `0` and active when greater than `0`.
 
+These context sources are opt-in. Leaving one unconfigured disables its related correlation instead of treating the missing source as negative evidence or a setup problem.
+
 The integration works best when each important appliance or circuit has a clean group of related source sensors.
 
 ## Installation
@@ -568,7 +570,7 @@ This context applies only to HVAC, HVAC compressor, HVAC blower, and electric he
 
 Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares the current day's pump runtime with the learned dry-weather baseline, current rain state or the configured response window after rain stops, optional rain intensity, and the current day's HVAC compressor runtime.
 
-This matters because a sump pump may run more during rain, and it may also run more when an AC compressor is removing humidity and sending condensate to a drain or sump. When both rain and AC activity are present, higher pump activity can be expected instead of automatically becoming a possible issue.
+This matters because a sump pump may run more during rain, and it may also run more when an AC compressor is removing humidity and sending condensate to a drain or sump. When both rain and AC activity are present, higher pump activity can be expected instead of automatically becoming a possible issue. Rain evidence carries more weight than compressor-only context; the compressor adjustment is capped below the base rain adjustment.
 
 Configure the global rain source during setup or later from **Configure**. Tune the per-circuit rain response window and activity threshold from:
 
@@ -981,7 +983,7 @@ Start with these on dashboards.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, context-source setup, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source`, `Add rain source`, `Add water-flow source`, `Review utility comparison` |
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Review utility comparison` |
 | Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Core/default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
