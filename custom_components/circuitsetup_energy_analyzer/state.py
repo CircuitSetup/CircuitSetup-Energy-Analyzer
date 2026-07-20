@@ -1,4 +1,4 @@
-"""Analyzer runtime state and event-reduction compatibility helpers."""
+"""Analyzer runtime state and event reduction."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .alerting import alert_anomaly_score
-from .managers.state_reducer import apply_state_update
 from .models import AlertEvidence, CircuitEvent
 
 
@@ -236,8 +235,3 @@ def process_events_into_state(
         state.anomaly_score_by_circuit.setdefault(circuit_id, 0.0)
 
     return state
-
-
-def _apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
-    """Apply a processor-requested update to AnalyzerState."""
-    apply_state_update(state, path, value)

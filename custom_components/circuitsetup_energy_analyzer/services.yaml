@@ -1446,7 +1446,7 @@ set_billing_cycle_settings:
           mode: box
 set_cost_settings:
   name: Set cost settings
-  description: "Advanced/script action: set per-circuit billing and legacy Time-of-Use values. The normal user path uses shared entities on the CircuitSetup Energy Analyzer device."
+  description: "Advanced/script action: set the cost-cycle start day for one configured circuit. The normal user path is the integration's cost controls."
   fields:
     circuit_id:
       name: Circuit ID
@@ -1477,56 +1477,6 @@ set_cost_settings:
           min: 1
           max: 31
           mode: box
-    default_rate_per_kwh:
-      name: Default Rate Per kWh
-      description: Legacy per-circuit fallback rate. Normal editing uses the global Fallback Electricity Rate number on the analyzer device.
-      required: false
-      example: 0.20
-      selector:
-        number:
-          min: 0.0001
-          max: 1000
-          step: any
-          mode: box
-    tou_rate_per_kwh:
-      name: TOU Rate Per kWh
-      description: Legacy per-circuit Time-of-Use rate. Normal editing uses the global TOU Rate number on the analyzer device.
-      required: false
-      example: 0.30
-      selector:
-        number:
-          min: 0.0001
-          max: 1000
-          step: any
-          mode: box
-    tou_start:
-      name: TOU Start
-      description: Legacy per-circuit Time-of-Use start in 24-hour HH:MM format.
-      required: false
-      example: "17:00"
-      selector:
-        text:
-    tou_end:
-      name: TOU End
-      description: Legacy per-circuit Time-of-Use end in 24-hour HH:MM format.
-      required: false
-      example: "21:00"
-      selector:
-        text:
-    tou_weekdays:
-      name: TOU Weekdays
-      description: Legacy per-circuit comma-separated weekdays where Monday is 0.
-      required: false
-      example: "0,1,2,3,4"
-      selector:
-        text:
-    tou_name:
-      name: TOU Name
-      description: Legacy per-circuit friendly name for the Time-of-Use rate period.
-      required: false
-      example: Peak
-      selector:
-        text:
 set_standby_settings:
   name: Set standby settings
   description: "Advanced/script action: set Always On and standby tracking for one configured circuit. The normal user path is Advanced Circuit Settings."

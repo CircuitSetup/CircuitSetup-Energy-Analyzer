@@ -10,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.standby import (
 
 def test_record_standby_sample_estimates_always_on_from_low_bin() -> None:
     history = {
+        "standby_sample_format": "1m-min-v1",
         "samples": [
             {"timestamp": f"2026-06-03T{hour:02d}:00:00+00:00", "real_power_w": value}
             for hour, value in enumerate(
@@ -42,6 +43,7 @@ def test_record_standby_sample_estimates_always_on_from_low_bin() -> None:
 
 def test_record_standby_sample_uses_lowest_power_in_default_48h_window() -> None:
     history = {
+        "standby_sample_format": "1m-min-v1",
         "samples": [
             {
                 "timestamp": "2026-06-01T06:00:00+00:00",
@@ -77,6 +79,7 @@ def test_record_standby_sample_uses_lowest_power_in_default_48h_window() -> None
 
 def test_record_standby_sample_uses_absolute_low_watermark_not_percentile() -> None:
     history = {
+        "standby_sample_format": "1m-min-v1",
         "samples": [
             {
                 "timestamp": "2026-06-02T00:00:00+00:00",
@@ -121,6 +124,7 @@ def test_record_standby_sample_marks_on_above_threshold() -> None:
 
 def test_record_standby_sample_flags_configured_always_on_limit() -> None:
     history = {
+        "standby_sample_format": "1m-min-v1",
         "samples": [
             {"timestamp": f"2026-06-03T{hour:02d}:00:00+00:00", "real_power_w": 45.0}
             for hour in range(8)
@@ -150,6 +154,7 @@ def test_record_standby_sample_flags_configured_always_on_limit() -> None:
 
 def test_record_standby_sample_prunes_old_samples_and_waits_for_learning() -> None:
     history = {
+        "standby_sample_format": "1m-min-v1",
         "samples": [
             {"timestamp": "2026-06-01T00:00:00+00:00", "real_power_w": 2.0},
             {"timestamp": "2026-06-03T11:00:00+00:00", "real_power_w": 4.0},
@@ -172,7 +177,7 @@ def test_record_standby_sample_prunes_old_samples_and_waits_for_learning() -> No
     ]
 
 
-def test_record_standby_sample_compacts_minutes_and_preserves_sample_count() -> None:
+def test_record_standby_sample_discards_unsupported_sample_format() -> None:
     history = {
         "samples": [
             {"timestamp": "2026-07-19T12:00:05+00:00", "real_power_w": 8.0},
@@ -191,14 +196,13 @@ def test_record_standby_sample_compacts_minutes_and_preserves_sample_count() -> 
     )
 
     assert result is not None
-    assert result.sample_count == 4
-    assert result.always_on_power_w == 3.0
+    assert result.sample_count == 1
+    assert result.always_on_power_w == 0.0
     assert history["standby_sample_format"] == "1m-min-v1"
     assert history["samples"] == [
         {
-            "timestamp": "2026-07-19T12:00:20+00:00",
-            "real_power_w": 3.0,
-            "sample_count": 4,
+            "timestamp": "2026-07-19T12:00:58+00:00",
+            "real_power_w": 4.0,
         }
     ]
 
@@ -210,5 +214,5 @@ def test_record_standby_sample_compacts_minutes_and_preserves_sample_count() -> 
         settings=StandbySettings(min_samples=4),
     )
     assert next_result is not None
-    assert next_result.sample_count == 5
+    assert next_result.sample_count == 2
     assert len(history["samples"]) == 2

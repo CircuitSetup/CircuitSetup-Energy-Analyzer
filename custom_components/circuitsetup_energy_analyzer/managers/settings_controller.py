@@ -588,11 +588,12 @@ class SettingsController:
 
     def alert_policy_for_circuit(self, circuit_id: str) -> ConservativeAlertPolicy:
         """Return the default alert policy for one circuit."""
+        sensitivity = self.sensitivity_for_circuit(circuit_id)
         policy_name = self._alert_policy_name_for_circuit(circuit_id)
         return self._cached_alert_policy(
             self._alert_policies,
             (circuit_id, policy_name),
-            lambda: _alert_policy_for_sensitivity(policy_name),
+            lambda: _alert_policy_for_sensitivity(sensitivity),
         )
 
     def usage_alert_policy_for_circuit(
@@ -946,56 +947,9 @@ class SettingsController:
             {},
         )
         default_start_day = config.cost_cycle_start_day if config is not None else 1
-        default_rate = config.default_rate_per_kwh if config is not None else None
-        default_tou_rate = config.tou_rate_per_kwh if config is not None else None
-        default_tou_start = config.tou_start if config is not None else None
-        default_tou_end = config.tou_end if config is not None else None
-        default_tou_weekdays = config.tou_weekdays if config is not None else ()
-        default_tou_name = config.tou_name if config is not None else "Peak"
-        legacy_tou_rate = _optional_positive_float_value(
-            overrides.get("tou_rate_per_kwh"),
-            default=default_tou_rate,
-        )
-        legacy_tou_start = str(overrides.get("tou_start") or default_tou_start or "")
-        legacy_tou_end = str(overrides.get("tou_end") or default_tou_end or "")
-        legacy_tou_weekdays = _weekday_tuple_value(
-            overrides.get("tou_weekdays"),
-            default=default_tou_weekdays,
-        )
-        legacy_tou_name = str(overrides.get("tou_name") or default_tou_name or "Peak")
-        has_global_tou = any(
-            key in global_overrides
-            for key in (
-                "tou_rate_per_kwh",
-                "tou_start",
-                "tou_end",
-                "tou_weekdays",
-                "tou_name",
-            )
-        )
         resolved_tou_rate = _optional_positive_float_value(
             global_overrides.get("tou_rate_per_kwh"),
             default=None,
-        ) if has_global_tou else legacy_tou_rate
-        resolved_tou_start = (
-            str(global_overrides.get("tou_start") or "")
-            if has_global_tou
-            else legacy_tou_start
-        )
-        resolved_tou_end = (
-            str(global_overrides.get("tou_end") or "")
-            if has_global_tou
-            else legacy_tou_end
-        )
-        resolved_tou_weekdays = (
-            _weekday_tuple_value(global_overrides.get("tou_weekdays"), default=())
-            if has_global_tou
-            else legacy_tou_weekdays
-        )
-        resolved_tou_name = (
-            str(global_overrides.get("tou_name") or "Peak")
-            if has_global_tou
-            else legacy_tou_name
         )
         return CostSettings(
             cycle_start_day=_positive_int_value(
@@ -1004,16 +958,16 @@ class SettingsController:
             ),
             default_rate_per_kwh=_optional_positive_float_value(
                 global_overrides.get("default_rate_per_kwh"),
-                default=_optional_positive_float_value(
-                    overrides.get("default_rate_per_kwh"),
-                    default=default_rate,
-                ),
+                default=None,
             ),
             tou_rate_per_kwh=resolved_tou_rate,
-            tou_start=resolved_tou_start,
-            tou_end=resolved_tou_end,
-            tou_weekdays=resolved_tou_weekdays,
-            tou_name=resolved_tou_name,
+            tou_start=str(global_overrides.get("tou_start") or ""),
+            tou_end=str(global_overrides.get("tou_end") or ""),
+            tou_weekdays=_weekday_tuple_value(
+                global_overrides.get("tou_weekdays"),
+                default=(),
+            ),
+            tou_name=str(global_overrides.get("tou_name") or "Peak"),
         )
 
     async def async_set_global_cost_rate(self, rate_per_kwh: Any) -> None:
@@ -1489,14 +1443,8 @@ class SettingsController:
         self,
         circuit_id: str,
         cycle_start_day: Any = None,
-        default_rate_per_kwh: Any = None,
-        tou_rate_per_kwh: Any = None,
-        tou_start: Any = None,
-        tou_end: Any = None,
-        tou_weekdays: Any = None,
-        tou_name: Any = None,
     ) -> None:
-        """Persist cost and Time-of-Use settings for one circuit."""
+        """Persist the cost-cycle start day for one circuit."""
         coordinator = self._coordinator
         config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.cost_settings_for_config(config, circuit_id)
@@ -1506,27 +1454,6 @@ class SettingsController:
                 default=current.cycle_start_day,
             ),
         }
-        default_rate = _optional_positive_float_value(
-            default_rate_per_kwh,
-            default=current.default_rate_per_kwh,
-        )
-        tou_rate = _optional_positive_float_value(
-            tou_rate_per_kwh,
-            default=current.tou_rate_per_kwh,
-        )
-        if default_rate is not None:
-            settings["default_rate_per_kwh"] = default_rate
-        if tou_rate is not None:
-            settings["tou_rate_per_kwh"] = tou_rate
-        settings["tou_start"] = str(tou_start or current.tou_start or "")
-        settings["tou_end"] = str(tou_end or current.tou_end or "")
-        weekdays = _weekday_csv_value(
-            tou_weekdays,
-            default=current.tou_weekdays,
-        )
-        if weekdays:
-            settings["tou_weekdays"] = weekdays
-        settings["tou_name"] = str(tou_name or current.tou_name or "Peak")
         await self._async_save_circuit_settings(
             circuit_id,
             coordinator.store_data.cost_settings_by_circuit,

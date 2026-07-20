@@ -7,12 +7,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer import (
+    notifications as notifications_module,
+)
+from custom_components.circuitsetup_energy_analyzer import repairs
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
-    CONF_ENTITY_MODEL_VERSION,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -31,11 +34,12 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
     ENTITY_DETAIL_EXPERT,
-    ENTITY_MODEL_LEGACY,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
     AnalyzerState,
-    _apply_state_update,
+)
+from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+    apply_state_update as _apply_state_update,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -194,11 +198,7 @@ async def test_process_update_promotes_new_expected_schedule_alerts(
         refresh,
         raising=False,
     )
-    monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        notify,
-    )
+    monkeypatch.setattr(notifications_module, "async_create_alert_notification", notify)
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(
             states=SimpleNamespace(get=lambda entity_id: None),
@@ -387,9 +387,7 @@ def test_coordinator_refreshes_rain_pump_context_from_rain_and_hvac() -> None:
             water_context_history_by_circuit={
                 "sump_pump": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "pump_runtime_minutes": 6.0,
                         "rain_active": False,
                         "compressor_runtime_minutes": 0.0,
@@ -463,9 +461,7 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
             water_context_history_by_circuit={
                 "sump_pump": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "pump_runtime_minutes": 6.0,
                         "rain_active": False,
                         "compressor_runtime_minutes": 0.0,
@@ -558,18 +554,24 @@ def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
         now + timedelta(minutes=59),
     )
 
-    assert coordinator.state.rain_pump_context_by_circuit["sump_pump"][
-        "rain_response_active"
-    ] is True
+    assert (
+        coordinator.state.rain_pump_context_by_circuit["sump_pump"][
+            "rain_response_active"
+        ]
+        is True
+    )
 
     coordinator.environment_context.refresh_water_context_state(
         coordinator.circuit_configs[0],
         now + timedelta(minutes=61),
     )
 
-    assert coordinator.state.rain_pump_context_by_circuit["sump_pump"][
-        "rain_response_active"
-    ] is False
+    assert (
+        coordinator.state.rain_pump_context_by_circuit["sump_pump"][
+            "rain_response_active"
+        ]
+        is False
+    )
 
 
 def test_coordinator_does_not_extend_rain_window_for_ambiguous_rain() -> None:
@@ -703,9 +705,10 @@ def test_coordinator_starts_rain_window_when_ambiguous_rain_becomes_dry() -> Non
         coordinator.circuit_configs[0],
         now - timedelta(minutes=30),
     )
-    assert coordinator.state.rain_pump_context_by_circuit["sump_pump"][
-        "rain_state"
-    ] == "ambiguous"
+    assert (
+        coordinator.state.rain_pump_context_by_circuit["sump_pump"]["rain_state"]
+        == "ambiguous"
+    )
     states["sensor.precipitation_rate"] = (
         "0",
         0,
@@ -760,9 +763,7 @@ def test_coordinator_marks_positive_rain_intensity_with_missing_unit_unknown() -
             water_context_history_by_circuit={
                 "sump_pump": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "pump_runtime_minutes": 6.0,
                         "rain_active": False,
                         "compressor_runtime_minutes": 0.0,
@@ -821,9 +822,7 @@ def test_coordinator_refreshes_water_flow_context_for_flow_without_load() -> Non
             water_context_history_by_circuit={
                 "washer": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "flow_status": "normal",
                     }
                     for index in range(12)
@@ -919,9 +918,7 @@ def test_coordinator_treats_positive_numeric_flow_sensor_as_active() -> None:
             water_context_history_by_circuit={
                 "washer": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "flow_status": "normal",
                     }
                     for index in range(12)
@@ -974,9 +971,7 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
             water_context_history_by_circuit={
                 "washer": [
                     {
-                        "timestamp": (
-                            now - timedelta(days=index + 1)
-                        ).isoformat(),
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
                         "flow_status": "normal",
                     }
                     for index in range(12)
@@ -1375,9 +1370,7 @@ def test_nilm_controller_exposes_history_validation_action() -> None:
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
 
-    assert callable(
-        coordinator.nilm_controller.async_validate_nilm_assignment_history
-    )
+    assert callable(coordinator.nilm_controller.async_validate_nilm_assignment_history)
 
 
 def test_nilm_controller_reports_enabled_mains_nilm_configs() -> None:
@@ -1668,9 +1661,7 @@ def test_nilm_controller_seeds_demo_workspace_state() -> None:
         mode=CircuitMode.MAINS_NILM,
         sensors=(
             SensorRef(
-                entity_id=(
-                    "sensor.cs_energy_analyzer_demo_mains_nilm_active_power"
-                ),
+                entity_id=("sensor.cs_energy_analyzer_demo_mains_nilm_active_power"),
                 role=SensorRole.REAL_POWER,
             ),
         ),
@@ -1837,9 +1828,7 @@ async def test_coordinator_listens_for_configured_schedule_entities(
 
     await coordinator.async_start(["sensor.pool_pump_power"])
 
-    assert subscriptions == [
-        ["sensor.pool_pump_power", "schedule.pool_pump"]
-    ]
+    assert subscriptions == [["sensor.pool_pump_power", "schedule.pool_pump"]]
     assert coordinator.source_entities == (
         "sensor.pool_pump_power",
         "schedule.pool_pump",
@@ -1966,9 +1955,12 @@ async def test_schedule_timer_rechecks_source_freshness_before_recording_miss() 
     await coordinator.async_refresh_expected_schedules(now)
 
     assert coordinator.store_data.appliance_schedule_evidence == {}
-    assert coordinator.state.expected_schedule_by_appliance[
-        "circuit:pool_pump"
-    ]["suppressed_reason"] == "source_unavailable"
+    assert (
+        coordinator.state.expected_schedule_by_appliance["circuit:pool_pump"][
+            "suppressed_reason"
+        ]
+        == "source_unavailable"
+    )
 
 
 @pytest.mark.asyncio
@@ -2016,8 +2008,8 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
-    assert coordinator._source_update_task is not None
-    await asyncio.wait_for(coordinator._source_update_task, timeout=1)
+    assert coordinator.source_updates.source_update_task is not None
+    await asyncio.wait_for(coordinator.source_updates.source_update_task, timeout=1)
 
     assert process_calls == 1
     assert coordinator.pending_source_update_entities == ()
@@ -2084,9 +2076,7 @@ async def test_coordinator_waits_for_quiet_source_state_changes(
             break
         await asyncio.sleep(0.01)
 
-    assert changed_entity_batches == [
-        ("sensor.fridge_current", "sensor.fridge_power")
-    ]
+    assert changed_entity_batches == [("sensor.fridge_current", "sensor.fridge_power")]
 
 
 @pytest.mark.asyncio
@@ -2192,51 +2182,10 @@ async def test_coordinator_passes_changed_source_entities_to_process_update(
 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
-    assert coordinator._source_update_task is not None
-    await asyncio.wait_for(coordinator._source_update_task, timeout=1)
+    assert coordinator.source_updates.source_update_task is not None
+    await asyncio.wait_for(coordinator.source_updates.source_update_task, timeout=1)
 
-    assert changed_entity_batches == [
-        ("sensor.fridge_current", "sensor.fridge_power")
-    ]
-
-
-@pytest.mark.asyncio
-async def test_coordinator_exposes_source_update_task_for_lifecycle_waits(
-    monkeypatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
-
-    callbacks = []
-
-    def fake_track_state_change_event(hass, entity_ids, callback):
-        callbacks.append(callback)
-        return lambda: None
-
-    monkeypatch.setattr(
-        coordinator_module,
-        "async_track_state_change_event",
-        fake_track_state_change_event,
-    )
-    monkeypatch.setattr(
-        coordinator_module,
-        "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
-        5.0,
-    )
-
-    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
-    await coordinator.async_start(["sensor.fridge_power"])
-    await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
-
-    assert (
-        coordinator._source_update_task
-        is coordinator.source_updates.source_update_task
-    )
-    assert coordinator._source_update_task is not None
-
-    await coordinator.async_stop()
-    await asyncio.sleep(0)
+    assert changed_entity_batches == [("sensor.fridge_current", "sensor.fridge_power")]
 
 
 @pytest.mark.asyncio
@@ -2394,9 +2343,7 @@ def _source_scoped_coordinator(
             "name": "Well Pump",
             "mode": "single_phase",
             "appliance_profile": "well_pump",
-            "sensors": [
-                {"entity_id": "sensor.well_pump_power", "role": "real_power"}
-            ],
+            "sensors": [{"entity_id": "sensor.well_pump_power", "role": "real_power"}],
         },
     ]
     if include_mains_nilm:
@@ -2407,9 +2354,7 @@ def _source_scoped_coordinator(
                 "name": "Mains NILM",
                 "mode": "mains_nilm",
                 "appliance_profile": "mains_nilm",
-                "sensors": [
-                    {"entity_id": "sensor.mains_power", "role": "real_power"}
-                ],
+                "sensors": [{"entity_id": "sensor.mains_power", "role": "real_power"}],
             },
         )
 
@@ -2601,8 +2546,8 @@ async def test_source_update_reuses_processing_context_for_runtime_processors(
 
     coordinator.context_builder.build = counting_build
     coordinator.pipeline.async_process_circuit = fake_process_circuit
-    coordinator._rebuild_setting_recommendations = (
-        lambda _now, *, circuit_id=None: False
+    coordinator._rebuild_setting_recommendations = lambda _now, *, circuit_id=None: (
+        False
     )
     notify_settings = "async_notify_settings_recommendations_if_needed"
     monkeypatch.setattr(
@@ -2789,61 +2734,6 @@ async def test_setup_entry_stores_and_unload_stops_coordinator_without_ha() -> N
 
 
 @pytest.mark.asyncio
-async def test_migrate_entry_canonicalizes_legacy_sensitivity_values() -> None:
-    from custom_components.circuitsetup_energy_analyzer import async_migrate_entry
-
-    class FakeConfigEntries:
-        def __init__(self) -> None:
-            self.updates = []
-
-        def async_update_entry(self, entry, **kwargs) -> None:
-            self.updates.append((entry, kwargs))
-            entry.data = MappingProxyType(kwargs.get("data", entry.data))
-            entry.options = MappingProxyType(kwargs.get("options", entry.options))
-
-    hass = SimpleNamespace(config_entries=FakeConfigEntries())
-    entry = SimpleNamespace(
-        data=MappingProxyType(
-            {
-                CONF_SENSITIVITY: "low",
-                CONF_ADVANCED_SETTINGS: MappingProxyType(
-                    {"freezer": MappingProxyType({"preset": "standard"})}
-                ),
-            }
-        ),
-        options=MappingProxyType(
-            {
-                CONF_SENSITIVITY: "high",
-                CONF_ADVANCED_SETTINGS: MappingProxyType(
-                    {"dryer": MappingProxyType({"preset": "high"})}
-                ),
-            }
-        ),
-    )
-
-    assert await async_migrate_entry(hass, entry) is True
-
-    assert hass.config_entries.updates == [
-        (
-            entry,
-            {
-                "data": {
-                    CONF_SENSITIVITY: "quiet",
-                    CONF_ADVANCED_SETTINGS: {"freezer": {"preset": "balanced"}},
-                },
-                "options": {
-                    CONF_SENSITIVITY: "sensitive",
-                    CONF_ADVANCED_SETTINGS: {"dryer": {"preset": "sensitive"}},
-                    CONF_ENTITY_MODEL_VERSION: ENTITY_MODEL_LEGACY,
-                },
-            },
-        )
-    ]
-    assert entry.data[CONF_SENSITIVITY] == "quiet"
-    assert entry.options[CONF_SENSITIVITY] == "sensitive"
-
-
-@pytest.mark.asyncio
 async def test_setup_entry_rolls_back_forwarding_failure() -> None:
     from custom_components.circuitsetup_energy_analyzer import async_setup_entry
 
@@ -2955,7 +2845,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
             },
             CONF_ADVANCED_SETTINGS: {
                 "refrigerator": {
-                    "preset": "high",
+                    "preset": "sensitive",
                     "operating_on_threshold_w": 30.0,
                     "operating_off_threshold_w": 12.0,
                     "operating_on_dwell_seconds": 14.0,
@@ -3018,9 +2908,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "operating_off_dwell_seconds": 50.0,
         "operating_merge_gap_seconds": 95.0,
     }
-    assert coordinator.store_data.energy_usage_settings_by_circuit[
-        "refrigerator"
-    ] == {
+    assert coordinator.store_data.energy_usage_settings_by_circuit["refrigerator"] == {
         "window_days": 14,
         "daily_spike_ratio": 0.35,
     }
@@ -3063,9 +2951,7 @@ def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
         "always_on_alert_w": 12.0,
         "min_samples": 36,
     }
-    assert coordinator.store_data.leg_imbalance_settings_by_circuit[
-        "refrigerator"
-    ] == {
+    assert coordinator.store_data.leg_imbalance_settings_by_circuit["refrigerator"] == {
         "warning_ratio": 0.4,
         "minimum_total_power_w": 800.0,
     }
@@ -3226,8 +3112,7 @@ def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
     )
     assert "refrigerator" not in coordinator.store_data.energy_goal_settings_by_circuit
     assert (
-        "refrigerator"
-        not in coordinator.store_data.activity_alert_settings_by_circuit
+        "refrigerator" not in coordinator.store_data.activity_alert_settings_by_circuit
     )
     assert "refrigerator" not in coordinator.store_data.billing_settings_by_circuit
     assert "refrigerator" not in coordinator.store_data.cost_settings_by_circuit
@@ -3235,8 +3120,7 @@ def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
     assert "refrigerator" not in coordinator.store_data.capacity_settings_by_circuit
     assert "refrigerator" not in coordinator.store_data.standby_settings_by_circuit
     assert (
-        "refrigerator"
-        not in coordinator.store_data.leg_imbalance_settings_by_circuit
+        "refrigerator" not in coordinator.store_data.leg_imbalance_settings_by_circuit
     )
     assert (
         "refrigerator"
@@ -3264,9 +3148,7 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
         notification_kwargs.append(kwargs)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -3304,7 +3186,7 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
                 p90=110.0,
                 confidence=1.0,
             )
-        }
+        },
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         hass,
@@ -3603,8 +3485,7 @@ async def test_runtime_retains_recent_observations_across_refreshes() -> None:
     await coordinator.async_process_update()
 
     assert (
-        coordinator.state.health_summary_by_circuit["fridge"]
-        == "Observation recorded"
+        coordinator.state.health_summary_by_circuit["fridge"] == "Observation recorded"
     )
     assert coordinator.state.recent_activity_timeline_by_circuit["fridge"] == {
         "status": "activity",
@@ -3715,9 +3596,7 @@ async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -4019,9 +3898,7 @@ def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
             ],
         },
         store_data=FeatureStoreData(
-            contextual_baseline_samples_by_circuit={
-                "hvac": [old_sample, recent_sample]
-            }
+            contextual_baseline_samples_by_circuit={"hvac": [old_sample, recent_sample]}
         ),
         now_fn=lambda: now,
     )
@@ -4192,9 +4069,11 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
 
 def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
         ALERT_FEEDBACK_MAX_ITEMS,
         ALERT_HISTORY_MAX_ITEMS,
-        EnergyAnalyzerCoordinator,
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
@@ -4237,7 +4116,6 @@ def test_runtime_caps_growing_persisted_alert_and_feedback_structures() -> None:
 async def test_expected_alert_feedback_suppresses_matching_future_notification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         alert_feedback_fingerprint,
     )
@@ -4254,7 +4132,7 @@ async def test_expected_alert_feedback_suppresses_matching_future_notification(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        module.notifications,
+        notifications_module,
         "async_create_alert_notification",
         fake_notification,
     )
@@ -4319,7 +4197,6 @@ async def test_expected_alert_feedback_suppresses_matching_future_notification(
 async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import coordinator as module
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         alert_feedback_fingerprint,
     )
@@ -4336,7 +4213,7 @@ async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        module.notifications,
+        notifications_module,
         "async_create_alert_notification",
         fake_notification,
     )
@@ -4470,16 +4347,18 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
         settings_advisor as advisor,
     )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        recommendation_episodes,
+    )
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
         NILM_SESSION_HISTORY_MAX_AGE,
         NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
         NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
         NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT,
         RECOMMENDATION_DECISIONS_MAX_ITEMS,
         RECOMMENDATION_HISTORY_MAX_ITEMS,
-        EnergyAnalyzerCoordinator,
-    )
-    from custom_components.circuitsetup_energy_analyzer.managers import (
-        recommendation_episodes,
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
@@ -4536,17 +4415,14 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     episodes = tuple(
         (f"rec-{index}", "hvac")
         for index in range(
-            recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS
-            + 10
+            recommendation_episodes.RECOMMENDATION_NOTIFICATION_EPISODE_MAX_ITEMS + 10
         )
     )
     coordinator = EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
         store_data=FeatureStoreData(
             nilm_signatures={"mains": signatures},
-            nilm_unknown_loads_by_circuit={
-                "mains": {"unknown_loads": unknown_loads}
-            },
+            nilm_unknown_loads_by_circuit={"mains": {"unknown_loads": unknown_loads}},
             nilm_session_history_by_circuit={"mains": session_history},
             settings_recommendations=recommendations,
             settings_recommendation_decisions=decisions,
@@ -4564,16 +4440,22 @@ def test_runtime_caps_nilm_inventory_and_recommendation_history() -> None:
     assert coordinator.store_data.nilm_signatures["mains"][0]["signature_id"] == (
         "sig-0"
     )
-    assert len(
-        coordinator.store_data.nilm_unknown_loads_by_circuit["mains"]["unknown_loads"]
-    ) == NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT
+    assert (
+        len(
+            coordinator.store_data.nilm_unknown_loads_by_circuit["mains"][
+                "unknown_loads"
+            ]
+        )
+        == NILM_UNKNOWN_LOADS_MAX_ITEMS_PER_CIRCUIT
+    )
     assert (
         len(coordinator.store_data.nilm_session_history_by_circuit["mains"])
         == NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
     )
-    assert coordinator.store_data.nilm_session_history_by_circuit["mains"][0][
-        "session_id"
-    ] == "session-0"
+    assert (
+        coordinator.store_data.nilm_session_history_by_circuit["mains"][0]["session_id"]
+        == "session-0"
+    )
     assert all(
         session["session_id"] != "old-session"
         for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
@@ -4753,9 +4635,7 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -5061,9 +4941,6 @@ def test_mains_parallel_sample_treats_partial_power_as_unavailable() -> None:
 async def test_runtime_experimental_nilm_updates_signature_diagnostics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -5103,9 +4980,7 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics(
         now_fn=lambda: holder["time"],
     )
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        AsyncMock(),
+        notifications_module, "async_create_alert_notification", AsyncMock()
     )
 
     for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1):
@@ -5122,16 +4997,18 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics(
     assert classification.startswith("possible")
     inventory = coordinator.state.nilm_unknown_loads_by_circuit["mains"]
     assert inventory["unknown_load_count"] == 1
-    assert inventory["unknown_loads"][0]["signature_id"] == (
-        coordinator.store_data.nilm_signatures["mains"][0]["signature_id"]
+    assert (
+        inventory["unknown_loads"][0]["signature_id"]
+        == (coordinator.store_data.nilm_signatures["mains"][0]["signature_id"])
     )
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
     sessions = coordinator.store_data.nilm_session_history_by_circuit["mains"]
     assert sessions
     assert sessions[0]["mains_circuit_id"] == "mains"
     assert sessions[0]["session_id"]
-    assert sessions[0]["signature_fingerprint"] == (
-        coordinator.store_data.nilm_signatures["mains"][0]["feedback_fingerprint"]
+    assert (
+        sessions[0]["signature_fingerprint"]
+        == (coordinator.store_data.nilm_signatures["mains"][0]["feedback_fingerprint"])
     )
     assert any(session["end"] is not None for session in sessions)
 
@@ -5393,10 +5270,13 @@ def test_weather_context_history_excludes_same_ha_local_day_samples() -> None:
         now_fn=lambda: now,
     )
 
-    assert coordinator.environment_context.weather_context_history_samples(
-        "hvac",
-        now,
-    ) == []
+    assert (
+        coordinator.environment_context.weather_context_history_samples(
+            "hvac",
+            now,
+        )
+        == []
+    )
 
 
 def test_dry_weather_pump_baseline_excludes_same_ha_local_day_samples() -> None:
@@ -5832,9 +5712,7 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
         signature["review_state"]
         for signature in coordinator.state.nilm_review_by_circuit["mains"]
     } == {"expected", "merged", "ignored"}
-    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ]
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
     assert {assignment["lifecycle_state"] for assignment in assignments} >= {
         "expected",
         "ignored",
@@ -5910,9 +5788,9 @@ async def test_nilm_label_interval_with_appliance_type_enters_review() -> None:
         appliance_profile="dishwasher",
     )
 
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assert interval["assignment_id"] == assignment["assignment_id"]
     assert assignment["appliance_profile"] == "dishwasher"
     assert assignment["label_interval_ids"] == [interval["interval_id"]]
@@ -5922,8 +5800,10 @@ async def test_nilm_label_interval_with_appliance_type_enters_review() -> None:
 @pytest.mark.asyncio
 async def test_nilm_label_intervals_are_bounded_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
         EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
+        NILM_LABEL_INTERVAL_MAX_ITEMS_PER_CIRCUIT,
     )
 
     coordinator = EnergyAnalyzerCoordinator(
@@ -6004,15 +5884,11 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
         appliance_id="dishwasher",
     )
 
-    assert signature_assignment["assignment_id"] == session_assignment[
-        "assignment_id"
+    assert signature_assignment["assignment_id"] == session_assignment["assignment_id"]
+    assert interval_assignment["assignment_id"] == signature_assignment["assignment_id"]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
     ]
-    assert interval_assignment["assignment_id"] == signature_assignment[
-        "assignment_id"
-    ]
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
     assert assignment["display_name"] == "Dishwasher"
     assert assignment["lifecycle_state"] == "assigned"
     assert assignment["signature_fingerprints"] == ["fingerprint_1"]
@@ -6023,16 +5899,21 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
     signature = coordinator.store_data.nilm_signatures["mains"][0]
     assert signature["assignment_id"] == assignment["assignment_id"]
     assert signature["review_state"] == "assigned"
-    assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
-        "assignment_id"
-    ] == assignment["assignment_id"]
+    assert (
+        coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+            "assignment_id"
+        ]
+        == assignment["assignment_id"]
+    )
 
 
 @pytest.mark.asyncio
 async def test_nilm_appliance_assignments_are_bounded_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
         EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
+        NILM_ASSIGNMENT_MAX_ITEMS_PER_CIRCUIT,
     )
 
     coordinator = EnergyAnalyzerCoordinator(
@@ -6700,9 +6581,7 @@ async def test_nilm_assignment_merge_moves_references_to_target() -> None:
         "assignment-target",
     )
 
-    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ]
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
     assert [assignment["assignment_id"] for assignment in assignments] == [
         "assignment-target"
     ]
@@ -6721,9 +6600,12 @@ async def test_nilm_assignment_merge_moves_references_to_target() -> None:
     assert coordinator.store_data.nilm_signatures["mains"][0]["assignment_id"] == (
         "assignment-target"
     )
-    assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
-        "assignment_id"
-    ] == "assignment-target"
+    assert (
+        coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0][
+            "assignment_id"
+        ]
+        == "assignment-target"
+    )
 
 
 @pytest.mark.asyncio
@@ -6834,9 +6716,7 @@ async def test_nilm_signature_assignment_clears_ignored_state() -> None:
     )
 
     signature = coordinator.store_data.nilm_signatures["mains"][0]
-    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ]
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
     assert "ignored" not in signature
     assert ("mains", "signature_1") not in coordinator.ignored_nilm_signatures
     assert assignment["lifecycle_state"] == "assigned"
@@ -6901,7 +6781,7 @@ async def test_nilm_signature_merge_tracks_assignment_target() -> None:
                         "updated_at": "2026-06-02T12:00:00+00:00",
                         "created_device": False,
                         "publish_entities": False,
-                    }
+                    },
                 ]
             },
         ),
@@ -7109,9 +6989,9 @@ async def test_nilm_publish_rolls_back_without_home_assistant_entities() -> None
             "assignment-dishwasher",
         )
 
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assert assignment["publish_entities"] is False
     assert assignment["lifecycle_state"] == "validated"
     assert hass.config_entries.reloaded == 2
@@ -7206,9 +7086,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert "estimated" in runtime_alert.message.lower()
     assert runtime_alert.features["source_type"] == "nilm_estimate"
     assert runtime_alert.features["confidence"] == pytest.approx(0.86)
-    assert runtime_alert.features["primary_target"] == (
-        "nilm:assignment-dishwasher"
-    )
+    assert runtime_alert.features["primary_target"] == ("nilm:assignment-dishwasher")
     assert runtime_alert.features["source_context"]["mains_circuit_id"] == "mains"
     assert runtime_alert.features["evidence_context"]["session_id"] == "session-open"
 
@@ -7254,9 +7132,7 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
         sent_notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -7335,9 +7211,7 @@ async def test_nilm_virtual_low_confidence_notification_prompts_validation(
         sent_notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -7395,9 +7269,7 @@ async def test_suppressed_nilm_alert_is_stored_once(
         sent_notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -7450,9 +7322,7 @@ async def test_nilm_virtual_needs_validation_notification_uses_review_category(
         sent_notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -7500,9 +7370,7 @@ async def test_nilm_virtual_conflict_notification_uses_model_drift_category(
         sent_notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -7595,9 +7463,9 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     assert mark_correct is not None
     assert await mark_wrong(alert_id) is True
 
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assert assignment["confidence"] == pytest.approx(0.75)
     assert assignment["lifecycle_state"] == "needs_validation"
     assert assignment["confirmed_session_ids"] == []
@@ -7659,9 +7527,9 @@ def test_nilm_controller_applies_alert_feedback_validation() -> None:
 
     coordinator.nilm_controller.apply_alert_feedback(alert, "correct", now)
 
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assert assignment["confidence"] == pytest.approx(0.85)
     assert assignment["last_validation"] == "correct"
     assert assignment["confirmed_session_ids"] == ["session-1"]
@@ -7721,9 +7589,9 @@ async def test_nilm_non_session_notification_feedback_keeps_session_counts_empty
 
     assert await coordinator.async_mark_nilm_appliance_wrong(alert_id) is True
 
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assert assignment["confidence"] == pytest.approx(0.75)
     assert assignment["confirmed_session_ids"] == []
     assert assignment["rejected_session_ids"] == []
@@ -7750,7 +7618,7 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
         issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_data_quality_issue",
         fake_issue,
     )
@@ -7763,9 +7631,7 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
                     "name": "Fridge",
                     "mode": "single_phase",
                     "appliance_profile": "refrigerator",
-                    "sensors": [
-                        {"entity_id": "sensor.missing", "role": "real_power"}
-                    ],
+                    "sensors": [{"entity_id": "sensor.missing", "role": "real_power"}],
                 }
             ]
         },
@@ -7800,12 +7666,12 @@ async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> N
         deleted.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_delete_data_quality_issue",
         fake_delete,
     )
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "existing_circuit_problem_issues",
         lambda hass, circuit_id, problems: {("fridge", "missing_required_sensor")},
     )
@@ -7863,7 +7729,7 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
         )
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_data_quality_issue",
         fake_issue,
     )
@@ -7877,9 +7743,7 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
             return SimpleNamespace(
                 state=values[entity_id],
                 attributes={
-                    "unit_of_measurement": (
-                        "A" if "current" in entity_id else "W"
-                    )
+                    "unit_of_measurement": ("A" if "current" in entity_id else "W")
                 },
                 last_updated=now,
             )
@@ -7923,9 +7787,10 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
             },
         )
     ]
-    assert "negative_real_power_load" in coordinator.state.data_quality_by_circuit[
-        "fridge"
-    ]
+    assert (
+        "negative_real_power_load"
+        in coordinator.state.data_quality_by_circuit["fridge"]
+    )
     assert "fridge" not in coordinator.state.last_event_by_circuit
     assert "fridge:real_power" not in coordinator.store_data.baselines
 
@@ -7950,7 +7815,7 @@ async def test_runtime_missing_energy_source_creates_setup_health_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8012,7 +7877,7 @@ async def test_setup_health_repair_includes_circuit_context(
         repairs_created.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8047,9 +7912,7 @@ async def test_setup_health_repair_includes_circuit_context(
             {
                 "circuit_name": "Refrigerator",
                 "reason": "Daily Energy Usage needs a cumulative energy source.",
-                "recommended_action": (
-                    "Add a cumulative kWh sensor to Refrigerator"
-                ),
+                "recommended_action": ("Add a cumulative kWh sensor to Refrigerator"),
                 "source_entities": ["sensor.fridge_power"],
             },
         )
@@ -8077,7 +7940,7 @@ async def test_process_update_missing_source_entities_creates_setup_health_repai
         repairs_created.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8135,7 +7998,7 @@ async def test_runtime_missing_mains_source_creates_setup_health_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8185,7 +8048,7 @@ async def test_runtime_missing_electrical_metrics_creates_setup_health_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8234,7 +8097,7 @@ async def test_runtime_ct_direction_setup_health_issue_creates_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8284,7 +8147,7 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
         issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8369,7 +8232,7 @@ async def test_runtime_enabled_rain_context_without_source_creates_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8430,7 +8293,7 @@ async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -8493,8 +8356,7 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
     assert coordinator.circuit_configs[0].circuit_id == "mains"
     assert coordinator.circuit_configs[0].mode is CircuitMode.MAINS_NILM
     assert (
-        coordinator.circuit_configs[0].appliance_profile
-        is ApplianceProfile.MAINS_NILM
+        coordinator.circuit_configs[0].appliance_profile is ApplianceProfile.MAINS_NILM
     )
     assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
 
@@ -8774,9 +8636,9 @@ async def test_demo_appliance_history_is_seeded_after_learning() -> None:
     assert usage["status"] != "learning"
     assert usage["status"] != "waiting_for_delta"
     assert coordinator.state.learning_by_circuit[circuit_id] is False
-    assert coordinator.state.learning_progress_by_circuit[circuit_id][
-        "learning"
-    ] is False
+    assert (
+        coordinator.state.learning_progress_by_circuit[circuit_id]["learning"] is False
+    )
     weather = coordinator.state.weather_context_by_circuit[circuit_id]
     assert weather["status"] != "learning"
     assert weather["status"] in {
@@ -8791,7 +8653,7 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
-    from custom_components.circuitsetup_energy_analyzer.panel import (
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
 
@@ -9058,9 +8920,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     hvac = by_circuit["cs_energy_analyzer_demo_hvac"]
     assert hvac.appliance_profile is ApplianceProfile.HVAC
     assert hvac.mode is CircuitMode.DUAL_PHASE
-    assert {
-        (sensor.entity_id, sensor.role, sensor.leg) for sensor in hvac.sensors
-    } >= {
+    assert {(sensor.entity_id, sensor.role, sensor.leg) for sensor in hvac.sensors} >= {
         (
             "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
             SensorRole.REAL_POWER,
@@ -9091,8 +8951,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     assert water_heater.appliance_profile is ApplianceProfile.WATER_HEATER
     assert water_heater.mode is CircuitMode.DUAL_PHASE
     assert {
-        (sensor.entity_id, sensor.role, sensor.leg)
-        for sensor in water_heater.sensors
+        (sensor.entity_id, sensor.role, sensor.leg) for sensor in water_heater.sensors
     } >= {
         (
             "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power",
@@ -9465,78 +9324,6 @@ def test_runtime_infers_recommended_v1_appliance_taxonomy_from_sources() -> None
     assert by_circuit["kitchen_microwave"].mode is CircuitMode.SINGLE_PHASE
 
 
-def test_runtime_accepts_car_charger_as_manual_appliance_profile_alias() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-    from custom_components.circuitsetup_energy_analyzer.models import (
-        ApplianceProfile,
-        CircuitMode,
-    )
-
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
-        entry_data={
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": "garage_charger",
-                    "name": "Garage Car Charger",
-                    "mode": "dual_phase",
-                    "appliance_profile": "car_charger",
-                    "sensors": [
-                        {
-                            "entity_id": "sensor.garage_charger_l1_power",
-                            "role": "real_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": "sensor.garage_charger_l2_power",
-                            "role": "real_power",
-                            "leg": "b",
-                        },
-                    ],
-                }
-            ],
-        },
-    )
-
-    config = coordinator.circuit_configs[0]
-
-    assert config.appliance_profile is ApplianceProfile.EV_CHARGER
-    assert config.mode is CircuitMode.DUAL_PHASE
-
-
-def test_runtime_accepts_microwave_oven_as_manual_appliance_profile_alias() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-    from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
-
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
-        entry_data={
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": "kitchen_microwave",
-                    "name": "Kitchen Microwave",
-                    "mode": "single_phase",
-                    "appliance_profile": "microwave_oven",
-                    "sensors": [
-                        {
-                            "entity_id": "sensor.kitchen_microwave_power",
-                            "role": "real_power",
-                        }
-                    ],
-                }
-            ],
-        },
-    )
-
-    config = coordinator.circuit_configs[0]
-
-    assert config.appliance_profile is ApplianceProfile.MICROWAVE
-
-
 def test_runtime_uses_circuits_saved_from_options_flow_assignments() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -9592,9 +9379,7 @@ def test_runtime_uses_circuits_saved_from_options_flow_assignments() -> None:
     assert config.circuit_id == "air_handler"
     assert config.appliance_profile is ApplianceProfile.HVAC_BLOWER
     assert config.mode is CircuitMode.SINGLE_PHASE
-    assert {
-        (sensor.entity_id, sensor.role) for sensor in config.sensors
-    } == {
+    assert {(sensor.entity_id, sensor.role) for sensor in config.sensors} == {
         ("sensor.air_handler_active_power", SensorRole.REAL_POWER),
         ("sensor.air_handler_current", SensorRole.CURRENT),
     }
@@ -9650,7 +9435,7 @@ def test_runtime_circuit_config_defaults_solar_inverter_to_generation() -> None:
                     "name": "Battery",
                     "mode": "single_phase",
                     "appliance_profile": "mixed",
-                    "power_flow": "bidirectional",
+                    "power_flow": "mains_net",
                     "sensors": [
                         {"entity_id": "sensor.battery_power", "role": "real_power"}
                     ],
@@ -10184,9 +9969,7 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -10365,9 +10148,7 @@ async def test_runtime_infers_configured_leg_from_single_phase_entity_hint(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -10459,9 +10240,7 @@ async def test_runtime_alerts_on_repeated_known_load_topology_mismatch(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -10562,9 +10341,7 @@ async def test_runtime_ignores_low_confidence_known_load_topology_mismatch(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -10715,9 +10492,7 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
             notifications.append(alert)
 
         monkeypatch.setattr(
-            coordinator_module.notifications,
-            "async_create_alert_notification",
-            fake_notification,
+            notifications_module, "async_create_alert_notification", fake_notification
         )
         coordinator = coordinator_module.EnergyAnalyzerCoordinator(
             SimpleNamespace(states=FakeStates(), data={}),
@@ -10765,8 +10540,8 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
             await coordinator.async_process_update()
         return len(notifications)
 
-    assert await alert_count_for_sensitivity("standard") == 0
-    assert await alert_count_for_sensitivity("high") == 1
+    assert await alert_count_for_sensitivity("balanced") == 0
+    assert await alert_count_for_sensitivity("sensitive") == 1
 
 
 @pytest.mark.asyncio
@@ -10785,9 +10560,7 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -10818,7 +10591,7 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
                 }
             ],
         },
-        options={CONF_SENSITIVITY: "high"},
+        options={CONF_SENSITIVITY: "sensitive"},
         store_data=FeatureStoreData(
             events=[
                 CircuitEvent(
@@ -10893,9 +10666,7 @@ async def test_relearn_baseline_clears_power_quality_runtime_state() -> None:
         now_fn=lambda: now,
     )
     coordinator.state.power_quality_score_by_circuit["fridge"] = 4.5
-    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
-        "Possible issue"
-    )
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = "Possible issue"
     coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
     coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
     coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
@@ -10944,9 +10715,7 @@ async def test_runtime_no_feature_sample_clears_power_quality_state() -> None:
     )
     coordinator.state.learning_by_circuit["fridge"] = False
     coordinator.state.power_quality_score_by_circuit["fridge"] = 4.5
-    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
-        "Possible issue"
-    )
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = "Possible issue"
     coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
     coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
     coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
@@ -10977,9 +10746,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -11005,7 +10772,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
                 }
             ],
         },
-        options={CONF_SENSITIVITY: "high"},
+        options={CONF_SENSITIVITY: "sensitive"},
         store_data=FeatureStoreData(
             events=[
                 CircuitEvent(
@@ -11106,9 +10873,7 @@ async def test_export_diagnostics_includes_power_quality_runtime_state() -> None
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
     coordinator.state.power_quality_score_by_circuit["fridge"] = 3.5
-    coordinator.state.power_quality_evidence_by_circuit["fridge"] = (
-        "Possible issue"
-    )
+    coordinator.state.power_quality_evidence_by_circuit["fridge"] = "Possible issue"
     coordinator.state.reactive_power_drift_by_circuit["fridge"] = 1.5
     coordinator.state.apparent_power_drift_by_circuit["fridge"] = 1.2
     coordinator.state.power_factor_drift_by_circuit["fridge"] = 0.8
@@ -11139,9 +10904,7 @@ async def test_export_history_csv_stores_retained_history_snapshot() -> None:
             },
             demand_by_circuit={
                 "fridge": {
-                    "daily_peaks": [
-                        {"date": "2026-06-01", "peak_demand_w": 3200.0}
-                    ]
+                    "daily_peaks": [{"date": "2026-06-01", "peak_demand_w": 3200.0}]
                 }
             },
         ),
@@ -11260,7 +11023,7 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
         issues.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_data_quality_issue",
         fake_issue,
     )
@@ -11273,9 +11036,7 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
                     "name": "Fridge",
                     "mode": "single_phase",
                     "appliance_profile": "refrigerator",
-                    "sensors": [
-                        {"entity_id": "sensor.missing", "role": "real_power"}
-                    ],
+                    "sensors": [{"entity_id": "sensor.missing", "role": "real_power"}],
                 }
             ]
         },
@@ -11301,96 +11062,21 @@ def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(),
-        options={CONF_SENSITIVITY: "standard"},
+        options={CONF_SENSITIVITY: "balanced"},
         store_data=FeatureStoreData(
             sensitivity_by_circuit={"fridge": "sensitive", "hvac": "quiet"}
         ),
     )
 
     assert (
-        coordinator.settings_controller.sensitivity_for_circuit("unknown")
-        == "balanced"
+        coordinator.settings_controller.sensitivity_for_circuit("unknown") == "balanced"
     )
-    assert coordinator.alert_policies.alert_policy_for_circuit(
-        "fridge"
-    ).min_repeated == 3
-    assert coordinator.alert_policies.alert_policy_for_circuit(
-        "hvac"
-    ).min_repeated == 4
-
-
-def test_coordinator_canonicalizes_legacy_sensitivity_config_copies() -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
+    assert (
+        coordinator.alert_policies.alert_policy_for_circuit("fridge").min_repeated == 3
     )
-
-    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(),
-        entry_data={
-            CONF_SENSITIVITY: "low",
-            "advanced_settings": {
-                "freezer": {"preset": "standard"},
-            },
-        },
-        options={
-            CONF_SENSITIVITY: "high",
-            "advanced_settings": {
-                "dryer": {"preset": "high"},
-            },
-        },
-    )
-
-    assert coordinator.entry_data[CONF_SENSITIVITY] == "quiet"
-    assert coordinator.entry_data["advanced_settings"]["freezer"]["preset"] == (
-        "balanced"
-    )
-    assert coordinator.options[CONF_SENSITIVITY] == "sensitive"
-    assert coordinator.options["advanced_settings"]["dryer"]["preset"] == "sensitive"
+    assert coordinator.alert_policies.alert_policy_for_circuit("hvac").min_repeated == 4
 
 
-@pytest.mark.asyncio
-async def test_expected_alert_feedback_suppresses_repeated_notification(
-    monkeypatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
-
-    notifications: list[AlertEvidence] = []
-
-    async def fake_notification(hass, alert, **kwargs) -> None:
-        notifications.append(alert)
-
-    monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
-    )
-    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(),
-        store_data=FeatureStoreData(
-            alert_feedback={"fridge:reactive_power": {"action": "expected"}}
-        ),
-    )
-    expected_alert = AlertEvidence(
-        timestamp=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
-        circuit_id="fridge",
-        severity=Severity.WARNING,
-        message="Expected compressor behavior",
-        feature="reactive_power",
-    )
-    other_alert = AlertEvidence(
-        timestamp=datetime(2026, 6, 2, 12, 1, tzinfo=UTC),
-        circuit_id="fridge",
-        severity=Severity.WARNING,
-        message="Different behavior",
-        feature="power_factor",
-    )
-
-    await coordinator._notify_alert(expected_alert)
-    await coordinator._notify_alert(other_alert)
-
-    assert notifications == [other_alert]
 
 
 @pytest.mark.asyncio
@@ -11413,9 +11099,7 @@ async def test_contextual_alert_feedback_only_suppresses_matching_context(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
     hot_context = {
         "comparison_basis": "contextual",
@@ -11542,12 +11226,14 @@ async def test_alert_feedback_methods_store_fingerprint_key() -> None:
     )
 
     unhelpful_fingerprint = alert_feedback_fingerprint(unhelpful_alert)
-    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
-        "action"
-    ] == "unhelpful"
-    assert coordinator.store_data.alert_feedback[unhelpful_fingerprint][
-        "expires_at"
-    ] == "2026-07-17T12:05:00+00:00"
+    assert (
+        coordinator.store_data.alert_feedback[unhelpful_fingerprint]["action"]
+        == "unhelpful"
+    )
+    assert (
+        coordinator.store_data.alert_feedback[unhelpful_fingerprint]["expires_at"]
+        == "2026-07-17T12:05:00+00:00"
+    )
 
 
 @pytest.mark.parametrize(
@@ -11677,9 +11363,7 @@ async def test_export_diagnostics_includes_ux_state() -> None:
 
     assert coordinator.last_exported_diagnostics["health_status"] == "possible_issue"
     assert coordinator.last_exported_diagnostics["health_summary"] == "Possible issue"
-    assert coordinator.last_exported_diagnostics["readiness"] == {
-        "alert_ready": True
-    }
+    assert coordinator.last_exported_diagnostics["readiness"] == {"alert_ready": True}
     assert coordinator.last_exported_diagnostics["learning_progress"] == {
         "cycle_count": 3
     }
@@ -11758,9 +11442,7 @@ async def test_export_diagnostics_includes_appliance_detail_story() -> None:
     coordinator.state.run_cycle_count_by_circuit["fridge"] = 14
     coordinator.state.run_cycle_runtime_seconds_by_circuit["fridge"] = 7200.0
     coordinator.state.health_summary_by_circuit["fridge"] = "Watch"
-    coordinator.state.energy_usage_evidence_by_circuit["fridge"] = {
-        "status": "higher"
-    }
+    coordinator.state.energy_usage_evidence_by_circuit["fridge"] = {"status": "higher"}
 
     await coordinator.async_export_diagnostics("fridge")
 
@@ -11772,9 +11454,7 @@ async def test_export_diagnostics_includes_appliance_detail_story() -> None:
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
     assert detail["evidence_path"].endswith("circuit_id=fridge")
-    comparisons = {
-        item["metric_id"]: item for item in detail["today_vs_normal"]
-    }
+    comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
     assert comparisons["daily_energy_kwh"]["status"] == "learning"
     assert comparisons["daily_energy_kwh"]["normal_low"] is None
     assert comparisons["daily_energy_kwh"]["normal_high"] is None
@@ -11856,9 +11536,7 @@ async def test_runtime_notifies_power_quality_relationship_change_after_maturity
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -11962,9 +11640,7 @@ async def test_runtime_detects_motor_power_quality_shift_from_watts_amps_pf_and_
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -12080,9 +11756,7 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -12159,9 +11833,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -12371,8 +12043,7 @@ async def test_coordinator_builds_settings_recommendation_after_maturity() -> No
 
 
 @pytest.mark.asyncio
-async def test_coordinator_builds_operating_detection_recommendations_after_maturity(
-) -> None:
+async def test_operating_detection_recommendations_after_maturity() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -12521,9 +12192,10 @@ async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> N
     assert recommendation["current_value"] == 0.25
     assert recommendation["evidence"]["source"] == "unhelpful_alert_feedback"
     assert recommendation["evidence"]["unhelpful_feedback_count"] == 2
-    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][
-        "daily_spike_ratio"
-    ] == 0.25
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"]["daily_spike_ratio"]
+        == 0.25
+    )
 
 
 @pytest.mark.asyncio
@@ -12566,8 +12238,7 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
     )
 
     assert (
-        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
-        == 0.3
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"] == 0.3
     )
     assert (
         coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
@@ -12585,14 +12256,14 @@ async def test_apply_setting_recommendation_updates_advanced_settings() -> None:
     assert recommendations[0]["recommendation_id"] == recommendation.recommendation_id
     assert recommendations[0]["status"] == "applied"
     assert (
-        coordinator.state.settings_recommendation_count_by_circuit.get("hvac", 0)
-        == 0
+        coordinator.state.settings_recommendation_count_by_circuit.get("hvac", 0) == 0
     )
 
 
 @pytest.mark.asyncio
-async def test_apply_operating_detection_recommendation_preserves_learned_source(
-) -> None:
+async def test_apply_operating_detection_recommendation_preserves_learned_source() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -12699,8 +12370,7 @@ async def test_undo_setting_recommendation_restores_previous_value() -> None:
     )
 
     assert (
-        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
-        == 0.25
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"] == 0.25
     )
     assert (
         coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
@@ -12760,8 +12430,7 @@ async def test_reset_setting_recommendation_restores_builtin_default() -> None:
     )
 
     assert (
-        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
-        == 0.25
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"] == 0.25
     )
     assert (
         coordinator.store_data.energy_usage_settings_by_circuit["hvac"][
@@ -12876,9 +12545,8 @@ async def test_dismiss_setting_recommendation_records_decision() -> None:
 
 
 def test_settings_recommendation_notification_id_is_entry_scoped() -> None:
-    from custom_components.circuitsetup_energy_analyzer import notifications
 
-    assert notifications.settings_recommendation_notification_id("entry-1") == (
+    assert notifications_module.settings_recommendation_notification_id("entry-1") == (
         f"{DOMAIN}_settings_recommendations_entry_1"
     )
 
@@ -12961,7 +12629,7 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
         )
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
+        notifications_module,
         "async_create_settings_recommendation_notification",
         fake_notification,
     )
@@ -13084,7 +12752,7 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         )
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
+        notifications_module,
         "async_create_settings_recommendation_notification",
         fake_notification,
     )
@@ -13115,9 +12783,11 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         now_fn=lambda: now,
     )
     coordinator._refresh_settings_recommendation_state(now)
-    await (
-        coordinator.notification_controller.async_notify_settings_recommendations_if_needed()
+    notify = (
+        coordinator.notification_controller
+        .async_notify_settings_recommendations_if_needed
     )
+    await notify()
     coordinator._apply_retention(now)
 
     reloaded = coordinator_module.EnergyAnalyzerCoordinator(
@@ -13128,9 +12798,11 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         now_fn=lambda: now,
     )
     reloaded._refresh_settings_recommendation_state(now)
-    await (
-        reloaded.notification_controller.async_notify_settings_recommendations_if_needed()
+    notify = (
+        reloaded.notification_controller
+        .async_notify_settings_recommendations_if_needed
     )
+    await notify()
 
     assert notifications == [{"entry_id": "entry-1", "total_pending": 110}]
 
@@ -13265,8 +12937,7 @@ async def test_apply_setting_recommendation_persists_config_entry_options() -> N
         == 0.3
     )
     assert (
-        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"]
-        == 0.3
+        coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"]["daily_spike_ratio"] == 0.3
     )
 
     reloaded = coordinator_module.EnergyAnalyzerCoordinator(
@@ -13305,7 +12976,7 @@ async def test_process_update_recommends_capacity_from_current_history(
         )
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
+        notifications_module,
         "async_create_settings_recommendation_notification",
         fake_notification,
     )
@@ -13382,7 +13053,6 @@ async def test_process_update_recommends_capacity_from_current_history(
 async def test_settings_recommendation_notification_creates_persistent_notification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from custom_components.circuitsetup_energy_analyzer import notifications
 
     calls: list[dict[str, Any]] = []
 
@@ -13412,7 +13082,7 @@ async def test_settings_recommendation_notification_creates_persistent_notificat
         persistent_notification,
     )
 
-    await notifications.async_create_settings_recommendation_notification(
+    await notifications_module.async_create_settings_recommendation_notification(
         SimpleNamespace(),
         "entry-1",
         total_pending=2,
@@ -13446,9 +13116,7 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -13572,9 +13240,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -13609,9 +13275,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
                     event_type=EventType.START,
                 )
             ],
-            activity_alert_settings_by_circuit={
-                "fridge": {"max_active_minutes": 30.0}
-            },
+            activity_alert_settings_by_circuit={"fridge": {"max_active_minutes": 30.0}},
         ),
         now_fn=lambda: holder["time"],
     )
@@ -13652,9 +13316,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -13694,9 +13356,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
                     event_type=EventType.STOP,
                 ),
             ],
-            activity_alert_settings_by_circuit={
-                "fridge": {"max_idle_minutes": 180.0}
-            },
+            activity_alert_settings_by_circuit={"fridge": {"max_idle_minutes": 180.0}},
         ),
         now_fn=lambda: holder["time"],
     )
@@ -13899,10 +13559,10 @@ async def test_runtime_reports_run_cycle_diagnostics_from_retained_events() -> N
         "last_start": "2026-06-03T11:30:00+00:00",
         "last_stop": "2026-06-03T01:20:00+00:00",
         "scope": "today",
-            "evidence_source": "retained_start_stop_events",
-            "comparison_mode": "same_time_of_day",
-            "as_of": "2026-06-03T12:00:00+00:00",
-        }
+        "evidence_source": "retained_start_stop_events",
+        "comparison_mode": "same_time_of_day",
+        "as_of": "2026-06-03T12:00:00+00:00",
+    }
 
 
 @pytest.mark.asyncio
@@ -13987,9 +13647,7 @@ async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14101,9 +13759,7 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14187,9 +13843,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14250,8 +13904,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
 
     assert coordinator.state.demand_peak_rank_by_circuit["mains"] == 4
     assert (
-        coordinator.state.demand_peak_status_by_circuit["mains"]
-        == "near_monthly_peak"
+        coordinator.state.demand_peak_status_by_circuit["mains"] == "near_monthly_peak"
     )
     assert coordinator.state.demand_evidence_by_circuit["mains"] == {
         "date": "2026-06-03",
@@ -14336,9 +13989,7 @@ async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14614,10 +14265,7 @@ async def test_runtime_calculates_solar_flow_from_mains_and_generation() -> None
         coordinator.state.solar_surplus_status_by_circuit["mains"]
         == "surplus_available"
     )
-    assert (
-        coordinator.state.solar_flexible_load_power_w_by_circuit["mains"]
-        == 800.0
-    )
+    assert coordinator.state.solar_flexible_load_power_w_by_circuit["mains"] == 800.0
     assert (
         coordinator.state.solar_flexible_load_coverage_percent_by_circuit["mains"]
         == 100.0
@@ -14686,9 +14334,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14721,6 +14367,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
         store_data=FeatureStoreData(
             standby_by_circuit={
                 "office": {
+                    "standby_sample_format": "1m-min-v1",
                     "samples": [
                         {
                             "timestamp": f"2026-06-03T{hour:02d}:00:00+00:00",
@@ -14860,9 +14507,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -14928,8 +14573,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
         "mismatch"
     )
     assert (
-        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
-        == 15.0
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"] == 15.0
     )
     assert (
         coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
@@ -15047,8 +14691,7 @@ async def test_runtime_sums_circuit_energy_when_measured_entities_omitted() -> N
         "mismatch"
     )
     assert (
-        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
-        == 12.0
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"] == 12.0
     )
     assert (
         coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
@@ -15211,8 +14854,7 @@ async def test_runtime_compares_opower_statistics_with_measured_mains_statistics
         "mismatch"
     )
     assert (
-        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
-        == 6.0
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"] == 6.0
     )
     assert (
         coordinator.state.utility_comparison_difference_percent_by_circuit["mains"]
@@ -15398,15 +15040,20 @@ async def test_runtime_compares_opower_statistics_with_configured_circuit_sum(
     assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
         "measured_energy_entities"
     ] == ["sensor.fridge_energy", "sensor.hvac_energy"]
-    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
-        "comparison_source"
-    ] == "circuit_energy_sum"
-    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
-        "measured_source_type"
-    ] == "statistics"
     assert (
-        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"]
-        == 2.0
+        coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+            "comparison_source"
+        ]
+        == "circuit_energy_sum"
+    )
+    assert (
+        coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+            "measured_source_type"
+        ]
+        == "statistics"
+    )
+    assert (
+        coordinator.state.utility_comparison_difference_kwh_by_circuit["mains"] == 2.0
     )
 
 
@@ -15473,9 +15120,12 @@ async def test_runtime_handles_unavailable_recorder_statistics(
     assert coordinator.state.utility_comparison_status_by_circuit["mains"] == (
         "missing_utility"
     )
-    assert coordinator.state.utility_comparison_evidence_by_circuit["mains"][
-        "utility_source_type"
-    ] == "statistics"
+    assert (
+        coordinator.state.utility_comparison_evidence_by_circuit["mains"][
+            "utility_source_type"
+        ]
+        == "statistics"
+    )
 
 
 @pytest.mark.asyncio
@@ -15636,7 +15286,7 @@ async def test_runtime_utility_comparison_setup_issue_creates_repair(
         raising=False,
     )
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -15704,7 +15354,7 @@ async def test_runtime_utility_comparison_missing_measured_creates_specific_repa
         created.append((circuit_id, problem, kwargs["data"]))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_create_circuit_issue",
         fake_issue,
     )
@@ -15726,9 +15376,7 @@ async def test_runtime_utility_comparison_missing_measured_creates_specific_repa
         },
         now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
     )
-    coordinator.state.utility_comparison_status_by_circuit["mains"] = (
-        "missing_measured"
-    )
+    coordinator.state.utility_comparison_status_by_circuit["mains"] = "missing_measured"
     coordinator.store_data.utility_comparison_settings_by_circuit["mains"] = {
         "utility_energy_entity": "sensor.utility_kwh",
     }
@@ -15751,66 +15399,6 @@ async def test_runtime_utility_comparison_missing_measured_creates_specific_repa
     ]
 
 
-@pytest.mark.asyncio
-async def test_runtime_specific_utility_comparison_repair_deletes_legacy_generic(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
-
-    created: list[tuple[str, str]] = []
-    deleted: list[tuple[str, str]] = []
-
-    async def fake_create(
-        hass,
-        circuit_id,
-        problem,
-        severity=Severity.WARNING,
-        **kwargs,
-    ) -> None:
-        created.append((circuit_id, problem))
-
-    async def fake_delete(hass, circuit_id, problem) -> None:
-        deleted.append((circuit_id, problem))
-
-    monkeypatch.setattr(
-        coordinator_module.repairs,
-        "async_create_circuit_issue",
-        fake_create,
-    )
-    monkeypatch.setattr(
-        coordinator_module.repairs,
-        "async_delete_circuit_issue",
-        fake_delete,
-    )
-
-    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
-        entry_data={
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": "mains",
-                    "name": "Mains",
-                    "mode": "mains_nilm",
-                    "appliance_profile": "mains_nilm",
-                    "sensors": [
-                        {"entity_id": "sensor.mains_power", "role": "real_power"}
-                    ],
-                }
-            ]
-        },
-        now_fn=lambda: datetime(2026, 6, 5, 0, 0, tzinfo=UTC),
-    )
-    coordinator.state.utility_comparison_status_by_circuit["mains"] = (
-        "missing_measured"
-    )
-
-    await coordinator._sync_setup_health_repairs("mains")
-    await coordinator._sync_setup_health_repairs("mains")
-
-    assert deleted == [("mains", "utility_comparison_source_mismatch")]
-    assert created == [("mains", "utility_comparison_missing_measured_source")]
 
 
 @pytest.mark.asyncio
@@ -15827,7 +15415,7 @@ async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
         deleted.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_delete_circuit_issue",
         fake_delete,
     )
@@ -15882,12 +15470,12 @@ async def test_runtime_setup_health_repair_clears_after_reload(
         deleted.append((circuit_id, problem))
 
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "async_delete_circuit_issue",
         fake_delete,
     )
     monkeypatch.setattr(
-        coordinator_module.repairs,
+        repairs,
         "existing_circuit_problem_issues",
         lambda hass, circuit_id, problems: {("fridge", "missing_energy_source")},
     )
@@ -16012,9 +15600,7 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -16151,11 +15737,6 @@ async def test_runtime_tracks_time_of_use_cost() -> None:
                     "appliance_profile": "hvac",
                     "cost_cycle_start_day": 1,
                     "default_rate_per_kwh": 0.10,
-                    "tou_rate_per_kwh": 0.30,
-                    "tou_start": "17:00",
-                    "tou_end": "21:00",
-                    "tou_weekdays": "0,1,2,3,4",
-                    "tou_name": "Peak",
                     "sensors": [
                         {"entity_id": "sensor.hvac_energy", "role": "energy"},
                     ],
@@ -16163,6 +15744,15 @@ async def test_runtime_tracks_time_of_use_cost() -> None:
             ],
         },
         store_data=FeatureStoreData(
+            cost_settings_by_circuit={
+                "__global__": {
+                    "tou_rate_per_kwh": 0.30,
+                    "tou_start": "17:00",
+                    "tou_end": "21:00",
+                    "tou_weekdays": "0,1,2,3,4",
+                    "tou_name": "Peak",
+                }
+            },
             cost_by_circuit={
                 "hvac": {
                     "cycle_start": "2026-06-01",
@@ -16171,7 +15761,7 @@ async def test_runtime_tracks_time_of_use_cost() -> None:
                     "last_energy_kwh": 100.0,
                     "last_sample_at": "2026-06-08T16:30:00+00:00",
                 }
-            }
+            },
         ),
         now_fn=lambda: now,
     )
@@ -16222,23 +15812,11 @@ async def test_runtime_persists_cost_settings() -> None:
     await coordinator.async_set_cost_settings(
         "fridge",
         cycle_start_day=1,
-        default_rate_per_kwh=0.20,
-        tou_rate_per_kwh=0.30,
-        tou_start="17:00",
-        tou_end="21:00",
-        tou_weekdays="0,1,2,3,4",
-        tou_name="Peak",
     )
 
     assert saved
     assert coordinator.store_data.cost_settings_by_circuit["fridge"] == {
         "cycle_start_day": 1,
-        "default_rate_per_kwh": 0.20,
-        "tou_rate_per_kwh": 0.30,
-        "tou_start": "17:00",
-        "tou_end": "21:00",
-        "tou_weekdays": "0,1,2,3,4",
-        "tou_name": "Peak",
     }
 
 
@@ -16257,9 +15835,7 @@ async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification
         notifications.append(alert)
 
     monkeypatch.setattr(
-        coordinator_module.notifications,
-        "async_create_alert_notification",
-        fake_notification,
+        notifications_module, "async_create_alert_notification", fake_notification
     )
 
     class FakeStates:
@@ -16290,7 +15866,7 @@ async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification
                 }
             ],
         },
-        options={CONF_SENSITIVITY: "high"},
+        options={CONF_SENSITIVITY: "sensitive"},
         store_data=FeatureStoreData(
             events=[
                 CircuitEvent(

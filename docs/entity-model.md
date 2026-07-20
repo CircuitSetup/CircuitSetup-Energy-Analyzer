@@ -12,8 +12,7 @@ model changes which results are exposed as standalone Home Assistant entities.
 | Standard | Simple plus configured canonical feature entities such as billing usage, cost cycle, standby status, weather/water context, capacity, and leg imbalance. | Feature-rich appliances without diagnostic clutter. |
 | Expert | Standard plus only the diagnostic or graph groups selected in options. | Custom dashboards, graphing, and troubleshooting. |
 
-Expert does not automatically recreate every historical diagnostic entity.
-Choose groups explicitly from the Entity Detail Level options screen.
+Choose Expert groups explicitly from the Entity Detail Level options screen.
 
 ## Expert Groups
 
@@ -31,29 +30,9 @@ Choose groups explicitly from the Entity Detail Level options screen.
 | Water Detail | Water-flow mismatch minutes |
 | Developer Diagnostics | Learning, data quality, recent activity, suggestions, anomaly score, circuit mode, power flow, and pause alerts |
 
-## Replacement Surfaces
-
-| Legacy standalone entity | Compact replacement |
-|---|---|
-| Sensitivity sensor | `select.<circuit>_alert_sensitivity` |
-| Readiness, Learning Progress | `sensor.<circuit>_health_summary` attributes |
-| Data Quality Checklist | Health Summary, Setup Health, and Repairs |
-| Alert Evidence, Last Event | Dynamic Alert Evidence panel and retained diagnostics |
-| Power-quality evidence/status text | `sensor.<circuit>_electrical_health` attributes and evidence panel |
-| Run Cycle Status | `sensor.<circuit>_activity_summary` and `binary_sensor.<circuit>_running` |
-| Cycle numeric metrics | Expert Cycle Metrics group |
-| Billing/cost status and budget details | `sensor.<circuit>_billing_cycle_usage` and `sensor.<circuit>_cost_cycle` attributes |
-| Standby Threshold sensor | Advanced Circuit Settings and Standby Status attributes |
-| Outdoor Temperature mirror | Configured outdoor temperature source entity and Weather Context attributes |
-| Secondary solar-flow mirrors | Solar Flow Status attributes and the evidence panel |
-| Solar load-shift detail mirrors | Solar Surplus sensors and load-shift evidence |
-| Utility comparison difference | Utility Comparison Status attributes |
-| Start/End Maintenance buttons | `switch.<circuit>_maintenance` |
-
 ## Count Evidence
 
 In the representative matrix, Simple creates 10 or fewer per-circuit entities
 and Standard creates 17 or fewer. Expert creates only explicitly selected
 groups; even selecting every group stays at or below 50 per-circuit entities.
-The compact model also replaces the old Start/End Maintenance buttons with the
-single maintenance switch.
+The compact model uses one `switch.<circuit>_maintenance` entity per circuit.

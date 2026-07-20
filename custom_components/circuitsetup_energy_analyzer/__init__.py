@@ -3,10 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from . import repairs
 from .const import (
     CONF_ADVANCED_SETTINGS,
-    CONF_ENTITY_MODEL_VERSION,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -15,16 +13,13 @@ from .const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DATA_RELOAD_COUNT,
     DOMAIN,
-    ENTITY_MODEL_LEGACY,
     PLATFORMS,
 )
 from .context_sources import strings_from_any
 from .coordinator import EnergyAnalyzerCoordinator
-from .entity_catalog import legacy_entity_registry_entries_for_hass
 from .panel import async_setup_panel, async_unload_panel
 from .services import async_setup_services, async_unload_services
 from .storage import FeatureStore, FeatureStoreData
-from .ux import canonicalize_sensitivity_config
 
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
@@ -62,14 +57,6 @@ async def async_setup_entry(
         await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        if getattr(hass, "config", None) is not None:
-            await repairs.async_sync_compact_entity_model_issue(
-                hass,
-                entry_id,
-                legacy_count=len(
-                    legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
-                ),
-            )
     except Exception:
         hass.data.get(DOMAIN, {}).pop(entry_id, None)
         await coordinator.async_stop()
@@ -77,29 +64,6 @@ async def async_setup_entry(
             await async_unload_panel(hass)
             await async_unload_services(hass)
         raise
-    return True
-
-
-async def async_migrate_entry(
-    hass: Any,
-    entry: CircuitSetupEnergyAnalyzerConfigEntry,
-) -> bool:
-    """Migrate config-entry data while preserving existing keys."""
-    data = canonicalize_sensitivity_config(getattr(entry, "data", {}) or {})
-    options = canonicalize_sensitivity_config(getattr(entry, "options", {}) or {})
-    if (
-        CONF_ENTITY_MODEL_VERSION not in data
-        and CONF_ENTITY_MODEL_VERSION not in options
-    ):
-        options[CONF_ENTITY_MODEL_VERSION] = ENTITY_MODEL_LEGACY
-    if data != dict(getattr(entry, "data", {}) or {}) or options != dict(
-        getattr(entry, "options", {}) or {}
-    ):
-        hass.config_entries.async_update_entry(
-            entry,
-            data=data,
-            options=options,
-        )
     return True
 
 

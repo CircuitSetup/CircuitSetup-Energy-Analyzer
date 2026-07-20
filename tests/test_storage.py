@@ -20,10 +20,6 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
     event_to_dict,
     feature_store_data_from_dict,
     feature_store_data_to_dict,
-    migrate_v1_to_v2,
-    migrate_v2_to_v3,
-    migrate_v3_to_v4,
-    migrate_v5_to_v6,
     prune_events,
 )
 
@@ -253,132 +249,12 @@ def test_standard_retention_keeps_at_least_month_of_events() -> None:
     assert pruned.events == [event]
 
 
-def test_storage_migrates_legacy_sensitivity_names_on_load_and_save() -> None:
-    restored = feature_store_data_from_dict(
-        {
-            "sensitivity_by_circuit": {
-                "freezer": "low",
-                "fridge": "standard",
-                "dryer": "high",
-                "mystery": "surprising",
-            }
-        }
-    )
-
-    assert restored.sensitivity_by_circuit == {
-        "freezer": "quiet",
-        "fridge": "balanced",
-        "dryer": "sensitive",
-        "mystery": "balanced",
-    }
-
-    raw = feature_store_data_to_dict(
-        FeatureStoreData(
-            sensitivity_by_circuit={
-                "freezer": "low",
-                "fridge": "standard",
-                "dryer": "high",
-                "mystery": "surprising",
-            }
-        )
-    )
-
-    assert raw["sensitivity_by_circuit"] == {
-        "freezer": "quiet",
-        "fridge": "balanced",
-        "dryer": "sensitive",
-        "mystery": "balanced",
-    }
 
 
-async def test_storage_v1_migrates_context_and_expires_legacy_feedback() -> None:
-    raw = {
-        "alert_feedback": {
-            "fridge:daily_energy_spike": {
-                "action": "expected",
-                "created_at": "2026-06-02T12:00:00+00:00",
-            },
-            "alert:v2|fridge|daily_energy_spike|direction=increase": {
-                "action": "expected",
-                "created_at": "2026-06-03T12:00:00+00:00",
-            },
-        },
-        "contextual_baselines_by_circuit": {
-            "hvac": {
-                "daily_energy_kwh|season=summer": {
-                    "feature": "daily_energy_kwh",
-                    "context_fingerprint": "season=summer",
-                    "context": {"season": "summer"},
-                    "sample_count": 7,
-                    "median": 8.0,
-                    "mad": 1.0,
-                    "p10": 6.0,
-                    "p90": 10.0,
-                    "confidence": 0.8,
-                }
-            }
-        },
-        "sensitivity_by_circuit": {"fridge": "quiet"},
-    }
-
-    migrated = await migrate_v1_to_v2(raw)
-
-    assert migrated["schema_version"] == STORAGE_VERSION
-    assert set(migrated["alert_feedback"]) == {
-        "alert:v2|fridge|daily_energy_spike|direction=increase"
-    }
-    contextual = migrated["contextual_baselines_by_circuit"]["hvac"]
-    assert set(contextual) == {"daily_energy_kwh|context:v2|season=summer"}
-    assert (
-        contextual["daily_energy_kwh|context:v2|season=summer"][
-            "context_fingerprint"
-        ]
-        == "context:v2|season=summer"
-    )
-    assert migrated["sensitivity_by_circuit"] == {"fridge": "quiet"}
 
 
-async def test_storage_v2_migrates_nilm_label_interval_storage() -> None:
-    raw = {
-        "schema_version": 2,
-        "events": [],
-        "nilm_signatures": {"mains": [{"signature_id": "signature_1"}]},
-    }
-
-    migrated = await migrate_v2_to_v3(raw)
-
-    assert migrated["schema_version"] == STORAGE_VERSION
-    assert migrated["nilm_label_intervals_by_circuit"] == {}
 
 
-async def test_storage_v3_migrates_nilm_review_states_to_assignments() -> None:
-    raw = {
-        "schema_version": 3,
-        "nilm_signatures": {
-            "mains": [
-                {
-                    "signature_id": "signature_1",
-                    "feedback_fingerprint": "fingerprint_1",
-                    "user_label": "Dishwasher",
-                    "likely_type": "dishwasher",
-                },
-                {
-                    "signature_id": "signature_2",
-                    "ignored": True,
-                },
-            ]
-        },
-    }
-
-    migrated = await migrate_v3_to_v4(raw)
-    assignments = migrated["nilm_appliance_assignments_by_circuit"]["mains"]
-
-    assert migrated["schema_version"] == STORAGE_VERSION
-    assert assignments[0]["display_name"] == "Dishwasher"
-    assert assignments[0]["lifecycle_state"] == "assigned"
-    assert assignments[0]["signature_fingerprints"] == ["fingerprint_1"]
-    assert assignments[1]["lifecycle_state"] == "ignored"
-    assert assignments[1]["signature_fingerprints"] == ["signature_2"]
 
 
 def test_feature_store_resets_malformed_optional_sections_safely() -> None:
@@ -1257,35 +1133,6 @@ def test_feature_store_persists_canonical_nilm_identity_with_session_history() -
     assert restored.nilm_session_history_by_circuit == {"mains": [session]}
 
 
-async def test_migrate_v5_backfills_nilm_appliance_key_without_losing_history() -> None:
-    session = {
-        "session_id": "session-1",
-        "assignment_id": "assignment-dishwasher",
-        "start": "2026-06-02T10:00:00+00:00",
-        "end": "2026-06-02T10:30:00+00:00",
-    }
-    migrated = await migrate_v5_to_v6(
-        {
-            "schema_version": 5,
-            "nilm_appliance_assignments_by_circuit": {
-                "mains": [
-                    {
-                        "assignment_id": "assignment-dishwasher",
-                        "display_name": "Kitchen Dishwasher",
-                    }
-                ]
-            },
-            "nilm_session_history_by_circuit": {"mains": [session]},
-            "dashboard_status": {"created": True},
-        }
-    )
-
-    assignment = migrated["nilm_appliance_assignments_by_circuit"]["mains"][0]
-    assert migrated["schema_version"] == STORAGE_VERSION
-    assert assignment["appliance_key"] == "nilm:assignment-dishwasher"
-    assert assignment["mains_circuit_id"] == "mains"
-    assert migrated["nilm_session_history_by_circuit"] == {"mains": [session]}
-    assert migrated["dashboard_status"] == {"created": True}
 
 
 def test_feature_store_preserves_settings_recommendations() -> None:
@@ -1382,12 +1229,6 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
     assert restored.weekly_digest_settings == data.weekly_digest_settings
 
 
-def test_legacy_store_uses_safe_notification_defaults() -> None:
-    restored = feature_store_data_from_dict({"schema_version": 6})
-
-    assert restored.appliance_notification_preferences == {}
-    assert restored.notification_delivery_state == {}
-    assert restored.weekly_digest_settings == {}
 
 
 def test_expected_schedule_settings_and_evidence_round_trip() -> None:
@@ -1411,10 +1252,3 @@ def test_expected_schedule_settings_and_evidence_round_trip() -> None:
 
     assert restored.appliance_schedule_settings == data.appliance_schedule_settings
     assert restored.appliance_schedule_evidence == data.appliance_schedule_evidence
-
-
-def test_v7_store_uses_safe_expected_schedule_defaults() -> None:
-    restored = feature_store_data_from_dict({"schema_version": 7})
-
-    assert restored.appliance_schedule_settings == {}
-    assert restored.appliance_schedule_evidence == {}

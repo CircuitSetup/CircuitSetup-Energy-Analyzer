@@ -137,7 +137,7 @@ views:
             entities:
               - entity: sensor.mains_nilm_nilm_unknown_loads
                 name: Inventory
-              - entity: sensor.mains_nilm_nilm_discovered_signatures
+              - entity: sensor.mains_nilm_nilm_signature_count
                 name: Signatures
               - entity: sensor.mains_nilm_monitored_coverage
                 name: Known Load Share
@@ -171,8 +171,6 @@ views:
               type: entities
               title: Utility comparison
               entities:
-                - entity: sensor.mains_nilm_utility_comparison_difference
-                  name: Utility Difference
                 - entity: sensor.mains_nilm_utility_comparison_status
                   name: Utility Status
           - type: statistics-graph

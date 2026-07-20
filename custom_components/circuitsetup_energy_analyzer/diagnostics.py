@@ -9,17 +9,10 @@ from .appliance_detail import (
 )
 from .const import (
     CONF_ENTITY_DETAIL_LEVEL,
-    CONF_ENTITY_MODEL_VERSION,
     DEFAULT_ENTITY_DETAIL_LEVEL,
     DOMAIN,
-    ENTITY_MODEL_COMPACT,
 )
-from .entity_catalog import (
-    compact_migration_preview_for_hass,
-    legacy_compatibility_keys_for_coordinator,
-    legacy_entity_registry_entries_for_hass,
-    selected_entity_groups_for_coordinator,
-)
+from .entity_catalog import selected_entity_groups_for_coordinator
 
 try:
     from homeassistant.helpers import device_registry as dr
@@ -158,14 +151,7 @@ def _entity_model_summary(hass: Any, entry: Any) -> dict[str, Any]:
             (),
             {"options": options, "entry_data": data},
         )()
-    preview = compact_migration_preview_for_hass(hass, entry_id=entry_id)
     return {
-        "version": _entry_value(
-            data,
-            options,
-            CONF_ENTITY_MODEL_VERSION,
-            ENTITY_MODEL_COMPACT,
-        ),
         "detail_level": _entry_value(
             data,
             options,
@@ -176,13 +162,6 @@ def _entity_model_summary(hass: Any, entry: Any) -> dict[str, Any]:
             group.value for group in selected_entity_groups_for_coordinator(
                 metadata_source
             )
-        ),
-        "desired_entity_count": int(preview.get("after_count", 0) or 0),
-        "legacy_entity_count": len(
-            legacy_entity_registry_entries_for_hass(hass, entry_id=entry_id)
-        ),
-        "legacy_compatibility_key_count": len(
-            legacy_compatibility_keys_for_coordinator(metadata_source)
         ),
     }
 

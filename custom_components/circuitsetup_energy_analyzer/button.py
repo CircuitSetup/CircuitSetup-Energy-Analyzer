@@ -70,20 +70,6 @@ CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (
         args_fn=lambda circuit_id: (circuit_id,),
         icon="mdi:school-outline",
     ),
-    CircuitButtonDescription(
-        key="start_maintenance",
-        name_suffix="Pause Alerts",
-        method_name="async_start_maintenance",
-        args_fn=lambda circuit_id: (circuit_id, "", None, False),
-        icon="mdi:bell-pause-outline",
-    ),
-    CircuitButtonDescription(
-        key="end_maintenance",
-        name_suffix="Resume Alerts",
-        method_name="async_end_maintenance",
-        args_fn=lambda circuit_id: (circuit_id, False),
-        icon="mdi:bell-ring-outline",
-    ),
 )
 
 GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
@@ -142,8 +128,6 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         """Return whether the action is currently usable."""
         return _button_availability_reason(
             self.entity_description.key,
-            self.circuit_id,
-            self.coordinator_state,
             self.coordinator,
         ) is None
 
@@ -152,8 +136,6 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         """Expose why a daily action is unavailable when relevant."""
         reason = _button_availability_reason(
             self.entity_description.key,
-            self.circuit_id,
-            self.coordinator_state,
             self.coordinator,
         )
         if reason is None:
@@ -164,8 +146,6 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         """Run the circuit action."""
         reason = _button_availability_reason(
             self.entity_description.key,
-            self.circuit_id,
-            self.coordinator_state,
             self.coordinator,
         )
         if reason is not None:
@@ -294,8 +274,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             descriptions,
             raw_circuit,
             coordinator,
-            hass=hass,
-            entry_id=entry_id,
         )
         entities.extend(
             CircuitAnalyzerButton(
@@ -337,19 +315,11 @@ def button_description_applies(
 ) -> bool:
     """Return whether a daily button is useful for this circuit."""
     del coordinator
-    if description.key not in {
-        "relearn_baseline",
-        "start_maintenance",
-        "end_maintenance",
-    }:
-        return True
     return supports_daily_circuit_controls(circuit)
 
 
 def _button_availability_reason(
     button_key: str,
-    circuit_id: str,
-    state: Any,
     coordinator: Any,
 ) -> str | None:
     method_name = next(
@@ -365,18 +335,12 @@ def _button_availability_reason(
     ):
         return "action_unavailable"
 
-    if button_key == "start_maintenance" and _maintenance_active(state, circuit_id):
-        return "maintenance_active"
-    if button_key == "end_maintenance" and not _maintenance_active(state, circuit_id):
-        return "maintenance_inactive"
     return None
 
 
 def _availability_reason_label(reason: str) -> str:
     return {
         "action_unavailable": "The analyzer action is unavailable.",
-        "maintenance_active": "Alerts are already paused for this circuit.",
-        "maintenance_inactive": "Alerts are not paused for this circuit.",
     }.get(reason, reason.replace("_", " "))
 
 
@@ -391,11 +355,4 @@ def _availability_attributes(reason: str) -> dict[str, str]:
 def _availability_next_step(reason: str) -> str:
     return {
         "action_unavailable": "Reload the integration or check the system log.",
-        "maintenance_active": "Use Resume Alerts when work is complete.",
-        "maintenance_inactive": "Use Pause Alerts before resuming alerts.",
     }.get(reason, "Review the circuit controls and try again.")
-
-
-def _maintenance_active(state: Any, circuit_id: str) -> bool:
-    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
-    return isinstance(maintenance, Mapping) and maintenance.get("active") is True

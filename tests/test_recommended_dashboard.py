@@ -349,7 +349,6 @@ def test_generated_dashboard_matches_glance_columns_to_visible_entities() -> Non
     } == {
         "Top appliances right now": 2,
         "Top energy users today": 2,
-        "Solar-covered share": 2,
         "Mains rollups": 2,
         "Unknown load signals": 2,
         "NILM review": 2,
@@ -423,7 +422,6 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     assert "sensor.fridge_daily_energy_usage" in refs
     assert "sensor.fridge_cost_cycle" in refs
     assert "sensor.fridge_cost_cycle_forecast" in refs
-    assert "sensor.fridge_solar_flexible_load_coverage" in refs
     assert "sensor.fridge_energy_summary" in refs
     assert "sensor.fridge_activity_summary" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
@@ -444,14 +442,6 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
             "entity": "sensor.mains_cost_cycle_forecast",
             "name": "Mains NILM Projected cost",
         },
-    ]
-    assert _card_with_title(todays_energy, "Solar-covered share")["entities"] == [
-        {
-            "entity": "sensor.fridge_solar_flexible_load_coverage",
-            "name": "Refrigerator",
-        },
-        {"entity": "sensor.hvac_solar_flexible_load_coverage", "name": "HVAC"},
-        {"entity": "sensor.mains_solar_flexible_load_coverage", "name": "Mains NILM"},
     ]
 
 

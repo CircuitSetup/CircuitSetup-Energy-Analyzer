@@ -964,19 +964,15 @@ def _mapping_for(values: Any, key: str) -> Mapping[str, Any]:
 
 
 def _calendar_datetime(dt: datetime, time_zone: TimeZone) -> datetime:
-    if time_zone is None or _is_naive_datetime(dt):
+    if time_zone is None:
         return dt
     return as_ha_local(dt, time_zone)
 
 
 def _sample_calendar_date(dt: datetime, time_zone: TimeZone) -> date:
-    if time_zone is None or _is_naive_datetime(dt):
+    if time_zone is None:
         return dt.date()
     return local_date(dt, time_zone)
-
-
-def _is_naive_datetime(dt: datetime) -> bool:
-    return dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None
 
 
 def _normalize_weather_mode(value: Any, temperature: float | None) -> str:

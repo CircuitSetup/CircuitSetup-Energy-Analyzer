@@ -467,53 +467,6 @@ async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
     }
 
 
-@pytest.mark.asyncio
-async def test_compact_entity_model_repair_is_single_integration_issue(
-    monkeypatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import repairs
-
-    calls = []
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    issue_registry_module = ModuleType("homeassistant.helpers.issue_registry")
-
-    class FakeIssueSeverity:
-        WARNING = "warning"
-        ERROR = "error"
-
-    def fake_create_issue(*args, **kwargs):
-        calls.append((args, kwargs))
-
-    issue_registry_module.IssueSeverity = FakeIssueSeverity
-    issue_registry_module.async_create_issue = fake_create_issue
-    helpers_module.issue_registry = issue_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.issue_registry",
-        issue_registry_module,
-    )
-
-    await repairs.async_create_compact_entity_model_issue(
-        SimpleNamespace(),
-        "entry-1",
-        legacy_count=3,
-    )
-
-    assert len(calls) == 1
-    args, kwargs = calls[0]
-    assert args[:3] == (
-        SimpleNamespace(),
-        DOMAIN,
-        "compact_entity_model_available_entry-1",
-    )
-    assert kwargs["translation_key"] == "compact_entity_model_available"
-    assert kwargs["is_fixable"] is False
-    assert kwargs["is_persistent"] is True
-    assert kwargs["data"]["legacy_count"] == 3
-    assert "Migrate To Compact Entity Model" in kwargs["data"]["recommended_action"]
 
 
 def test_nilm_label_schema_validates_required_fields() -> None:
@@ -3461,12 +3414,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             self,
             circuit_id: str,
             cycle_start_day: object = None,
-            default_rate_per_kwh: object = None,
-            tou_rate_per_kwh: object = None,
-            tou_start: object = None,
-            tou_end: object = None,
-            tou_weekdays: object = None,
-            tou_name: object = None,
         ) -> None:
             self.calls.append(
                 (
@@ -3474,12 +3421,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
                     (
                         circuit_id,
                         cycle_start_day,
-                        default_rate_per_kwh,
-                        tou_rate_per_kwh,
-                        tou_start,
-                        tou_end,
-                        tou_weekdays,
-                        tou_name,
                     ),
                 )
             )
@@ -3722,12 +3663,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             data={
                 "circuit_id": "fridge",
                 "cycle_start_day": 1,
-                "default_rate_per_kwh": 0.20,
-                "tou_rate_per_kwh": 0.30,
-                "tou_start": "17:00",
-                "tou_end": "21:00",
-                "tou_weekdays": "0,1,2,3,4",
-                "tou_name": "Peak",
             }
         )
     )
@@ -3845,7 +3780,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_set_billing_cycle_settings", ("fridge", 15, 300.0, 0.9)),
         (
             "async_set_cost_settings",
-            ("fridge", 1, 0.20, 0.30, "17:00", "21:00", "0,1,2,3,4", "Peak"),
+            ("fridge", 1),
         ),
         ("async_set_standby_settings", ("fridge", 24, 8.0, 25.0)),
         ("async_set_capacity_settings", ("fridge", 20.0, 0.8)),
@@ -3878,55 +3813,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     ]
 
 
-@pytest.mark.asyncio
-async def test_set_circuit_sensitivity_service_normalizes_legacy_presets() -> None:
-    from custom_components.circuitsetup_energy_analyzer.services import (
-        SERVICE_SET_CIRCUIT_SENSITIVITY,
-        async_setup_services,
-    )
-
-    class FakeServices:
-        def __init__(self) -> None:
-            self.registered: dict[tuple[str, str], object] = {}
-
-        def async_register(self, domain, service, handler, schema=None) -> None:
-            self.registered[(domain, service)] = handler
-
-    class FakeCoordinator:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, str]] = []
-
-        def async_set_updated_data(self, data) -> None:
-            return None
-
-        def has_circuit(self, circuit_id: str) -> bool:
-            return circuit_id == "fridge"
-
-        async def async_set_circuit_sensitivity(
-            self,
-            circuit_id: str,
-            preset: str,
-        ) -> None:
-            self.calls.append((circuit_id, preset))
-
-    coordinator = FakeCoordinator()
-    hass = SimpleNamespace(
-        data={DOMAIN: {"entry-1": coordinator}},
-        services=FakeServices(),
-        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
-    )
-
-    await async_setup_services(hass)
-
-    for legacy, canonical in (
-        ("low", "quiet"),
-        ("standard", "balanced"),
-        ("high", "sensitive"),
-    ):
-        await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
-            SimpleNamespace(data={"circuit_id": "fridge", "preset": legacy})
-        )
-        assert coordinator.calls[-1] == ("fridge", canonical)
 
 
 @pytest.mark.asyncio

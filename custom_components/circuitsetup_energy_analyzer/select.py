@@ -45,24 +45,6 @@ DASHBOARD_LAYOUT_LABELS = {
     DASHBOARD_LAYOUT_STANDARD: "Standard",
     DASHBOARD_LAYOUT_EXPERT: "Expert",
 }
-SENSITIVITY_SELECT_ALIASES = {
-    "low": "quiet",
-    "quiet": "quiet",
-    "standard": "balanced",
-    "balanced": "balanced",
-    "high": "sensitive",
-    "sensitive": "sensitive",
-}
-DASHBOARD_LAYOUT_SELECT_ALIASES = {
-    DASHBOARD_LAYOUT_SIMPLE: DASHBOARD_LAYOUT_SIMPLE,
-    DASHBOARD_LAYOUT_STANDARD: DASHBOARD_LAYOUT_STANDARD,
-    DASHBOARD_LAYOUT_EXPERT: DASHBOARD_LAYOUT_EXPERT,
-    "simple": DASHBOARD_LAYOUT_SIMPLE,
-    "standard": DASHBOARD_LAYOUT_STANDARD,
-    "expert": DASHBOARD_LAYOUT_EXPERT,
-}
-
-
 @dataclass(frozen=True, slots=True)
 class CircuitSelectDescription:
     key: str
@@ -167,7 +149,6 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
         """Persist a new sensitivity preset."""
         preset = _select_option_value(
             option,
-            aliases=SENSITIVITY_SELECT_ALIASES,
             action_label=self.entity_description.name_suffix,
             valid_options=SENSITIVITY_OPTIONS,
         )
@@ -255,7 +236,6 @@ class EntityDetailLevelSelect(SelectEntity):
         """Persist and apply a new entity detail profile."""
         detail_level = _select_option_value(
             option,
-            aliases={level: level for level in ENTITY_DETAIL_LEVELS},
             action_label="entity detail level",
             valid_options=ENTITY_DETAIL_LEVELS,
         )
@@ -349,7 +329,6 @@ class DashboardLayoutSelect(SelectEntity):
         """Persist a new recommended-dashboard layout."""
         layout = _select_option_value(
             option,
-            aliases=DASHBOARD_LAYOUT_SELECT_ALIASES,
             action_label="dashboard layout",
             valid_options=DASHBOARD_LAYOUT_OPTIONS,
         )
@@ -381,8 +360,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             descriptions,
             raw_circuit,
             coordinator,
-            hass=hass,
-            entry_id=entry_id,
         )
         entities.extend(
             CircuitAlertSensitivitySelect(
@@ -442,13 +419,12 @@ def _action_unavailable_attributes() -> dict[str, str]:
 def _select_option_value(
     option: Any,
     *,
-    aliases: Mapping[str, str],
     action_label: str,
     valid_options: list[str] | tuple[str, ...],
 ) -> str:
     normalized = str(option or "").strip().lower()
-    if normalized in aliases:
-        return aliases[normalized]
+    if normalized in {value.lower() for value in valid_options}:
+        return normalized
     choices = ", ".join(valid_options)
     raise HomeAssistantError(
         f"Cannot set {action_label.strip().lower()} to {option!r}. "

@@ -15,18 +15,15 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 
 
-def test_normalize_sensitivity_accepts_friendly_and_legacy_names() -> None:
+def test_normalize_sensitivity_accepts_current_names() -> None:
     from custom_components.circuitsetup_energy_analyzer.ux import (
         alert_policy_name_for_sensitivity,
         normalize_sensitivity,
     )
 
     assert normalize_sensitivity("quiet") == "quiet"
-    assert normalize_sensitivity("low") == "quiet"
     assert normalize_sensitivity("balanced") == "balanced"
-    assert normalize_sensitivity("standard") == "balanced"
     assert normalize_sensitivity("sensitive") == "sensitive"
-    assert normalize_sensitivity("high") == "sensitive"
     assert normalize_sensitivity("surprising") == "balanced"
     assert alert_policy_name_for_sensitivity("quiet") == "low"
     assert alert_policy_name_for_sensitivity("balanced") == "standard"
@@ -264,31 +261,6 @@ def test_alert_evidence_detail_labels_known_and_fallback_metrics() -> None:
         ) == metadata
 
 
-def test_alert_evidence_detail_recovers_legacy_power_quality_metric() -> None:
-    from custom_components.circuitsetup_energy_analyzer.ux import (
-        alert_evidence_detail,
-    )
-
-    alert = AlertEvidence(
-        timestamp=datetime(2026, 7, 10, tzinfo=UTC),
-        circuit_id="oven",
-        severity=Severity.WARNING,
-        message="Reactive behavior changed.",
-        feature="resistive_load_became_reactive",
-        features={
-            "reactive_power": 12.5,
-            "reactive_to_real_ratio": 13.0,
-            "power_factor": 0.0,
-        },
-        observed_value=0.14248837235748318,
-        baseline_value=0.10285714285714286,
-    )
-
-    detail = alert_evidence_detail(alert)
-
-    assert detail["value_metric"] == "reactive_to_real_ratio"
-    assert detail["value_label"] == "Reactive-to-real power ratio"
-    assert detail["value_format"] == "percentage"
 
 
 def test_alert_evidence_detail_bounds_large_contributing_metric_attributes() -> None:

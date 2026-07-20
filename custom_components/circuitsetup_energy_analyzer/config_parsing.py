@@ -261,7 +261,7 @@ def _circuit_config_from_raw(
     if not isinstance(raw_circuit, dict):
         return None
 
-    circuit_id = raw_circuit.get("circuit_id") or raw_circuit.get("id")
+    circuit_id = raw_circuit.get("circuit_id")
     if not circuit_id:
         return None
 
@@ -289,41 +289,34 @@ def _circuit_config_from_raw(
         energy_usage_window_days=_positive_int_from_raw(
             raw_circuit,
             "energy_usage_window_days",
-            "usage_window_days",
             default=7,
         ),
         daily_energy_spike_ratio=_positive_float_from_raw(
             raw_circuit,
             "daily_energy_spike_ratio",
-            "usage_spike_ratio",
             default=0.25,
         ),
         daily_energy_goal_kwh=_optional_positive_float_from_raw(
             raw_circuit,
             "daily_energy_goal_kwh",
-            "daily_goal_kwh",
         ),
         energy_goal_alert_ratio=_positive_float_from_raw(
             raw_circuit,
             "energy_goal_alert_ratio",
-            "goal_alert_ratio",
             default=1.0,
         ),
         billing_cycle_start_day=_positive_int_from_raw(
             raw_circuit,
             "billing_cycle_start_day",
-            "cycle_start_day",
             default=1,
         ),
         billing_cycle_budget_kwh=_optional_positive_float_from_raw(
             raw_circuit,
             "billing_cycle_budget_kwh",
-            "budget_kwh",
         ),
         billing_cycle_budget_alert_ratio=_positive_float_from_raw(
             raw_circuit,
             "billing_cycle_budget_alert_ratio",
-            "budget_alert_ratio",
             default=1.0,
         ),
         billing_cycle_min_elapsed_days=_positive_int_from_raw(
@@ -334,50 +327,30 @@ def _circuit_config_from_raw(
         cost_cycle_start_day=_positive_int_from_raw(
             raw_circuit,
             "cost_cycle_start_day",
-            "cycle_start_day",
             default=1,
         ),
-        default_rate_per_kwh=_optional_positive_float_from_raw(
-            raw_circuit,
-            "default_rate_per_kwh",
-            "cost_default_rate_per_kwh",
-        ),
-        tou_rate_per_kwh=_optional_positive_float_from_raw(
-            raw_circuit,
-            "tou_rate_per_kwh",
-            "cost_tou_rate_per_kwh",
-        ),
-        tou_start=_optional_string_from_raw(raw_circuit, "tou_start", "cost_tou_start"),
-        tou_end=_optional_string_from_raw(raw_circuit, "tou_end", "cost_tou_end"),
-        tou_weekdays=_weekday_tuple_value(raw_circuit.get("tou_weekdays")),
-        tou_name=str(raw_circuit.get("tou_name") or "Peak"),
         demand_window_minutes=_positive_int_from_raw(
             raw_circuit,
             "demand_window_minutes",
-            "demand_window",
             default=15,
         ),
         demand_limit_w=_optional_positive_float_from_raw(
             raw_circuit,
             "demand_limit_w",
-            "demand_limit",
         ),
         standby_window_hours=_positive_int_from_raw(
             raw_circuit,
             "standby_window_hours",
-            "standby_window",
             default=48,
         ),
         standby_threshold_w=_positive_float_from_raw(
             raw_circuit,
             "standby_threshold_w",
-            "standby_threshold",
             default=8.0,
         ),
         always_on_alert_w=_optional_positive_float_from_raw(
             raw_circuit,
             "always_on_alert_w",
-            "always_on_limit_w",
         ),
         standby_min_samples=_positive_int_from_raw(
             raw_circuit,
@@ -389,33 +362,6 @@ def _circuit_config_from_raw(
 
 def _appliance_profile_from_raw_value(value: Any) -> ApplianceProfile:
     normalized = str(value or ApplianceProfile.MIXED.value).strip().lower()
-    aliases = {
-        "hvac_system": ApplianceProfile.HVAC.value,
-        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "blower": ApplianceProfile.HVAC_BLOWER.value,
-        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
-        "well_pump": ApplianceProfile.WATER_PUMP.value,
-        "booster_pump": ApplianceProfile.WATER_PUMP.value,
-        "car_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charging": ApplianceProfile.EV_CHARGER.value,
-        "level2_charger": ApplianceProfile.EV_CHARGER.value,
-        "level_2_charger": ApplianceProfile.EV_CHARGER.value,
-        "wall_connector": ApplianceProfile.EV_CHARGER.value,
-        "microwave_oven": ApplianceProfile.MICROWAVE.value,
-        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
-    }
-    normalized = aliases.get(normalized, normalized)
     return ApplianceProfile(normalized)
 
 
@@ -427,8 +373,6 @@ def _power_flow_mode_from_raw(
     raw_power_flow = raw_circuit.get("power_flow")
     if raw_power_flow is not None:
         value = str(raw_power_flow).strip().lower()
-        if value == "bidirectional":
-            return PowerFlowMode.MAINS_NET
         try:
             return PowerFlowMode(value)
         except ValueError:
@@ -444,12 +388,8 @@ def _power_flow_mode_from_raw(
 
 
 def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:
-    raw_sensors = raw_circuit.get("sensors")
-    if raw_sensors is None:
-        raw_sensors = raw_circuit.get("source_entities", [])
-
     refs: list[SensorRef] = []
-    for raw_sensor in raw_sensors:
+    for raw_sensor in raw_circuit.get("sensors", []):
         ref = _sensor_ref_from_raw(raw_sensor)
         if ref is not None:
             refs.append(ref)
@@ -503,14 +443,6 @@ def _optional_positive_float_from_raw(
     return None
 
 
-def _optional_string_from_raw(raw: dict[str, Any], *keys: str) -> str | None:
-    for key in keys:
-        value = raw.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return None
-
-
 def _optional_positive_float_value(
     value: Any,
     *,
@@ -521,30 +453,6 @@ def _optional_positive_float_value(
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0.0 else default
-
-
-def _weekday_tuple_value(
-    value: Any,
-    *,
-    default: tuple[int, ...] = (),
-) -> tuple[int, ...]:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        raw_items: Any = value.split(",")
-    elif isinstance(value, (list, tuple, set)):
-        raw_items = value
-    else:
-        return default
-    weekdays: list[int] = []
-    for item in raw_items:
-        try:
-            weekday = int(str(item).strip())
-        except (TypeError, ValueError):
-            continue
-        if 0 <= weekday <= 6 and weekday not in weekdays:
-            weekdays.append(weekday)
-    return tuple(weekdays) if weekdays else default
 
 
 def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:

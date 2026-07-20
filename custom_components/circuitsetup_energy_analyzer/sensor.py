@@ -89,7 +89,7 @@ from .nilm_virtual import (
 from .notifications import POWER_QUALITY_ALERT_FEATURES
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
-from .tariff import configured_electricity_rate
+from .tariff import configured_electricity_rate, global_cost_settings
 from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
@@ -147,14 +147,6 @@ SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_a
 def anomaly_score_value(state: Any, circuit_id: str) -> float:
     """Return the current anomaly score for a circuit."""
     return float(getattr(state, "anomaly_score_by_circuit", {}).get(circuit_id, 0.0))
-
-
-def last_event_value(state: Any, circuit_id: str) -> str | None:
-    """Return the last event type value for a circuit."""
-    event = getattr(state, "last_event_by_circuit", {}).get(circuit_id)
-    if event is None:
-        return None
-    return event.event_type.value
 
 
 def health_summary_value(state: Any, circuit_id: str) -> str:
@@ -268,23 +260,6 @@ def energy_dashboard_status_value(state: Any, circuit_id: str) -> str:
     )
 
 
-def alert_evidence_value(state: Any, circuit_id: str) -> str:
-    """Return the feature named in the latest alert evidence."""
-    evidence = getattr(state, "alert_evidence_by_circuit", {}).get(circuit_id, {})
-    if isinstance(evidence, Mapping):
-        if evidence.get("feature_name"):
-            return str(evidence["feature_name"])
-        if evidence.get("feature"):
-            return friendly_feature_name(evidence.get("feature"))
-        return ""
-
-    alerts = getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, [])
-    if alerts:
-        feature = getattr(alerts[-1], "feature", "")
-        return friendly_feature_name(feature) if feature else ""
-    return ""
-
-
 def recent_activity_value(state: Any, circuit_id: str) -> str:
     """Return the latest recent activity title for a circuit."""
     return str(
@@ -292,13 +267,6 @@ def recent_activity_value(state: Any, circuit_id: str) -> str:
             circuit_id,
             "No recent activity",
         )
-    )
-
-
-def recent_activity_count_value(state: Any, circuit_id: str) -> int:
-    """Return the number of retained activity items in the recent window."""
-    return int(
-        getattr(state, "recent_activity_count_by_circuit", {}).get(circuit_id, 0)
     )
 
 
@@ -404,35 +372,6 @@ def weather_context_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     return {}
 
 
-def outdoor_temperature_value(state: Any, circuit_id: str) -> float | None:
-    """Return the graphable outdoor temperature for an HVAC circuit."""
-    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
-    if not isinstance(evidence, Mapping):
-        return None
-    value = _numeric_value(evidence.get("current_outdoor_temperature"))
-    return None if value is None else round(value, 3)
-
-
-def outdoor_temperature_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
-    """Return outdoor temperature conversion evidence."""
-    evidence = getattr(state, "weather_context_by_circuit", {}).get(circuit_id)
-    if not isinstance(evidence, Mapping):
-        return {}
-    attributes: dict[str, Any] = {
-        "temperature_unit": _outdoor_temperature_unit_from_evidence(evidence),
-    }
-    temperature_f = _numeric_value(evidence.get("temperature_f"))
-    if temperature_f is not None:
-        attributes["temperature_f"] = round(temperature_f, 3)
-    if evidence.get("temperature_source_entity"):
-        attributes["temperature_source_entity"] = str(
-            evidence["temperature_source_entity"],
-        )
-    if evidence.get("temperature_source_unit"):
-        attributes["temperature_source_unit"] = str(evidence["temperature_source_unit"])
-    return attributes
-
-
 def rain_pump_correlation_value(state: Any, circuit_id: str) -> str:
     """Return a friendly rain/pump correlation status."""
     evidence = getattr(state, "rain_pump_context_by_circuit", {}).get(circuit_id)
@@ -470,20 +409,6 @@ def water_flow_mismatch_minutes_value(state: Any, circuit_id: str) -> float:
     return float(evidence.get("mismatch_minutes", 0.0) or 0.0)
 
 
-def _outdoor_temperature_unit_from_evidence(evidence: Mapping[str, Any]) -> str:
-    unit = str(
-        evidence.get("temperature_unit")
-        or evidence.get("current_outdoor_temperature_unit")
-        or "",
-    ).strip()
-    lowered = unit.lower()
-    if lowered in {"°c", "c", "celsius"}:
-        return UnitOfTemperature.CELSIUS
-    if lowered in {"°f", "f", "fahrenheit"}:
-        return UnitOfTemperature.FAHRENHEIT
-    return unit or UnitOfTemperature.FAHRENHEIT
-
-
 def _weather_context_status(evidence: Any) -> str:
     if isinstance(evidence, Mapping):
         return str(evidence.get("status") or "no_temperature_source")
@@ -504,13 +429,6 @@ def _water_context_status(evidence: Any) -> str:
     if isinstance(evidence, str):
         return evidence
     return "unconfigured"
-
-
-def _numeric_value(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def run_cycle_count_value(state: Any, circuit_id: str) -> int:
@@ -676,47 +594,6 @@ def solar_generation_power_value(state: Any, circuit_id: str) -> float:
     )
 
 
-def solar_site_consumption_power_value(state: Any, circuit_id: str) -> float:
-    """Return instantaneous site consumption from solar plus signed grid power."""
-    return float(
-        getattr(state, "solar_site_consumption_w_by_circuit", {}).get(
-            circuit_id,
-            0.0,
-        )
-    )
-
-
-def solar_grid_import_power_value(state: Any, circuit_id: str) -> float:
-    """Return instantaneous grid import power in watts."""
-    return float(
-        getattr(state, "solar_grid_import_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
-
-
-def solar_grid_export_power_value(state: Any, circuit_id: str) -> float:
-    """Return instantaneous grid export power in watts."""
-    return float(
-        getattr(state, "solar_grid_export_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
-
-
-def solar_self_consumption_value(state: Any, circuit_id: str) -> float:
-    """Return percent of generated solar consumed on site."""
-    return float(
-        getattr(state, "solar_self_consumption_percent_by_circuit", {}).get(
-            circuit_id,
-            0.0,
-        )
-    )
-
-
-def solar_powered_value(state: Any, circuit_id: str) -> float:
-    """Return percent of current site load powered by solar."""
-    return float(
-        getattr(state, "solar_powered_percent_by_circuit", {}).get(circuit_id, 0.0)
-    )
-
-
 def solar_flow_status_value(state: Any, circuit_id: str) -> str:
     """Return the instantaneous solar-flow diagnostic status."""
     return str(
@@ -734,60 +611,12 @@ def solar_surplus_power_value(state: Any, circuit_id: str) -> float:
     )
 
 
-def solar_load_shift_power_value(state: Any, circuit_id: str) -> float:
-    """Return surplus power available after the load-shift threshold is met."""
-    return float(
-        getattr(state, "solar_load_shift_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
-
-
-def solar_flexible_load_power_value(state: Any, circuit_id: str) -> float:
-    """Return current power used by configured flexible solar loads."""
-    return float(
-        getattr(state, "solar_flexible_load_power_w_by_circuit", {}).get(
-            circuit_id,
-            0.0,
-        )
-    )
-
-
-def solar_flexible_load_coverage_value(state: Any, circuit_id: str) -> float:
-    """Return percent of active flexible load estimated to be solar-covered."""
-    return float(
-        getattr(
-            state,
-            "solar_flexible_load_coverage_percent_by_circuit",
-            {},
-        ).get(circuit_id, 0.0)
-    )
-
-
 def solar_surplus_status_value(state: Any, circuit_id: str) -> str:
     """Return the solar surplus/load-shift diagnostic status."""
     return str(
         getattr(state, "solar_surplus_status_by_circuit", {}).get(
             circuit_id,
             "missing_mains",
-        )
-    )
-
-
-def solar_load_shift_status_value(state: Any, circuit_id: str) -> str:
-    """Return whether flexible loads are solar-covered or waiting for surplus."""
-    return str(
-        getattr(state, "solar_load_shift_status_by_circuit", {}).get(
-            circuit_id,
-            "not_applicable",
-        )
-    )
-
-
-def utility_comparison_difference_value(state: Any, circuit_id: str) -> float:
-    """Return measured-vs-utility kWh difference as a percentage."""
-    return float(
-        getattr(state, "utility_comparison_difference_percent_by_circuit", {}).get(
-            circuit_id,
-            0.0,
         )
     )
 
@@ -822,16 +651,6 @@ def billing_cycle_forecast_value(state: Any, circuit_id: str) -> float:
     )
 
 
-def billing_cycle_budget_usage_value(state: Any, circuit_id: str) -> float:
-    """Return current billing-cycle usage as a percent of the configured budget."""
-    return float(
-        getattr(state, "billing_cycle_budget_usage_by_circuit", {}).get(
-            circuit_id,
-            0.0,
-        )
-    )
-
-
 def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
     """Return the billing-cycle tracker status."""
     return str(
@@ -839,18 +658,6 @@ def billing_cycle_status_value(state: Any, circuit_id: str) -> str:
             circuit_id,
             "no_budget",
         )
-    )
-
-
-def cost_current_rate_value(state: Any, circuit_id: str) -> float:
-    """Return the active cost rate for a circuit."""
-    cost_rates = getattr(state, "cost_current_rate_by_circuit", {})
-    fallback_rate = (
-        cost_rates.get(circuit_id, 0.0) if isinstance(cost_rates, Mapping) else 0.0
-    )
-    return effective_electricity_rate(
-        getattr(state, "utility_cost_rate_by_circuit", {}),
-        fallback_rate,
     )
 
 
@@ -880,13 +687,6 @@ def always_on_power_value(state: Any, circuit_id: str) -> float:
     """Return estimated Always On power for a circuit."""
     return float(
         getattr(state, "always_on_power_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
-
-
-def standby_threshold_value(state: Any, circuit_id: str) -> float:
-    """Return the configured standby threshold in watts."""
-    return float(
-        getattr(state, "standby_threshold_w_by_circuit", {}).get(circuit_id, 0.0)
     )
 
 
@@ -1443,10 +1243,6 @@ def _mapping_attributes(field_name: str) -> Callable[[Any, str], dict[str, Any] 
     return attributes
 
 
-def _sensitivity_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
-    return {"preset": sensitivity_value(state, circuit_id)}
-
-
 _STATUS_LABEL_OVERRIDES: Mapping[str, str] = {
     "nilm_review": "NILM Review",
     "tou_peak": "TOU Peak",
@@ -1641,24 +1437,16 @@ class DiagnosticSensorDescription:
 
 SENSOR_ICONS: Mapping[str, str] = {
     "anomaly_score": "mdi:alert-octagon-outline",
-    "last_event": "mdi:timeline-clock-outline",
     "health_summary": "mdi:heart-pulse",
     "activity_summary": "mdi:run-fast",
     "electrical_health": "mdi:lightning-bolt-circle",
     "energy_summary": "mdi:home-lightning-bolt-outline",
-    "readiness": "mdi:check-decagram-outline",
-    "learning_progress": "mdi:school-outline",
-    "data_quality_checklist": "mdi:database-alert-outline",
     "energy_dashboard_status": "mdi:view-dashboard-outline",
-    "alert_evidence": "mdi:clipboard-alert-outline",
     "recent_activity": "mdi:timeline-text-outline",
-    "recent_activity_count": "mdi:counter",
-    "sensitivity": "mdi:tune-variant",
     "settings_suggestions": "mdi:tune-variant",
     "circuit_mode": "mdi:transmission-tower",
     "power_flow": "mdi:swap-horizontal",
     "power_quality_score": "mdi:sine-wave",
-    "power_quality_evidence": "mdi:lightning-bolt-circle",
     "reactive_power_drift": "mdi:flash-triangle-outline",
     "apparent_power_drift": "mdi:alpha-v-circle-outline",
     "power_factor_drift": "mdi:cosine-wave",
@@ -1667,7 +1455,6 @@ SENSOR_ICONS: Mapping[str, str] = {
     "nilm_unmatched_load_percentage": "mdi:chart-scatter-plot",
     "nilm_topology_status": "mdi:source-branch",
     "weather_context": "mdi:thermometer-lines",
-    "outdoor_temperature": "mdi:thermometer",
     "rain_pump_correlation": "mdi:weather-rainy",
     "water_flow_correlation": "mdi:water-sync",
     "water_flow_mismatch_minutes": "mdi:pipe-leak",
@@ -1679,7 +1466,6 @@ SENSOR_ICONS: Mapping[str, str] = {
     "run_cycle_count": "mdi:counter",
     "run_cycle_runtime": "mdi:timer-outline",
     "run_cycle_duty_cycle": "mdi:percent-outline",
-    "run_cycle_status": "mdi:run",
     "current_demand": "mdi:gauge",
     "peak_demand": "mdi:chart-line-variant",
     "demand_limit_usage": "mdi:gauge-full",
@@ -1689,38 +1475,21 @@ SENSOR_ICONS: Mapping[str, str] = {
     "capacity_usage": "mdi:fuse",
     "capacity_status": "mdi:fuse-alert",
     "leg_imbalance": "mdi:scale-balance",
-    "leg_imbalance_status": "mdi:scale-unbalanced",
     "metric_consistency_score": "mdi:clipboard-check-outline",
-    "metric_consistency_status": "mdi:clipboard-check-outline",
     "balance_power": "mdi:scale-balance",
     "monitored_power": "mdi:flash-outline",
     "monitored_coverage": "mdi:radar",
     "balance_status": "mdi:scale-balance",
     "solar_generation_power": "mdi:solar-power-variant",
-    "solar_site_consumption_power": "mdi:home-lightning-bolt-outline",
-    "solar_grid_import_power": "mdi:transmission-tower-import",
-    "solar_grid_export_power": "mdi:transmission-tower-export",
-    "solar_self_consumption": "mdi:home-percent-outline",
-    "solar_powered": "mdi:solar-power",
     "solar_flow_status": "mdi:swap-horizontal-bold",
     "solar_surplus_power": "mdi:weather-sunny-alert",
-    "solar_load_shift_power": "mdi:clock-fast",
-    "solar_flexible_load_power": "mdi:power-plug-outline",
-    "solar_flexible_load_coverage": "mdi:chart-donut",
-    "solar_load_shift_status": "mdi:clock-check-outline",
     "solar_surplus_status": "mdi:weather-sunny",
-    "utility_comparison_difference": "mdi:file-compare",
     "utility_comparison_status": "mdi:receipt-text-check-outline",
     "billing_cycle_usage": "mdi:calendar-counter",
     "billing_cycle_forecast": "mdi:calendar-clock",
-    "billing_cycle_budget_usage": "mdi:cash-clock",
-    "billing_cycle_status": "mdi:calendar-check",
-    "cost_current_rate": "mdi:currency-usd",
     "cost_cycle": "mdi:cash-multiple",
     "cost_cycle_forecast": "mdi:chart-line",
-    "cost_status": "mdi:cash-check",
     "always_on_power": "mdi:power-plug",
-    "standby_threshold": "mdi:power-standby",
     "standby_status": "mdi:power-sleep",
     "always_on_limit_usage": "mdi:power-cycle",
 }
@@ -1732,11 +1501,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Anomaly Score",
         value_fn=anomaly_score_value,
         state_class=SensorStateClass.MEASUREMENT,
-    ),
-    DiagnosticSensorDescription(
-        key="last_event",
-        name_suffix="Last Event",
-        value_fn=last_event_value,
     ),
     DiagnosticSensorDescription(
         key="health_summary",
@@ -1763,55 +1527,16 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=energy_summary_attributes,
     ),
     DiagnosticSensorDescription(
-        key="readiness",
-        name_suffix="Readiness",
-        value_fn=readiness_value,
-        attributes_fn=_mapping_attributes("readiness_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="learning_progress",
-        name_suffix="Learning Progress",
-        value_fn=learning_progress_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("learning_progress_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="data_quality_checklist",
-        name_suffix="Data Quality Checklist",
-        value_fn=data_quality_checklist_value,
-        attributes_fn=_mapping_attributes("data_quality_checklist_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="energy_dashboard_status",
         name_suffix="Energy Dashboard Status",
         value_fn=energy_dashboard_status_value,
         attributes_fn=_mapping_attributes("energy_dashboard_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="alert_evidence",
-        name_suffix="Alert Evidence",
-        value_fn=alert_evidence_value,
-        attributes_fn=_mapping_attributes("alert_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="recent_activity",
         name_suffix="Recent Activity",
         value_fn=recent_activity_value,
         attributes_fn=_mapping_attributes("recent_activity_timeline_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="recent_activity_count",
-        name_suffix="Recent Activity Count",
-        value_fn=recent_activity_count_value,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("recent_activity_timeline_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="sensitivity",
-        name_suffix="Sensitivity",
-        value_fn=sensitivity_value,
-        attributes_fn=_sensitivity_attributes,
     ),
     DiagnosticSensorDescription(
         key="settings_suggestions",
@@ -1834,11 +1559,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Power Quality Score",
         value_fn=power_quality_score_value,
         state_class=SensorStateClass.MEASUREMENT,
-    ),
-    DiagnosticSensorDescription(
-        key="power_quality_evidence",
-        name_suffix="Power Quality Evidence",
-        value_fn=power_quality_evidence_value,
     ),
     DiagnosticSensorDescription(
         key="reactive_power_drift",
@@ -1889,14 +1609,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Weather Context",
         value_fn=weather_context_value,
         attributes_fn=weather_context_attributes,
-    ),
-    DiagnosticSensorDescription(
-        key="outdoor_temperature",
-        name_suffix="Outdoor Temperature",
-        value_fn=outdoor_temperature_value,
-        native_unit_of_measurement=None,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=outdoor_temperature_attributes,
     ),
     DiagnosticSensorDescription(
         key="rain_pump_correlation",
@@ -1978,12 +1690,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="run_cycle_status",
-        name_suffix="Run Cycle Status",
-        value_fn=run_cycle_status_value,
-        attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="current_demand",
         name_suffix="Current Demand",
         value_fn=current_demand_value,
@@ -2049,23 +1755,11 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("leg_imbalance_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="leg_imbalance_status",
-        name_suffix="Leg Imbalance Status",
-        value_fn=leg_imbalance_status_value,
-        attributes_fn=_mapping_attributes("leg_imbalance_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="metric_consistency_score",
         name_suffix="Metric Consistency Score",
         value_fn=metric_consistency_score_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("metric_consistency_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="metric_consistency_status",
-        name_suffix="Metric Consistency Status",
-        value_fn=metric_consistency_status_value,
         attributes_fn=_mapping_attributes("metric_consistency_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
@@ -2107,46 +1801,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="solar_site_consumption_power",
-        name_suffix="Solar Site Consumption Power",
-        value_fn=solar_site_consumption_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_grid_import_power",
-        name_suffix="Solar Grid Import Power",
-        value_fn=solar_grid_import_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_grid_export_power",
-        name_suffix="Solar Grid Export Power",
-        value_fn=solar_grid_export_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_self_consumption",
-        name_suffix="Solar Self Consumption",
-        value_fn=solar_self_consumption_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_powered",
-        name_suffix="Solar Powered",
-        value_fn=solar_powered_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="solar_flow_status",
         name_suffix="Solar Flow Status",
         value_fn=solar_flow_status_value,
@@ -2161,48 +1815,10 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="solar_load_shift_power",
-        name_suffix="Solar Load Shift Power",
-        value_fn=solar_load_shift_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_flexible_load_power",
-        name_suffix="Solar Flexible Load Power",
-        value_fn=solar_flexible_load_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_flexible_load_coverage",
-        name_suffix="Solar Flexible Load Coverage",
-        value_fn=solar_flexible_load_coverage_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="solar_load_shift_status",
-        name_suffix="Solar Load Shift Status",
-        value_fn=solar_load_shift_status_value,
-        attributes_fn=_mapping_attributes("solar_load_shift_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="solar_surplus_status",
         name_suffix="Solar Surplus Status",
         value_fn=solar_surplus_status_value,
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="utility_comparison_difference",
-        name_suffix="Utility Comparison Difference",
-        value_fn=utility_comparison_difference_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("utility_comparison_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="utility_comparison_status",
@@ -2227,28 +1843,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="billing_cycle_budget_usage",
-        name_suffix="Billing Cycle Budget Usage",
-        value_fn=billing_cycle_budget_usage_value,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="billing_cycle_status",
-        name_suffix="Billing Cycle Status",
-        value_fn=billing_cycle_status_value,
-        attributes_fn=_mapping_attributes("billing_cycle_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="cost_current_rate",
-        name_suffix="Cost Current Rate",
-        value_fn=cost_current_rate_value,
-        native_unit_of_measurement="$/kWh",
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="cost_cycle",
         name_suffix="Cost Cycle",
         value_fn=cost_cycle_value,
@@ -2263,23 +1857,9 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="cost_status",
-        name_suffix="Cost Status",
-        value_fn=cost_status_value,
-        attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="always_on_power",
         name_suffix="Always On Power",
         value_fn=always_on_power_value,
-        native_unit_of_measurement=UnitOfPower.WATT,
-        state_class=SensorStateClass.MEASUREMENT,
-        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
-        key="standby_threshold",
-        name_suffix="Standby Threshold",
-        value_fn=standby_threshold_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
@@ -2312,7 +1892,6 @@ _SUMMARY_SENSOR_KEYS = {
 _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
     *_SUMMARY_SENSOR_KEYS,
     "weather_context",
-    "outdoor_temperature",
     "rain_pump_correlation",
     "water_flow_correlation",
 }
@@ -2324,7 +1903,6 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "settings_suggestions",
     "daily_energy_usage",
     "weather_context",
-    "outdoor_temperature",
     "rain_pump_correlation",
     "water_flow_correlation",
     "water_flow_mismatch_minutes",
@@ -2343,30 +1921,15 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "monitored_power",
     "monitored_coverage",
     "solar_generation_power",
-    "solar_site_consumption_power",
-    "solar_grid_import_power",
-    "solar_grid_export_power",
-    "solar_self_consumption",
-    "solar_powered",
     "solar_flow_status",
     "solar_surplus_power",
-    "solar_load_shift_power",
-    "solar_flexible_load_power",
-    "solar_flexible_load_coverage",
-    "solar_load_shift_status",
     "solar_surplus_status",
-    "utility_comparison_difference",
     "utility_comparison_status",
     "billing_cycle_usage",
     "billing_cycle_forecast",
-    "billing_cycle_budget_usage",
-    "billing_cycle_status",
-    "cost_current_rate",
     "cost_cycle",
     "cost_cycle_forecast",
-    "cost_status",
     "always_on_power",
-    "standby_threshold",
     "standby_status",
     "always_on_limit_usage",
 }
@@ -2407,19 +1970,12 @@ SENSOR_ENTITY_TIER_BY_KEY: dict[str, EntityTier] = {
 
 _CORE_SENSOR_KEYS = {
     "anomaly_score",
-    "last_event",
     "health_summary",
     "activity_summary",
     "electrical_health",
     "energy_summary",
-    "readiness",
-    "learning_progress",
-    "data_quality_checklist",
     "energy_dashboard_status",
-    "alert_evidence",
     "recent_activity",
-    "recent_activity_count",
-    "sensitivity",
     "settings_suggestions",
     "circuit_mode",
     "power_flow",
@@ -2430,12 +1986,11 @@ _ENERGY_USAGE_SENSOR_KEYS = {
     "energy_usage_status",
 }
 _ENERGY_GOAL_SENSOR_KEYS = {"energy_goal_usage", "energy_goal_status"}
-_POWER_QUALITY_SENSOR_KEYS = {"power_quality_score", "power_quality_evidence"}
+_POWER_QUALITY_SENSOR_KEYS = {"power_quality_score"}
 _RUN_CYCLE_SENSOR_KEYS = {
     "run_cycle_count",
     "run_cycle_runtime",
     "run_cycle_duty_cycle",
-    "run_cycle_status",
 }
 _DEMAND_SENSOR_KEYS = {
     "current_demand",
@@ -2446,14 +2001,8 @@ _DEMAND_SENSOR_KEYS = {
     "demand_status",
 }
 _CAPACITY_SENSOR_KEYS = {"capacity_usage", "capacity_status"}
-_SPLIT_PHASE_SENSOR_KEYS = {
-    "leg_imbalance",
-    "leg_imbalance_status",
-}
-_METRIC_CONSISTENCY_SENSOR_KEYS = {
-    "metric_consistency_score",
-    "metric_consistency_status",
-}
+_SPLIT_PHASE_SENSOR_KEYS = {"leg_imbalance"}
+_METRIC_CONSISTENCY_SENSOR_KEYS = {"metric_consistency_score"}
 _MAINS_NILM_SENSOR_KEYS = {
     "nilm_signature_count",
     "nilm_unknown_loads",
@@ -2468,42 +2017,25 @@ _BALANCE_SENSOR_KEYS = {
 }
 _SOLAR_FLOW_SENSOR_KEYS = {
     "solar_generation_power",
-    "solar_site_consumption_power",
-    "solar_grid_import_power",
-    "solar_grid_export_power",
-    "solar_self_consumption",
-    "solar_powered",
     "solar_flow_status",
     "solar_surplus_power",
-    "solar_load_shift_power",
-    "solar_flexible_load_power",
-    "solar_flexible_load_coverage",
-    "solar_load_shift_status",
     "solar_surplus_status",
 }
-_UTILITY_COMPARISON_SENSOR_KEYS = {
-    "utility_comparison_difference",
-    "utility_comparison_status",
-}
+_UTILITY_COMPARISON_SENSOR_KEYS = {"utility_comparison_status"}
 _BILLING_SENSOR_KEYS = {
     "billing_cycle_usage",
     "billing_cycle_forecast",
-    "billing_cycle_budget_usage",
-    "billing_cycle_status",
 }
 _COST_SENSOR_KEYS = {
-    "cost_current_rate",
     "cost_cycle",
     "cost_cycle_forecast",
-    "cost_status",
 }
 _STANDBY_SENSOR_KEYS = {
     "always_on_power",
-    "standby_threshold",
     "standby_status",
     "always_on_limit_usage",
 }
-_WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context", "outdoor_temperature"}
+_WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context"}
 _RAIN_PUMP_CONTEXT_SENSOR_KEYS = {"rain_pump_correlation"}
 _WATER_FLOW_CONTEXT_SENSOR_KEYS = {
     "water_flow_correlation",
@@ -2654,10 +2186,10 @@ def sensor_description_applies(
             or _stored_settings(coordinator, "billing_settings_by_circuit", circuit)
         )
     if key in _COST_SENSOR_KEYS:
+        tariff = global_cost_settings(coordinator)
         return has_energy and (
-            _configured_positive(circuit, "default_rate_per_kwh")
-            or _configured_positive(circuit, "tou_rate_per_kwh")
-            or _stored_settings(coordinator, "cost_settings_by_circuit", circuit)
+            _configured_positive(tariff, "default_rate_per_kwh")
+            or _configured_positive(tariff, "tou_rate_per_kwh")
         )
     if key in _STANDBY_SENSOR_KEYS:
         return (
@@ -2727,48 +2259,13 @@ def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
         if isinstance(circuit, Mapping)
         else getattr(circuit, "appliance_profile", None)
     )
-    raw_profile = _appliance_profile_alias(str(raw_profile or ""))
+    raw_profile = str(raw_profile or "").strip().lower()
     try:
         return ApplianceProfile(raw_profile)
     except (TypeError, ValueError):
         return None
 
 
-def _appliance_profile_alias(raw_profile: str) -> str:
-    normalized = raw_profile.strip().lower()
-    aliases = {
-        "hvac_system": ApplianceProfile.HVAC.value,
-        "ac": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "ac_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "a_c_compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_conditioner": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "compressor": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "heat_pump": ApplianceProfile.HVAC_COMPRESSOR.value,
-        "air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "hvac_air_handler": ApplianceProfile.HVAC_BLOWER.value,
-        "blower": ApplianceProfile.HVAC_BLOWER.value,
-        "aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "electric_aux_heat": ApplianceProfile.ELECTRIC_HEAT.value,
-        "heat_strip": ApplianceProfile.ELECTRIC_HEAT.value,
-        "well_pump": ApplianceProfile.WATER_PUMP.value,
-        "booster_pump": ApplianceProfile.WATER_PUMP.value,
-        "clothes_washer": ApplianceProfile.WASHER.value,
-        "laundry_washer": ApplianceProfile.WASHER.value,
-        "washing_machine": ApplianceProfile.WASHER.value,
-        "clothes_dryer": ApplianceProfile.DRYER.value,
-        "electric_dryer": ApplianceProfile.DRYER.value,
-        "gas_dryer": ApplianceProfile.DRYER.value,
-        "microwave_oven": ApplianceProfile.MICROWAVE.value,
-        "kitchen_microwave": ApplianceProfile.MICROWAVE.value,
-        "car_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charger": ApplianceProfile.EV_CHARGER.value,
-        "vehicle_charging": ApplianceProfile.EV_CHARGER.value,
-        "level2_charger": ApplianceProfile.EV_CHARGER.value,
-        "level_2_charger": ApplianceProfile.EV_CHARGER.value,
-        "wall_connector": ApplianceProfile.EV_CHARGER.value,
-    }
-    return aliases.get(normalized, normalized)
 
 
 def _circuit_mode(circuit: Any) -> CircuitMode | None:
@@ -3069,16 +2566,7 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        """Return the native unit, allowing temperature display units to vary."""
-        if self.entity_description.key == "outdoor_temperature":
-            attributes = outdoor_temperature_attributes(
-                self.coordinator_state,
-                self.circuit_id,
-            )
-            return str(
-                attributes.get("temperature_unit")
-                or UnitOfTemperature.FAHRENHEIT,
-            )
+        """Return the sensor's native unit."""
         return self._attr_native_unit_of_measurement
 
     @property
@@ -3449,8 +2937,6 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             descriptions,
             raw_circuit,
             coordinator,
-            hass=hass,
-            entry_id=entry_id,
         )
         entities.extend(
             CircuitAnalyzerSensor(

@@ -233,7 +233,6 @@ class EvidenceActionController:
                 ),
             ),
             alert_feedback_fingerprint_for_observation(observation),
-            _legacy_alert_feedback_key_for_observation(observation),
         )
         return self._first_current_feedback(candidates)
 
@@ -256,7 +255,6 @@ class EvidenceActionController:
                 ),
             ),
             _alert_feedback_key(alert),
-            _legacy_alert_feedback_key(alert),
         )
         return self._first_current_feedback(candidates)
 
@@ -349,14 +347,6 @@ def _alert_feedback_key(
     config: Any = None,
 ) -> str:
     return alert_feedback_fingerprint(alert, config=config)
-
-
-def _legacy_alert_feedback_key(alert: AlertEvidence) -> str:
-    return f"{alert.circuit_id}:{_alert_feature(alert)}"
-
-
-def _legacy_alert_feedback_key_for_observation(observation: Observation) -> str:
-    return f"{observation.circuit_id}:{observation.feature or 'alert'}"
 
 
 def _alert_feedback_effect(status: str) -> str:

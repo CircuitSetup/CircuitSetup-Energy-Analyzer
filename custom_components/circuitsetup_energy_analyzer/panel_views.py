@@ -161,9 +161,10 @@ class NilmWorkspaceView(HomeAssistantView):
     async def get(self, request: Any) -> Any:
         """Return bounded NILM workspace data selected by query parameters."""
         from . import panel
+        from .panel_nilm import nilm_workspace_payload
 
         hass = request.app[panel.KEY_HASS]
-        payload = panel.nilm_workspace_payload(
+        payload = nilm_workspace_payload(
             panel._loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),

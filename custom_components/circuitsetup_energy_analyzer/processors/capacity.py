@@ -204,7 +204,7 @@ def _record_capacity_current_sample(
         samples = raw_samples
         _drop_expired_capacity_samples(samples, cutoff)
     else:
-        samples = _compact_capacity_samples(raw_samples, cutoff)
+        samples = []
         history["capacity_current_sample_format"] = _CAPACITY_SAMPLE_FORMAT
 
     _upsert_capacity_sample(samples, timestamp, parsed)
@@ -228,41 +228,6 @@ def _capacity_voltage_v(
         return None
     multiplier = 2.0 if config.mode is CircuitMode.DUAL_PHASE else 1.0
     return abs(float(voltage)) * multiplier
-
-
-def _compact_capacity_samples(
-    raw_samples: Any,
-    cutoff: datetime,
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_samples, list):
-        return []
-    buckets: dict[datetime, dict[str, Any]] = {}
-    for raw_sample in raw_samples:
-        if not isinstance(raw_sample, Mapping):
-            continue
-        sample_time = _datetime_or_none(raw_sample.get("timestamp"))
-        if sample_time is None or sample_time < cutoff:
-            continue
-        try:
-            current_amps = abs(float(raw_sample.get("current_amps")))
-        except (TypeError, ValueError):
-            continue
-        bucket = _capacity_bucket_start(sample_time)
-        existing = buckets.get(bucket)
-        if existing is None:
-            buckets[bucket] = {
-                "timestamp": sample_time.isoformat(),
-                "current_amps": round(current_amps, 2),
-            }
-            if (count := _stored_sample_count(raw_sample)) > 1:
-                buckets[bucket]["sample_count"] = count
-            continue
-        count = _stored_sample_count(existing) + _stored_sample_count(raw_sample)
-        if current_amps > float(existing["current_amps"]):
-            existing["timestamp"] = sample_time.isoformat()
-            existing["current_amps"] = round(current_amps, 2)
-        existing["sample_count"] = count
-    return [buckets[bucket] for bucket in sorted(buckets)]
 
 
 def _drop_expired_capacity_samples(

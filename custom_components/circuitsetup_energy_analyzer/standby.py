@@ -7,7 +7,7 @@ from typing import Any
 DEFAULT_STANDBY_WINDOW_HOURS = 48
 DEFAULT_STANDBY_THRESHOLD_W = 8.0
 _STANDBY_BUCKET_MINUTES = 1
-_STANDBY_SAMPLE_FORMAT = "1m-min-v1"
+STANDBY_SAMPLE_FORMAT = "1m-min-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,14 +69,14 @@ def record_standby_sample(
     current_power = _round_w(max(float(real_power_w), 0.0))
     raw_samples = history.get("samples")
     if (
-        history.get("standby_sample_format") == _STANDBY_SAMPLE_FORMAT
+        history.get("standby_sample_format") == STANDBY_SAMPLE_FORMAT
         and isinstance(raw_samples, list)
     ):
         samples = raw_samples
         _drop_expired_standby_samples(samples, cutoff)
     else:
-        samples = _compact_standby_samples(raw_samples, cutoff)
-        history["standby_sample_format"] = _STANDBY_SAMPLE_FORMAT
+        samples = []
+        history["standby_sample_format"] = STANDBY_SAMPLE_FORMAT
 
     _upsert_standby_sample(samples, timestamp, current_power)
     history["samples"] = samples
@@ -172,41 +172,6 @@ def _result(
         always_on_limit_usage=always_on_limit_usage,
         features=features,
     )
-
-
-def _compact_standby_samples(
-    raw_samples: Any,
-    cutoff: datetime,
-) -> list[dict[str, Any]]:
-    if not isinstance(raw_samples, list):
-        return []
-    buckets: dict[datetime, dict[str, Any]] = {}
-    for raw_sample in raw_samples:
-        if not isinstance(raw_sample, dict):
-            continue
-        sample_time = _datetime_or_none(raw_sample.get("timestamp"))
-        power = _float_or_none(raw_sample.get("real_power_w"))
-        if sample_time is None or sample_time < cutoff or power is None:
-            continue
-        bucket = _standby_bucket_start(sample_time)
-        count = _stored_sample_count(raw_sample)
-        existing = buckets.get(bucket)
-        if existing is None:
-            compacted = {
-                "timestamp": sample_time.isoformat(),
-                "real_power_w": _round_w(max(power, 0.0)),
-            }
-            if count > 1:
-                compacted["sample_count"] = count
-            buckets[bucket] = compacted
-            continue
-
-        total_count = _stored_sample_count(existing) + count
-        if power < float(existing["real_power_w"]):
-            existing["timestamp"] = sample_time.isoformat()
-            existing["real_power_w"] = _round_w(max(power, 0.0))
-        existing["sample_count"] = total_count
-    return [buckets[bucket] for bucket in sorted(buckets)]
 
 
 def _drop_expired_standby_samples(

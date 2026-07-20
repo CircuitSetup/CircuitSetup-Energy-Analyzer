@@ -199,16 +199,6 @@ class SetupHealthAggregator:
                 _SETUP_HEALTH_REPAIR_PROBLEMS,
             )
         )
-        if (
-            utility_comparison_problem
-            in {
-                "utility_comparison_missing_utility_source",
-                "utility_comparison_missing_measured_source",
-            }
-            and (circuit_id, utility_comparison_problem)
-            not in self.active_repair_issues
-        ):
-            current.add((circuit_id, "utility_comparison_source_mismatch"))
         for issue in sorted(current - desired):
             await repairs.async_delete_circuit_issue(
                 coordinator.hass,

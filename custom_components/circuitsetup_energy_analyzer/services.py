@@ -8,7 +8,7 @@ from typing import Any
 
 from . import notifications
 from .const import DOMAIN
-from .ux import FRIENDLY_SENSITIVITY_ALIASES
+from .ux import SENSITIVITY_VALUES
 
 try:
     from homeassistant.exceptions import HomeAssistantError
@@ -106,12 +106,6 @@ ATTR_MAX_IDLE_MINUTES = "max_idle_minutes"
 ATTR_CYCLE_START_DAY = "cycle_start_day"
 ATTR_BUDGET_KWH = "budget_kwh"
 ATTR_BUDGET_ALERT_RATIO = "budget_alert_ratio"
-ATTR_DEFAULT_RATE_PER_KWH = "default_rate_per_kwh"
-ATTR_TOU_RATE_PER_KWH = "tou_rate_per_kwh"
-ATTR_TOU_START = "tou_start"
-ATTR_TOU_END = "tou_end"
-ATTR_TOU_WEEKDAYS = "tou_weekdays"
-ATTR_TOU_NAME = "tou_name"
 ATTR_WINDOW_MINUTES = "window_minutes"
 ATTR_DEMAND_LIMIT_W = "demand_limit_w"
 ATTR_BREAKER_AMPS = "breaker_amps"
@@ -244,12 +238,6 @@ COST_SETTINGS_SERVICE_SCHEMA = _schema(
         ATTR_CIRCUIT_ID,
         ATTR_ENTITY_ID,
         ATTR_CYCLE_START_DAY,
-        ATTR_DEFAULT_RATE_PER_KWH,
-        ATTR_TOU_RATE_PER_KWH,
-        ATTR_TOU_START,
-        ATTR_TOU_END,
-        ATTR_TOU_WEEKDAYS,
-        ATTR_TOU_NAME,
     ),
 )
 DEMAND_SETTINGS_SERVICE_SCHEMA = _schema(
@@ -1163,12 +1151,6 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_set_cost_settings",
                 circuit_id,
                 data.get(ATTR_CYCLE_START_DAY),
-                data.get(ATTR_DEFAULT_RATE_PER_KWH),
-                data.get(ATTR_TOU_RATE_PER_KWH),
-                data.get(ATTR_TOU_START),
-                data.get(ATTR_TOU_END),
-                data.get(ATTR_TOU_WEEKDAYS),
-                data.get(ATTR_TOU_NAME),
             )
         elif service == SERVICE_SET_STANDBY_SETTINGS:
             await _call_if_present(
@@ -1251,8 +1233,8 @@ def _service_circuit_id(
 
 def _service_sensitivity_preset(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in FRIENDLY_SENSITIVITY_ALIASES:
-        return FRIENDLY_SENSITIVITY_ALIASES[normalized]
+    if normalized in SENSITIVITY_VALUES:
+        return normalized
 
     choices = ", ".join(_SENSITIVITY_SERVICE_OPTIONS)
     raise HomeAssistantError(
