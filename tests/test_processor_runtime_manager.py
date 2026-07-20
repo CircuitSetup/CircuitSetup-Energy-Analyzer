@@ -52,3 +52,22 @@ def test_coordinator_exposes_processor_runtime_learning_maturity() -> None:
         coordinator.circuit_configs[0],
         now,
     )
+
+    store_data.learning_started_at_by_circuit["fridge"] = now.isoformat()
+    assert not coordinator.processor_runtime.learning_mature(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    store_data.events.extend(
+        CircuitEvent(
+            timestamp=now,
+            circuit_id="fridge",
+            event_type=EventType.START,
+        )
+        for _index in range(minimum_cycles)
+    )
+    assert coordinator.processor_runtime.learning_mature(
+        coordinator.circuit_configs[0],
+        now,
+    )

@@ -475,13 +475,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
+        now = self._now_fn()
         self.store_persistence.reset_baseline_for_circuit(
             circuit_id,
             self._baseline_values,
+            now,
         )
         self.state_reducer.reset_learning_state(self.state, circuit_id)
         self._clear_nilm_topology_state(circuit_id)
-        now = self._now_fn()
         self.refresh_ux_state_for_circuit(circuit_id, now)
         self.async_set_updated_data(self.state)
         await self._async_save_store(now)

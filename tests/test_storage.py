@@ -1199,6 +1199,9 @@ def test_feature_store_preserves_settings_recommendations() -> None:
 
 def test_notification_preferences_and_digest_settings_round_trip() -> None:
     data = FeatureStoreData(
+        learning_started_at_by_circuit={
+            "dryer": "2026-07-13T12:00:00+00:00"
+        },
         appliance_notification_preferences={
             "circuit:dryer": {
                 "finished_running": True,
@@ -1226,6 +1229,9 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
         data.appliance_notification_preferences
     )
     assert restored.notification_delivery_state == data.notification_delivery_state
+    assert restored.learning_started_at_by_circuit == (
+        data.learning_started_at_by_circuit
+    )
     assert restored.weekly_digest_settings == data.weekly_digest_settings
 
 

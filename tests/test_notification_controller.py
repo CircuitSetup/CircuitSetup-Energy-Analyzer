@@ -40,6 +40,7 @@ def test_notification_controller_episode_key_uses_public_current_time() -> None:
 
     coordinator = SimpleNamespace(
         current_time=lambda: now,
+        state=SimpleNamespace(learning_by_circuit={"fridge": False}),
         store_data=SimpleNamespace(
             settings_recommendation_notification_episode_key=(),
         ),
@@ -75,6 +76,7 @@ def test_notification_controller_owns_episode_key_compaction() -> None:
     ]
     coordinator = SimpleNamespace(
         current_time=lambda: now,
+        state=SimpleNamespace(learning_by_circuit={"fridge": False}),
         store_data=SimpleNamespace(
             settings_recommendation_notification_episode_key=(),
         ),
@@ -130,7 +132,10 @@ async def test_settings_notification_repeats_only_for_new_suggestions(
         "async_create_settings_recommendation_notification",
         create_notification,
     )
-    state = SimpleNamespace(settings_recommendation_count_by_circuit={"fridge": 1})
+    state = SimpleNamespace(
+        settings_recommendation_count_by_circuit={"fridge": 1},
+        learning_by_circuit={"fridge": True},
+    )
     coordinator = SimpleNamespace(
         current_time=lambda: now,
         hass=SimpleNamespace(),
@@ -151,6 +156,10 @@ async def test_settings_notification_repeats_only_for_new_suggestions(
         coordinator,
     )
 
+    await controller.async_notify_settings_recommendations_if_needed()
+    assert notifications_created == []
+
+    state.learning_by_circuit["fridge"] = False
     await controller.async_notify_settings_recommendations_if_needed()
     pending[0] = recommendation("rec-1", evidence=8)
     await controller.async_notify_settings_recommendations_if_needed()
@@ -208,6 +217,7 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(),
         paused_circuits={"fridge"},
+        state=SimpleNamespace(learning_by_circuit={"fridge": False}),
         evidence_actions=_EvidenceActions(),
         circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
         store_data=SimpleNamespace(settings_recommendation_notification_episode_key=()),
@@ -219,6 +229,64 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
     await controller.async_notify_alert(alert)
 
     assert created == [alert]
+
+
+@pytest.mark.asyncio
+async def test_alert_notifications_wait_for_learning_except_obvious_issues(
+    monkeypatch,
+) -> None:
+    created: list[AlertEvidence] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        created.append(alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    now = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    routine_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Runtime changed",
+        feature="run_cycle_duration_s",
+    )
+    obvious_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Circuit capacity exceeded",
+        feature="circuit_capacity",
+    )
+    state = SimpleNamespace(learning_by_circuit={"dryer": True})
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={},
+            notification_delivery_state={},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(routine_alert)
+    await controller.async_notify_alert(obvious_alert)
+    assert created == [obvious_alert]
+
+    state.learning_by_circuit["dryer"] = False
+    await controller.async_notify_alert(routine_alert)
+    assert created == [obvious_alert, routine_alert]
 
 
 @pytest.mark.asyncio
@@ -266,6 +334,7 @@ async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> No
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
         current_time=lambda: now,
+        state=SimpleNamespace(learning_by_circuit={"dryer": False}),
         evidence_actions=SimpleNamespace(
             alerts_paused=lambda circuit_id: False,
             has_suppressed_alert_feedback=lambda alert: False,
@@ -286,6 +355,11 @@ async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> No
     assert store_data.notification_delivery_state["deferred"][0][
         "defer_until"
     ] == "2026-07-14T07:00:00-04:00"
+
+    coordinator.state.learning_by_circuit["dryer"] = True
+    await controller.async_dispatch_due(datetime(2026, 7, 14, 12, tzinfo=UTC))
+    assert sent == []
+    assert store_data.notification_delivery_state["deferred"] == []
 
 
 @pytest.mark.asyncio
@@ -324,6 +398,7 @@ async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
     )
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(learning_by_circuit={"dryer": False}),
         evidence_actions=SimpleNamespace(
             alerts_paused=lambda circuit_id: False,
             has_suppressed_alert_feedback=lambda alert: False,
@@ -348,13 +423,20 @@ async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> None:
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 8, 12, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Runtime changed",
+        feature="run_cycle_duration_s",
+    )
     store_data = SimpleNamespace(
         settings_recommendation_notification_episode_key=(),
         appliance_notification_preferences={},
         notification_delivery_state={
             "weekly": [
                 {
-                    "alert_id": "runtime-change",
+                    "alert_id": notification_id_for_alert(alert),
                     "appliance_key": "circuit:dryer",
                     "category": "unusual_runtime",
                     "queued_at": "2026-07-08T12:00:00+00:00",
@@ -372,6 +454,7 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
         },
         nilm_appliance_assignments_by_circuit={},
         nilm_session_history_by_circuit={},
+        alerts=[alert],
     )
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
@@ -404,6 +487,69 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
         0
     ]["appliance_key"] == "circuit:dryer"
     assert store_data.notification_delivery_state["weekly"] == []
+
+
+@pytest.mark.parametrize("retain_alert", [False, True])
+@pytest.mark.asyncio
+async def test_weekly_queue_drops_routine_alert_when_circuit_reenters_learning(
+    monkeypatch,
+    retain_alert: bool,
+) -> None:
+    notifications_created: list[object] = []
+
+    async def create_notification(hass, digest) -> None:
+        del hass
+        notifications_created.append(digest)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_weekly_digest_notification",
+        create_notification,
+    )
+    now = datetime(2026, 7, 8, 12, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Runtime changed",
+        feature="run_cycle_duration_s",
+    )
+    alert_id = notification_id_for_alert(alert)
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={},
+        notification_delivery_state={
+            "weekly": [
+                {
+                    "alert_id": alert_id,
+                    "appliance_key": "circuit:dryer",
+                    "category": "unusual_runtime",
+                    "queued_at": now.isoformat(),
+                }
+            ]
+        },
+        weekly_digest_settings={
+            "enabled": False,
+            "delivery": "persistent_notification",
+        },
+        alerts=[alert] if retain_alert else [],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(learning_by_circuit={"dryer": True}),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_refresh_weekly_digest(
+        datetime(2026, 7, 13, 12, tzinfo=UTC)
+    )
+
+    assert notifications_created == []
+    assert store_data.notification_delivery_state["weekly"] == []
+    assert "latest_report" not in store_data.weekly_digest_settings
 
 
 @pytest.mark.asyncio

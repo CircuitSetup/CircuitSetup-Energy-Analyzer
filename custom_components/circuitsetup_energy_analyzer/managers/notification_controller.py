@@ -20,6 +20,16 @@ from ..weekly_digest import (
 )
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
+_LEARNING_BYPASS_ALERT_FEATURES = frozenset(
+    {
+        "circuit_capacity",
+        "demand_limit",
+        "dual_phase_leg_imbalance",
+        "nilm_leg_mismatch",
+        "nilm_topology_mismatch",
+    }
+)
+
 
 class NotificationController:
     """Coordinate persistent notifications and duplicate suppression."""
@@ -43,6 +53,8 @@ class NotificationController:
 
     async def async_notify_alert(self, alert: AlertEvidence) -> None:
         """Create one persistent alert notification when it is not suppressed."""
+        if not self._learning_allows_alert(alert):
+            return
         if self._coordinator.evidence_actions.alerts_paused(alert.circuit_id):
             return
         if self._coordinator.evidence_actions.has_suppressed_alert_feedback(alert):
@@ -77,6 +89,31 @@ class NotificationController:
             self._current_time(alert.timestamp),
         )
 
+    def _learning_allows_alert(self, alert: AlertEvidence) -> bool:
+        if (
+            alert.severity is Severity.ERROR
+            or alert.feature in _LEARNING_BYPASS_ALERT_FEATURES
+        ):
+            return True
+        return not self._circuit_is_learning(alert.circuit_id)
+
+    def _circuit_is_learning(self, circuit_id: str) -> bool:
+        runtime = getattr(self._coordinator, "processor_runtime", None)
+        registry = getattr(self._coordinator, "circuit_registry", None)
+        config_for_circuit = getattr(registry, "config_for_circuit", None)
+        config = (
+            config_for_circuit(circuit_id) if callable(config_for_circuit) else None
+        )
+        if runtime is not None and config is not None:
+            return not runtime.learning_mature(config, self._current_time())
+        state = getattr(self._coordinator, "state", None)
+        return bool(
+            getattr(state, "learning_by_circuit", {}).get(
+                circuit_id,
+                False,
+            )
+        )
+
     async def async_dispatch_due(self, now: datetime) -> None:
         """Deliver deferred alerts whose local quiet window has ended."""
         state = self._delivery_state()
@@ -98,6 +135,8 @@ class NotificationController:
             alert = alerts_by_id.get(str(item.get("alert_id") or ""))
             if due is None or alert is None or due > now:
                 remaining.append(item)
+                continue
+            if not self._learning_allows_alert(alert):
                 continue
             await notifications.async_create_alert_notification(
                 self._coordinator.hass,
@@ -139,6 +178,11 @@ class NotificationController:
         _, week_end = completed_week_bounds(now, time_zone)
         due_weekly: list[dict[str, Any]] = []
         pending_weekly: list[dict[str, Any]] = []
+        blocked_weekly = False
+        alerts_by_id = {
+            notifications.notification_id_for_alert(alert): alert
+            for alert in getattr(self._coordinator.store_data, "alerts", ())
+        }
         for item in weekly_queue if isinstance(weekly_queue, list) else ():
             if not isinstance(item, dict):
                 continue
@@ -147,11 +191,18 @@ class NotificationController:
                 queued_at is not None
                 and self._local_time(queued_at).date() <= week_end
             ):
+                alert = alerts_by_id.get(str(item.get("alert_id") or ""))
+                if alert is None or not self._learning_allows_alert(alert):
+                    blocked_weekly = True
+                    continue
                 due_weekly.append(item)
             else:
                 pending_weekly.append(item)
         has_due_weekly = bool(due_weekly)
         if settings.get("enabled") is not True and not has_due_weekly:
+            if blocked_weekly:
+                state["weekly"] = pending_weekly
+                self._mark_store_dirty()
             return
         digest_items = digest_items_for_coordinator(
             self._coordinator,
@@ -176,7 +227,7 @@ class NotificationController:
             )
         elif delivery == "mobile_notification":
             await self._async_send_mobile_digest(digest, settings)
-        if has_due_weekly:
+        if has_due_weekly or blocked_weekly:
             state["weekly"] = pending_weekly
         self._mark_store_dirty()
 
@@ -209,6 +260,7 @@ class NotificationController:
             alerts_by_id[alert_id]
             for item in ready
             if (alert_id := str(item.get("alert_id") or "")) in alerts_by_id
+            and self._learning_allows_alert(alerts_by_id[alert_id])
         ]
         if alerts:
             await notifications.async_create_daily_summary_notification(
@@ -285,11 +337,15 @@ class NotificationController:
 
     async def async_notify_settings_recommendations_if_needed(self) -> None:
         """Notify again only when the pending set gains a new recommendation."""
+        counts = self._coordinator.state.settings_recommendation_count_by_circuit
         total_pending = sum(
-            self._coordinator.state.settings_recommendation_count_by_circuit.values(),
+            count
+            for circuit_id, count in counts.items()
+            if not self._circuit_is_learning(circuit_id)
         )
         if total_pending <= 0:
-            self.set_settings_recommendation_notification_episode_key(())
+            if sum(counts.values()) <= 0:
+                self.set_settings_recommendation_notification_episode_key(())
             return
 
         episode_key = self.settings_recommendation_episode_key()
@@ -326,6 +382,8 @@ class NotificationController:
             self._coordinator.settings_controller.pending_settings_recommendations
         )
         for recommendation in pending_recommendations(self._coordinator.current_time()):
+            if self._circuit_is_learning(recommendation.circuit_id):
+                continue
             parts.append((str(recommendation.recommendation_id),))
         return self._compact_settings_recommendation_episode_key(tuple(sorted(parts)))
 
