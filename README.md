@@ -56,8 +56,8 @@ You need:
 - HACS, if installing through the recommended method.
 - One or more energy-meter sensors already available in Home Assistant.
 - For CircuitSetup meters, ESPHome entities from an ATM90E32-based meter are the expected source (uncomment [power quality](https://github.com/CircuitSetup/Expandable-6-Channel-ESP32-Energy-Meter/blob/63c6f8935700eeee3c033c74a1d3ebdd15e706b3/Software/ESPHome/6chan_energy_meter_main_board.yaml#L80) in your config)
-- Cumulative kWh sensors if you want daily energy, goals, billing-cycle, cost, utility comparison, or Energy Dashboard readiness checks.
-- Current sensors, or power plus voltage, if you want capacity/amp checks.
+- Active-power sensors are enough for the analyzer to derive daily energy, goals, billing-cycle usage, and cost. Home Assistant Energy Dashboard readiness still requires a native cumulative kWh sensor.
+- Current sensors, or power plus shared mains voltage, if you want capacity/amp checks.
 - Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
 - An outdoor temperature sensor if you want HVAC weather context.
 - A rain sensor if you want sump, well, or water-pump activity compared with rainfall and HVAC condensate context.
@@ -901,7 +901,7 @@ These are the sensors you select during setup. The analyzer does not require eve
 | **Active Power / Watts** | Appliance state, automatically derived kWh, demand, cycles, NILM, balance, solar flow, and negative-power checks. |
 | **Current** | Capacity checks, dual-phase evidence, metric consistency. |
 | **Peak Current / Peak A** | Short current-spike evidence for configured breaker-capacity alerts. |
-| **Voltage** | Shared mains voltage and split-phase line context; it is not assigned as an individual appliance-circuit source. |
+| **Voltage** | Shared, leg-aware mains context for appliance capacity, metric-consistency, and voltage-sag calculations; it is not assigned as an appliance-circuit source or required for analysis. |
 | **Frequency** | Shared line-frequency context for mains analysis. |
 | **Power Factor** | Motor/load behavior and metric consistency evidence. |
 | **Reactive Power** | Motor, compressor, pump, and power-quality drift evidence. |

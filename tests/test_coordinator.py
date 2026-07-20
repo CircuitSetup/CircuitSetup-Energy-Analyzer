@@ -9250,6 +9250,85 @@ def test_runtime_keeps_mains_voltage_out_of_vehicle_charger_sources() -> None:
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in config.sensors)
 
 
+def test_runtime_uses_leg_aware_mains_voltage_as_appliance_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    values = {
+        "sensor.pressure_pump_l2_power": ("605", "W"),
+        "sensor.car_charger_l1_power": ("1190", "W"),
+        "sensor.car_charger_l2_power": ("1210", "W"),
+        "sensor.panel_l1_voltage": ("119", "V"),
+        "sensor.panel_l2_voltage": ("121", "V"),
+    }
+
+    def get_state(entity_id: str):
+        value = values.get(entity_id)
+        if value is None:
+            return None
+        state, unit = value
+        return SimpleNamespace(
+            state=state,
+            attributes={"unit_of_measurement": unit},
+            last_updated=now,
+        )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=get_state), data={}),
+        entry_data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.pressure_pump_l2_power",
+                "sensor.car_charger_l1_power",
+                "sensor.car_charger_l2_power",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.panel_l1_voltage",
+                "sensor.panel_l2_voltage",
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    configs = {config.circuit_id: config for config in coordinator.circuit_configs}
+    pump = configs["pressure_pump"]
+    ev = configs["car_charger"]
+    pump_sample = coordinator._sample_for_config(pump, now)
+    ev_sample = coordinator._sample_for_config(ev, now)
+
+    assert pump_sample.voltage == 121.0
+    assert pump_sample.source_entity_ids == ("sensor.pressure_pump_l2_power",)
+    assert ev_sample.voltage == 120.0
+    assert ev_sample.leg_a_voltage == 119.0
+    assert ev_sample.leg_b_voltage == 121.0
+    assert all(
+        SensorRole.VOLTAGE not in {sensor.role for sensor in config.sensors}
+        for config in coordinator.circuit_configs
+    )
+
+
+def test_mains_voltage_change_refreshes_all_appliance_calculations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_SOURCE_ENTITIES: ["sensor.pump_power"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage"],
+        },
+    )
+
+    selected = coordinator._processing_configs_for_changed_entities(
+        ["sensor.panel_voltage"]
+    )
+
+    assert {config.circuit_id for config in selected} == {"pump", "mains"}
+
+
 @pytest.mark.parametrize(
     ("circuit_id", "expected_name", "expected_profile", "expected_mode", "suffixes"),
     [

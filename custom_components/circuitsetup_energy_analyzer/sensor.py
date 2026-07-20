@@ -2132,7 +2132,9 @@ def sensor_description_applies(
     has_energy = SensorRole.ENERGY in roles
     has_energy_data = has_energy or has_real_power
     has_current = bool(roles & {SensorRole.CURRENT, SensorRole.PEAK_CURRENT})
-    has_voltage = SensorRole.VOLTAGE in roles
+    has_voltage = SensorRole.VOLTAGE in roles or bool(
+        getattr(coordinator, "_mains_voltage_entity_ids", ())
+    )
 
     if key in _ENERGY_USAGE_SENSOR_KEYS:
         return has_energy_data

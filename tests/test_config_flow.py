@@ -5254,6 +5254,26 @@ def test_options_source_entities_override_setup_source_entities() -> None:
     assert _source_entities_for_entry(entry, coordinator) == ("sensor.option_power",)
 
 
+def test_source_entities_for_entry_listens_to_mains_voltage_without_nilm() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.pump_power"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.setup_voltage"],
+        },
+        options={CONF_MAINS_SOURCE_ENTITIES: ["sensor.option_voltage"]},
+    )
+    coordinator = SimpleNamespace(circuit_configs=())
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "sensor.pump_power",
+        "sensor.option_voltage",
+    )
+
+
 def test_source_entities_for_entry_includes_linked_flow_sensors() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         _source_entities_for_entry,

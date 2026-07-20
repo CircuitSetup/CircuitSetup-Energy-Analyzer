@@ -81,7 +81,7 @@ def circuit_configs_from_entry_data(
         _experimental_nilm_enabled(entry_data, options)
         and not any(config.mode is CircuitMode.MAINS_NILM for config in configs)
     ):
-        mains_config = _mains_nilm_config_from_sources(entry_data, options)
+        mains_config = mains_context_config_from_sources(entry_data, options)
         if mains_config is not None:
             configs.append(mains_config)
     return tuple(configs)
@@ -214,7 +214,7 @@ def _experimental_nilm_enabled(
     )
 
 
-def _mains_nilm_config_from_sources(
+def mains_context_config_from_sources(
     entry_data: dict[str, Any],
     options: dict[str, Any] | None,
 ) -> CircuitConfig | None:

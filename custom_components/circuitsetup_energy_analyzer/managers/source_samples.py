@@ -249,8 +249,18 @@ class SourceSampleBuilder:
             leg_b_real_power=_sample_value_or_none(leg_b_sample, "real_power"),
             leg_a_current=_sample_value_or_none(leg_a_sample, "current"),
             leg_b_current=_sample_value_or_none(leg_b_sample, "current"),
-            leg_a_voltage=_sample_value_or_none(leg_a_sample, "voltage"),
-            leg_b_voltage=_sample_value_or_none(leg_b_sample, "voltage"),
+            leg_a_voltage=_average_leg_sensor_values(
+                sensor_samples,
+                "voltage",
+                SensorRole.VOLTAGE,
+                "a",
+            ),
+            leg_b_voltage=_average_leg_sensor_values(
+                sensor_samples,
+                "voltage",
+                SensorRole.VOLTAGE,
+                "b",
+            ),
         )
 
 
@@ -398,6 +408,24 @@ def _average_sample_values(
     if not values:
         return None
     return float(sum(values) / len(values))
+
+
+def _average_leg_sensor_values(
+    sensor_samples: list[tuple[SensorRef, NormalizedCircuitSample]],
+    attribute: str,
+    role: SensorRole,
+    leg: str,
+) -> float | None:
+    return _average_sample_values(
+        [
+            sample
+            for sensor, sample in sensor_samples
+            if sensor.role is role
+            and (normalized_leg(sensor.leg) or entity_id_leg_hint(sensor.entity_id))
+            == leg
+        ],
+        attribute,
+    )
 
 
 def _power_flow_direction(

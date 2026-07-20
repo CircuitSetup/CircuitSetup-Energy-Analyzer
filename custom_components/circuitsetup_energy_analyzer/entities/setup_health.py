@@ -1126,7 +1126,11 @@ def _setup_health_needs_capacity_settings(coordinator: Any, circuit: Any) -> boo
     has_capacity_input = bool(
         roles & {SensorRole.CURRENT, SensorRole.PEAK_CURRENT}
     ) or (
-        SensorRole.REAL_POWER in roles and SensorRole.VOLTAGE in roles
+        SensorRole.REAL_POWER in roles
+        and (
+            SensorRole.VOLTAGE in roles
+            or bool(getattr(coordinator, "_mains_voltage_entity_ids", ()))
+        )
     )
     capacity_relevant = (
         mode is CircuitMode.DUAL_PHASE or profile in _HIGH_POWER_PROFILES

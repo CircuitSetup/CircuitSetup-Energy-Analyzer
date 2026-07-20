@@ -3036,6 +3036,55 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     )
 
 
+def test_shared_mains_voltage_enables_appliance_voltage_calculations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
+        _setup_health_needs_capacity_settings,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    coordinator = SimpleNamespace(
+        _mains_voltage_entity_ids=frozenset({"sensor.panel_voltage"}),
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={"heater": {"breaker_amps": 20.0}},
+        ),
+    )
+    heater = CircuitConfig(
+        circuit_id="heater",
+        name="Heater",
+        appliance_profile=ApplianceProfile.ELECTRIC_HEAT,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.heater_power", SensorRole.REAL_POWER),),
+    )
+    pump = CircuitConfig(
+        circuit_id="pump",
+        name="Pump",
+        appliance_profile=ApplianceProfile.WATER_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.pump_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.pump_current", SensorRole.CURRENT),
+        ),
+    )
+
+    assert sensor_description_applies(
+        descriptions["capacity_usage"], heater, coordinator
+    )
+    assert sensor_description_applies(
+        descriptions["metric_consistency_score"], pump, coordinator
+    )
+    assert _setup_health_needs_capacity_settings(
+        SimpleNamespace(
+            _mains_voltage_entity_ids=frozenset({"sensor.panel_voltage"}),
+            store_data=FeatureStoreData(),
+        ),
+        heater,
+    )
+
+
 def test_utility_comparison_sensors_merge_config_sources_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
