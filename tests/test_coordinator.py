@@ -9010,6 +9010,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     by_circuit = {config.circuit_id: config for config in coordinator.circuit_configs}
 
     assert set(by_circuit) == {
+        "mains",
         "cs_energy_analyzer_demo_refrigerator",
         "cs_energy_analyzer_demo_hvac",
         "cs_energy_analyzer_demo_water_heater",
@@ -9017,6 +9018,10 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         "cs_energy_analyzer_demo_dryer",
         "cs_energy_analyzer_demo_pool_pump",
         "cs_energy_analyzer_demo_basement_lights",
+    }
+    assert {sensor.role for sensor in by_circuit["mains"].sensors} == {
+        SensorRole.ENERGY,
+        SensorRole.VOLTAGE,
     }
     fridge = by_circuit["cs_energy_analyzer_demo_refrigerator"]
     assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
@@ -9313,9 +9318,13 @@ def test_runtime_uses_leg_aware_mains_voltage_as_appliance_context() -> None:
     assert ev_sample.voltage == 120.0
     assert ev_sample.leg_a_voltage == 119.0
     assert ev_sample.leg_b_voltage == 121.0
+    assert {sensor.role for sensor in configs["mains"].sensors} == {
+        SensorRole.VOLTAGE
+    }
     assert all(
         SensorRole.VOLTAGE not in {sensor.role for sensor in config.sensors}
-        for config in coordinator.circuit_configs
+        for circuit_id, config in configs.items()
+        if circuit_id != "mains"
     )
 
 

@@ -7,7 +7,6 @@ from typing import Any
 
 from .const import (
     CONF_CIRCUITS,
-    CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_RETENTION_MODE,
     CONF_SOURCE_ENTITIES,
@@ -77,10 +76,7 @@ def circuit_configs_from_entry_data(
         )
     )
 
-    if (
-        _experimental_nilm_enabled(entry_data, options)
-        and not any(config.mode is CircuitMode.MAINS_NILM for config in configs)
-    ):
+    if not any(config.mode is CircuitMode.MAINS_NILM for config in configs):
         mains_config = mains_context_config_from_sources(entry_data, options)
         if mains_config is not None:
             configs.append(mains_config)
@@ -204,19 +200,6 @@ def _source_entity_configs_from_sources(
 def _automatic_source_entity_excluded(entity_id: str) -> bool:
     tokens = set(_entity_object_id(entity_id).split("_"))
     return bool(tokens & {"harmonic", "total"})
-
-
-def _experimental_nilm_enabled(
-    entry_data: dict[str, Any],
-    options: dict[str, Any] | None,
-) -> bool:
-    options = options or {}
-    return bool(
-        options.get(
-            CONF_ENABLE_EXPERIMENTAL_NILM,
-            entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
-        )
-    )
 
 
 def mains_context_config_from_sources(

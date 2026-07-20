@@ -97,7 +97,7 @@ During setup, you choose:
 |---|---|
 | **Source Devices** | ESPHome meter devices, such as a CircuitSetup ATM90E32 meter. The integration expands selected devices into matching electrical sensors. |
 | **Extra Source Entities** | Individual sensors that are not attached to a selected source device, or sensors you want to add manually. |
-| **Mains Source Entities** | Optional whole-panel or aggregate sensors used for mains balance, experimental Mains NILM, solar-flow, and utility comparison. |
+| **Mains Source Entities** | Optional whole-panel or aggregate sensors that create a separate mains analysis entity for mains balance, solar-flow, and utility comparison. Experimental NILM can be enabled separately. |
 | **Outdoor Temperature Entity** | Optional outdoor temperature source used only for HVAC weather context. |
 | **Rain Sensor** | Optional boolean rain sensor used to explain expected sump, well-pump, or water-pump activity. |
 | **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |

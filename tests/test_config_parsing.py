@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
     CONF_SOURCE_ENTITIES,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -113,6 +114,21 @@ def test_config_parser_excludes_harmonic_and_total_automatic_configs() -> None:
     )
 
     assert [config.circuit_id for config in configs] == ["refrigerator"]
+
+
+def test_config_parser_creates_mains_config_without_experimental_nilm() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {CONF_MAINS_SOURCE_ENTITIES: ["sensor.mains_power"]}
+    )
+
+    assert len(configs) == 1
+    assert configs[0].circuit_id == "mains"
+    assert configs[0].mode is CircuitMode.MAINS_NILM
+    assert configs[0].appliance_profile is ApplianceProfile.MAINS_NILM
 
 
 def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:
