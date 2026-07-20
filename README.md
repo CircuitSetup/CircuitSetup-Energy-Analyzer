@@ -750,6 +750,8 @@ The analyzer uses two different Home Assistant surfaces:
 | **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
+Routine behavior and settings-suggestion notifications wait until that appliance or mains circuit finishes learning. Direct circuit-capacity, configured demand-limit, dual-phase imbalance, and concrete NILM topology mismatch alerts can still notify during learning.
+
 When an alert appears:
 
 1. Read the notification and related summary entity first.
@@ -842,7 +844,7 @@ data:
 
 ### Relearn a circuit baseline
 
-Use this after maintenance, appliance replacement, CT remapping, or any other change that makes the old learned baseline no longer useful.
+Use this after maintenance, appliance replacement, CT remapping, or any other change that makes the old learned baseline no longer useful. Relearning starts a fresh learning period for that circuit while leaving its retained history intact.
 
 ```yaml
 action: circuitsetup_energy_analyzer.relearn_baseline

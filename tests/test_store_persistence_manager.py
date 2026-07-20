@@ -9,6 +9,8 @@ from custom_components.circuitsetup_energy_analyzer.managers.store_persistence i
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
+    CircuitEvent,
+    EventType,
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import (
@@ -56,6 +58,10 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
                 feature="energy_usage",
             ),
         ],
+        events=[
+            CircuitEvent(now, "fridge", EventType.START),
+            CircuitEvent(now, "washer", EventType.START),
+        ],
     )
     baseline_values = defaultdict(list)
     baseline_values["fridge:real_power"].append(120.0)
@@ -64,7 +70,7 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     manager._coordinator = SimpleNamespace(store_data=store_data)
     manager.dirty = False
 
-    manager.reset_baseline_for_circuit("fridge", baseline_values)
+    manager.reset_baseline_for_circuit("fridge", baseline_values, now)
 
     assert store_data.baselines == {
         "washer:real_power": BaselineStats(
@@ -78,6 +84,10 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
         )
     }
     assert [alert.circuit_id for alert in store_data.alerts] == ["washer"]
+    assert [event.circuit_id for event in store_data.events] == ["fridge", "washer"]
+    assert store_data.learning_started_at_by_circuit == {
+        "fridge": "2026-06-30T12:00:00+00:00"
+    }
     assert dict(baseline_values) == {"washer:real_power": [400.0]}
     assert manager.dirty is True
 

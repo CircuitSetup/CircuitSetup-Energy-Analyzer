@@ -112,10 +112,27 @@ class ProcessorRuntimeManager:
 
     def learning_mature(self, config: CircuitConfig, now: datetime) -> bool:
         profile = get_profile_definition(config.appliance_profile)
+        raw_learning_started_at = (
+            self._coordinator.store_data.learning_started_at_by_circuit.get(
+                config.circuit_id
+            )
+        )
+        learning_started_at = None
+        if raw_learning_started_at:
+            try:
+                learning_started_at = datetime.fromisoformat(raw_learning_started_at)
+            except ValueError:
+                pass
+            if learning_started_at is not None and learning_started_at.tzinfo is None:
+                learning_started_at = learning_started_at.replace(tzinfo=now.tzinfo)
         circuit_events = [
             event
             for event in self._coordinator.store_data.events
             if event.circuit_id == config.circuit_id
+            and (
+                learning_started_at is None
+                or event.timestamp >= learning_started_at
+            )
         ]
         cycle_count = sum(
             1 for event in circuit_events if event.event_type is EventType.START

@@ -82,8 +82,9 @@ class StorePersistenceManager:
         self,
         circuit_id: str,
         baseline_values: dict[str, list[float]],
+        now: datetime,
     ) -> None:
-        """Clear learned baselines and stored alerts for one circuit."""
+        """Clear learned baselines and alerts for one circuit."""
         prefix = f"{circuit_id}:"
         store_data = self._coordinator.store_data
         store_data.baselines = {
@@ -97,6 +98,7 @@ class StorePersistenceManager:
         store_data.alerts = [
             alert for alert in store_data.alerts if alert.circuit_id != circuit_id
         ]
+        store_data.learning_started_at_by_circuit[circuit_id] = now.isoformat()
         self.mark_dirty()
 
     async def async_save_if_dirty(self, now: datetime, *, force: bool = True) -> None:

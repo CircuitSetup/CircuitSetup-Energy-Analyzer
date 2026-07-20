@@ -167,6 +167,7 @@ class FeatureStoreData:
         default_factory=dict
     )
     dashboard_status: dict[str, Any] = field(default_factory=dict)
+    learning_started_at_by_circuit: dict[str, str] = field(default_factory=dict)
 
 
 def event_to_dict(event: CircuitEvent) -> dict[str, Any]:
@@ -304,6 +305,10 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             key: baseline_to_dict(baseline)
             for key, baseline in data.baselines.items()
         },
+        "learning_started_at_by_circuit": {
+            str(circuit_id): str(timestamp)
+            for circuit_id, timestamp in data.learning_started_at_by_circuit.items()
+        },
         "alerts": [alert_to_dict(alert) for alert in data.alerts],
         "nilm_signatures": {
             str(circuit_id): [dict(signature) for signature in signatures]
@@ -433,6 +438,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
     return FeatureStoreData(
         events=_events_from_raw(raw.get("events", [])),
         baselines=_baselines_from_raw(raw.get("baselines", {})),
+        learning_started_at_by_circuit={
+            str(circuit_id): str(timestamp)
+            for circuit_id, timestamp in _mapping_items(
+                raw.get("learning_started_at_by_circuit", {})
+            )
+        },
         alerts=_alerts_from_raw(raw.get("alerts", [])),
         nilm_signatures=_dict_of_list_dicts(raw.get("nilm_signatures", {})),
         nilm_unknown_loads_by_circuit=_dict_of_dicts(
@@ -672,6 +683,7 @@ def prune_events(
     return FeatureStoreData(
         events=[event for event in data.events if event.timestamp >= cutoff],
         baselines=data.baselines,
+        learning_started_at_by_circuit=data.learning_started_at_by_circuit,
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
         nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,

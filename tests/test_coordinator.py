@@ -163,6 +163,17 @@ def _hass_with_states(
     return SimpleNamespace(states=FakeStates(), config=SimpleNamespace())
 
 
+def _completed_learning_events(
+    circuit_id: str,
+    now: datetime,
+) -> list[CircuitEvent]:
+    started_at = now - timedelta(days=8)
+    return [
+        CircuitEvent(started_at, circuit_id, EventType.START),
+        CircuitEvent(started_at + timedelta(minutes=5), circuit_id, EventType.STOP),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_process_update_promotes_new_expected_schedule_alerts(
     monkeypatch,
@@ -11861,6 +11872,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
             energy_usage_by_circuit={
                 "fridge": {
                     "last_energy_kwh": 100.0,
@@ -12637,6 +12649,7 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     now_holder = {"value": now}
     store_data = FeatureStoreData(
+        events=_completed_learning_events("hvac", now),
         energy_usage_by_circuit={
             "hvac": {
                 "days": [
@@ -13018,6 +13031,9 @@ async def test_process_update_recommends_capacity_from_current_history(
                 "ev": {"warning_ratio": 0.9},
             },
         },
+        store_data=FeatureStoreData(
+            events=_completed_learning_events("ev", now),
+        ),
         now_fn=lambda: now_holder["value"],
     )
 
@@ -13144,6 +13160,7 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
             energy_goal_settings_by_circuit={
                 "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
             },
@@ -13269,6 +13286,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
         },
         store_data=FeatureStoreData(
             events=[
+                *_completed_learning_events("fridge", now),
                 CircuitEvent(
                     timestamp=now - timedelta(minutes=45),
                     circuit_id="fridge",
@@ -13283,6 +13301,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
     for offset in range(3):
         holder["time"] = now + timedelta(days=offset)
         coordinator.store_data.events = [
+            *_completed_learning_events("fridge", holder["time"]),
             CircuitEvent(
                 timestamp=holder["time"] - timedelta(minutes=45),
                 circuit_id="fridge",
@@ -13345,6 +13364,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
         },
         store_data=FeatureStoreData(
             events=[
+                *_completed_learning_events("fridge", now),
                 CircuitEvent(
                     timestamp=now - timedelta(hours=5),
                     circuit_id="fridge",
@@ -13364,6 +13384,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
     for offset in range(3):
         holder["time"] = now + timedelta(days=offset)
         coordinator.store_data.events = [
+            *_completed_learning_events("fridge", holder["time"]),
             CircuitEvent(
                 timestamp=holder["time"] - timedelta(hours=5),
                 circuit_id="fridge",
@@ -13871,6 +13892,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("mains", now),
             demand_by_circuit={
                 "mains": {
                     "samples": [],
@@ -14365,6 +14387,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("office", now),
             standby_by_circuit={
                 "office": {
                     "standby_sample_format": "1m-min-v1",
@@ -14545,6 +14568,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("mains", now),
             utility_comparison_settings_by_circuit={
                 "mains": {
                     "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -15632,6 +15656,7 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
             billing_by_circuit={
                 "fridge": {
                     "cycle_start": "2026-06-01",
