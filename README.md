@@ -114,7 +114,7 @@ During setup, you choose:
 Use the integration in this order:
 
 - **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
-- **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as adding a cumulative kWh source, fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
+- **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
 - **Classify circuits deliberately**: choose the appliance type and source sensors, then review the automatically derived circuit mode and power-flow mode before trusting appliance evidence.
 - **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
@@ -151,7 +151,7 @@ questions instead of raw diagnostic entity lists:
   enough sessions across multiple days are confirmed with acceptable
   confidence and false-positive rate.
 - **Setup Health checklist** adds onboarding checklist attributes for source
-  data, assignments, CT direction, cumulative kWh, appliance profiles,
+  data, assignments, CT direction, energy tracking, appliance profiles,
   dashboard creation, notifications, NILM, and learning progress. Its compact
   **Needs Attention** view shows only actionable setup/data problems, direct
   appliance findings, and NILM validation work. Findings are ranked, limited
@@ -511,7 +511,7 @@ Suggested settings remember apply, deny, and dismiss decisions. Denying a sugges
 
 ### Energy usage spikes
 
-For circuits with cumulative kWh sensors, the analyzer derives daily usage from positive energy deltas. By default, it compares today's usage with a learned rolling window and treats a large repeated increase as possible issue evidence.
+The analyzer derives daily usage from positive cumulative-kWh deltas when an energy sensor is available. For power-only circuits, it automatically maintains an internal cumulative-kWh helper from consecutive watt samples. By default, it compares today's usage with a learned rolling window and treats a large repeated increase as possible issue evidence.
 
 Use this for appliances where daily usage should usually stay within a predictable range, such as refrigerators, freezers, water heaters, HVAC, pumps, or EV charging circuits.
 
@@ -536,9 +536,8 @@ Configure this from:
 **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
 
 Set a daily kWh goal for the circuit. Set the goal back to `0` to clear it.
-The daily goal control is only created when the circuit has usable energy data,
-so stale saved goals do not add a confusing control before a cumulative kWh
-source is configured.
+The daily goal control is created when the circuit has either cumulative energy
+or real-power data. Power-only circuits use the analyzer's automatic kWh helper.
 
 ### Run-cycle diagnostics
 
@@ -880,7 +879,7 @@ When calling actions manually or from an automation, set `circuit_id` to the con
 |---|---|
 | `Needs data` | Required source sensors are missing, stale, unavailable, or not producing usable samples. |
 | `Learning` | The analyzer has data but does not yet have enough retained samples or cycles. |
-| `Waiting For Energy Change` | A cumulative kWh sensor exists, but the analyzer has not yet observed a positive energy increase. |
+| `Waiting For Energy Change` | The analyzer is waiting for a cumulative-energy increase or enough consecutive power samples to derive one. |
 | `Missing Metrics` | Optional electrical metrics needed for a check are not available. |
 | `Possible issue` | Repeated evidence crossed a configured or learned threshold. Review evidence before making a diagnosis. |
 | Negative watts on a load | Usually export power or reversed CT orientation. Check power-flow mode and CT direction. |
@@ -888,7 +887,7 @@ When calling actions manually or from an automation, set `circuit_id` to the con
 Daily Energy Usage can show `0 kWh` for two different reasons:
 
 1. The circuit truly has not used energy today.
-2. The analyzer is still waiting to observe the first positive increase from the cumulative kWh source.
+2. The analyzer is still waiting to observe the first positive cumulative-energy increase or to derive one from consecutive power samples.
 
 Use `sensor.<circuit>_energy_usage_status` and the `status_explanation` attribute to tell the difference.
 
@@ -898,12 +897,12 @@ These are the sensors you select during setup. The analyzer does not require eve
 
 | Source role | Used for |
 |---|---|
-| **Energy** | Daily kWh, billing-cycle usage, goals, utility comparison, Energy Dashboard readiness. |
-| **Active Power / Watts** | Appliance state, demand, cycles, NILM, balance, solar flow, negative-power checks. |
+| **Energy** | Optional native cumulative kWh for daily usage, billing-cycle usage, goals, utility comparison, and Energy Dashboard readiness. |
+| **Active Power / Watts** | Appliance state, automatically derived kWh, demand, cycles, NILM, balance, solar flow, and negative-power checks. |
 | **Current** | Capacity checks, dual-phase evidence, metric consistency. |
 | **Peak Current / Peak A** | Short current-spike evidence for configured breaker-capacity alerts. |
-| **Voltage** | Metric consistency and current estimation. Split-phase mains L1/L2 voltage can help appliance circuits. |
-| **Frequency** | Line-frequency context from the meter. |
+| **Voltage** | Shared mains voltage and split-phase line context; it is not assigned as an individual appliance-circuit source. |
+| **Frequency** | Shared line-frequency context for mains analysis. |
 | **Power Factor** | Motor/load behavior and metric consistency evidence. |
 | **Reactive Power** | Motor, compressor, pump, and power-quality drift evidence. |
 | **Apparent Power** | VA relationship checks with watts and power factor. |
@@ -918,8 +917,8 @@ Example source entity names commonly look like this:
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| Energy | `sensor.<appliance>_energy` | Cumulative kWh source used for daily usage, billing, goals, and utility comparison. | Source entity selected by the user. | Increasing kWh total |
-| Active Power | `sensor.<appliance>_active_power` or `sensor.<appliance>_watts` | Instantaneous real power used for activity, demand, NILM, balance, and run-cycle checks. | Source entity selected by the user. | Watts, including signed watts when the meter reports export |
+| Energy | `sensor.<appliance>_energy` | Optional native cumulative kWh used for daily usage, billing, goals, and utility comparison. | Source entity selected by the user. | Increasing kWh total |
+| Active Power | `sensor.<appliance>_active_power` or `sensor.<appliance>_watts` | Instantaneous real power used for automatic kWh derivation, activity, demand, NILM, balance, and run-cycle checks. | Source entity selected by the user. | Watts, including signed watts when the meter reports export |
 
 For single-phase appliances, use one matching set of source entities.
 
@@ -974,15 +973,15 @@ Start with these on dashboards.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, context-source setup, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Add cumulative kWh source`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source`, `Add rain source`, `Add water-flow source`, `Review utility comparison` |
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, context-source setup, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Add outdoor temperature source`, `Add rain source`, `Add water-flow source`, `Review utility comparison` |
 | Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Core/default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
-| Daily Energy Usage | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from a cumulative energy source. | Core/default visible when usable energy data exists. | `0.0 kWh` and higher daily totals |
+| Daily Energy Usage | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
 | Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Core/default visible for appliance circuits with active-power sensors. | `on`, `off` |
 
-Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` when the analyzer has not observed a cumulative kWh increase yet.
+Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
 
 ### Running Vs Observations Vs Alerts
 
@@ -1159,7 +1158,7 @@ Common status values include:
 | Tracking | `tracking` | The analyzer has enough inputs and is tracking this check. |
 | Unavailable | `unavailable` | This check does not have enough retained data yet. |
 | Unconfigured | `unconfigured` | This optional check has not been configured. |
-| Waiting For Energy Change | `waiting_for_delta` | A cumulative kWh source is present, but no positive energy increase has been observed. |
+| Waiting For Energy Change | `waiting_for_delta` | No positive native energy increase or derived watt-to-kWh change has been observed yet. |
 | Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
 
 For automations and debugging, status sensors may expose:

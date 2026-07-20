@@ -244,13 +244,19 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
     )
 
     await pipeline.async_process_circuit(
-        SimpleNamespace(
+        CircuitConfig(
             circuit_id="fridge",
+            name="Fridge",
             appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
             power_flow=PowerFlowMode.LOAD,
         ),
-        SimpleNamespace(),
-        SimpleNamespace(),
+        NormalizedCircuitSample(
+            timestamp=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+            circuit_id="fridge",
+            real_power=180.0,
+        ),
+        SimpleNamespace(store_data=FeatureStoreData()),
     )
 
     processor_names = [

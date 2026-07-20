@@ -992,6 +992,18 @@ def _energy_summary(state: Any, circuit_id: str) -> tuple[str, str]:
     if goal_status == "near_goal" or cost_status == "tou_peak":
         return "Watch", "Energy or cost is near a configured warning threshold."
     if energy_usage_status == "waiting_for_delta":
+        evidence = getattr(state, "energy_usage_evidence_by_circuit", {}).get(
+            circuit_id,
+            {},
+        )
+        if (
+            isinstance(evidence, Mapping)
+            and evidence.get("energy_source") == "derived_from_power"
+        ):
+            return (
+                "Learning",
+                "The automatic kWh helper is waiting for another power sample.",
+            )
         return (
             "Needs Energy Data",
             "A cumulative kWh source is present but has not increased yet.",
@@ -2118,13 +2130,14 @@ def sensor_description_applies(
     is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
     has_real_power = SensorRole.REAL_POWER in roles
     has_energy = SensorRole.ENERGY in roles
+    has_energy_data = has_energy or has_real_power
     has_current = bool(roles & {SensorRole.CURRENT, SensorRole.PEAK_CURRENT})
     has_voltage = SensorRole.VOLTAGE in roles
 
     if key in _ENERGY_USAGE_SENSOR_KEYS:
-        return has_energy
+        return has_energy_data
     if key in _ENERGY_GOAL_SENSOR_KEYS:
-        return has_energy and (
+        return has_energy_data and (
             _configured_positive(circuit, "daily_energy_goal_kwh")
             or _stored_settings(coordinator, "energy_goal_settings_by_circuit", circuit)
         )
@@ -2181,13 +2194,13 @@ def sensor_description_applies(
             circuit,
         )
     if key in _BILLING_SENSOR_KEYS:
-        return has_energy and (
+        return has_energy_data and (
             _configured_positive(circuit, "billing_cycle_budget_kwh")
             or _stored_settings(coordinator, "billing_settings_by_circuit", circuit)
         )
     if key in _COST_SENSOR_KEYS:
         tariff = global_cost_settings(coordinator)
-        return has_energy and (
+        return has_energy_data and (
             _configured_positive(tariff, "default_rate_per_kwh")
             or _configured_positive(tariff, "tou_rate_per_kwh")
         )

@@ -337,7 +337,7 @@ def number_description_applies(
     """Return whether a number control is useful for this circuit."""
     if description.key != "daily_energy_goal":
         return True
-    if _has_energy_sensor(circuit):
+    if _has_energy_input(circuit):
         return True
     circuit_id = _circuit_id(circuit)
     state = getattr(coordinator, "data", None)
@@ -347,10 +347,13 @@ def number_description_applies(
     return isinstance(evidence, Mapping) and bool(evidence)
 
 
-def _has_energy_sensor(circuit: Any) -> bool:
+def _has_energy_input(circuit: Any) -> bool:
     return any(
-        _sensor_role(sensor) is SensorRole.ENERGY
-        and _sensor_unit_is_cumulative_energy(sensor)
+        _sensor_role(sensor) is SensorRole.REAL_POWER
+        or (
+            _sensor_role(sensor) is SensorRole.ENERGY
+            and _sensor_unit_is_cumulative_energy(sensor)
+        )
         for sensor in _circuit_sensors(circuit)
     )
 

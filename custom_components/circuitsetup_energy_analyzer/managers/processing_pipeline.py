@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Any
 
-from ..models import ApplianceProfile, PowerFlowMode
+from ..models import ApplianceProfile, PowerFlowMode, SensorRole
+from ..usage import derive_cumulative_energy_from_power
 
 
 class ProcessingPipeline:
@@ -71,6 +73,20 @@ class ProcessingPipeline:
     ) -> tuple[list[Any], list[Any]]:
         events: list[Any] = []
         alerts: list[Any] = []
+        energy_history = context.store_data.energy_usage_by_circuit.setdefault(
+            config.circuit_id,
+            {},
+        )
+        if not _has_usable_energy_sensor(config):
+            sample = replace(
+                sample,
+                energy=derive_cumulative_energy_from_power(
+                    energy_history,
+                    timestamp=sample.timestamp,
+                    power_w=sample.real_power,
+                ),
+            )
+            energy_history["energy_source"] = "derived_from_power"
 
         event_result = self._event_processor.process(sample, config, context)
         new_events, _ = await self._async_apply_feature_result(event_result)
@@ -212,3 +228,13 @@ class ProcessingPipeline:
             await self._sync_setup_health_repairs(circuit_id)
             alerts.extend(new_alerts)
         return alerts
+
+
+def _has_usable_energy_sensor(config: Any) -> bool:
+    for sensor in config.sensors:
+        if sensor.role is not SensorRole.ENERGY:
+            continue
+        unit = str(sensor.unit or "").strip().lower()
+        if not unit or unit in {"kwh", "wh", "mwh"}:
+            return True
+    return False

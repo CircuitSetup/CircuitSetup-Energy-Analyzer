@@ -65,8 +65,10 @@ def evaluate_energy_dashboard_readiness(
             status="power_ready",
             ready_power_entities=tuple(power_entities),
             guidance=(
-                "Use the ready power input with Home Assistant's Energy Dashboard "
-                "or create an energy sensor with the Integration helper."
+                "The analyzer derives kWh automatically from this power input "
+                "for circuit analysis. "
+                "Home Assistant's Energy Dashboard still requires a cumulative "
+                "energy entity."
             ),
         )
 

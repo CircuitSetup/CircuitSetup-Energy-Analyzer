@@ -7654,6 +7654,106 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str, list[str], dict[str, Any]]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        source_entities=(),
+        **kwargs,
+    ) -> None:
+        del hass, severity
+        issues.append(
+            (
+                circuit_id,
+                problem,
+                list(source_entities),
+                dict(kwargs.get("data") or {}),
+            )
+        )
+
+    monkeypatch.setattr(repairs, "async_create_data_quality_issue", fake_issue)
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    stale_entity = ["sensor.ac2_power"]
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            if entity_id == "sensor.ac2_power":
+                return SimpleNamespace(
+                    state="180",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=(
+                        now - timedelta(minutes=30)
+                        if stale_entity[0] == entity_id
+                        else now
+                    ),
+                )
+            if entity_id == "sensor.ac2_current":
+                return SimpleNamespace(
+                    state="1.5",
+                    attributes={"unit_of_measurement": "A"},
+                    last_updated=(
+                        now - timedelta(minutes=30)
+                        if stale_entity[0] == entity_id
+                        else now
+                    ),
+                )
+            raise AssertionError(entity_id)
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ac2",
+                    "name": "Ac2",
+                    "mode": "single_phase",
+                    "appliance_profile": "hvac",
+                    "sensors": [
+                        {"entity_id": "sensor.ac2_power", "role": "real_power"},
+                        {"entity_id": "sensor.ac2_current", "role": "current"},
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_process_update()
+
+    assert issues == [
+        (
+            "ac2",
+            "stale_source_sensor",
+            ["sensor.ac2_power"],
+            {
+                "circuit_name": "Ac2",
+                "reason": (
+                    "One or more selected source sensors have not updated "
+                    "recently."
+                ),
+                "recommended_action": "Fix stale source sensor data for Ac2",
+                "source_entities": ["sensor.ac2_power"],
+            },
+        )
+    ]
+
+    issues.clear()
+    stale_entity[0] = "sensor.ac2_current"
+    await coordinator.async_process_update()
+
+    assert issues[0][2] == ["sensor.ac2_current"]
+    assert issues[0][3]["source_entities"] == ["sensor.ac2_current"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -7796,7 +7896,7 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
 
 
 @pytest.mark.asyncio
-async def test_runtime_missing_energy_source_creates_setup_health_repair(
+async def test_runtime_power_only_circuit_derives_energy_without_repair(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -7820,6 +7920,8 @@ async def test_runtime_missing_energy_source_creates_setup_health_repair(
         fake_issue,
     )
 
+    now = [datetime(2026, 6, 2, 12, 0, tzinfo=UTC)]
+
     class FakeStates:
         def get(self, entity_id: str):
             assert entity_id == "sensor.fridge_power"
@@ -7830,7 +7932,7 @@ async def test_runtime_missing_energy_source_creates_setup_health_repair(
                     "device_class": "power",
                     "state_class": "measurement",
                 },
-                last_updated=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+                last_updated=now[0],
             )
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
@@ -7848,16 +7950,27 @@ async def test_runtime_missing_energy_source_creates_setup_health_repair(
                 }
             ]
         },
-        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        now_fn=lambda: now[0],
     )
 
     await coordinator.async_process_update()
+    first_evidence = coordinator.state.energy_usage_evidence_by_circuit["fridge"]
+    assert first_evidence["energy_source"] == "derived_from_power"
+    assert "power samples" in first_evidence["status_explanation"]
+    now[0] += timedelta(minutes=5)
+    await coordinator.async_process_update()
 
-    assert ("fridge", "missing_energy_source") in issues
+    assert ("fridge", "missing_energy_source") not in issues
+    assert coordinator.state.daily_energy_usage_by_circuit["fridge"] == pytest.approx(
+        0.015
+    )
+    assert coordinator.state.energy_usage_evidence_by_circuit["fridge"][
+        "energy_source"
+    ] == "derived_from_power"
 
 
 @pytest.mark.asyncio
-async def test_setup_health_repair_includes_circuit_context(
+async def test_setup_health_does_not_create_missing_energy_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -7905,18 +8018,7 @@ async def test_setup_health_repair_includes_circuit_context(
 
     await coordinator._sync_setup_health_repairs("fridge")
 
-    assert repairs_created == [
-        (
-            "fridge",
-            "missing_energy_source",
-            {
-                "circuit_name": "Refrigerator",
-                "reason": "Daily Energy Usage needs a cumulative energy source.",
-                "recommended_action": ("Add a cumulative kWh sensor to Refrigerator"),
-                "source_entities": ["sensor.fridge_power"],
-            },
-        )
-    ]
+    assert repairs_created == []
 
 
 @pytest.mark.asyncio
@@ -8029,7 +8131,7 @@ async def test_runtime_missing_mains_source_creates_setup_health_repair(
 
 
 @pytest.mark.asyncio
-async def test_runtime_missing_electrical_metrics_creates_setup_health_repair(
+async def test_runtime_missing_electrical_metrics_does_not_create_repair(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -8074,7 +8176,7 @@ async def test_runtime_missing_electrical_metrics_creates_setup_health_repair(
 
     await coordinator._sync_setup_health_repairs("hvac")
 
-    assert ("hvac", "missing_electrical_metrics") in issues
+    assert ("hvac", "missing_electrical_metrics") not in issues
 
 
 @pytest.mark.asyncio
@@ -8911,11 +9013,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     assert fridge.appliance_profile is ApplianceProfile.REFRIGERATOR
     assert fridge.mode is CircuitMode.SINGLE_PHASE
     assert fridge.sensors[0].role is SensorRole.ENERGY
-    assert any(
-        sensor.entity_id == "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
-        and sensor.role is SensorRole.VOLTAGE
-        for sensor in fridge.sensors
-    )
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in fridge.sensors)
 
     hvac = by_circuit["cs_energy_analyzer_demo_hvac"]
     assert hvac.appliance_profile is ApplianceProfile.HVAC
@@ -8931,21 +9029,8 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
             SensorRole.REAL_POWER,
             "b",
         ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-            SensorRole.VOLTAGE,
-            "a",
-        ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
-            SensorRole.VOLTAGE,
-            "b",
-        ),
     }
-    assert not any(
-        sensor.entity_id == "sensor.cs_energy_analyzer_demo_hvac_voltage"
-        for sensor in hvac.sensors
-    )
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in hvac.sensors)
 
     water_heater = by_circuit["cs_energy_analyzer_demo_water_heater"]
     assert water_heater.appliance_profile is ApplianceProfile.WATER_HEATER
@@ -8963,21 +9048,8 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
             SensorRole.REAL_POWER,
             "b",
         ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-            SensorRole.VOLTAGE,
-            "a",
-        ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
-            SensorRole.VOLTAGE,
-            "b",
-        ),
     }
-    assert not any(
-        sensor.entity_id == "sensor.cs_energy_analyzer_demo_water_heater_voltage"
-        for sensor in water_heater.sensors
-    )
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in water_heater.sensors)
 
     washer = by_circuit["cs_energy_analyzer_demo_washer"]
     assert washer.name == "Washer"
@@ -9011,12 +9083,8 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
             SensorRole.APPARENT_POWER,
             None,
         ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-            SensorRole.VOLTAGE,
-            "a",
-        ),
     }
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in washer.sensors)
 
     dryer = by_circuit["cs_energy_analyzer_demo_dryer"]
     assert dryer.name == "Dryer"
@@ -9055,17 +9123,8 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
             SensorRole.APPARENT_POWER,
             "b",
         ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-            SensorRole.VOLTAGE,
-            "a",
-        ),
-        (
-            "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
-            SensorRole.VOLTAGE,
-            "b",
-        ),
     }
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in dryer.sensors)
 
     pool_pump = by_circuit["cs_energy_analyzer_demo_pool_pump"]
     assert pool_pump.appliance_profile is ApplianceProfile.POOL_PUMP
@@ -9138,7 +9197,7 @@ def test_runtime_merges_new_prefixed_source_sensor_into_existing_config() -> Non
     }
 
 
-def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> None:
+def test_runtime_keeps_mains_voltage_out_of_vehicle_charger_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -9187,9 +9246,8 @@ def test_runtime_infers_vehicle_charging_sources_as_dual_phase_ev_charger() -> N
             SensorRole.REAL_POWER,
             "b",
         ),
-        ("sensor.panel_mains_l1_voltage", SensorRole.VOLTAGE, "a"),
-        ("sensor.panel_mains_l2_voltage", SensorRole.VOLTAGE, "b"),
     }
+    assert not any(sensor.role is SensorRole.VOLTAGE for sensor in config.sensors)
 
 
 @pytest.mark.parametrize(
@@ -15477,7 +15535,10 @@ async def test_runtime_setup_health_repair_clears_after_reload(
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: {("fridge", "missing_energy_source")},
+        lambda hass, circuit_id, problems: {
+            ("fridge", "missing_electrical_metrics"),
+            ("fridge", "missing_energy_source"),
+        },
     )
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
@@ -15501,7 +15562,10 @@ async def test_runtime_setup_health_repair_clears_after_reload(
 
     await coordinator._sync_setup_health_repairs("fridge")
 
-    assert ("fridge", "missing_energy_source") in deleted
+    assert deleted == [
+        ("fridge", "missing_electrical_metrics"),
+        ("fridge", "missing_energy_source"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -700,22 +700,6 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
         if quality_issue is not None:
             issues.append(quality_issue)
 
-        energy_status = _setup_health_status(
-            state,
-            "energy_dashboard_status_by_circuit",
-            circuit_id,
-        )
-        if energy_status in {"needs_energy_source", "power_ready"}:
-            issues.append(
-                _setup_health_issue(
-                    "Add cumulative kWh source",
-                    f"Add a cumulative kWh sensor to {circuit.name}",
-                    circuit,
-                    "Daily Energy Usage needs a cumulative energy source.",
-                    issue="missing_energy_source",
-                )
-            )
-
         energy_usage_status = _setup_health_status(
             state,
             "energy_usage_evidence_by_circuit",
@@ -782,24 +766,6 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "dual phase."
                     ),
                     issue="circuit_mode_mismatch",
-                )
-            )
-
-        if _setup_health_status(
-            state,
-            "metric_consistency_status_by_circuit",
-            circuit_id,
-        ) == "missing_metrics":
-            issues.append(
-                _setup_health_issue(
-                    "Review circuit assignments",
-                    f"Add matching electrical metrics for {circuit.name}",
-                    circuit,
-                    (
-                        "Power Metric Consistency needs matching real power, apparent "
-                        "power, voltage, current, or power factor sensors."
-                    ),
-                    issue="missing_electrical_metrics",
                 )
             )
 
@@ -1067,6 +1033,22 @@ def _setup_health_learning_guidance(
         or getattr(circuit, "circuit_id", "this circuit")
     )
     if energy_usage_status == "waiting_for_delta":
+        energy_evidence = _setup_health_mapping(
+            state,
+            "energy_usage_evidence_by_circuit",
+            getattr(circuit, "circuit_id", ""),
+        )
+        if (
+            isinstance(energy_evidence, Mapping)
+            and energy_evidence.get("energy_source") == "derived_from_power"
+        ):
+            return (
+                f"Waiting for another power sample on {circuit_name}",
+                (
+                    "The automatic kWh helper needs consecutive power samples "
+                    "before it can calculate energy use."
+                ),
+            )
         return (
             f"Waiting for first positive kWh increase on {circuit_name}",
             (

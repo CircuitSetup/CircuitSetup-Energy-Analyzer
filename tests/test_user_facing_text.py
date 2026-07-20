@@ -4133,7 +4133,10 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         "Confirms Home Assistant is receiving live readings for each circuit.",
         "Names, profiles, and sensor roles identify each circuit.",
         "Checks that power flow matches the selected circuit role.",
-        "Energy totals power today-vs-normal and utility comparisons.",
+        (
+            "Energy totals use a configured kWh source or are derived "
+            "automatically from power."
+        ),
         "Profiles choose the right runtime, standby, demand, and context checks.",
         "Controls which helper sensors and dashboard diagnostics HA creates.",
         "Provides setup health, appliance status, and evidence links in one view.",
@@ -6187,6 +6190,12 @@ def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
         assert "{reason}" in description
 
 
+def test_stale_source_repair_description_names_the_source_entity() -> None:
+    description = _translations()["issues"]["stale_source_sensor"]["description"]
+
+    assert "{source_entities}" in description
+
+
 def test_readme_includes_practical_usage_guide() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())
@@ -6286,7 +6295,7 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "Waiting For Energy Change" in readme_text
     assert "waiting_for_delta" in readme_text
     assert "true zero usage" in readme_text
-    assert "not observed a cumulative kWh increase" in readme_text
+    assert "automatic watt-to-kWh helper" in readme_text
 
 
 def test_readme_explains_generated_dashboard_controls() -> None:

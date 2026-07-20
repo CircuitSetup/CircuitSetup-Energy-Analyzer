@@ -281,7 +281,7 @@
           },
           "energy_settings": {
             "name": "Energy Usage And Goals",
-            "description": "Daily kWh spike and goal settings for circuits with energy sensors.",
+            "description": "Daily kWh spike and goal settings for circuits with cumulative energy or real-power sensors.",
             "data": {
               "reset_energy_settings_to_defaults": "Reset Energy Settings To Defaults",
               "window_days": "Energy Window Days",
@@ -687,7 +687,7 @@
     },
     "stale_source_sensor": {
       "title": "Energy Analyzer source sensor is stale",
-      "description": "A configured source sensor has not updated recently. Appliance analysis is paused for the affected circuit. Suggested fix: {fix}"
+      "description": "The configured source sensor {source_entities} has not updated recently. Appliance analysis is paused for the affected circuit. Suggested fix: {fix}"
     },
     "missing_energy_source": {
       "title": "Energy Analyzer circuit needs cumulative energy data",
@@ -832,8 +832,8 @@
       },
       "notes": {
         "household_overview_after_setup": "Household overview appears after setup.",
-        "todays_energy_after_sources": "Today's energy appears after kWh sources report.",
-        "appliance_status_summary": "These cards keep each appliance to Activity, Electrical Health, Energy Summary, and Daily Energy Usage. Daily Energy Usage may show Waiting For Energy Change until a cumulative kWh source increases.",
+        "todays_energy_after_sources": "Today's energy appears after cumulative energy or consecutive power samples report.",
+        "appliance_status_summary": "These cards keep each appliance to Activity, Electrical Health, Energy Summary, and Daily Energy Usage. Daily Energy Usage may show Waiting For Energy Change until a native energy source increases or the automatic kWh helper receives consecutive power samples.",
         "known_load_share": "Known Load Share is how much of current mains power is explained by the circuits you selected. Low values usually mean normal unmonitored loads, not necessarily a problem.",
         "energy_tracking_after_entities": "Energy tracking cards appear after analyzer summary entities are created and available.",
         "run_timeline_after_activity": "Run timeline appears after activity summaries.",
@@ -892,9 +892,9 @@
             "fix": "Check CT direction"
           },
           "cumulative_kwh_sources_found": {
-            "title": "Cumulative kWh sources found",
-            "why_it_matters": "Energy totals power today-vs-normal and utility comparisons.",
-            "fix": "Add cumulative kWh source"
+            "title": "Energy tracking available",
+            "why_it_matters": "Energy totals use a configured kWh source or are derived automatically from power.",
+            "fix": "Review energy source"
           },
           "appliance_profiles_selected": {
             "title": "Appliance profiles selected",
