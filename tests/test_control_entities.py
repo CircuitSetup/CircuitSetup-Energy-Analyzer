@@ -899,7 +899,7 @@ async def test_number_setup_entry_filters_controls_through_catalog(
 
 
 @pytest.mark.asyncio
-async def test_number_setup_skips_daily_energy_goal_without_energy_source(
+async def test_number_setup_adds_daily_energy_goal_for_power_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import number
@@ -916,13 +916,15 @@ async def test_number_setup_skips_daily_energy_goal_without_energy_source(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_garage_freezer_daily_energy_goal",
         "entry-1_electricity_rate",
         "entry-1_tou_rate",
     ]
+    assert added_entities[0].native_value == 0.0
 
 
 @pytest.mark.asyncio
-async def test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_unit(
+async def test_number_setup_uses_power_helper_for_non_cumulative_energy_unit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import number
@@ -939,13 +941,14 @@ async def test_number_setup_skips_daily_energy_goal_for_non_cumulative_energy_un
     )
 
     assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_air_handler_daily_energy_goal",
         "entry-1_electricity_rate",
         "entry-1_tou_rate",
     ]
 
 
 @pytest.mark.asyncio
-async def test_number_setup_skips_stale_daily_goal_without_energy_source(
+async def test_number_setup_restores_daily_goal_with_power_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import number
@@ -971,13 +974,15 @@ async def test_number_setup_skips_stale_daily_goal_without_energy_source(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_garage_freezer_daily_energy_goal",
         "entry-1_electricity_rate",
         "entry-1_tou_rate",
     ]
+    assert added_entities[0].native_value == 3.25
 
 
 @pytest.mark.asyncio
-async def test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed(
+async def test_number_setup_keeps_power_only_goal_on_circuit_device(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import number
@@ -1012,6 +1017,7 @@ async def test_number_setup_keeps_circuit_device_when_stale_goal_is_suppressed(
     )
 
     assert [entity.unique_id for entity in added_entities] == [
+        "entry-1_garage_freezer_daily_energy_goal",
         "entry-1_electricity_rate",
         "entry-1_tou_rate",
     ]

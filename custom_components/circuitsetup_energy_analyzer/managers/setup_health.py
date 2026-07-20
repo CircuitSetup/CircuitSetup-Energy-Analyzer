@@ -124,9 +124,16 @@ class SetupHealthAggregator:
             )
             self.active_repair_issues.discard(issue)
 
-        for issue in desired - self.active_repair_issues:
+        issues_to_create = desired - self.active_repair_issues
+        issues_to_create.update(
+            issue for issue in desired if issue[1] == "stale_source_sensor"
+        )
+        for issue in issues_to_create:
             source_entities = (
-                sample_or_problem.source_entity_ids
+                self.data_quality_issue_source_entities(
+                    sample_or_problem,
+                    issue[1],
+                )
                 if not isinstance(sample_or_problem, str)
                 else self.data_quality_repair_source_entities(issue[0])
             )
@@ -152,11 +159,6 @@ class SetupHealthAggregator:
             desired.add((circuit_id, "missing_source_entities"))
             utility_comparison_problem = None
         else:
-            dashboard_status = coordinator.state.energy_dashboard_status_by_circuit.get(
-                circuit_id
-            )
-            if dashboard_status in {"needs_energy_source", "power_ready"}:
-                desired.add((circuit_id, "missing_energy_source"))
             if (
                 self.has_missing_mains_status(circuit_id)
                 and not has_mains_source_configured(
@@ -165,11 +167,6 @@ class SetupHealthAggregator:
                 )
             ):
                 desired.add((circuit_id, "missing_mains_source"))
-            if (
-                coordinator.state.metric_consistency_status_by_circuit.get(circuit_id)
-                == "missing_metrics"
-            ):
-                desired.add((circuit_id, "missing_electrical_metrics"))
             if self.has_ct_direction_status(circuit_id):
                 desired.add((circuit_id, "check_ct_direction"))
             if (
@@ -267,6 +264,23 @@ class SetupHealthAggregator:
 
     def data_quality_repair_source_entities(self, circuit_id: str) -> list[str]:
         return self.source_entities(circuit_id)
+
+    def data_quality_issue_source_entities(
+        self,
+        sample: Any,
+        problem: str,
+    ) -> list[str]:
+        source_entities = list(sample.source_entity_ids)
+        if problem != "stale_source_sensor":
+            return source_entities
+        stale_entities = {
+            issue.split(" ", 1)[0]
+            for issue in sample.quality_issues
+            if data_quality_problem(issue) == problem
+        }
+        return [
+            entity_id for entity_id in source_entities if entity_id in stale_entities
+        ] or source_entities
 
     def repair_data(self, circuit_id: str, problem: str) -> dict[str, Any]:
         coordinator = self._coordinator

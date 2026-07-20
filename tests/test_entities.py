@@ -1435,7 +1435,7 @@ def test_recent_activity_attributes_are_bounded() -> None:
             for index in range(5)
         ],
     }
-def test_setup_health_prioritizes_missing_energy_source() -> None:
+def test_setup_health_treats_optional_energy_and_metric_inputs_as_ready() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
         setup_health_value,
@@ -1447,6 +1447,7 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
             energy_dashboard_evidence_by_circuit={
                 "fridge": {"status": "needs_energy_source"}
             },
+            metric_consistency_status_by_circuit={"fridge": "missing_metrics"},
         ),
         circuit_configs=(
             CircuitConfig(
@@ -1458,38 +1459,26 @@ def test_setup_health_prioritizes_missing_energy_source() -> None:
             ),
         ),
     )
-    assert setup_health_value(setup_coordinator) == "Add cumulative kWh source"
+    assert setup_health_value(setup_coordinator) == "Ready"
     setup_attrs = setup_health_attributes(setup_coordinator)
-    assert setup_attrs["blocking_issue_count"] == 1
-    assert setup_attrs["issue_count"] == 1
-    assert setup_attrs["warning_count"] == 1
-    assert setup_attrs["ready"] is False
-    assert setup_attrs["next_step"] == (
-        "Add a cumulative kWh sensor to Kitchen Fridge"
-    )
-    assert setup_attrs["recommended_action"] == (
-        "Add a cumulative kWh sensor to Kitchen Fridge"
-    )
-    assert setup_attrs["primary_issue"] == "missing_energy_source"
-    assert setup_attrs["primary_severity"] == "warning"
-    assert setup_attrs["issue_summary"] == (
-        "1 warning: Add a cumulative kWh sensor to Kitchen Fridge"
-    )
-    assert setup_attrs["affected_circuit"] == "fridge"
-    assert setup_attrs["affected_circuits"] == ["fridge"]
-    assert setup_attrs["missing_energy_sources"] == ["fridge"]
+    assert setup_attrs["blocking_issue_count"] == 0
+    assert setup_attrs["issue_count"] == 0
+    assert setup_attrs["warning_count"] == 0
+    assert setup_attrs["ready"] is True
+    assert setup_attrs["next_step"] == "No setup action needed"
+    assert setup_attrs["recommended_action"] == "No setup action needed"
+    assert setup_attrs["primary_issue"] is None
+    assert setup_attrs["primary_severity"] is None
+    assert setup_attrs["issue_summary"] == "Ready"
+    assert setup_attrs["affected_circuit"] is None
+    assert setup_attrs["affected_circuits"] == []
+    assert setup_attrs["missing_energy_sources"] == []
     assert setup_attrs["learning_circuits"] == []
     assert setup_attrs["stale_sources"] == []
     assert setup_attrs["negative_power_loads"] == []
-    assert setup_attrs["issues"][0]["reason"] == (
-        "Daily Energy Usage needs a cumulative energy source."
-    )
-    assert setup_attrs["issues"][0]["circuit_id"] == "fridge"
-    assert setup_attrs["issues"][0]["issue"] == "missing_energy_source"
-    assert setup_attrs["issues"][0]["severity"] == "warning"
-    assert setup_attrs["issues"][0]["fix"] == (
-        "Add a cumulative kWh sensor to Kitchen Fridge"
-    )
+    assert setup_attrs["issues"] == []
+    checklist = {item["item_id"]: item for item in setup_attrs["checklist"]}
+    assert checklist["cumulative_kwh_sources_found"]["status"] == "ok"
 
     ready_coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=())
     assert setup_health_value(ready_coordinator) == "Review circuit assignments"
@@ -1562,14 +1551,12 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
 
     assert attrs["checklist_total_count"] == 10
     assert checklist["source_data_found"]["status"] == "ok"
-    assert checklist["cumulative_kwh_sources_found"]["status"] == "needs_attention"
-    assert checklist["cumulative_kwh_sources_found"]["affected_circuits"] == [
-        "fridge"
-    ]
+    assert checklist["cumulative_kwh_sources_found"]["status"] == "ok"
+    assert "affected_circuits" not in checklist["cumulative_kwh_sources_found"]
     assert checklist["dashboard_created"]["status"] == "ok"
     assert checklist["nilm_enabled"]["status"] == "optional"
     assert checklist["learning_progress"]["status"] == "ok"
-    assert attrs["checklist_ready_count"] == 9
+    assert attrs["checklist_ready_count"] == 10
 
 
 def test_setup_health_dashboard_checklist_survives_reload_status() -> None:
@@ -1967,6 +1954,33 @@ def test_setup_health_learning_next_step_uses_specific_progress_reason() -> None
     assert waiting_attrs["next_step"] == (
         "Waiting for first positive kWh increase on Kitchen Fridge"
     )
+
+    derived_energy = SimpleNamespace(
+        data=AnalyzerState(
+            energy_usage_evidence_by_circuit={
+                "fridge": {
+                    "status": "waiting_for_delta",
+                    "energy_source": "derived_from_power",
+                }
+            }
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+        store_data=FeatureStoreData(),
+        options={},
+    )
+    derived_attrs = setup_health_attributes(derived_energy)
+    assert derived_attrs["next_step"] == (
+        "Waiting for another power sample on Kitchen Fridge"
+    )
+    assert "automatic kWh helper" in derived_attrs["reason"]
 
     cycle_learning = SimpleNamespace(
         data=AnalyzerState(
@@ -3022,6 +3036,55 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     )
 
 
+def test_shared_mains_voltage_enables_appliance_voltage_calculations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
+        _setup_health_needs_capacity_settings,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    coordinator = SimpleNamespace(
+        _mains_voltage_entity_ids=frozenset({"sensor.panel_voltage"}),
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={"heater": {"breaker_amps": 20.0}},
+        ),
+    )
+    heater = CircuitConfig(
+        circuit_id="heater",
+        name="Heater",
+        appliance_profile=ApplianceProfile.ELECTRIC_HEAT,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.heater_power", SensorRole.REAL_POWER),),
+    )
+    pump = CircuitConfig(
+        circuit_id="pump",
+        name="Pump",
+        appliance_profile=ApplianceProfile.WATER_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.pump_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.pump_current", SensorRole.CURRENT),
+        ),
+    )
+
+    assert sensor_description_applies(
+        descriptions["capacity_usage"], heater, coordinator
+    )
+    assert sensor_description_applies(
+        descriptions["metric_consistency_score"], pump, coordinator
+    )
+    assert _setup_health_needs_capacity_settings(
+        SimpleNamespace(
+            _mains_voltage_entity_ids=frozenset({"sensor.panel_voltage"}),
+            store_data=FeatureStoreData(),
+        ),
+        heater,
+    )
+
+
 def test_utility_comparison_sensors_merge_config_sources_per_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -3256,6 +3319,27 @@ def test_energy_usage_sensors_explain_waiting_for_delta() -> None:
     assert "energy sensor increase" in attrs["suggested_next_check"]
 
 
+def test_energy_summary_explains_automatic_kwh_helper_startup() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        energy_summary_attributes,
+        energy_summary_value,
+    )
+
+    state = AnalyzerState(
+        energy_usage_evidence_by_circuit={
+            "fridge": {
+                "status": "waiting_for_delta",
+                "energy_source": "derived_from_power",
+            }
+        }
+    )
+
+    assert energy_summary_value(state, "fridge") == "Learning"
+    assert "automatic kWh helper" in energy_summary_attributes(state, "fridge")[
+        "summary_explanation"
+    ]
+
+
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,
@@ -3353,7 +3437,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.fridge_energy", SensorRole.ENERGY),),
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
     )
     coordinator = SimpleNamespace(
         data=AnalyzerState(
@@ -3381,10 +3465,11 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert setup_health.suggested_object_id == (
         "circuitsetup_energy_analyzer_setup_health"
     )
-    assert setup_health.native_value == "Add cumulative kWh source"
-    assert setup_health.extra_state_attributes["blocking_issue_count"] == 1
-    assert setup_health.extra_state_attributes["next_step"] == (
-        "Add a cumulative kWh sensor to Kitchen Fridge"
+    assert setup_health.native_value == "Ready"
+    assert setup_health.extra_state_attributes["blocking_issue_count"] == 0
+    assert (
+        setup_health.extra_state_attributes["next_step"]
+        == "No setup action needed"
     )
     assert getattr(setup_health, "device_info", None) is None
     effective_rate = added_entities[1]
@@ -4885,7 +4970,7 @@ async def test_sensor_setup_entry_materializes_demo_car_charger_sources() -> Non
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
+async def test_sensor_setup_entry_adds_mains_energy_without_appliance_cycles() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
@@ -4917,10 +5002,10 @@ async def test_sensor_setup_entry_adds_mains_nilm_entities_only() -> None:
         "entry-1_mains_nilm_topology_status",
         "entry-1_mains_balance_power",
         "entry-1_mains_current_demand",
+        "entry-1_mains_daily_energy_usage",
     } <= unique_ids
     assert not {
         "entry-1_mains_run_cycle_count",
-        "entry-1_mains_daily_energy_usage",
         "entry-1_mains_standby_status",
         "entry-1_mains_billing_cycle_usage",
         "entry-1_mains_cost_cycle",

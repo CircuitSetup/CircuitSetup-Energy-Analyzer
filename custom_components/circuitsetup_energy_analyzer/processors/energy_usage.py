@@ -67,8 +67,9 @@ class EnergyUsageProcessor:
         if self._seed_demo_history is not None:
             self._seed_demo_history(circuit_config, sample, context.now, settings)
 
+        history = context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {})
         result = record_energy_usage(
-            context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {}),
+            history,
             circuit_id=circuit_id,
             timestamp=context.now,
             energy_kwh=sample.energy,
@@ -88,6 +89,14 @@ class EnergyUsageProcessor:
             sample,
             context,
         )
+        energy_source = str(history.get("energy_source") or "")
+        evidence = energy_usage_evidence_payload(
+            result,
+            contextual_comparison,
+            energy_source=energy_source,
+        )
+        if energy_source:
+            evidence["energy_source"] = energy_source
         feature_result = FeatureResult(
             state_updates=[
                 StateUpdate(
@@ -100,10 +109,7 @@ class EnergyUsageProcessor:
                 ),
                 StateUpdate(
                     ("energy_usage_evidence_by_circuit", circuit_id),
-                    energy_usage_evidence_payload(
-                        result,
-                        contextual_comparison,
-                    ),
+                    evidence,
                 ),
             ],
             store_dirty=True,
@@ -168,6 +174,8 @@ def energy_usage_spike_message(
 def energy_usage_evidence_payload(
     result: Any,
     contextual_comparison: dict[str, Any] | None = None,
+    *,
+    energy_source: str = "",
 ) -> dict[str, Any]:
     """Build the analyzer state payload for daily usage tracking."""
     status = "over_threshold" if result.spike is not None else result.tracking_status
@@ -185,9 +193,15 @@ def energy_usage_evidence_payload(
         "status": status,
         "raw_status": status,
         "status_label": _status_label_for_evidence(status),
-        "status_explanation": _status_explanation_for_evidence(status),
+        "status_explanation": _status_explanation_for_evidence(
+            status,
+            energy_source=energy_source,
+        ),
         "status_reason": result.status_reason,
-        "suggested_next_check": _energy_usage_next_check(status),
+        "suggested_next_check": _energy_usage_next_check(
+            status,
+            energy_source=energy_source,
+        ),
     }
     if contextual_comparison:
         payload.update(
@@ -376,8 +390,13 @@ def _status_label_for_evidence(status: str) -> str:
     return " ".join(part.capitalize() for part in status.split("_"))
 
 
-def _status_explanation_for_evidence(status: str) -> str:
+def _status_explanation_for_evidence(status: str, *, energy_source: str = "") -> str:
     if status == "waiting_for_delta":
+        if energy_source == "derived_from_power":
+            return (
+                "The automatic kWh helper needs consecutive power samples before "
+                "it can calculate an energy change."
+            )
         return (
             "A cumulative kWh source is present, but the analyzer has not "
             "observed it increase since tracking started."
@@ -391,8 +410,10 @@ def _status_explanation_for_evidence(status: str) -> str:
     return f"{_status_label_for_evidence(status)} status reported by the analyzer."
 
 
-def _energy_usage_next_check(status: str) -> str:
+def _energy_usage_next_check(status: str, *, energy_source: str = "") -> str:
     if status == "waiting_for_delta":
+        if energy_source == "derived_from_power":
+            return "Let the analyzer collect another usable power sample."
         return (
             "Let the analyzer see the energy sensor increase, or confirm the "
             "circuit has a cumulative kWh source."

@@ -45,6 +45,28 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
     ]
 
 
+def test_config_parser_groups_peak_current_under_mac_suffixed_channel() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.circuitsetup_energy_meter_24x_a4e634_car_charger_watts",
+                "sensor.circuitsetup_energy_meter_24x_a4e634_car_charger_peak_a",
+            ]
+        }
+    )
+
+    assert len(configs) == 1
+    assert configs[0].name == "Car Charger"
+    assert [sensor.role for sensor in configs[0].sensors] == [
+        SensorRole.REAL_POWER,
+        SensorRole.PEAK_CURRENT,
+    ]
+
+
 def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

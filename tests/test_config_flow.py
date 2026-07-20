@@ -3156,6 +3156,62 @@ def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
     )
 
 
+def test_automatic_assignments_route_meter_metrics_and_use_channel_names(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+    sources = [
+        "sensor.circuitsetup_energy_meter_24x_a4e634_voltage",
+        "sensor.circuitsetup_energy_meter_24x_a4e634_frequency",
+        "sensor.circuitsetup_energy_meter_24x_a4e634_car_charger_peak_a",
+        "sensor.circuitsetup_energy_meter_24x_a4e634_car_charger_harmonic_power",
+        "sensor.circuitsetup_energy_meter_24x_a4e634_pressure_pump_watts",
+        "sensor.circuitsetup_energy_meter_24x_a4e634_ac_watts",
+    ]
+
+    validated = config_flow.validate_setup_input(
+        {CONF_EXTRA_SOURCE_ENTITIES: sources, CONF_RETENTION_MODE: "standard"}
+    )
+    assert validated[CONF_MAINS_SOURCE_ENTITIES] == sources[:2]
+
+    groups = config_flow.assignment_groups_from_sources(
+        validated[CONF_SOURCE_ENTITIES],
+        mains_source_entities=validated[CONF_MAINS_SOURCE_ENTITIES],
+    )
+
+    assert [group["name"] for group in groups] == [
+        "Car Charger",
+        "Pressure Pump",
+        "AC",
+    ]
+    assert [group["appliance_profile"] for group in groups] == [
+        "ev_charger",
+        "water_pump",
+        "hvac_compressor",
+    ]
+    assert groups[0]["entity_ids"] == (sources[2],)
+    assert config_flow._assignment_sensor_options(groups[0]["entity_ids"]) == [
+        {
+            "value": sources[2],
+            "label": f"Car Charger Peak A ({sources[2]})",
+        }
+    ]
+
+    circuit = config_flow._circuit_from_assignment_group(
+        groups[0],
+        {
+            "include_circuit": True,
+            "included_sensors": [sources[2]],
+            "circuit_name": "Car Charger",
+            "appliance_profile": "ev_charger",
+        },
+    )
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == "peak_current"
+
+
 def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         build_config_from_assignment_input,
@@ -5196,6 +5252,26 @@ def test_options_source_entities_override_setup_source_entities() -> None:
     coordinator = SimpleNamespace(circuit_configs=())
 
     assert _source_entities_for_entry(entry, coordinator) == ("sensor.option_power",)
+
+
+def test_source_entities_for_entry_listens_to_mains_voltage_without_nilm() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_SOURCE_ENTITIES: ["sensor.pump_power"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.setup_voltage"],
+        },
+        options={CONF_MAINS_SOURCE_ENTITIES: ["sensor.option_voltage"]},
+    )
+    coordinator = SimpleNamespace(circuit_configs=())
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "sensor.pump_power",
+        "sensor.option_voltage",
+    )
 
 
 def test_source_entities_for_entry_includes_linked_flow_sensors() -> None:

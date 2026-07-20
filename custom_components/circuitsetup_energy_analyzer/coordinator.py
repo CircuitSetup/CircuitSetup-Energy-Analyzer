@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any, Self
 
@@ -13,10 +14,14 @@ from .activity_timeline import (
 from .config_parsing import (
     circuit_configs_from_entry_data as _circuit_configs_from_entry_data,
 )
+from .config_parsing import (
+    mains_context_config_from_sources,
+)
 from .const import (
     DOMAIN,
 )
 from .expected_schedule import refresh_expected_schedule_contexts
+from .managers.source_samples import normalized_leg
 from .managers.utility_energy_sources import (
     _ha_recorder_get_instance,
     _ha_statistics_during_period,
@@ -25,7 +30,9 @@ from .models import (
     AlertEvidence,
     CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     RetentionMode,
+    SensorRole,
 )
 from .normalize import NormalizedCircuitSample, SourceState
 from .processors import (
@@ -127,6 +134,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.circuit_configs = _circuit_configs_from_entry_data(
             self.entry_data,
             self.options,
+        )
+        self._mains_context_config = mains_context_config_from_sources(
+            self.entry_data,
+            self.options,
+        )
+        self._mains_voltage_entity_ids = frozenset(
+            sensor.entity_id
+            for sensor in (
+                self._mains_context_config.sensors
+                if self._mains_context_config is not None
+                else ()
+            )
+            if sensor.role is SensorRole.VOLTAGE
         )
         self._source_circuit_ids_by_entity = _source_circuit_ids_by_entity(
             self.circuit_configs
@@ -275,6 +295,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         if not changed:
             return tuple(self.circuit_configs)
 
+        if changed & self._mains_voltage_entity_ids:
+            return tuple(self.circuit_configs)
+
         if not changed.issubset(self._known_source_entity_ids):
             return tuple(self.circuit_configs)
 
@@ -353,6 +376,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         processing_circuit_ids = {
             config.circuit_id for config in processing_configs
         }
+        mains_context_sample = self._mains_context_sample(now)
         self.state_reducer.prune_recent_observations(
             self.state,
             now,
@@ -360,7 +384,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
 
         for config in self.circuit_configs:
-            sample = self._sample_for_config(config, now)
+            sample = self._sample_for_config(
+                config,
+                now,
+                mains_context_sample=mains_context_sample,
+            )
             samples.append((config, sample))
             self.state_reducer.refresh_config_metadata_state(self.state, config)
             self.state_reducer.refresh_latest_real_power_state(
@@ -1171,8 +1199,56 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self: Self,
         config: CircuitConfig,
         now: datetime,
+        *,
+        mains_context_sample: NormalizedCircuitSample | None = None,
     ) -> NormalizedCircuitSample:
-        return self.source_samples.sample_for_config(config, now)
+        sample = self.source_samples.sample_for_config(config, now)
+        if config.mode is CircuitMode.MAINS_NILM:
+            return sample
+        mains_sample = mains_context_sample or self._mains_context_sample(now)
+        if mains_sample is None:
+            return sample
+        circuit_legs = {
+            leg
+            for sensor in config.sensors
+            if (leg := normalized_leg(sensor.leg)) is not None
+        }
+        shared_voltage = mains_sample.voltage
+        if config.mode is not CircuitMode.DUAL_PHASE and len(circuit_legs) == 1:
+            leg = next(iter(circuit_legs))
+            leg_voltage = getattr(mains_sample, f"leg_{leg}_voltage", None)
+            if leg_voltage is not None:
+                shared_voltage = leg_voltage
+        return replace(
+            sample,
+            voltage=sample.voltage if sample.voltage is not None else shared_voltage,
+            leg_a_voltage=(
+                sample.leg_a_voltage
+                if sample.leg_a_voltage is not None
+                else (
+                    mains_sample.leg_a_voltage
+                    if mains_sample.leg_a_voltage is not None
+                    else mains_sample.voltage
+                )
+            ),
+            leg_b_voltage=(
+                sample.leg_b_voltage
+                if sample.leg_b_voltage is not None
+                else (
+                    mains_sample.leg_b_voltage
+                    if mains_sample.leg_b_voltage is not None
+                    else mains_sample.voltage
+                )
+            ),
+        )
+
+    def _mains_context_sample(
+        self: Self,
+        now: datetime,
+    ) -> NormalizedCircuitSample | None:
+        if self._mains_context_config is None:
+            return None
+        return self.source_samples.sample_for_config(self._mains_context_config, now)
 
     async def _sync_data_quality_repairs(
         self: Self,

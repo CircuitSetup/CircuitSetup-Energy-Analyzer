@@ -65,6 +65,7 @@ class SensorRole(StrEnum):
 
     VOLTAGE = "voltage"
     CURRENT = "current"
+    PEAK_CURRENT = "peak_current"
     REAL_POWER = "real_power"
     REACTIVE_POWER = "reactive_power"
     APPARENT_POWER = "apparent_power"

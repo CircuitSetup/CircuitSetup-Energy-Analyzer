@@ -172,7 +172,7 @@ def test_should_create_entity_checks_feature_source_applicability() -> None:
         ),
     )
 
-    assert not should_create_entity(
+    assert should_create_entity(
         rule=rule,
         circuit=power_only,
         coordinator=None,

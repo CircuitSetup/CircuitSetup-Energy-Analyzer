@@ -24,7 +24,7 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
     ),
     (
         ("leg_imbalance", "phase", "capacity"),
-        (SensorRole.REAL_POWER, SensorRole.CURRENT),
+        (SensorRole.REAL_POWER, SensorRole.CURRENT, SensorRole.PEAK_CURRENT),
     ),
     (
         ("reactive", "var"),
@@ -59,6 +59,7 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
 _DEFAULT_ROLES = (
     SensorRole.REAL_POWER,
     SensorRole.CURRENT,
+    SensorRole.PEAK_CURRENT,
     SensorRole.REACTIVE_POWER,
     SensorRole.APPARENT_POWER,
     SensorRole.POWER_FACTOR,

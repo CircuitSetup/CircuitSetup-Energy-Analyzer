@@ -176,6 +176,7 @@ from .discovery import (
     async_discover_energy_source_entities_for_devices,
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
+    friendly_source_name,
     infer_sensor_role,
 )
 from .entity import (
@@ -291,6 +292,10 @@ FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
 _SOURCE_METRIC_SUFFIXES = (
+    "_peak_current",
+    "_peak_amps",
+    "_peak_amp",
+    "_peak_a",
     "_reactive_power",
     "_apparent_power",
     "_power_factor",
@@ -970,6 +975,11 @@ def _with_auto_mains_source_entities(
 
 
 def _looks_like_mains_source_entity(entity_id: str) -> bool:
+    if _assignment_sensor_role(entity_id) in {
+        SensorRole.VOLTAGE,
+        SensorRole.FREQUENCY,
+    }:
+        return True
     circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
     if circuit_id in _MAINS_SOURCE_CIRCUIT_IDS:
         return True
@@ -2428,7 +2438,11 @@ def assignment_groups_from_sources(
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
     ]
-    grouped_entities = non_mains_entities
+    grouped_entities = [
+        entity_id
+        for entity_id in non_mains_entities
+        if "harmonic" not in entity_id.lower()
+    ]
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
@@ -3178,7 +3192,15 @@ def _suggest_assignment_profile_mode(
             profile,
             entity_id_list,
         )
-    if "_water_pump_" in text or "_well_pump_" in text or "_booster_pump_" in text:
+    if any(
+        token in text
+        for token in (
+            "_water_pump_",
+            "_well_pump_",
+            "_booster_pump_",
+            "_pressure_pump_",
+        )
+    ):
         profile = ApplianceProfile.WATER_PUMP.value
         return profile, _assignment_mode_for_profile_and_entities(
             profile,
@@ -3280,8 +3302,7 @@ def _suggest_assignment_profile_mode(
 
 
 def _friendly_name_from_id(value: str) -> str:
-    text = str(value).removeprefix("cs_energy_analyzer_demo_")
-    return text.replace("_", " ").strip().title()
+    return friendly_source_name(str(value).removeprefix("cs_energy_analyzer_demo_"))
 
 
 def _slugify(value: str) -> str:
