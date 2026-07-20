@@ -3024,6 +3024,70 @@ def test_capacity_processor_records_current_and_returns_capacity_alert() -> None
     ]
 
 
+def test_capacity_processor_prefers_peak_current_for_spike_alerts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.normalize import SourceState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.capacity import (
+        CapacityProcessor,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.ev_current", SensorRole.CURRENT),
+            SensorRef("sensor.ev_peak_a", SensorRole.PEAK_CURRENT),
+        ),
+    )
+    peak_state = SourceState(
+        entity_id="sensor.ev_peak_a",
+        state="42",
+        unit="A",
+        last_updated=now,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = CapacityProcessor(
+        settings_for_config=lambda _circuit_id: CapacitySettings(
+            breaker_amps=40.0,
+            warning_ratio=0.8,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        source_states_for=lambda _config, _now: {
+            peak_state.entity_id: peak_state,
+        },
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="ev",
+        real_power=2880.0,
+        current=12.0,
+        voltage=240.0,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert policy.observations[0].observed_value == 42.0
+    assert result.state_updates[0].value == 105.0
+    assert result.alerts[0].feature == "circuit_capacity"
+
+
 def test_capacity_history_discards_unsupported_sample_format() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import capacity
 

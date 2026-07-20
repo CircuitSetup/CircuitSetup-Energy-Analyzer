@@ -1141,7 +1141,9 @@ def _setup_health_needs_capacity_settings(coordinator: Any, circuit: Any) -> boo
     roles = _sensor_roles(circuit)
     profile = _appliance_profile(circuit)
     mode = _circuit_mode(circuit)
-    has_capacity_input = SensorRole.CURRENT in roles or (
+    has_capacity_input = bool(
+        roles & {SensorRole.CURRENT, SensorRole.PEAK_CURRENT}
+    ) or (
         SensorRole.REAL_POWER in roles and SensorRole.VOLTAGE in roles
     )
     capacity_relevant = (

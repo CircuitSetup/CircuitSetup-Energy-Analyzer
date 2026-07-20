@@ -2118,7 +2118,7 @@ def sensor_description_applies(
     is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
     has_real_power = SensorRole.REAL_POWER in roles
     has_energy = SensorRole.ENERGY in roles
-    has_current = SensorRole.CURRENT in roles
+    has_current = bool(roles & {SensorRole.CURRENT, SensorRole.PEAK_CURRENT})
     has_voltage = SensorRole.VOLTAGE in roles
 
     if key in _ENERGY_USAGE_SENSOR_KEYS:

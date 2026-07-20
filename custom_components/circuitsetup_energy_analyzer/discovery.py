@@ -94,6 +94,8 @@ def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole |
         return SensorRole.APPARENT_POWER
     if "power factor" in text:
         return SensorRole.POWER_FACTOR
+    if re.search(r"\bpeak\s+(?:current|amps?|a)\b", text):
+        return SensorRole.PEAK_CURRENT
     if "voltage" in text:
         return SensorRole.VOLTAGE
     if "current" in text or re.search(r"\bamps?\b", text):
@@ -108,6 +110,16 @@ def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole |
     ):
         return SensorRole.ENERGY
     return None
+
+
+def friendly_source_name(value: str) -> str:
+    """Return the channel/metric name after an ESPHome MAC suffix."""
+    object_id = str(value).split(".")[-1]
+    matches = tuple(re.finditer(r"(?:^|_)[0-9a-f]{6}(?:_|$)", object_id.lower()))
+    if matches:
+        object_id = object_id[matches[-1].end() :]
+    words = object_id.replace("_", " ").split()
+    return " ".join("AC" if word.lower() == "ac" else word.title() for word in words)
 
 
 def score_circuitsetup_candidate(sensor: DiscoveredSensor) -> int:

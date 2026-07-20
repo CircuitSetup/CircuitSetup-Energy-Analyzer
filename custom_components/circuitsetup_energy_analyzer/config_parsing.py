@@ -16,6 +16,7 @@ from .const import (
 from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
+from .discovery import friendly_source_name
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
 )
@@ -483,6 +484,10 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
 
 
 _SOURCE_METRIC_SUFFIXES = (
+    "_peak_current",
+    "_peak_amps",
+    "_peak_amp",
+    "_peak_a",
     "_reactive_power",
     "_apparent_power",
     "_power_factor",
@@ -537,6 +542,11 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
     object_id = _entity_object_id(entity_id)
+    if _has_metric_suffix(
+        object_id,
+        ("peak_current", "peak_amps", "peak_amp", "peak_a"),
+    ):
+        return SensorRole.PEAK_CURRENT
     if _has_metric_suffix(object_id, ("power_factor", "pf")):
         return SensorRole.POWER_FACTOR
     if _has_metric_suffix(object_id, ("reactive_power", "reactive", "var")):
@@ -671,8 +681,9 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
 
 
 def _friendly_name_from_circuit_id(circuit_id: str) -> str:
-    text = str(circuit_id).removeprefix("cs_energy_analyzer_demo_")
-    return text.replace("_", " ").strip().title()
+    return friendly_source_name(
+        str(circuit_id).removeprefix("cs_energy_analyzer_demo_")
+    )
 
 
 def _appliance_profile_mode_from_circuit_id(
@@ -746,6 +757,7 @@ def _appliance_profile_mode_from_circuit_id(
                 "_water_pump_",
                 "_waterpump_",
                 "_booster_pump_",
+                "_pressure_pump_",
             ),
             ApplianceProfile.WATER_PUMP,
             CircuitMode.SINGLE_PHASE,

@@ -901,11 +901,18 @@ These are the sensors you select during setup. The analyzer does not require eve
 | **Energy** | Daily kWh, billing-cycle usage, goals, utility comparison, Energy Dashboard readiness. |
 | **Active Power / Watts** | Appliance state, demand, cycles, NILM, balance, solar flow, negative-power checks. |
 | **Current** | Capacity checks, dual-phase evidence, metric consistency. |
+| **Peak Current / Peak A** | Short current-spike evidence for configured breaker-capacity alerts. |
 | **Voltage** | Metric consistency and current estimation. Split-phase mains L1/L2 voltage can help appliance circuits. |
 | **Frequency** | Line-frequency context from the meter. |
 | **Power Factor** | Motor/load behavior and metric consistency evidence. |
 | **Reactive Power** | Motor, compressor, pump, and power-quality drift evidence. |
 | **Apparent Power** | VA relationship checks with watts and power factor. |
+
+ATM90E32 harmonic active power is not ordinary active power or a THD percentage.
+Automatic assignment leaves harmonic sensors unassigned rather than treating them as
+standalone mixed circuits. A future dedicated role can use harmonic-to-active-power
+trends for nonlinear-load fingerprints or learned drift without corrupting watts-based
+appliance analysis.
 
 Example source entity names commonly look like this:
 

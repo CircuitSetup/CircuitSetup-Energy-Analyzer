@@ -94,6 +94,13 @@ class CapacityProcessor:
         sample: NormalizedCircuitSample,
         context: ProcessingContext,
     ) -> float | None:
+        peak_currents = self._sensor_currents(
+            config,
+            context.now,
+            SensorRole.PEAK_CURRENT,
+        )
+        if peak_currents:
+            return max(peak_currents)
         if config.mode is CircuitMode.DUAL_PHASE:
             leg_currents = self._dual_phase_leg_currents(config, context.now)
             if leg_currents:
@@ -110,13 +117,32 @@ class CapacityProcessor:
         config: CircuitConfig,
         now: datetime,
     ) -> tuple[float, ...]:
+        return self._sensor_currents(
+            config,
+            now,
+            SensorRole.CURRENT,
+            require_leg=True,
+        )
+
+    def _sensor_currents(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+        role: SensorRole,
+        *,
+        require_leg: bool = False,
+    ) -> tuple[float, ...]:
+        sensors = tuple(
+            sensor
+            for sensor in config.sensors
+            if sensor.role is role
+            and (not require_leg or _normalized_leg(sensor.leg) is not None)
+        )
+        if not sensors:
+            return ()
         states = self._source_states_for(config, now)
         currents: list[float] = []
-        for sensor in config.sensors:
-            if sensor.role is not SensorRole.CURRENT:
-                continue
-            if _normalized_leg(sensor.leg) is None:
-                continue
+        for sensor in sensors:
             source = states.get(sensor.entity_id)
             if source is None:
                 continue
@@ -124,8 +150,8 @@ class CapacityProcessor:
                 value = float(source.state)
             except ValueError:
                 continue
-            if value > 0.0:
-                currents.append(value)
+            if value != 0.0:
+                currents.append(abs(value))
         return tuple(currents)
 
     def _capacity_alert(
