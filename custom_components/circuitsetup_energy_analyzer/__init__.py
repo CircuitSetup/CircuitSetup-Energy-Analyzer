@@ -6,6 +6,7 @@ from typing import Any
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
@@ -97,6 +98,14 @@ def _source_entities_for_entry(
         entry_options.get(
             CONF_SOURCE_ENTITIES,
             entry_data.get(CONF_SOURCE_ENTITIES, []),
+        )
+    )
+    entity_ids.extend(
+        strings_from_any(
+            entry_options.get(
+                CONF_MAINS_SOURCE_ENTITIES,
+                entry_data.get(CONF_MAINS_SOURCE_ENTITIES, []),
+            )
         )
     )
     outdoor_temperature_entity = str(

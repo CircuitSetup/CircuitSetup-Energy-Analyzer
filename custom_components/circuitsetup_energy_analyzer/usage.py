@@ -8,6 +8,7 @@ from .local_time import TimeZone, as_ha_local, local_date
 
 DEFAULT_USAGE_WINDOW_DAYS = 7
 DEFAULT_DAILY_USAGE_SPIKE_RATIO = 0.25
+_MAX_DERIVED_ENERGY_INTERVAL = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +51,35 @@ class EnergyUsageResult:
     tracking_status: str
     status_reason: str
     spike: EnergyUsageSpike | None = None
+
+
+def derive_cumulative_energy_from_power(
+    history: dict[str, Any],
+    *,
+    timestamp: datetime,
+    power_w: float | None,
+) -> float | None:
+    """Maintain a cumulative kWh helper for a power-only circuit."""
+    energy_kwh = _float_or_none(history.get("derived_energy_kwh"))
+    last_sample_at = _datetime_or_none(history.get("derived_energy_last_sample_at"))
+    last_power_w = _float_or_none(history.get("derived_energy_last_power_w"))
+
+    if power_w is None:
+        history["derived_energy_last_sample_at"] = timestamp.isoformat()
+        history.pop("derived_energy_last_power_w", None)
+        return energy_kwh
+
+    energy_kwh = energy_kwh or 0.0
+    if last_sample_at is not None and last_power_w is not None:
+        elapsed = timestamp - last_sample_at
+        if timedelta(0) < elapsed <= _MAX_DERIVED_ENERGY_INTERVAL:
+            average_power_w = (max(last_power_w, 0.0) + max(power_w, 0.0)) / 2
+            energy_kwh += average_power_w * elapsed.total_seconds() / 3_600_000
+
+    history["derived_energy_kwh"] = round(energy_kwh, 6)
+    history["derived_energy_last_sample_at"] = timestamp.isoformat()
+    history["derived_energy_last_power_w"] = float(power_w)
+    return float(history["derived_energy_kwh"])
 
 
 def record_energy_usage(

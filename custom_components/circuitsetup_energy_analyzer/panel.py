@@ -102,6 +102,7 @@ APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS = (24, 168, 720)
 _HISTORY_UNIT_BY_ROLE = {
     SensorRole.VOLTAGE: "V",
     SensorRole.CURRENT: "A",
+    SensorRole.PEAK_CURRENT: "A",
     SensorRole.REAL_POWER: "W",
     SensorRole.REACTIVE_POWER: "var",
     SensorRole.APPARENT_POWER: "VA",
