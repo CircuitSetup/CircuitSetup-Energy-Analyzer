@@ -11,6 +11,7 @@ from .alert_links import (
     alert_graph_window,
     alert_source_entities,
 )
+from .localized_text import translation_text
 from .models import (
     AlertEvidence,
     BaselineStats,
@@ -20,8 +21,20 @@ from .models import (
     EventType,
     SensorRole,
 )
-from .notifications import notification_id_for_alert
-from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
+from .notifications import (
+    ALERT_VALUE_METADATA,
+    notification_id_for_alert,
+)
+from .notifications import (
+    format_alert_value as _format_alert_value,
+)
+from .safety import feature_needs_electrical_safety_notice
+
+
+def _ux_text(*keys: str, **values: Any) -> str:
+    text = translation_text("ux", *keys)
+    return text.format(**values) if values else text
+
 
 SENSITIVITY_VALUES = frozenset({"quiet", "balanced", "sensitive"})
 POLICY_NAME_BY_SENSITIVITY = {
@@ -30,69 +43,8 @@ POLICY_NAME_BY_SENSITIVITY = {
     "sensitive": "high",
 }
 SENSITIVITY_LABELS = {
-    "quiet": "Quiet",
-    "balanced": "Balanced",
-    "sensitive": "Sensitive",
-}
-ALERT_VALUE_METADATA = {
-    "activity_inactive_too_long": (
-        "Activity inactive too long",
-        "min",
-        "number",
-    ),
-    "activity_left_on": ("Activity left on", "min", "number"),
-    "always_on_power": ("Always on power", "W", "number"),
-    "reactive_to_real_ratio": (
-        "Reactive-to-real power ratio",
-        "%",
-        "percentage",
-    ),
-    "apparent_to_real_ratio": (
-        "Apparent-to-real power ratio",
-        "%",
-        "percentage",
-    ),
-    "power_factor": ("Power factor", "", "decimal"),
-    "power_factor_deficit": ("Power factor deficit", "", "decimal"),
-    "real_power": ("Real power", "W", "number"),
-    "reactive_power": ("Reactive power", "VAR", "number"),
-    "apparent_power": ("Apparent power", "VA", "number"),
-    "billing_cycle_budget": ("Billing cycle budget", "kWh", "number"),
-    "circuit_capacity": ("Circuit capacity", "A", "number"),
-    "daily_energy_goal": ("Daily energy goal", "kWh", "number"),
-    "daily_energy_usage_spike": ("Daily energy usage spike", "kWh", "number"),
-    "demand_limit": ("Demand limit", "W", "number"),
-    "demand_monthly_peak": ("Demand monthly peak", "W", "number"),
-    "dual_phase_leg_imbalance": (
-        "Dual phase leg imbalance",
-        "%",
-        "percentage",
-    ),
-    "nilm_appliance_unusual_energy": (
-        "NILM appliance unusual energy",
-        "kWh",
-        "number",
-    ),
-    "nilm_appliance_confidence": ("NILM confidence", "%", "percentage"),
-    "nilm_appliance_unusual_runtime": (
-        "NILM appliance unusual runtime",
-        "min",
-        "number",
-    ),
-    "rain_pump_correlation": ("Rain pump correlation", "min", "number"),
-    "run_cycle_daily_duty_cycle_percent": (
-        "Run cycle daily duty cycle",
-        "%",
-        "number",
-    ),
-    "run_cycle_daily_start_count": (
-        "Run cycle daily start count",
-        "starts",
-        "number",
-    ),
-    "run_cycle_duration_s": ("Run cycle duration", "s", "number"),
-    "utility_energy_mismatch": ("Utility energy mismatch", "kWh", "number"),
-    "water_flow_correlation": ("Water flow correlation", "min", "number"),
+    key: _ux_text("sensitivity_labels", key)
+    for key in ("quiet", "balanced", "sensitive")
 }
 POWER_QUALITY_RELATIONSHIP_METRICS = (
     "reactive_to_real_ratio",
@@ -125,13 +77,8 @@ ROLE_SAMPLE_FIELDS = {
     SensorRole.ENERGY: "energy",
 }
 FEATURE_TOKEN_LABELS = {
-    "hvac": "HVAC",
-    "kwh": "kWh",
-    "nilm": "NILM",
-    "pf": "PF",
-    "s": "Seconds",
-    "va": "VA",
-    "var": "VAR",
+    key: _ux_text("feature_tokens", key)
+    for key in ("hvac", "kwh", "nilm", "pf", "s", "va", "var")
 }
 
 
@@ -187,14 +134,14 @@ def friendly_feature_name(value: Any) -> str:
     """Return a human-readable label for an internal alert feature key."""
     raw = str(value or "").strip()
     if not raw:
-        return "Alert"
+        return _ux_text("feature_fallback")
     words = []
     for token in raw.replace("-", "_").split("_"):
         token = token.strip()
         if not token:
             continue
         words.append(FEATURE_TOKEN_LABELS.get(token.lower(), token.title()))
-    return " ".join(words) or "Alert"
+    return " ".join(words) or _ux_text("feature_fallback")
 
 
 def alert_evidence_detail(
@@ -248,7 +195,9 @@ def alert_evidence_detail(
         "first_seen": first_seen,
         "last_seen": last_seen,
         "time_window": (
-            f"{first_seen} to {last_seen}" if first_seen and last_seen else None
+            _ux_text("time_window", first_seen=first_seen, last_seen=last_seen)
+            if first_seen and last_seen
+            else None
         ),
         "contributing_metrics": contributing_metrics["metrics"],
         "contributing_metrics_count": contributing_metrics["count"],
@@ -264,7 +213,7 @@ def alert_evidence_detail(
         "graph_window_end": graph_window_end.isoformat(),
     }
     if feature_needs_electrical_safety_notice(feature):
-        detail["safety_notice"] = ELECTRICAL_SAFETY_NOTICE
+        detail["safety_notice"] = translation_text("safety", "electrical_notice")
     if alert.feedback_status is not None:
         detail["feedback_status"] = alert.feedback_status
     if alert.feedback_effect is not None:
@@ -272,9 +221,7 @@ def alert_evidence_detail(
     if alert.feedback_expires_at is not None:
         detail["feedback_expires_at"] = alert.feedback_expires_at.isoformat()
     if alert.matching_feedback_fingerprint is not None:
-        detail["matching_feedback_fingerprint"] = (
-            alert.matching_feedback_fingerprint
-        )
+        detail["matching_feedback_fingerprint"] = alert.matching_feedback_fingerprint
     if alert.adjusted_min_repeated is not None:
         detail["adjusted_min_repeated"] = alert.adjusted_min_repeated
     return detail
@@ -292,63 +239,48 @@ def _alert_what_happened(
     value_unit: str,
     value_format: str,
 ) -> str:
-    return (
-        f"{value_label} changed from the learned or configured expectation. "
-        "Observed "
-        f"{_format_alert_value(alert.observed_value, value_unit, value_format)} "
-        "compared with baseline "
-        f"{_format_alert_value(alert.baseline_value, value_unit, value_format)}."
+    return _ux_text(
+        "what_happened",
+        value_label=value_label,
+        observed_value=_format_alert_value(
+            alert.observed_value,
+            value_unit,
+            value_format,
+        ),
+        baseline_value=_format_alert_value(
+            alert.baseline_value,
+            value_unit,
+            value_format,
+        ),
     )
-
-
-def _format_alert_value(value: float, unit: str, value_format: str) -> str:
-    if value_format == "percentage":
-        return f"{value * 100.0:.3f}%"
-    formatted = f"{value:.3f}".rstrip("0").rstrip(".")
-    return f"{formatted}{f' {unit}' if unit else ''}"
 
 
 def _alert_why_it_matters(feature: str) -> str:
     lower = feature.lower()
     if "capacity" in lower or "demand" in lower:
-        return (
-            "Demand and capacity evidence can show unusual operating load, but "
-            "it is not an electrical safety verification."
-        )
+        return _ux_text("why_it_matters", "capacity")
     if "reactive" in lower or "power_factor" in lower or lower.endswith("_pf"):
-        return (
-            "Changes in VAR, VA, or power factor can indicate that the load is "
-            "operating differently than its learned pattern."
-        )
+        return _ux_text("why_it_matters", "power_quality")
     if "energy" in lower or "kwh" in lower:
-        return (
-            "Energy-use changes can identify appliances that are running longer "
-            "or using more energy than their recent baseline."
-        )
+        return _ux_text("why_it_matters", "energy")
     if "cycle" in lower or "activity" in lower:
-        return (
-            "Run-cycle changes can show equipment that is running longer, "
-            "short-cycling, or not running when expected."
-        )
-    return (
-        "Repeated analyzer evidence means this circuit is no longer matching "
-        "its recent learned or configured behavior."
-    )
+        return _ux_text("why_it_matters", "activity")
+    return _ux_text("why_it_matters", "default")
 
 
 def _alert_what_to_check_first(feature: str) -> str:
     lower = feature.lower()
     if "capacity" in lower or "demand" in lower:
-        return "Review the appliance load and configured breaker/capacity settings."
+        return _ux_text("what_to_check_first", "capacity")
     if "leg" in lower or "phase" in lower:
-        return "Verify both CTs, leg assignment, and dual-phase circuit mapping."
+        return _ux_text("what_to_check_first", "phase")
     if "reactive" in lower or "power_factor" in lower or lower.endswith("_pf"):
-        return "Compare watts, VAR, VA, current, voltage, and power factor readings."
+        return _ux_text("what_to_check_first", "power_quality")
     if "energy" in lower or "kwh" in lower:
-        return "Check the cumulative kWh sensor and recent appliance runtime."
+        return _ux_text("what_to_check_first", "energy")
     if "cycle" in lower or "activity" in lower:
-        return "Review recent run cycles and whether the appliance is expected to run."
-    return "Review the source sensors and recent activity for this circuit."
+        return _ux_text("what_to_check_first", "activity")
+    return _ux_text("what_to_check_first", "default")
 
 
 def _alert_threshold(features: Mapping[str, Any]) -> Any:
@@ -507,20 +439,20 @@ def health_summary(
 ) -> tuple[str, str]:
     """Return the highest-priority dashboard health state."""
     if data_quality_problem:
-        return "needs_data", "Needs data"
+        return "needs_data", _ux_text("health_summary", "needs_data")
     if paused:
-        return "paused", "Paused"
+        return "paused", _ux_text("health_summary", "paused")
     if active_alerts:
-        return "possible_issue", "Possible issue"
+        return "possible_issue", _ux_text("health_summary", "possible_issue")
     if observations:
-        return "observation", "Observation recorded"
+        return "observation", _ux_text("health_summary", "observation")
     if nilm_review_count > 0:
-        return "nilm_review", "NILM review"
+        return "nilm_review", _ux_text("health_summary", "nilm_review")
     if mixed:
-        return "mixed_observation", "Mixed observation"
+        return "mixed_observation", _ux_text("health_summary", "mixed_observation")
     if learning:
-        return "learning", "Learning"
-    return "ready", "Ready"
+        return "learning", _ux_text("health_summary", "learning")
+    return "ready", _ux_text("health_summary", "ready")
 
 
 def _alert_feature(alert: AlertEvidence) -> str:

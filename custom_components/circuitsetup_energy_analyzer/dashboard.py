@@ -140,11 +140,7 @@ def build_recommended_dashboard(
     normalized_layout = normalize_dashboard_layout(layout)
     include_feature_cards = _layout_includes_feature_cards(normalized_layout)
     include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
-    circuit_list = [
-        circuit
-        for circuit in circuits
-        if _circuit_id(circuit)
-    ]
+    circuit_list = [circuit for circuit in circuits if _circuit_id(circuit)]
     registry_lookup = _registry_entity_lookup(hass, entry_id)
     appliance_circuits = [
         circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
@@ -170,6 +166,19 @@ def build_recommended_dashboard(
             hass=hass,
             entry_id=entry_id,
         ),
+        _energy_tracking_section(
+            appliance_circuits,
+            include_feature_cards=include_feature_cards,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
+        _appliance_run_timeline_section(
+            appliance_circuits,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
     ]
     if appliance_circuits:
         sections.append(
@@ -191,23 +200,6 @@ def build_recommended_dashboard(
                 entry_id=entry_id,
             )
         )
-    sections.append(
-        _energy_tracking_section(
-            appliance_circuits,
-            include_feature_cards=include_feature_cards,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        )
-    )
-    sections.append(
-        _appliance_run_timeline_section(
-            appliance_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        )
-    )
     if include_feature_cards and mains_circuits:
         sections.append(
             _nilm_review_section(
@@ -259,11 +251,7 @@ def dashboard_preflight_summary(
     normalized_layout = normalize_dashboard_layout(layout)
     include_feature_cards = _layout_includes_feature_cards(normalized_layout)
     include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
-    circuit_list = [
-        circuit
-        for circuit in circuits
-        if _circuit_id(circuit)
-    ]
+    circuit_list = [circuit for circuit in circuits if _circuit_id(circuit)]
     appliance_circuits = [
         circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
     ]
@@ -390,17 +378,13 @@ def _dashboard_section_titles(
     titles = [
         _section_title("household_overview"),
         _section_title("todays_energy"),
+        _section_title("energy_tracking"),
+        _section_title("appliance_run_timeline"),
     ]
     if appliance_circuits:
         titles.append(_section_title("appliance_status"))
     if mains_circuits:
         titles.append(_section_title("mains_solar_nilm"))
-    titles.extend(
-        [
-            _section_title("energy_tracking"),
-            _section_title("appliance_run_timeline"),
-        ]
-    )
     if include_feature_cards and mains_circuits:
         titles.append(_section_title("nilm_review"))
     if include_feature_cards and hvac_circuits:
@@ -580,18 +564,18 @@ def _todays_energy_section(
     cards: list[dict[str, Any]] = []
     if daily_rows:
         cards.append(
+            _statistics_graph_card(
+                _dashboard_text("cards", "todays_appliance_energy"),
+                [row["entity"] for row in daily_rows],
+            )
+        )
+        cards.append(
             {
                 "type": "glance",
                 "title": _dashboard_text("cards", "top_energy_users_today"),
                 "columns": _glance_columns(daily_rows[:5]),
                 "entities": daily_rows[:5],
             }
-        )
-        cards.append(
-            _statistics_graph_card(
-                _dashboard_text("cards", "todays_appliance_energy"),
-                [row["entity"] for row in daily_rows],
-            )
         )
         cost_rows: list[dict[str, str]] = []
         for circuit in circuits:
@@ -705,9 +689,7 @@ def _mains_section(
                     "severity": {"red": 0, "yellow": 40, "green": 70},
                 }
             )
-            cards.append(
-                _markdown_card(_dashboard_text("notes", "known_load_share"))
-            )
+            cards.append(_markdown_card(_dashboard_text("notes", "known_load_share")))
 
         load_rows, _ = _resolved_entity_rows(
             circuit_id,
@@ -876,9 +858,7 @@ def _energy_tracking_section(
 
     if not cards:
         cards.append(
-            _markdown_card(
-                _dashboard_text("notes", "energy_tracking_after_entities")
-            )
+            _markdown_card(_dashboard_text("notes", "energy_tracking_after_entities"))
         )
 
     return {
@@ -1040,9 +1020,7 @@ def _hvac_weather_section(
                 },
             )
         )
-    cards.append(
-        _markdown_card(_dashboard_text("notes", "notifications_and_repairs"))
-    )
+    cards.append(_markdown_card(_dashboard_text("notes", "notifications_and_repairs")))
 
     return {
         "type": "grid",
@@ -1055,11 +1033,7 @@ def _expert_evidence_section(circuits: Iterable[Any]) -> dict[str, Any]:
     return {
         "type": "grid",
         "title": _section_title("diagnostics_and_evidence"),
-        "cards": [
-            _markdown_card(
-                _expert_evidence_markdown(circuits)
-            )
-        ],
+        "cards": [_markdown_card(_expert_evidence_markdown(circuits))],
     }
 
 
@@ -1622,8 +1596,7 @@ def _dashboard_contains_card_type(cards: object, card_type: str) -> bool:
         if cards.get("type") == card_type:
             return True
         return any(
-            _dashboard_contains_card_type(value, card_type)
-            for value in cards.values()
+            _dashboard_contains_card_type(value, card_type) for value in cards.values()
         )
     if isinstance(cards, list):
         return any(_dashboard_contains_card_type(value, card_type) for value in cards)

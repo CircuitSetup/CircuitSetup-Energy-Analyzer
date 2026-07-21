@@ -354,6 +354,38 @@ def test_build_circuit_sample_flags_negative_load_power() -> None:
     assert "sensor.fridge_power negative_real_power_load" in sample.quality_issues
 
 
+@pytest.mark.parametrize(
+    ("power_w", "has_issue"),
+    ((-4.99, False), (-5.0, True)),
+)
+def test_negative_load_power_repair_starts_at_five_watts(
+    power_w: float,
+    has_issue: bool,
+) -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.fridge_power": SourceState(
+                "sensor.fridge_power",
+                str(power_w),
+                "W",
+                now,
+            )
+        },
+        now,
+    )
+
+    assert ("negative_real_power_load" in " ".join(sample.quality_issues)) is has_issue
+
+
 def test_build_circuit_sample_analyzes_generation_export_power() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(

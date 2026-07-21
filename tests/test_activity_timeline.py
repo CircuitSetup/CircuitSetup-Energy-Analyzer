@@ -120,9 +120,27 @@ def test_recent_activity_timeline_limits_items_and_reports_quiet() -> None:
     assert quiet.items == []
 
 
-def test_recent_activity_timeline_includes_observation_items_without_alerts() -> (
-    None
-):
+def test_recent_activity_timeline_deduplicates_identical_items() -> None:
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    event = CircuitEvent(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="pump",
+        event_type=EventType.START,
+    )
+
+    summary = build_recent_activity_timeline(
+        circuit_id="pump",
+        events=[event, event],
+        alerts=[],
+        now=now,
+    )
+
+    assert summary.total_count == 1
+    assert summary.event_count == 1
+    assert len(summary.items) == 1
+
+
+def test_recent_activity_timeline_includes_observation_items_without_alerts() -> None:
     now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
     observation = Observation(
         circuit_id="dryer",

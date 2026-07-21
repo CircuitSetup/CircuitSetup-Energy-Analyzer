@@ -32,6 +32,7 @@ from .nilm_virtual import (
     nilm_virtual_appliance_states,
 )
 from .notifications import notification_id_for_alert
+from .profiles import get_profile_definition
 from .sensor import (
     activity_summary_value,
     electrical_health_attributes,
@@ -183,7 +184,7 @@ def appliance_detail_for_circuit(
         what_to_check_first=first_checks,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
         source_quality=_direct_source_quality(config, state),
-        learning_readiness=_learning_readiness(state, config.circuit_id),
+        learning_readiness=_learning_readiness(state, config.circuit_id, config),
         assignment_id=(
             str(converted_assignment.get("assignment_id") or "") or None
             if converted_assignment
@@ -196,8 +197,7 @@ def appliance_detail_for_circuit(
             else f"circuit:{config.circuit_id}"
         ),
         appliance_id=(
-            str(converted_assignment.get("appliance_id") or "")
-            or config.circuit_id
+            str(converted_assignment.get("appliance_id") or "") or config.circuit_id
             if converted_assignment
             else config.circuit_id
         ),
@@ -444,9 +444,7 @@ def _nilm_session_baseline(
         if start is None or end is None:
             continue
         total_duration = max(
-            (
-                end.astimezone(UTC) - start.astimezone(UTC)
-            ).total_seconds(),
+            (end.astimezone(UTC) - start.astimezone(UTC)).total_seconds(),
             0.0,
         )
         session_energy = max(
@@ -463,8 +461,7 @@ def _nilm_session_baseline(
             if overlap_end > overlap_start:
                 values = daily.setdefault(day, _empty_nilm_daily_metrics())
                 overlap_seconds = (
-                    overlap_end.astimezone(UTC)
-                    - overlap_start.astimezone(UTC)
+                    overlap_end.astimezone(UTC) - overlap_start.astimezone(UTC)
                 ).total_seconds()
                 values["runtime_today_seconds"] += overlap_seconds
                 if total_duration > 0:
@@ -511,9 +508,7 @@ def _nilm_session_detail(
             duration = state.current_session_duration_seconds
         return {
             "session_id": session_id,
-            "signature_fingerprint": str(
-                session.get("signature_fingerprint") or ""
-            )
+            "signature_fingerprint": str(session.get("signature_fingerprint") or "")
             or None,
             "start": _iso_value(session.get("start")),
             "end": _iso_value(session.get("end")),
@@ -726,9 +721,7 @@ def metric_comparisons_for_circuit(
                 config.circuit_id,
             )
             prefix = (
-                "runtime_today"
-                if metric_id == "runtime_today_seconds"
-                else "run_count"
+                "runtime_today" if metric_id == "runtime_today_seconds" else "run_count"
             )
             evidence = {
                 **evidence,
@@ -883,16 +876,16 @@ def appliance_expectations_for_circuit(
             )
         return _ranked_distinct_expectations(candidates)
 
-    runtime_is_context_explained = bool(
-        primary
-        and primary[0].status == "expected"
-    )
+    runtime_is_context_explained = bool(primary and primary[0].status == "expected")
     electrical_attrs = electrical_health_attributes(state, config.circuit_id)
-    if _mapping_status(
-        state,
-        "leg_imbalance_status_by_circuit",
-        config.circuit_id,
-    ) == "imbalanced":
+    if (
+        _mapping_status(
+            state,
+            "leg_imbalance_status_by_circuit",
+            config.circuit_id,
+        )
+        == "imbalanced"
+    ):
         candidates.append(
             _expectation(
                 config,
@@ -1089,9 +1082,7 @@ def _primary_appliance_expectations_for_circuit(
                     source_type=expectation_source,
                     observed=f"{config.name} energy is above normal today.",
                     expected=_normal_range_text(daily),
-                    why_it_matters=(
-                        "Cold appliances should cycle and return to idle."
-                    ),
+                    why_it_matters=("Cold appliances should cycle and return to idle."),
                     what_to_check_first=("Check the door seal, coils, and airflow.",),
                     evidence_path=evidence_path,
                 ),
@@ -1137,9 +1128,7 @@ def _primary_appliance_expectations_for_circuit(
                     why_it_matters=(
                         "HVAC runtime should change with outdoor temperature."
                     ),
-                    what_to_check_first=(
-                        "No action needed unless comfort is poor.",
-                    ),
+                    what_to_check_first=("No action needed unless comfort is poor.",),
                     evidence_path=evidence_path,
                 ),
             )
@@ -1192,12 +1181,9 @@ def _primary_appliance_expectations_for_circuit(
                 observed="Pump runtime is above the learned range without context.",
                 expected=_normal_range_text(runtime),
                 why_it_matters=(
-                    "Unexpected pump activity can point to water intrusion "
-                    "or leaks."
+                    "Unexpected pump activity can point to water intrusion or leaks."
                 ),
-                what_to_check_first=(
-                    "Check for water flow, rain, or a stuck pump.",
-                ),
+                what_to_check_first=("Check for water flow, rain, or a stuck pump.",),
                 evidence_path=evidence_path,
             ),
         )
@@ -1212,9 +1198,7 @@ def _primary_appliance_expectations_for_circuit(
         )
         why_it_matters = recipe[2] if recipe else "A change in use may need review."
         first_checks = (
-            recipe[3]
-            if recipe
-            else ("Review recent activity and source data.",)
+            recipe[3] if recipe else ("Review recent activity and source data.",)
         )
         return (
             _expectation(
@@ -1820,7 +1804,11 @@ def _direct_source_quality(config: CircuitConfig, state: Any) -> dict[str, Any]:
     }
 
 
-def _learning_readiness(state: Any, circuit_id: str) -> dict[str, Any]:
+def _learning_readiness(
+    state: Any,
+    circuit_id: str,
+    config: CircuitConfig,
+) -> dict[str, Any]:
     progress = _mapping_for_circuit(
         state,
         "learning_progress_by_circuit",
@@ -1837,10 +1825,18 @@ def _learning_readiness(state: Any, circuit_id: str) -> dict[str, Any]:
         status, label = "waiting_for_delta", "Waiting for first kWh delta"
     else:
         status, label = "learning", "Learning"
+    days_required = max(
+        get_profile_definition(config.appliance_profile).minimum_learning_days,
+        1,
+    )
+    baseline_age_days = _number_or_none(progress.get("baseline_age_days"))
+    days_complete = min(int(baseline_age_days or 0), days_required)
     return {
         "status": status,
         "label": label,
-        "baseline_age_days": _number_or_none(progress.get("baseline_age_days")),
+        "baseline_age_days": baseline_age_days,
+        "days_complete": days_complete,
+        "days_required": days_required,
         "cycle_count": _state_int_value(progress.get("cycle_count")),
         "learned_feature_count": _state_int_value(
             progress.get("learned_feature_count")

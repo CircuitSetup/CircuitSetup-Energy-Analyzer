@@ -200,8 +200,6 @@ def test_validate_setup_input_preserves_setup_fields_without_manual_circuits() -
     assert "known_load_circuits" not in validated
 
 
-
-
 def test_validate_setup_input_parses_text_entity_values() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
@@ -396,9 +394,7 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
 
     validated = validate_setup_input({CONF_DEMO_SOURCE_BUNDLE_ENABLED: True})
     demo_mains_source_entity_ids = {
-        entity_id
-        for entity_id in DEMO_SOURCE_ENTITY_IDS
-        if "_demo_mains_" in entity_id
+        entity_id for entity_id in DEMO_SOURCE_ENTITY_IDS if "_demo_mains_" in entity_id
     }
     demo_assignable_source_entity_ids = (
         set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
@@ -409,9 +405,7 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
         validated[CONF_EXTRA_SOURCE_ENTITIES]
     )
     assert demo_assignable_source_entity_ids <= set(validated[CONF_SOURCE_ENTITIES])
-    assert demo_mains_source_entity_ids <= set(
-        validated[CONF_MAINS_SOURCE_ENTITIES]
-    )
+    assert demo_mains_source_entity_ids <= set(validated[CONF_MAINS_SOURCE_ENTITIES])
 
     groups = assignment_groups_from_sources(validated[CONF_SOURCE_ENTITIES])
     car_charger = next(
@@ -423,11 +417,13 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
     assert car_charger["name"] == "Car Charger"
     assert car_charger["appliance_profile"] == "ev_charger"
     assert car_charger["mode"] == "dual_phase"
-    assert "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power" in (
-        car_charger["entity_ids"]
+    assert (
+        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power"
+        in (car_charger["entity_ids"])
     )
-    assert "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power" in (
-        car_charger["entity_ids"]
+    assert (
+        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power"
+        in (car_charger["entity_ids"])
     )
     sump_pump = next(
         group
@@ -438,8 +434,9 @@ def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
     assert sump_pump["name"] == "Sump Pump"
     assert sump_pump["appliance_profile"] == "sump_pump"
     assert sump_pump["mode"] == "single_phase"
-    assert "sensor.cs_energy_analyzer_demo_sump_pump_active_power" in (
-        sump_pump["entity_ids"]
+    assert (
+        "sensor.cs_energy_analyzer_demo_sump_pump_active_power"
+        in (sump_pump["entity_ids"])
     )
 
 
@@ -455,10 +452,7 @@ def test_validate_setup_input_preserves_outdoor_temperature_entity() -> None:
         }
     )
 
-    assert (
-        validated[CONF_OUTDOOR_TEMPERATURE_ENTITY]
-        == "sensor.outdoor_temperature"
-    )
+    assert validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] == "sensor.outdoor_temperature"
 
 
 def test_validate_setup_input_preserves_water_context_sources() -> None:
@@ -749,17 +743,19 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
         {
             "value": "hvac:daily_spike_ratio:v1",
             "label": (
-                "Downstairs HVAC - Daily Spike Ratio: "
-                "0.5 -> 0.3 (82% confidence)"
+                "Downstairs HVAC - Daily Spike Ratio: 0.5 -> 0.3 (82% confidence)"
             ),
         }
     ]
-    assert _schema_validator(result["data_schema"], "setting_suggestion_ids")[
-        "select"
-    ]["multiple"]
-    assert _schema_validator(result["data_schema"], "setting_suggestion_ids")[
-        "select"
-    ]["mode"] == "list"
+    assert _schema_validator(result["data_schema"], "setting_suggestion_ids")["select"][
+        "multiple"
+    ]
+    assert (
+        _schema_validator(result["data_schema"], "setting_suggestion_ids")["select"][
+            "mode"
+        ]
+        == "list"
+    )
     action_options = _schema_validator(
         result["data_schema"],
         "recommendation_action",
@@ -886,7 +882,7 @@ async def test_recommendations_step_guides_standby_advanced_settings() -> None:
     assert "Default value: 48" in summary
     assert "Expected effect: Use enough standby history" in summary
     assert "Observed Standby Samples: 96" in summary
-    assert "Washer - Always On Alert W: 0 W -> 35 W" in summary
+    assert "Washer - Always On Power Alert: 0 W -> 35 W" in summary
     assert "Expected effect: Surface unusually high Always On draw" in summary
     assert "P95 Always On W: 42.5" in summary
 
@@ -936,7 +932,9 @@ async def test_options_recommendations_step_guides_solar_flow_suggestions() -> N
     result = await flow.async_step_recommendations()
 
     summary = result["description_placeholders"]["recommendations"]
-    assert "Mains - High Solar Surplus Threshold W: 1500 W -> 2600 W" in summary
+    assert (
+        "Mains - High Solar Surplus Power Threshold: 1500 W -> 2600 W" in summary
+    )
     assert "Default value: 1500" in summary
     assert "Expected effect: Reserve high solar surplus guidance" in summary
     assert "Observed Export Samples: 7" in summary
@@ -997,11 +995,13 @@ async def test_recommendations_step_guides_solar_flow_advanced_settings() -> Non
     result = await flow.async_step_recommendations()
 
     summary = result["description_placeholders"]["recommendations"]
-    assert "Mains - Solar Export Tolerance W: 100 W -> 250 W" in summary
+    assert "Mains - Solar Export Power Tolerance: 100 W -> 250 W" in summary
     assert "Default value: 100" in summary
     assert "Expected effect: Keep normal CT and inverter timing drift" in summary
     assert "P95 Export Residual W: 220" in summary
-    assert "Mains - Flexible Load Running Threshold W: 100 W -> 175 W" in summary
+    assert (
+        "Mains - Flexible Load Running Power Threshold: 100 W -> 175 W" in summary
+    )
     assert "Expected effect: Classify flexible loads as running only after" in summary
     assert "Observed Flexible Loads: 3" in summary
 
@@ -1084,8 +1084,9 @@ async def test_options_recommendations_step_dispatches_batch_actions(
 
 
 @pytest.mark.asyncio
-async def test_options_recommendations_step_handles_missing_or_empty_suggestions(
-) -> None:
+async def test_options_recommendations_step_handles_missing_or_empty_suggestions() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
@@ -1116,9 +1117,10 @@ async def test_options_recommendations_step_handles_missing_or_empty_suggestions
     assert empty["step_id"] == "recommendations"
     assert _schema_keys(empty["data_schema"]) == set()
     assert empty["errors"] == {}
-    assert "no pending suggestions" in empty["description_placeholders"][
-        "recommendations"
-    ].lower()
+    assert (
+        "no pending suggestions"
+        in empty["description_placeholders"]["recommendations"].lower()
+    )
 
 
 @pytest.mark.asyncio
@@ -1339,15 +1341,11 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
         CONF_MAINS_SOURCE_ENTITIES,
         CONF_KNOWN_LOAD_CIRCUITS,
     }
-    assert (
-        _schema_default(form["data_schema"], CONF_ENABLE_EXPERIMENTAL_NILM) is False
-    )
+    assert _schema_default(form["data_schema"], CONF_ENABLE_EXPERIMENTAL_NILM) is False
     assert _schema_default(form["data_schema"], CONF_MAINS_SOURCE_ENTITIES) == [
         "sensor.old_mains_power"
     ]
-    assert _schema_default(form["data_schema"], CONF_KNOWN_LOAD_CIRCUITS) == [
-        "fridge"
-    ]
+    assert _schema_default(form["data_schema"], CONF_KNOWN_LOAD_CIRCUITS) == ["fridge"]
 
     result = await flow.async_step_mains(
         {
@@ -1359,9 +1357,7 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
-    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
-        "sensor.panel_mains_l1_power"
-    ]
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == ["sensor.panel_mains_l1_power"]
     assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["hvac"]
 
 
@@ -1504,10 +1500,6 @@ async def test_options_entity_detail_step_reloads_entity_set_changes() -> None:
     assert entry.options == expected_options
 
 
-
-
-
-
 def test_utility_schema_omits_blank_optional_entity_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1542,6 +1534,25 @@ def test_utility_schema_omits_blank_optional_entity_defaults(
     assert _schema_default(schema, "utility_energy_entity") is vol.UNDEFINED
     assert _schema_default(schema, "utility_cost_entity") is vol.UNDEFINED
     assert included_entities == []
+
+
+def test_utility_schema_does_not_auto_select_a_discovered_statistic() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    schema = config_flow._utility_schema(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                }
+            ]
+        },
+        utility_statistic_ids=("opower:utility_elec_consumption",),
+    )
+
+    assert _schema_default(schema, "utility_statistic_id") == ""
 
 
 @pytest.mark.asyncio
@@ -1805,7 +1816,7 @@ async def test_options_advanced_step_resets_circuit_to_defaults() -> None:
         "hvac": {
             "preset": "quiet",
             "breaker_amps": 40.0,
-        }
+        },
     }
 
 
@@ -1902,9 +1913,7 @@ async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
-    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == [
-        "sensor.refrigerator_power"
-    ]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.refrigerator_power"]
     assert result["data"][CONF_SOURCE_ENTITIES] == [
         "sensor.refrigerator_power",
     ]
@@ -1948,9 +1957,7 @@ async def test_options_flow_adds_complete_demo_bundle_from_toggle() -> None:
     assert result["type"] == "create_entry"
     assert result["data"][CONF_DEMO_SOURCE_BUNDLE_ENABLED] is True
     demo_mains_source_entity_ids = {
-        entity_id
-        for entity_id in DEMO_SOURCE_ENTITY_IDS
-        if "_demo_mains_" in entity_id
+        entity_id for entity_id in DEMO_SOURCE_ENTITY_IDS if "_demo_mains_" in entity_id
     }
     demo_assignable_source_entity_ids = (
         set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
@@ -2048,9 +2055,9 @@ async def test_options_flow_removes_demo_bundle_and_demo_assignments() -> None:
     assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == ["sensor.real_mains_power"]
     assert result["data"][CONF_CIRCUITS] == [real_circuit]
     assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["kitchen_refrigerator"]
-    assert "cs_energy_analyzer_demo_washer" not in result["data"][
-        CONF_CIRCUIT_ASSIGNMENTS
-    ]
+    assert (
+        "cs_energy_analyzer_demo_washer" not in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
+    )
 
 
 @pytest.mark.asyncio
@@ -2123,9 +2130,9 @@ async def test_options_flow_removing_demo_bundle_preserves_data_circuits() -> No
     assert result["data"][CONF_CIRCUITS] == [real_circuit]
     assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["kitchen_refrigerator"]
     assert "kitchen_refrigerator" in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
-    assert "cs_energy_analyzer_demo_washer" not in result["data"][
-        CONF_CIRCUIT_ASSIGNMENTS
-    ]
+    assert (
+        "cs_energy_analyzer_demo_washer" not in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
+    )
 
 
 @pytest.mark.asyncio
@@ -2286,8 +2293,7 @@ async def test_options_flow_dashboard_warns_when_layout_exceeds_entity_detail(
         DASHBOARD_LAYOUT_EXPERT
     )
     assert (
-        _schema_default(result["data_schema"], "apply_entity_detail_profile")
-        is False
+        _schema_default(result["data_schema"], "apply_entity_detail_profile") is False
     )
     assert coordinator.calls == []
 
@@ -3068,9 +3074,7 @@ async def test_user_flow_treats_two_leg_pumps_as_dual_phase(
 
     flow = CircuitSetupEnergyAnalyzerConfigFlow()
 
-    result = await flow.async_step_user(
-        {CONF_EXTRA_SOURCE_ENTITIES: source_entities}
-    )
+    result = await flow.async_step_user({CONF_EXTRA_SOURCE_ENTITIES: source_entities})
 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
@@ -3196,6 +3200,139 @@ def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
         )
         == []
     )
+
+
+def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.kitchen_power", "sensor.kitchen_current"],
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [{"entity_id": "sensor.kitchen_power"}],
+            },
+            {
+                "circuit_id": "microwave",
+                "name": "Microwave",
+                "appliance_profile": "microwave",
+                "mode": "single_phase",
+                "sensors": [{"entity_id": "sensor.kitchen_current"}],
+            },
+        ],
+    )
+
+    assert [group["circuit_id"] for group in groups] == [
+        "refrigerator",
+        "microwave",
+    ]
+    assert [group["entity_ids"] for group in groups] == [
+        ("sensor.kitchen_power",),
+        ("sensor.kitchen_current",),
+    ]
+
+
+def test_assignment_review_does_not_offer_sensors_owned_by_other_appliances() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    source_entities = ["sensor.kitchen_power", "sensor.kitchen_current"]
+    circuits = [
+        {
+            "circuit_id": "refrigerator",
+            "name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+            "mode": "single_phase",
+            "sensors": [{"entity_id": source_entities[0]}],
+        },
+        {
+            "circuit_id": "microwave",
+            "name": "Microwave",
+            "appliance_profile": "microwave",
+            "mode": "single_phase",
+            "sensors": [{"entity_id": source_entities[1]}],
+        },
+    ]
+    flow = SimpleNamespace(hass=None, async_show_form=lambda **kwargs: kwargs)
+
+    config_flow._start_assignment_review(
+        flow,
+        {
+            CONF_SOURCE_ENTITIES: source_entities,
+            CONF_EXTRA_SOURCE_ENTITIES: source_entities,
+        },
+        existing_circuits=circuits,
+        show_picker=True,
+        update_existing=True,
+    )
+
+    assert [group["available_entity_ids"] for group in flow._assignment_groups] == [
+        (source_entities[0],),
+        (source_entities[1],),
+    ]
+
+
+def test_removed_assignment_sensors_remain_available_as_candidates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.refrigerator_power", "sensor.microwave_power"],
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [{"entity_id": "sensor.refrigerator_power"}],
+            }
+        ],
+    )
+
+    assert {group["group_id"] for group in groups} == {
+        "refrigerator",
+        "microwave",
+    }
+
+
+def test_existing_assignment_schema_uses_only_the_explicit_remove_action() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    schema = config_flow._assignment_schema(
+        {
+            "entity_ids": ("sensor.fridge_power",),
+            "name": "Fridge",
+            "appliance_profile": "refrigerator",
+            "allow_remove_from_analysis": True,
+        }
+    )
+
+    assert "remove_from_analysis" in _schema_keys(schema)
+    assert "include_circuit" not in _schema_keys(schema)
+
+
+def test_reviewed_circuits_reject_duplicate_sensor_ownership() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuits = [
+        {
+            "circuit_id": circuit_id,
+            "name": circuit_id,
+            "sensors": [{"entity_id": "sensor.shared_power"}],
+        }
+        for circuit_id in ("fridge", "freezer")
+    ]
+
+    with pytest.raises(
+        config_flow.SetupValidationError,
+        match="invalid_circuit_assignments",
+    ):
+        config_flow._final_config_from_reviewed_circuits({}, circuits)
 
 
 def test_automatic_assignments_route_meter_metrics_and_use_channel_names(
@@ -4511,8 +4648,9 @@ async def test_advanced_settings_form_shows_operating_detection_source() -> None
 
 
 @pytest.mark.asyncio
-async def test_advanced_settings_form_shows_learned_operating_detection_source(
-) -> None:
+async def test_advanced_settings_form_shows_learned_operating_detection_source() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
@@ -4730,8 +4868,9 @@ def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_contro
     assert _schema_default(schema, "flexible_load_running_threshold_w") == 175.0
 
 
-def test_advanced_settings_schema_shows_dual_phase_controls_only_for_dual_phase(
-) -> None:
+def test_advanced_settings_schema_shows_dual_phase_controls_only_for_dual_phase() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,
         CircuitMode,
@@ -4759,8 +4898,7 @@ def test_advanced_settings_schema_shows_dual_phase_controls_only_for_dual_phase(
     assert "solar_flow_settings" not in _schema_section_keys(schema)
 
 
-def test_advanced_settings_schema_hides_appliance_controls_for_mixed_circuits(
-) -> None:
+def test_advanced_settings_schema_hides_appliance_controls_for_mixed_circuits() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,
         CircuitMode,
@@ -5035,6 +5173,8 @@ def test_advanced_settings_from_input_resets_remaining_feature_sections() -> Non
         "power_factor_tolerance": 0.08,
         "minimum_apparent_power_va": 120.0,
     }
+
+
 @pytest.mark.asyncio
 async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
@@ -5418,24 +5558,18 @@ def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> N
     assert "sensor.cs_energy_analyzer_demo_mains_l1_voltage" in include_entities
     assert "sensor.cs_energy_analyzer_demo_mains_l2_voltage" in include_entities
     assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power"
-        in include_entities
+        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power" in include_entities
     )
     assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power"
-        in include_entities
+        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power" in include_entities
     )
-    assert (
-        "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power"
-        in include_entities
-    )
+    assert "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power" in include_entities
     assert "sensor.cs_energy_analyzer_demo_washer_active_power" in include_entities
     assert "sensor.cs_energy_analyzer_demo_dryer_l1_active_power" in include_entities
     assert "sensor.cs_energy_analyzer_demo_dryer_l2_active_power" in include_entities
-    assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_voltage"
-        not in include_entities
-    )
+    assert "sensor.cs_energy_analyzer_demo_car_charger_voltage" not in include_entities
+
+
 def test_options_schema_uses_discovered_suffixed_demo_entity_ids(
     monkeypatch,
 ) -> None:
@@ -5519,9 +5653,7 @@ def test_source_entities_for_entry_includes_linked_flow_sensors() -> None:
         data={
             CONF_ADVANCED_SETTINGS: {
                 "washer": {
-                    CONF_LINKED_FLOW_SENSOR_ENTITIES: [
-                        "binary_sensor.washer_flow"
-                    ]
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES: ["binary_sensor.washer_flow"]
                 }
             }
         },

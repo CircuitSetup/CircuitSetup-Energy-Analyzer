@@ -36,7 +36,7 @@
         "title": "Appliance Circuit Assignments",
         "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
-          "include_circuit": "Include Circuit",
+          "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
@@ -44,7 +44,7 @@
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
-          "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "include_circuit": "Turn this off to keep the selected sensors available without creating an appliance analysis.",
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
@@ -70,7 +70,7 @@
           "circuit_id": "Circuit",
           "utility_energy_entity": "Utility Energy Entity",
           "utility_cost_entity": "Utility Cost Entity",
-          "utility_statistic_id": "Utility Statistic ID",
+          "utility_statistic_id": "Recorder Statistic ID (advanced)",
           "utility_source_type": "Utility Source Type",
           "utility_statistic_period": "Utility Statistic Period",
           "measured_energy_entities": "Measured Energy Entities",
@@ -81,7 +81,7 @@
           "circuit_id": "Choose the circuit to compare. Mains is usually the right choice for utility bill data.",
           "utility_energy_entity": "Optional utility or Opower kWh entity to use when recorder statistics are not available.",
           "utility_cost_entity": "Optional utility or Opower cost entity for the same billing period. The analyzer divides cost by utility kWh to calculate the shared electricity rate.",
-          "utility_statistic_id": "Optional recorder statistic ID for Utility or Opower kWh data.",
+          "utility_statistic_id": "Use only when utility kWh exists as a recorder statistic without an entity. Otherwise choose Utility Energy Entity.",
           "utility_source_type": "Choose Auto to prefer statistics when available and fall back to the selected entity.",
           "utility_statistic_period": "Choose the recorder period to compare against measured kWh data.",
           "measured_energy_entities": "Optional measured kWh entities to sum; leave blank to use the analyzer's circuit energy total.",
@@ -175,7 +175,7 @@
           "circuit_id": "Circuit",
           "utility_energy_entity": "Utility Energy Entity",
           "utility_cost_entity": "Utility Cost Entity",
-          "utility_statistic_id": "Utility Statistic ID",
+          "utility_statistic_id": "Recorder Statistic ID (advanced)",
           "utility_source_type": "Utility Source Type",
           "utility_statistic_period": "Utility Statistic Period",
           "measured_energy_entities": "Measured Energy Entities",
@@ -186,7 +186,7 @@
           "circuit_id": "Choose the circuit to compare. Mains is usually the right choice for utility bill data.",
           "utility_energy_entity": "Optional utility or Opower kWh entity to use when recorder statistics are not available.",
           "utility_cost_entity": "Optional utility or Opower cost entity for the same billing period. The analyzer divides cost by utility kWh to calculate the shared electricity rate.",
-          "utility_statistic_id": "Optional recorder statistic ID for Utility or Opower kWh data.",
+          "utility_statistic_id": "Use only when utility kWh exists as a recorder statistic without an entity. Otherwise choose Utility Energy Entity.",
           "utility_source_type": "Choose Auto to prefer statistics when available and fall back to the selected entity.",
           "utility_statistic_period": "Choose the recorder period to compare against measured kWh data.",
           "measured_energy_entities": "Optional measured kWh entities to sum; leave blank to use the analyzer's circuit energy total.",
@@ -469,7 +469,7 @@
         "title": "Appliance Circuit Assignments",
         "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
-          "include_circuit": "Include Circuit",
+          "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
@@ -477,7 +477,7 @@
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
-          "include_circuit": "Turn this off to leave the selected sensors out of appliance-specific analysis.",
+          "include_circuit": "Turn this off to keep the selected sensors available without creating an appliance analysis.",
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
@@ -733,7 +733,7 @@
     },
     "unexpected_negative_real_power": {
       "title": "Energy Analyzer sees negative load power",
-      "description": "A load circuit is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected. Suggested fix: {fix}"
+      "description": "{circuit_name} is reporting negative real power. Check CT orientation, or set the circuit power flow to generation or mains net if export is expected. Suggested fix: {fix}"
     },
     "missing_mains_nilm_sensor": {
       "title": "Energy Analyzer mains NILM sensor is missing",
@@ -748,6 +748,50 @@
     "safety": {
       "electrical_notice": "This is operational evidence from energy measurements, not electrical safety verification, code compliance, or breaker sizing advice. Consult a qualified electrician for safety or code concerns."
     },
+    "ux": {
+      "sensitivity_labels": {
+        "quiet": "Quiet",
+        "balanced": "Balanced",
+        "sensitive": "Sensitive"
+      },
+      "feature_tokens": {
+        "hvac": "HVAC",
+        "kwh": "kWh",
+        "nilm": "NILM",
+        "pf": "PF",
+        "s": "Seconds",
+        "va": "VA",
+        "var": "VAR"
+      },
+      "feature_fallback": "Alert",
+      "time_window": "{first_seen} to {last_seen}",
+      "what_happened": "{value_label} changed from the learned or configured expectation. Observed {observed_value} compared with baseline {baseline_value}.",
+      "why_it_matters": {
+        "capacity": "Demand and capacity evidence can show unusual operating load, but it is not an electrical safety verification.",
+        "power_quality": "Changes in VAR, VA, or power factor can indicate that the load is operating differently than its learned pattern.",
+        "energy": "Energy-use changes can identify appliances that are running longer or using more energy than their recent baseline.",
+        "activity": "Run-cycle changes can show equipment that is running longer, short-cycling, or not running when expected.",
+        "default": "Repeated analyzer evidence means this circuit is no longer matching its recent learned or configured behavior."
+      },
+      "what_to_check_first": {
+        "capacity": "Review the appliance load and configured breaker/capacity settings.",
+        "phase": "Verify both CTs, leg assignment, and dual-phase circuit mapping.",
+        "power_quality": "Compare watts, VAR, VA, current, voltage, and power factor readings.",
+        "energy": "Check the cumulative kWh sensor and recent appliance runtime.",
+        "activity": "Review recent run cycles and whether the appliance is expected to run.",
+        "default": "Review the source sensors and recent activity for this circuit."
+      },
+      "health_summary": {
+        "needs_data": "Needs data",
+        "paused": "Paused",
+        "possible_issue": "Possible issue",
+        "observation": "Observation recorded",
+        "nilm_review": "NILM review",
+        "mixed_observation": "Mixed observation",
+        "learning": "Learning",
+        "ready": "Ready"
+      }
+    },
     "notifications": {
       "alert": {
         "title": "Energy Analyzer Alert",
@@ -759,12 +803,125 @@
         "confidence": "Confidence",
         "cost_unavailable": "Cost unavailable",
         "comparison_value": "Comparison value",
-        "baseline_value": "Baseline value"
+        "baseline_value": "Baseline value",
+        "power_quality_notice": "This is a repeated change from the learned electrical pattern, not an electrical safety diagnosis.",
+        "confidence_line": "Confidence: {confidence}%.",
+        "units": {
+          "minutes": "min",
+          "power": "W",
+          "percent": "%",
+          "reactive_power": "VAR",
+          "apparent_power": "VA",
+          "energy": "kWh",
+          "current": "A",
+          "starts": "starts",
+          "seconds": "s"
+        },
+        "value_metrics": {
+          "activity_inactive_too_long": "Activity inactive too long",
+          "activity_left_on": "Activity left on",
+          "always_on_power": "Always on power",
+          "reactive_to_real_ratio": "Reactive-to-real power ratio",
+          "apparent_to_real_ratio": "Apparent-to-real power ratio",
+          "power_factor": "Power factor",
+          "power_factor_deficit": "Power factor deficit",
+          "real_power": "Real power",
+          "reactive_power": "Reactive power",
+          "apparent_power": "Apparent power",
+          "billing_cycle_budget": "Billing cycle budget",
+          "circuit_capacity": "Circuit capacity",
+          "daily_energy_goal": "Daily energy goal",
+          "daily_energy_usage_spike": "Daily energy usage spike",
+          "demand_limit": "Demand limit",
+          "demand_monthly_peak": "Demand monthly peak",
+          "dual_phase_leg_imbalance": "Dual phase leg imbalance",
+          "nilm_appliance_unusual_energy": "NILM appliance unusual energy",
+          "nilm_appliance_confidence": "NILM confidence",
+          "nilm_appliance_unusual_runtime": "NILM appliance unusual runtime",
+          "rain_pump_correlation": "Rain pump correlation",
+          "run_cycle_daily_duty_cycle_percent": "Run cycle daily duty cycle",
+          "run_cycle_daily_start_count": "Run cycle daily start count",
+          "run_cycle_duration_s": "Run cycle duration",
+          "utility_energy_mismatch": "Utility energy mismatch",
+          "water_flow_correlation": "Water flow correlation"
+        }
       },
       "settings_recommendations": {
         "title": "CircuitSetup Energy Analyzer suggested settings",
         "singular_message": "There is 1 suggested Advanced Circuit Setting to review: [Review Suggested Settings]({settings_url}).",
         "plural_message": "There are {total_pending} suggested Advanced Circuit Settings to review: [Review Suggested Settings]({settings_url})."
+      },
+      "weekly_digest": {
+        "title": "Weekly Appliance Digest",
+        "intro": "Appliance summary for {week_start} through {week_end}.",
+        "largest_changes": "Largest changes from normal",
+        "change_item": "- {display_name}: {change_percent}%",
+        "no_changes": "- No meaningful changes from learned normal.",
+        "top_energy_users": "Top energy users",
+        "energy_item": "- {display_name}: {energy_kwh} kWh",
+        "no_energy_data": "- No retained appliance energy data."
+      },
+      "daily_summary": {
+        "title": "Daily Appliance Summary",
+        "intro": "Appliance notifications queued for {summary_date}.",
+        "alert_item": "- {message}"
+      }
+    },
+    "settings_advisor": {
+      "setting_labels": {
+        "daily_spike_ratio": "Daily Spike Ratio",
+        "demand_limit_w": "Demand Power Limit",
+        "max_active_minutes": "Max Active Minutes",
+        "warning_ratio": "Capacity Warning Ratio",
+        "operating_on_threshold_w": "Turn-On Power",
+        "operating_off_threshold_w": "Turn-Off Power",
+        "standby_threshold_w": "Standby Power Threshold",
+        "always_on_alert_w": "Always On Power Alert",
+        "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
+        "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power",
+        "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
+        "power_factor_tolerance": "Power Factor Tolerance",
+        "minimum_apparent_power_va": "Minimum Apparent Power VA",
+        "balance_negative_tolerance_w": "Negative Balance Power Tolerance",
+        "solar_surplus_threshold_w": "Solar Surplus Power Threshold",
+        "solar_export_tolerance_w": "Solar Export Power Tolerance",
+        "high_solar_surplus_threshold_w": "High Solar Surplus Power Threshold",
+        "flexible_load_running_threshold_w": "Flexible Load Running Power Threshold",
+        "circuit_retention_mode": "Circuit Retention Mode"
+      },
+      "fallback_setting_label": "Setting: {setting_key}",
+      "units": {
+        "ratio": "ratio",
+        "minutes": "min",
+        "power": "W",
+        "percent": "%",
+        "apparent_power": "VA"
+      },
+      "groups": {
+        "energy_usage": "Energy Usage",
+        "run_cycle": "Run Cycle",
+        "safety": "Safety",
+        "standby": "Standby",
+        "operating_detection": "Operating Detection",
+        "dual_phase": "Dual Phase",
+        "power_quality": "Power Quality",
+        "mains_balance": "Mains Balance",
+        "solar_flow": "Solar Flow"
+      },
+      "reasons": {
+        "energy_usage": "Observed {observed_days} complete days of energy usage; the 95th percentile daily usage was {p95_daily_kwh} kWh.",
+        "run_cycle": "Based on {observed_cycles} observed run cycles, the 95th percentile active runtime was {p95_active_minutes} minutes.",
+        "capacity": "Observed sustained EV charger current samples; lower the warning ratio without inferring breaker size.",
+        "standby": "{circuit_name} has a stable low-power pattern. The suggested standby threshold leaves margin above the observed low-power cluster.",
+        "operating_detection": "Observed {confirmed_starts} confirmed starts and {idle_samples} idle samples over {learning_days} days. The running and idle power distributions are clearly separated.",
+        "dual_phase_ratio": "The paired legs have repeatedly run with a tighter balance than the current warning threshold. The suggestion stays above the observed high-end imbalance.",
+        "dual_phase_minimum": "Dual-phase imbalance should be evaluated when the appliance is genuinely active, not while it is idle or lightly loaded.",
+        "apparent_power_tolerance": "Observed W, VA, current, and power-factor residuals are stable enough to tune the metric consistency tolerance.",
+        "power_factor_tolerance": "Power-factor relationship checks have a stable residual pattern, so the tolerance can be tuned to the observed sensor behavior.",
+        "minimum_apparent_power": "The observed apparent-power range supports a circuit specific minimum before metric consistency is evaluated.",
+        "mains_balance": "Measured mains-minus-load balance has enough history to tune the negative balance tolerance while still surfacing mapping, solar, or CT-orientation problems.",
+        "solar_surplus": "Solar surplus should start near the middle of observed export events.",
+        "high_solar_surplus": "High solar surplus should represent the upper end of observed export events."
       }
     },
     "dashboard": {
@@ -890,6 +1047,7 @@
           },
           "ct_direction_valid": {
             "title": "CT direction looks valid",
+            "title_attention": "CT direction needs review",
             "why_it_matters": "Checks that power flow matches the selected circuit role.",
             "fix": "Check CT direction"
           },
@@ -1003,8 +1161,15 @@
         "source": "Source",
         "status": "Status",
         "suggested": "Suggested",
+        "today": "Today",
         "unknown": "Unknown",
         "unknown_load": "Unknown load"
+      },
+      "confirmations": {
+        "relearn_title": "Relearn Baseline",
+        "relearn_message": "This clears the stored baseline and related learned alert state, then it will restart learning for this circuit.",
+        "cancel": "Cancel",
+        "confirm_relearn": "Relearn"
       },
       "headers": {
         "alert_evidence": "Alert Evidence",
@@ -1194,6 +1359,7 @@
         "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
         "learning_ranges": "Learning normal ranges for this appliance.",
+        "learning_progress": "{complete} days of learning out of {required} days complete",
         "comparison_summary": "Normal {normal}. Status {status}.",
         "projected_end_of_day": "Projected end of day",
         "projected_range": "Projected range {low} - {high}",
@@ -1283,14 +1449,16 @@
         "not_pending": "This recommendation is no longer pending.",
         "not_applied": "Only applied recommendations can be undone.",
         "expected_effect": "Expected effect: {effect}",
+        "expected_effect_label": "Expected effect",
         "evidence": "Evidence: {evidence}",
+        "evidence_label": "Evidence",
         "recommendation_evidence": "Recommendation Evidence",
         "previewing_evidence": "Previewing evidence for {label}.",
         "no_evidence_summary": "No compact evidence summary is available for this recommendation.",
         "evidence_count": "{count} evidence fields were captured{omitted}.",
         "evidence_omitted": "; {count} are hidden from this compact preview",
         "value_row": "{label}: {value}",
-        "preview_history": "Preview historical impact",
+        "preview_history": "Historical impact:",
         "preview_window": "{count} retained observations from {start} to {end}.",
         "preview_alerts": "alerts",
         "preview_state_changes": "state changes",

@@ -10,7 +10,7 @@ from .ids import readable_component as _readable_component
 from .ids import tuple_id as _tuple_id
 from .localized_text import translation_text
 from .models import AlertEvidence, CircuitConfig
-from .safety import ELECTRICAL_SAFETY_NOTICE, feature_needs_electrical_safety_notice
+from .safety import feature_needs_electrical_safety_notice
 
 POWER_QUALITY_ALERT_FEATURES = frozenset(
     {
@@ -22,13 +22,51 @@ POWER_QUALITY_ALERT_FEATURES = frozenset(
         "resistive_load_became_reactive",
     }
 )
-_POWER_QUALITY_VALUE_FORMATS = {
-    "reactive_to_real_ratio": ("Reactive-to-real power ratio", "%", "percentage"),
-    "apparent_to_real_ratio": ("Apparent-to-real power ratio", "%", "percentage"),
-    "power_factor": ("Power factor", "", "decimal"),
-    "power_factor_deficit": ("Power factor deficit", "", "decimal"),
-    "reactive_power": ("Reactive power", "VAR", "number"),
-    "apparent_power": ("Apparent power", "VA", "number"),
+_ALERT_VALUE_FORMATS = {
+    "activity_inactive_too_long": ("minutes", "number"),
+    "activity_left_on": ("minutes", "number"),
+    "always_on_power": ("power", "number"),
+    "reactive_to_real_ratio": ("percent", "percentage"),
+    "apparent_to_real_ratio": ("percent", "percentage"),
+    "power_factor": (None, "decimal"),
+    "power_factor_deficit": (None, "decimal"),
+    "real_power": ("power", "number"),
+    "reactive_power": ("reactive_power", "number"),
+    "apparent_power": ("apparent_power", "number"),
+    "billing_cycle_budget": ("energy", "number"),
+    "circuit_capacity": ("current", "number"),
+    "daily_energy_goal": ("energy", "number"),
+    "daily_energy_usage_spike": ("energy", "number"),
+    "demand_limit": ("power", "number"),
+    "demand_monthly_peak": ("power", "number"),
+    "dual_phase_leg_imbalance": ("percent", "percentage"),
+    "nilm_appliance_unusual_energy": ("energy", "number"),
+    "nilm_appliance_confidence": ("percent", "percentage"),
+    "nilm_appliance_unusual_runtime": ("minutes", "number"),
+    "rain_pump_correlation": ("minutes", "number"),
+    "run_cycle_daily_duty_cycle_percent": ("percent", "number"),
+    "run_cycle_daily_start_count": ("starts", "number"),
+    "run_cycle_duration_s": ("seconds", "number"),
+    "utility_energy_mismatch": ("energy", "number"),
+    "water_flow_correlation": ("minutes", "number"),
+}
+
+
+def _notification_text(*keys: str) -> str:
+    return translation_text("notifications", *keys)
+
+
+def _notification_text_format(*keys: str, **values: Any) -> str:
+    return _notification_text(*keys).format(**values)
+
+
+ALERT_VALUE_METADATA = {
+    key: (
+        _notification_text("alert", "value_metrics", key),
+        _notification_text("alert", "units", unit_key) if unit_key else "",
+        format_kind,
+    )
+    for key, (unit_key, format_kind) in _ALERT_VALUE_FORMATS.items()
 }
 
 
@@ -72,9 +110,11 @@ def alert_notification_message(
     lines.extend(
         [
             "",
-            f"- {_notification_value_label(
-                alert, _notification_text('alert', 'observed_value')
-            )}: "
+            f"- {
+                _notification_value_label(
+                    alert, _notification_text('alert', 'observed_value')
+                )
+            }: "
             f"{_format_notification_value(alert, alert.observed_value)}",
             f"- {_notification_value_label(alert, _comparison_value_label(alert))}: "
             f"{_format_notification_value(alert, alert.baseline_value)}",
@@ -87,7 +127,7 @@ def alert_notification_message(
             (
                 "",
                 f"{_notification_text('alert', 'safety_notice')}: "
-                f"{ELECTRICAL_SAFETY_NOTICE}",
+                f"{translation_text('safety', 'electrical_notice')}",
             )
         )
     lines.extend(
@@ -105,23 +145,27 @@ def _power_quality_notice_lines(alert: AlertEvidence) -> list[str]:
         return []
     return [
         "",
-        "This is a repeated change from the learned electrical pattern, not an "
-        "electrical safety diagnosis.",
+        _notification_text("alert", "power_quality_notice"),
     ]
 
 
 def _notification_value_label(alert: AlertEvidence, label: str) -> str:
-    value_format = _POWER_QUALITY_VALUE_FORMATS.get(alert.value_metric)
+    value_format = ALERT_VALUE_METADATA.get(alert.value_metric or alert.feature)
     if value_format is None:
         return label
     return f"{label} ({value_format[0]})"
 
 
 def _format_notification_value(alert: AlertEvidence, value: float) -> str:
-    value_format = _POWER_QUALITY_VALUE_FORMATS.get(alert.value_metric)
+    value_format = ALERT_VALUE_METADATA.get(alert.value_metric or alert.feature)
     if value_format is None:
         return str(value)
     _, unit, format_kind = value_format
+    return format_alert_value(value, unit, format_kind)
+
+
+def format_alert_value(value: float, unit: str, format_kind: str) -> str:
+    """Format one alert value consistently across notification and panel views."""
     if format_kind == "percentage":
         return f"{value * 100.0:.3f}%"
     formatted = f"{value:.3f}".rstrip("0").rstrip(".")
@@ -140,7 +184,13 @@ def _nilm_source_lines(alert: AlertEvidence) -> list[str]:
     confidence = _nilm_confidence(alert)
     confidence_label = _notification_text("alert", "confidence")
     if confidence is not None and f"{confidence_label}:" not in alert.message:
-        lines.append(f"{confidence_label}: {round(confidence * 100)}%.")
+        lines.append(
+            _notification_text_format(
+                "alert",
+                "confidence_line",
+                confidence=round(confidence * 100),
+            )
+        )
     return lines
 
 
@@ -248,28 +298,46 @@ async def async_create_weekly_digest_notification(
     biggest = list(getattr(digest, "biggest_changes", ()))
     top_energy = list(getattr(digest, "top_energy_users", ()))
     lines = [
-        f"Appliance summary for {digest.week_start} through {digest.week_end}.",
-        "",
-        "**Largest changes from normal**",
-        *(
-            [
-                f"- {item.display_name}: {round(item.change_ratio * 100)}%"
-                for item in biggest
-            ]
-            or ["- No meaningful changes from learned normal.".strip()]
+        _notification_text_format(
+            "weekly_digest",
+            "intro",
+            week_start=digest.week_start,
+            week_end=digest.week_end,
         ),
         "",
-        "**Top energy users**",
+        f"**{_notification_text('weekly_digest', 'largest_changes')}**",
         *(
-            [f"- {item.display_name}: {item.energy_kwh} kWh" for item in top_energy]
-            or ["- No retained appliance energy data.".strip()]
+            [
+                _notification_text_format(
+                    "weekly_digest",
+                    "change_item",
+                    display_name=item.display_name,
+                    change_percent=round(item.change_ratio * 100),
+                )
+                for item in biggest
+            ]
+            or [_notification_text("weekly_digest", "no_changes")]
+        ),
+        "",
+        f"**{_notification_text('weekly_digest', 'top_energy_users')}**",
+        *(
+            [
+                _notification_text_format(
+                    "weekly_digest",
+                    "energy_item",
+                    display_name=item.display_name,
+                    energy_kwh=item.energy_kwh,
+                )
+                for item in top_energy
+            ]
+            or [_notification_text("weekly_digest", "no_energy_data")]
         ),
     ]
     try:
         create(
             hass,
             "\n".join(lines),
-            title="Weekly Appliance Digest",
+            title=_notification_text("weekly_digest", "title"),
             notification_id=f"{DOMAIN}_weekly_appliance_digest",
         )
     except (AttributeError, TypeError):
@@ -293,15 +361,26 @@ async def async_create_daily_summary_notification(
     if create is None:
         return
     lines = [
-        f"Appliance notifications queued for {summary_date}.",
+        _notification_text_format(
+            "daily_summary",
+            "intro",
+            summary_date=summary_date,
+        ),
         "",
-        *[f"- {alert.message}" for alert in alerts[:20]],
+        *[
+            _notification_text_format(
+                "daily_summary",
+                "alert_item",
+                message=alert.message,
+            )
+            for alert in alerts[:20]
+        ],
     ]
     try:
         create(
             hass,
             "\n".join(lines),
-            title="Daily Appliance Summary",
+            title=_notification_text("daily_summary", "title"),
             notification_id=f"{DOMAIN}_daily_appliance_summary",
         )
     except (AttributeError, TypeError):
@@ -320,9 +399,7 @@ def _settings_recommendation_message(total_pending: int, entry_id: str) -> str:
 
 
 def _settings_recommendations_options_path(entry_id: str) -> str:
-    query = urlencode(
-        {"review_suggested_settings": "1", "entry_id": entry_id}
-    )
+    query = urlencode({"review_suggested_settings": "1", "entry_id": entry_id})
     return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}"
 
 
@@ -330,7 +407,3 @@ def _comparison_value_label(alert: AlertEvidence) -> str:
     if alert.feature in {"demand_limit", "demand_monthly_peak"}:
         return _notification_text("alert", "comparison_value")
     return _notification_text("alert", "baseline_value")
-
-
-def _notification_text(*keys: str) -> str:
-    return translation_text("notifications", *keys)

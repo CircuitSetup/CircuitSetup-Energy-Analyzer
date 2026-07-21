@@ -191,12 +191,11 @@ def test_existing_summary_fields_feed_appliance_story() -> None:
         "summary_explanation": "The appliance is currently active.",
     }
     assert energy_summary_value(state, "fridge") == "Normal"
-    assert energy_summary_attributes(state, "fridge")[
-        "daily_energy_usage_kwh"
-    ] == 1.82
-    assert electrical_health_attributes(state, "fridge")[
-        "what_to_check_first"
-    ] == "No electrical check is needed right now."
+    assert energy_summary_attributes(state, "fridge")["daily_energy_usage_kwh"] == 1.82
+    assert (
+        electrical_health_attributes(state, "fridge")["what_to_check_first"]
+        == "No electrical check is needed right now."
+    )
     assert health_summary_attributes(state, "fridge")["next_step"] == (
         "No action needed"
     )
@@ -235,10 +234,10 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     }
     assert detail["learning_readiness"]["status"] == "ready"
     assert detail["learning_readiness"]["label"] == "Ready"
+    assert detail["learning_readiness"]["days_complete"] == 7
+    assert detail["learning_readiness"]["days_required"] == 7
     assert detail["next_step"] == "Review alert evidence"
-    assert detail["what_to_check_first"] == [
-        "No electrical check is needed right now."
-    ]
+    assert detail["what_to_check_first"] == ["No electrical check is needed right now."]
     assert detail["evidence_path"] == (
         "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge"
     )
@@ -552,9 +551,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
         },
     }
     assert "open_evidence" not in payload["actions"]
-    assert {"mark_correct", "mark_wrong", "adjust_interval"} <= set(
-        payload["actions"]
-    )
+    assert {"mark_correct", "mark_wrong", "adjust_interval"} <= set(payload["actions"])
     assert payload["actions"]["mark_correct"]["service"] == "validate_nilm_session"
     assert payload["actions"]["mark_wrong"]["service"] == "reject_nilm_session"
     assert payload["history"]["entities"] == [
@@ -587,8 +584,9 @@ def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:
     actions = payload["actions"]
     alert_id = payload["detail"]["active_alerts"][0]["alert_id"]
 
-    assert actions["open_evidence"]["path"] == (
-        payload["detail"]["active_alerts"][0]["evidence_path"]
+    assert (
+        actions["open_evidence"]["path"]
+        == (payload["detail"]["active_alerts"][0]["evidence_path"])
     )
     for key, service in (
         ("mark_correct", "mark_nilm_appliance_correct"),
@@ -665,16 +663,12 @@ def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None
         "confidence": 0.91,
         "validation_result": None,
     }
-    timeline_ids = {
-        item["session_id"] for item in detail["recent_timeline"]["items"]
-    }
+    timeline_ids = {item["session_id"] for item in detail["recent_timeline"]["items"]}
     assert timeline_ids == {
         "session-dishwasher-complete",
         "session-dishwasher-open",
     }
-    assert {
-        item["session_id"] for item in detail["session_timeline"]
-    } == timeline_ids
+    assert {item["session_id"] for item in detail["session_timeline"]} == timeline_ids
     assert {item["source_type"] for item in detail["session_timeline"]} == {
         "nilm_estimate"
     }
@@ -698,9 +692,9 @@ def test_direct_meter_conversion_preserves_nilm_identity_in_appliance_detail() -
         profile=ApplianceProfile.WASHER,
     )
     coordinator.circuit_configs = (*coordinator.circuit_configs, direct)
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assignment.update(
         {
             "appliance_key": "nilm:assignment-dishwasher",
@@ -821,12 +815,13 @@ async def test_expected_schedule_save_uses_backend_appliance_identity() -> None:
     )
 
     assert result["status"] == "saved"
-    assert result["expected_schedule_settings"]["appliance_key"] == (
-        "circuit:fridge"
+    assert result["expected_schedule_settings"]["appliance_key"] == ("circuit:fridge")
+    assert (
+        coordinator.store_data.appliance_schedule_settings["circuit:fridge"]["windows"][
+            0
+        ]["start"]
+        == "08:00"
     )
-    assert coordinator.store_data.appliance_schedule_settings[
-        "circuit:fridge"
-    ]["windows"][0]["start"] == "08:00"
     assert coordinator.store_data.appliance_schedule_evidence == {}
 
 
@@ -836,9 +831,9 @@ def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
     )
 
     coordinator = _nilm_coordinator()
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     sessions = [
         _nilm_session(
             f"session-confirmed-{day}",
@@ -869,9 +864,9 @@ def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
         "runtime_today_seconds",
         "run_count_today",
     }
-    assert {
-        item["comparison_mode"] for item in validated["today_vs_normal"]
-    } == {"same_time_of_day"}
+    assert {item["comparison_mode"] for item in validated["today_vs_normal"]} == {
+        "same_time_of_day"
+    }
 
     assignment["lifecycle_state"] = "needs_validation"
     unvalidated = appliance_detail_payload(
@@ -894,9 +889,7 @@ def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
     }
     assert insufficient_history["next_step"] == "Confirm more NILM sessions"
 
-    assignment["confirmed_session_ids"] = [
-        item["session_id"] for item in sessions
-    ]
+    assignment["confirmed_session_ids"] = [item["session_id"] for item in sessions]
     assignment["false_positive_rate"] = 1.0
     poor_validation = appliance_detail_payload(
         [coordinator],
@@ -911,9 +904,9 @@ def test_rejected_nilm_session_is_reviewable_but_not_last_attributed_match() -> 
     )
 
     coordinator = _nilm_coordinator()
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assignment.update(
         {
             "session_ids": ["session-confirmed", "session-rejected"],
@@ -943,9 +936,7 @@ def test_rejected_nilm_session_is_reviewable_but_not_last_attributed_match() -> 
     )["detail"]
 
     assert detail["last_matched_session"]["session_id"] == "session-confirmed"
-    timeline = {
-        item["session_id"]: item for item in detail["recent_timeline"]["items"]
-    }
+    timeline = {item["session_id"]: item for item in detail["recent_timeline"]["items"]}
     assert timeline["session-rejected"]["validation_result"] == "rejected"
 
 
@@ -955,9 +946,9 @@ def test_unpublished_nilm_appliance_uses_retained_session_history() -> None:
     )
 
     coordinator = _nilm_coordinator()
-    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
-        "mains"
-    ][0]
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
     assignment["publish_entities"] = False
     coordinator.store_data.nilm_session_history_by_circuit = {
         "mains": [

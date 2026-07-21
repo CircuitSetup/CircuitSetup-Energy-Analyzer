@@ -3,6 +3,8 @@ views:
   - type: sections
     title: Overview
     path: overview
+    max_columns: 4
+    dense_section_placement: true
     sections:
       - type: grid
         title: Appliance Status

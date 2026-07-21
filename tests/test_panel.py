@@ -143,9 +143,7 @@ def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
         alert_evidence_payload,
     )
 
-    fingerprint = (
-        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
-    )
+    fingerprint = "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
     alert = _alert(
         feedback_status="expected",
         feedback_effect="Notifications suppressed for this expected pattern",
@@ -162,9 +160,7 @@ def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
     assert payload["alert"]["feedback_effect"] == (
         "Notifications suppressed for this expected pattern"
     )
-    assert payload["alert"]["feedback_expires_at"] == (
-        "2026-09-15T12:00:00+00:00"
-    )
+    assert payload["alert"]["feedback_expires_at"] == ("2026-09-15T12:00:00+00:00")
     assert payload["alert"]["matching_feedback_fingerprint"] == fingerprint
 
 
@@ -173,9 +169,7 @@ def test_alert_evidence_payload_explains_unhelpful_adjusted_requirement() -> Non
         alert_evidence_payload,
     )
 
-    fingerprint = (
-        "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
-    )
+    fingerprint = "hvac|runtime_high|sources=real_power|observed=3.0-3.5|ratio=25-50pct"
     alert = _alert(
         feedback_status="unhelpful",
         feedback_effect="Future matching alerts require stronger repeated evidence",
@@ -258,9 +252,7 @@ def test_panel_nilm_assignment_save_reloads_after_service_calls() -> None:
         1,
     )[1].split("\n  _routeRequestsNilmWorkspace", 1)[0]
     context_line = "const actionContext = this._nilmWorkspaceActionContext();"
-    assert body.index(context_line) < body.index(
-        "await this._hass.callService"
-    )
+    assert body.index(context_line) < body.index("await this._hass.callService")
     assert body.index("await this._hass.callService") < body.index(
         "await this._refreshNilmWorkspaceData"
     )
@@ -284,9 +276,7 @@ def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> No
         1,
     )[1].split("\n  async _saveNilmAssignmentChanges", 1)[0]
     context_line = "const actionContext = this._nilmWorkspaceActionContext();"
-    assert body.index(context_line) < body.index(
-        "await this._hass.callService"
-    )
+    assert body.index(context_line) < body.index("await this._hass.callService")
     assert body.index("await this._hass.callService") < body.index(
         "await this._refreshNilmWorkspaceData"
     )
@@ -345,8 +335,7 @@ def test_frontend_component_prefers_import_without_hass_components_warning(
             raise AssertionError("deprecated hass.components.frontend access")
 
     assert (
-        _frontend_component(SimpleNamespace(components=Components()))
-        is frontend_module
+        _frontend_component(SimpleNamespace(components=Components())) is frontend_module
     )
 
 
@@ -630,15 +619,11 @@ def test_alert_evidence_payload_includes_per_recommendation_actions() -> None:
     assert payload["setting_recommendations"][0]["actions"]["undo"]["service"] == (
         "undo_setting_recommendation"
     )
-    assert payload["setting_recommendations"][0]["actions"]["undo"][
-        "enabled"
-    ] is False
+    assert payload["setting_recommendations"][0]["actions"]["undo"]["enabled"] is False
     assert payload["setting_recommendations"][0]["actions"]["reset"]["service"] == (
         "reset_setting_recommendation"
     )
-    assert payload["setting_recommendations"][0]["actions"]["reset"][
-        "enabled"
-    ] is True
+    assert payload["setting_recommendations"][0]["actions"]["reset"]["enabled"] is True
     assert payload["setting_recommendations"][0]["display_label"] == (
         "Raise daily spike threshold"
     )
@@ -810,6 +795,7 @@ def test_alert_evidence_payload_selects_requested_recommendation_preview() -> No
             {
                 "recommendation_id": recommendation_id,
                 "circuit_id": "ev_charger",
+                "circuit_name": "EV Charger",
                 "setting_key": "warning_ratio",
                 "setting_label": "Capacity Warning Ratio",
                 "current_value": 0.9,
@@ -833,9 +819,27 @@ def test_alert_evidence_payload_selects_requested_recommendation_preview() -> No
     assert payload["requested_recommendation_id"] == recommendation_id
     selected = payload["selected_recommendation"]
     assert selected["recommendation_id"] == recommendation_id
-    assert selected["display_label"] == "Capacity Warning Ratio"
+    assert selected["display_label"] == "EV Charger Capacity Warning Ratio"
     assert selected["evidence_preview"] == (
         "Observed Samples: 8; P95 Current Amps: 36.4"
+    )
+
+
+def test_recommendation_header_leads_with_appliance_and_names_power() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _recommendation_display_label,
+    )
+
+    assert (
+        _recommendation_display_label(
+            {
+                "circuit_id": "hvac",
+                "circuit_name": "HVAC",
+                "setting_key": "standby_threshold_w",
+                "setting_label": "Standby Threshold W",
+            }
+        )
+        == "HVAC Standby Power Threshold"
     )
 
 
@@ -868,6 +872,7 @@ def test_alert_evidence_payload_guides_always_on_recommendations() -> None:
     )
 
     recommendation = payload["setting_recommendations"][0]
+    assert recommendation["display_label"] == "Washer Always On Power Alert"
     assert recommendation["default_value"] == 0.0
     assert recommendation["expected_effect"].startswith(
         "Surface unusually high Always On draw"
@@ -904,6 +909,9 @@ def test_alert_evidence_payload_guides_flexible_load_recommendations() -> None:
     )
 
     recommendation = payload["setting_recommendations"][0]
+    assert recommendation["display_label"] == (
+        "Mains Flexible Load Running Power Threshold"
+    )
     assert recommendation["default_value"] == 100.0
     assert recommendation["expected_effect"].startswith(
         "Classify flexible loads as running only after"
@@ -1110,9 +1118,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
     ]
 
 
-def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() -> (
-    None
-):
+def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
     )
@@ -1498,8 +1504,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["virtual_appliances"][0]["display_name"] == "Dishwasher"
     assert payload["virtual_appliances"][0]["is_running"] is False
     assert payload["virtual_appliances"][0]["estimated_power_w"] == 0.0
-    assert payload["virtual_appliances"][0]["estimated_energy_kwh_today"] == (
-        payload["sessions"][0]["estimated_energy_kwh"]
+    assert (
+        payload["virtual_appliances"][0]["estimated_energy_kwh_today"]
+        == (payload["sessions"][0]["estimated_energy_kwh"])
     )
     assert payload["virtual_appliances"][0]["confidence"] == 0.9
     assert payload["virtual_appliances"][0]["model_status"] == "assigned"
@@ -1517,9 +1524,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "label",
         "appliance_profile",
     ]
-    assert {"value": "washer", "label": "Washer"} in label_action[
-        "profile_options"
-    ]
+    assert {"value": "washer", "label": "Washer"} in label_action["profile_options"]
     assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"
@@ -1717,9 +1722,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
         {"interval_id": "interval-new", "label": "Dryer"},
     ]
 
-    assert _nilm_workspace_session_specs(signatures, assignments) == [
-        ("sig-new", None)
-    ]
+    assert _nilm_workspace_session_specs(signatures, assignments) == [("sig-new", None)]
     lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
     assert set(lanes) == {
         "needs_review",
@@ -1729,9 +1732,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     }
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
-    assert lanes["ignored_expected"]["assignment_ids"] == [
-        "assignment-retired"
-    ]
+    assert lanes["ignored_expected"]["assignment_ids"] == ["assignment-retired"]
 
 
 def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
@@ -1741,11 +1742,14 @@ def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
 
     sessions = [{"session_id": "session-unassigned"}]
 
-    assert _nilm_workspace_visible_sessions(
-        sessions,
-        [{"ignored": True}],
-        [{"lifecycle_state": "retired"}],
-    ) == sessions
+    assert (
+        _nilm_workspace_visible_sessions(
+            sessions,
+            [{"ignored": True}],
+            [{"lifecycle_state": "retired"}],
+        )
+        == sessions
+    )
 
 
 def test_nilm_workspace_keeps_merged_signature_sessions_on_visible_assignment() -> None:
@@ -1795,9 +1799,7 @@ def _nilm_workspace_coordinator(
     return coordinator
 
 
-def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() -> (
-    None
-):
+def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -2078,11 +2080,7 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
         ]
     }
     coordinator.state.nilm_unknown_loads_by_circuit = {
-        "mains": {
-            "unknown_loads": [
-                {"signature_id": "signature_1", "confidence": 0.7}
-            ]
-        }
+        "mains": {"unknown_loads": [{"signature_id": "signature_1", "confidence": 0.7}]}
     }
     coordinator._nilm_unmatched_edges = {
         "mains": [
@@ -2726,12 +2724,14 @@ def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
 
     assert payload["edge_count"] == len(old_edges) + 2
     assert len(payload["edges"]) == MAX_NILM_WORKSPACE_EDGES
-    assert payload["edges"][-1]["timestamp"] == (
-        recent_start + timedelta(minutes=30)
-    ).isoformat()
-    assert payload["sessions"][-1]["end"] == (
-        recent_start + timedelta(minutes=30)
-    ).isoformat()
+    assert (
+        payload["edges"][-1]["timestamp"]
+        == (recent_start + timedelta(minutes=30)).isoformat()
+    )
+    assert (
+        payload["sessions"][-1]["end"]
+        == (recent_start + timedelta(minutes=30)).isoformat()
+    )
 
 
 def test_nilm_workspace_history_rows_are_capped() -> None:
@@ -3072,9 +3072,7 @@ def test_alert_evidence_payload_keeps_requested_circuit_after_stale_alert_id() -
     assert payload["requested_circuit_id"] == "car_charger"
     assert payload["requested_feature"] == "demand_monthly_peak"
     assert payload["circuit"]["circuit_id"] == "car_charger"
-    assert payload["actions"]["pause_alerts"]["data"] == {
-        "circuit_id": "car_charger"
-    }
+    assert payload["actions"]["pause_alerts"]["data"] == {"circuit_id": "car_charger"}
     assert payload["actions"]["pause_alerts"]["service"] == "start_maintenance"
     assert "start_maintenance" not in payload["actions"]
     assert "end_maintenance" not in payload["actions"]
@@ -3141,9 +3139,11 @@ def test_setup_health_payload_links_checklist_actions_to_option_steps() -> None:
         for item in payload["issues"]
         if item["issue"] == "missing_capacity_setting"
     )
-    assert capacity_issue["open_path"] == (
-        "/config/integrations/integration/circuitsetup_energy_analyzer"
-    )
+    capacity = urlparse(capacity_issue["open_path"])
+    capacity_params = parse_qs(capacity.fragment)
+    assert capacity_params["config_entry"] == ["entry-hvac"]
+    assert capacity_params["options_step"] == ["advanced_settings"]
+    assert capacity_params["circuit_id"] == ["hvac"]
 
     checklist = {item["item_id"]: item for item in payload["checklist"]}
     entity_detail = urlparse(checklist["entity_detail_level_selected"]["open_path"])

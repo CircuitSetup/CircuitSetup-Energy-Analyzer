@@ -304,13 +304,19 @@ export function createEvidenceViewMethods({
         <div class="entity-list">
           ${recommendationItems.map(({ recommendation, originalIndex }) => `
             <div class="metric">
-              <strong>${this._escape(recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting"))}</strong>
-              ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
-              ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
-              ${this._recommendationValueRows(recommendation)}
-              ${recommendation.expected_effect ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.expected_effect", { effect: recommendation.expected_effect }))}</p>` : ""}
-              ${recommendation.evidence_preview ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence", { evidence: recommendation.evidence_preview }))}</p>` : ""}
-              ${this._renderSettingImpactPreview(recommendation)}
+              <div class="recommendation-layout">
+                <div class="recommendation-summary">
+                  <strong>${this._escape(recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting"))}</strong>
+                  ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
+                  ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
+                  ${this._recommendationValueRows(recommendation)}
+                </div>
+                <div class="recommendation-support">
+                  ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+                  ${this._renderRecommendationEvidence(recommendation.evidence_preview)}
+                  ${this._renderSettingImpactPreview(recommendation)}
+                </div>
+              </div>
                 <div class="actions">
                  ${recommendation.actions && recommendation.actions.preview ? this._recommendationActionButton(recommendation, originalIndex, "preview", this._panelText("actions.labels.preview_evidence"), true) : ""}
                  ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
@@ -334,7 +340,7 @@ export function createEvidenceViewMethods({
     const evidenceCount = Number(recommendation.evidence_key_count || 0);
     const omittedCount = Number(recommendation.evidence_omitted_key_count || 0);
     const evidenceSummary = recommendation.evidence_preview
-      ? `<p>${this._escape(recommendation.evidence_preview)}</p>`
+      ? this._renderRecommendationEvidence(recommendation.evidence_preview)
       : `<p class="muted">${this._escape(this._panelText("recommendations.no_evidence_summary"))}</p>`;
     const omitted = omittedCount > 0
       ? this._panelTextFormat("recommendations.evidence_omitted", { count: omittedCount })
@@ -342,16 +348,54 @@ export function createEvidenceViewMethods({
     const countSummary = evidenceCount > 0
       ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence_count", { count: evidenceCount, omitted }))}</p>`
       : "";
+    const originalIndex = this._selectedRecommendationIndex(recommendation);
     return `
       <section class="panel">
         <h2>${this._escape(this._panelText("recommendations.recommendation_evidence"))}</h2>
         <p class="muted">${this._escape(this._panelTextFormat("recommendations.previewing_evidence", { label }))}</p>
-        ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
-        ${this._recommendationValueRows(recommendation)}
-        ${evidenceSummary}
-        ${countSummary}
+        <div class="actions recommendation-evidence-actions">
+          ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
+          ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", this._panelText("actions.labels.dismiss"), true)}
+          ${this._recommendationActionButton(recommendation, originalIndex, "reset", this._panelText("actions.labels.reset_default"), true)}
+        </div>
+        <div class="recommendation-layout">
+          <div class="recommendation-summary">
+            ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
+            ${this._recommendationValueRows(recommendation)}
+          </div>
+          <div class="recommendation-support">
+            ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+            ${evidenceSummary}
+            ${countSummary}
+            ${this._renderSettingImpactPreview(recommendation)}
+          </div>
+        </div>
       </section>
     `;
+  }
+
+  _selectedRecommendationIndex(recommendation) {
+    const recommendations = this._payload && this._payload.setting_recommendations;
+    if (!Array.isArray(recommendations)) {
+      return -1;
+    }
+    return recommendations.findIndex((item) => (
+      item && item.recommendation_id === recommendation.recommendation_id
+    ));
+  }
+
+  _renderRecommendationEvidence(evidencePreview) {
+    const lines = String(evidencePreview || "")
+      .split(/;|\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      return "";
+    }
+    return `<div class="recommendation-evidence">
+      <strong>${this._escape(this._panelText("recommendations.evidence_label"))}:</strong>
+      ${lines.map((line) => `<span class="recommendation-evidence-line">${this._escape(line)}</span>`).join("")}
+    </div>`;
   }
 
   _recommendationValueRows(recommendation) {
@@ -361,15 +405,17 @@ export function createEvidenceViewMethods({
     const suggestedValue = applied ? undefined : recommendation.suggested_value;
     const rows = [];
     if (currentValue !== undefined) {
-      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.current"), value: currentValue }))}</code>`);
+      rows.push([this._panelText("common.current"), currentValue]);
     }
     if (recommendation.default_value !== undefined) {
-      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.default"), value: recommendation.default_value }))}</code>`);
+      rows.push([this._panelText("common.default"), recommendation.default_value]);
     }
     if (suggestedValue !== undefined) {
-      rows.push(`<code>${this._escape(this._panelTextFormat("recommendations.value_row", { label: this._panelText("common.suggested"), value: suggestedValue }))}</code>`);
+      rows.push([this._panelText("common.suggested"), suggestedValue]);
     }
-    return rows.length ? `<div class="entity-list">${rows.join("")}</div>` : "";
+    return rows.length ? `<div class="recommendation-values">${rows.map(([label, value]) => `
+      <div class="recommendation-value"><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>
+    `).join("")}</div>` : "";
   }
 
   _renderSafetyNotice(alert) {
@@ -424,21 +470,13 @@ export function createEvidenceViewMethods({
     const valueRange = Math.max(maxValue - minValue, 1);
     const x = (time) => padLeft + ((time - minTime) / timeRange) * (width - padLeft - padRight);
     const y = (value) => padTop + (1 - ((value - minValue) / valueRange)) * (height - padTop - padBottom);
-    const unit = alert.y_axis_label ? ` ${alert.y_axis_label}` : "";
-    const pointTitle = (item, point) => this._panelTextFormat("chart.point_title", {
-      name: item.name,
-      value: this._formatNumber(point.value),
-      unit,
-      time: this._formatDateTime(new Date(point.time)),
-    });
+    const unitLabel = alert.y_axis_label || "";
+    const unit = unitLabel ? ` ${unitLabel}` : "";
 
     const lines = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
-      const circles = item.points.map((point) => {
-        const title = pointTitle(item, point);
-        return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}"><title>${this._escape(title)}</title></circle>`;
-      }).join("");
+      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="3" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(unitLabel)}"></circle>`).join("");
       return `<polyline fill="none" stroke="${color}" stroke-width="2.5" points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
@@ -523,10 +561,53 @@ export function createEvidenceViewMethods({
         ${timeTickLabels}
         ${edgeMarkers}
         ${lines}
+        <line class="chart-crosshair" data-chart-crosshair x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
       </svg>
+      <div class="chart-readout" data-chart-readout aria-live="polite" aria-hidden="true"></div>
       <div class="legend">${legend}</div>
       <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
     `;
+  }
+
+  _attachChartInspectors() {
+    for (const svg of this.shadowRoot.querySelectorAll("svg.chart")) {
+      const points = Array.from(svg.querySelectorAll("[data-chart-point]"));
+      const crosshair = svg.querySelector("[data-chart-crosshair]");
+      const readout = svg.nextElementSibling;
+      if (!points.length || !crosshair || !readout || !readout.matches("[data-chart-readout]")) {
+        continue;
+      }
+      const showPoint = (point) => {
+        const time = point.dataset.chartTime;
+        const matching = points.filter((candidate) => candidate.dataset.chartTime === time);
+        crosshair.setAttribute("x1", point.getAttribute("cx"));
+        crosshair.setAttribute("x2", point.getAttribute("cx"));
+        crosshair.dataset.visible = "true";
+        const values = matching.map((candidate) => {
+          const unit = candidate.dataset.chartUnit ? ` ${candidate.dataset.chartUnit}` : "";
+          return `${candidate.dataset.chartName}: ${candidate.dataset.chartValue}${unit}`;
+        });
+        readout.textContent = `${this._formatDateTime(new Date(Number(time)))} | ${values.join(" | ")}`;
+        readout.setAttribute("aria-hidden", "false");
+      };
+      svg.addEventListener("pointermove", (event) => {
+        const rect = svg.getBoundingClientRect();
+        const viewWidth = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : 900;
+        const pointerX = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * viewWidth;
+        const closest = points.reduce((best, point) => (
+          Math.abs(Number(point.getAttribute("cx")) - pointerX)
+            < Math.abs(Number(best.getAttribute("cx")) - pointerX) ? point : best
+        ));
+        showPoint(closest);
+      });
+      svg.addEventListener("pointerleave", () => {
+        delete crosshair.dataset.visible;
+        readout.setAttribute("aria-hidden", "true");
+      });
+      for (const point of points) {
+        point.addEventListener("focus", () => showPoint(point));
+      }
+    }
   }
 
   _chartTimeTicks(minTime, maxTime, x) {

@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
+from .localized_text import translation_text
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -37,24 +38,41 @@ OPERATING_THRESHOLD_MIN_IDLE_SAMPLES = 10
 OPERATING_THRESHOLD_MIN_START_SAMPLES = 5
 OPERATING_THRESHOLD_MIN_SEPARATION_W = 15.0
 OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
+
+
+def _advisor_text(*keys: str, **values: Any) -> str:
+    text = translation_text("settings_advisor", *keys)
+    return text.format(**values) if values else text
+
+
+def _advisor_unit(key: str) -> str:
+    return _advisor_text("units", key)
+
+
+_SETTING_KEYS = (
+    "daily_spike_ratio",
+    "demand_limit_w",
+    "max_active_minutes",
+    "warning_ratio",
+    "operating_on_threshold_w",
+    "operating_off_threshold_w",
+    "standby_threshold_w",
+    "always_on_alert_w",
+    "leg_imbalance_warning_ratio",
+    "leg_imbalance_min_total_power_w",
+    "apparent_power_tolerance_percent",
+    "power_factor_tolerance",
+    "minimum_apparent_power_va",
+    "balance_negative_tolerance_w",
+    "solar_surplus_threshold_w",
+    "solar_export_tolerance_w",
+    "high_solar_surplus_threshold_w",
+    "flexible_load_running_threshold_w",
+    "circuit_retention_mode",
+)
 SETTING_LABELS = {
-    "daily_spike_ratio": "Daily Spike Ratio",
-    "max_active_minutes": "Max Active Minutes",
-    "warning_ratio": "Capacity Warning Ratio",
-    "operating_on_threshold_w": "Turn-On Power",
-    "operating_off_threshold_w": "Turn-Off Power",
-    "standby_threshold_w": "Standby Threshold W",
-    "always_on_alert_w": "Always On Alert W",
-    "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
-    "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
-    "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
-    "power_factor_tolerance": "Power Factor Tolerance",
-    "minimum_apparent_power_va": "Minimum Apparent Power VA",
-    "balance_negative_tolerance_w": "Balance Negative Tolerance W",
-    "solar_surplus_threshold_w": "Solar Surplus Threshold W",
-    "high_solar_surplus_threshold_w": "High Solar Surplus Threshold W",
-    "flexible_load_running_threshold_w": "Flexible Load Running Threshold W",
-    "circuit_retention_mode": "Circuit Retention Mode",
+    setting_key: _advisor_text("setting_labels", setting_key)
+    for setting_key in _SETTING_KEYS
 }
 
 
@@ -198,13 +216,14 @@ def recommendation_to_dict(
 
 def recommendation_from_dict(raw: Mapping[str, Any]) -> SettingRecommendation:
     """Deserialize a setting recommendation from JSON storage."""
+    setting_key = str(raw["setting_key"])
     return SettingRecommendation(
         recommendation_id=str(raw["recommendation_id"]),
         unique_key=str(raw["unique_key"]),
         circuit_id=str(raw["circuit_id"]),
         circuit_name=str(raw["circuit_name"]),
-        setting_key=str(raw["setting_key"]),
-        setting_label=str(raw["setting_label"]),
+        setting_key=setting_key,
+        setting_label=SETTING_LABELS.get(setting_key, str(raw["setting_label"])),
         current_value=raw.get("current_value"),
         suggested_value=raw.get("suggested_value"),
         unit=raw.get("unit"),
@@ -340,13 +359,15 @@ def _energy_usage_recommendations(
             setting_key="daily_spike_ratio",
             current_value=current_value,
             suggested_value=suggested_value,
-            unit="ratio",
+            unit=_advisor_unit("ratio"),
             feature="energy_usage_spikes",
-            group="Energy Usage",
+            group=_advisor_text("groups", "energy_usage"),
             confidence=0.78,
-            reason=(
-                f"Observed {len(observed_days)} complete days of energy usage; "
-                f"the 95th percentile daily usage was {p95_daily_kwh:g} kWh."
+            reason=_advisor_text(
+                "reasons",
+                "energy_usage",
+                observed_days=len(observed_days),
+                p95_daily_kwh=f"{p95_daily_kwh:g}",
             ),
             evidence={
                 "observed_days": len(observed_days),
@@ -379,13 +400,15 @@ def _cycle_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendation]
             setting_key="max_active_minutes",
             current_value=current_value,
             suggested_value=suggested_value,
-            unit="min",
+            unit=_advisor_unit("minutes"),
             feature="run_cycle_runtime",
-            group="Run Cycle",
+            group=_advisor_text("groups", "run_cycle"),
             confidence=0.8,
-            reason=(
-                f"Based on {len(durations)} observed run cycles, the 95th "
-                f"percentile active runtime was {p95_active_minutes} minutes."
+            reason=_advisor_text(
+                "reasons",
+                "run_cycle",
+                observed_cycles=len(durations),
+                p95_active_minutes=p95_active_minutes,
             ),
             evidence={
                 "observed_cycles": len(durations),
@@ -401,10 +424,7 @@ def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendati
         current_samples,
         inputs.feature_history.get("current_sample_counts"),
     )
-    if (
-        inputs.context.appliance_profile != "ev_charger"
-        or sum(current_counts) < 7
-    ):
+    if inputs.context.appliance_profile != "ev_charger" or sum(current_counts) < 7:
         return []
 
     suggested_value = 0.75
@@ -421,14 +441,11 @@ def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendati
             setting_key="warning_ratio",
             current_value=current_value,
             suggested_value=suggested_value,
-            unit="ratio",
+            unit=_advisor_unit("ratio"),
             feature="capacity_warning_ratio",
-            group="Safety",
+            group=_advisor_text("groups", "safety"),
             confidence=0.76,
-            reason=(
-                "Observed sustained EV charger current samples; lower the "
-                "warning ratio without inferring breaker size."
-            ),
+            reason=_advisor_text("reasons", "capacity"),
             evidence={
                 "observed_samples": sum(current_counts),
                 "p95_current_amps": round(
@@ -467,14 +484,14 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
             setting_key="standby_threshold_w",
             current_value=current_value,
             suggested_value=suggested_value,
-            unit="W",
+            unit=_advisor_unit("power"),
             feature="always_on_standby",
-            group="Standby",
+            group=_advisor_text("groups", "standby"),
             confidence=0.78,
-            reason=(
-                f"{inputs.context.circuit_name} has a stable low-power pattern. "
-                "The suggested standby threshold leaves margin above the observed "
-                "low-power cluster."
+            reason=_advisor_text(
+                "reasons",
+                "standby",
+                circuit_name=inputs.context.circuit_name,
             ),
             evidence={
                 "observed_samples": sum(standby_counts),
@@ -505,8 +522,7 @@ def _operating_detection_recommendations(
         key="power_w",
     )
     if (
-        _timestamped_sample_count(idle_samples)
-        < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
+        _timestamped_sample_count(idle_samples) < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
         or _timestamped_sample_count(start_samples)
         < OPERATING_THRESHOLD_MIN_START_SAMPLES
     ):
@@ -553,10 +569,12 @@ def _operating_detection_recommendations(
         0.0,
         0.92,
     )
-    reason = (
-        f"Observed {len(start_values)} confirmed starts and {len(idle_values)} idle "
-        f"samples over {learning_days} days. The running and idle power "
-        "distributions are clearly separated."
+    reason = _advisor_text(
+        "reasons",
+        "operating_detection",
+        confirmed_starts=len(start_values),
+        idle_samples=len(idle_values),
+        learning_days=learning_days,
     )
     recommendations: list[SettingRecommendation] = []
     threshold_payload = {
@@ -571,9 +589,9 @@ def _operating_detection_recommendations(
                 setting_key=OPERATING_ON_THRESHOLD_W,
                 current_value=current_on,
                 suggested_value=suggested_on,
-                unit="W",
+                unit=_advisor_unit("power"),
                 feature="operating_detection_thresholds",
-                group="Operating Detection",
+                group=_advisor_text("groups", "operating_detection"),
                 confidence=confidence,
                 reason=reason,
                 evidence=evidence,
@@ -588,9 +606,9 @@ def _operating_detection_recommendations(
                 setting_key=OPERATING_OFF_THRESHOLD_W,
                 current_value=current_off,
                 suggested_value=suggested_off,
-                unit="W",
+                unit=_advisor_unit("power"),
                 feature="operating_detection_thresholds",
-                group="Operating Detection",
+                group=_advisor_text("groups", "operating_detection"),
                 confidence=confidence,
                 reason=reason,
                 evidence=evidence,
@@ -617,9 +635,7 @@ def _dual_phase_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
     p95_ratio = _percentile(ratios, 95)
     p25_total = _percentile(totals, 25)
     suggested_ratio = round(_clamp(max(0.15, p95_ratio * 3), 0.15, 0.5), 2)
-    suggested_minimum = float(
-        _round_to_nearest(max(250.0, p25_total * 0.95), 250)
-    )
+    suggested_minimum = float(_round_to_nearest(max(250.0, p25_total * 0.95), 250))
     recommendations: list[SettingRecommendation] = []
 
     current_ratio = _float_setting(
@@ -636,13 +652,9 @@ def _dual_phase_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
                 suggested_value=suggested_ratio,
                 unit=None,
                 feature="dual_phase_leg_imbalance",
-                group="Dual Phase",
+                group=_advisor_text("groups", "dual_phase"),
                 confidence=0.82,
-                reason=(
-                    "The paired legs have repeatedly run with a tighter balance "
-                    "than the current warning threshold. The suggestion stays "
-                    "above the observed high-end imbalance."
-                ),
+                reason=_advisor_text("reasons", "dual_phase_ratio"),
                 evidence={
                     "observed_samples": len(ratios),
                     "p95_imbalance_ratio": round(p95_ratio, 3),
@@ -663,14 +675,11 @@ def _dual_phase_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
                 setting_key="leg_imbalance_min_total_power_w",
                 current_value=current_minimum,
                 suggested_value=suggested_minimum,
-                unit="W",
+                unit=_advisor_unit("power"),
                 feature="dual_phase_leg_imbalance",
-                group="Dual Phase",
+                group=_advisor_text("groups", "dual_phase"),
                 confidence=0.8,
-                reason=(
-                    "Dual-phase imbalance should be evaluated when the appliance "
-                    "is genuinely active, not while it is idle or lightly loaded."
-                ),
+                reason=_advisor_text("reasons", "dual_phase_minimum"),
                 evidence={
                     "observed_samples": len(totals),
                     "p25_total_power_w": round(p25_total, 1),
@@ -697,9 +706,7 @@ def _metric_consistency_recommendations(
 
     if len(residuals) >= MIN_ADVISOR_DAYS:
         p95 = _percentile(residuals, 95)
-        suggested_value = float(
-            _round_to_nearest(_clamp(p95 * 2, 5.0, 25.0), 1)
-        )
+        suggested_value = float(_round_to_nearest(_clamp(p95 * 2, 5.0, 25.0), 1))
         current_value = _float_setting(
             inputs.context.advanced_settings,
             "apparent_power_tolerance_percent",
@@ -712,14 +719,11 @@ def _metric_consistency_recommendations(
                     setting_key="apparent_power_tolerance_percent",
                     current_value=current_value,
                     suggested_value=suggested_value,
-                    unit="%",
+                    unit=_advisor_unit("percent"),
                     feature="power_metric_consistency",
-                    group="Power Quality",
+                    group=_advisor_text("groups", "power_quality"),
                     confidence=0.78,
-                    reason=(
-                        "Observed W, VA, current, and power-factor residuals are "
-                        "stable enough to tune the metric consistency tolerance."
-                    ),
+                    reason=_advisor_text("reasons", "apparent_power_tolerance"),
                     evidence={
                         "observed_samples": len(residuals),
                         "p95_apparent_power_residual_percent": round(p95, 2),
@@ -744,13 +748,9 @@ def _metric_consistency_recommendations(
                     suggested_value=suggested_pf,
                     unit=None,
                     feature="power_metric_consistency",
-                    group="Power Quality",
+                    group=_advisor_text("groups", "power_quality"),
                     confidence=0.76,
-                    reason=(
-                        "Power-factor relationship checks have a stable residual "
-                        "pattern, so the tolerance can be tuned to the observed "
-                        "sensor behavior."
-                    ),
+                    reason=_advisor_text("reasons", "power_factor_tolerance"),
                     evidence={
                         "observed_samples": len(pf_residuals),
                         "p95_power_factor_residual": round(p95_pf, 3),
@@ -773,14 +773,11 @@ def _metric_consistency_recommendations(
                     setting_key="minimum_apparent_power_va",
                     current_value=current_va,
                     suggested_value=minimum_va,
-                    unit="VA",
+                    unit=_advisor_unit("apparent_power"),
                     feature="power_metric_consistency",
-                    group="Power Quality",
+                    group=_advisor_text("groups", "power_quality"),
                     confidence=0.72,
-                    reason=(
-                        "The observed apparent-power range supports a circuit "
-                        "specific minimum before metric consistency is evaluated."
-                    ),
+                    reason=_advisor_text("reasons", "minimum_apparent_power"),
                     evidence={
                         "observed_samples": len(va_samples),
                         "p10_apparent_power_va": round(p10_va, 1),
@@ -802,9 +799,7 @@ def _mains_balance_recommendations(
         return []
 
     p95 = _percentile(values, 95)
-    suggested_value = float(
-        _round_to_nearest(_clamp(p95 * 1.25, 100.0, 1500.0), 50)
-    )
+    suggested_value = float(_round_to_nearest(_clamp(p95 * 1.25, 100.0, 1500.0), 50))
     current_value = _float_setting(
         inputs.context.advanced_settings,
         "balance_negative_tolerance_w",
@@ -819,15 +814,11 @@ def _mains_balance_recommendations(
             setting_key="balance_negative_tolerance_w",
             current_value=current_value,
             suggested_value=suggested_value,
-            unit="W",
+            unit=_advisor_unit("power"),
             feature="mains_balance",
-            group="Mains Balance",
+            group=_advisor_text("groups", "mains_balance"),
             confidence=0.76,
-            reason=(
-                "Measured mains-minus-load balance has enough history to tune "
-                "the negative balance tolerance while still surfacing mapping, "
-                "solar, or CT-orientation problems."
-            ),
+            reason=_advisor_text("reasons", "mains_balance"),
             evidence={
                 "observed_samples": len(values),
                 "p95_negative_balance_w": round(p95, 1),
@@ -854,13 +845,12 @@ def _solar_flow_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
         (
             "solar_surplus_threshold_w",
             float(_round_to_nearest(_clamp(p50, 250.0, 5000.0), 100)),
-            "Solar surplus should start near the middle of observed export events.",
+            _advisor_text("reasons", "solar_surplus"),
         ),
         (
             "high_solar_surplus_threshold_w",
             float(_round_to_nearest(_clamp(p95, 750.0, 10000.0), 100)),
-            "High solar surplus should represent the upper end of observed "
-            "export events.",
+            _advisor_text("reasons", "high_solar_surplus"),
         ),
     )
     recommendations: list[SettingRecommendation] = []
@@ -877,9 +867,9 @@ def _solar_flow_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
                 setting_key=setting_key,
                 current_value=current_value,
                 suggested_value=suggested_value,
-                unit="W",
+                unit=_advisor_unit("power"),
                 feature="solar_flow",
-                group="Solar Flow",
+                group=_advisor_text("groups", "solar_flow"),
                 confidence=0.74,
                 reason=reason,
                 evidence={
@@ -919,7 +909,7 @@ def _make_recommendation(
         setting_key=setting_key,
         setting_label=SETTING_LABELS.get(
             setting_key,
-            setting_key.replace("_", " ").capitalize(),
+            _advisor_text("fallback_setting_label", setting_key=setting_key),
         ),
         current_value=current_value,
         suggested_value=suggested_value,

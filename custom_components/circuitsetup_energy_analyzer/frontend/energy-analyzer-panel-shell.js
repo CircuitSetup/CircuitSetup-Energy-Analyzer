@@ -10,7 +10,12 @@ export class PanelShellMethods {
     const setupHealthRoute = this._routeRequestsSetupHealth();
     const suggestedSettingsRoute = this._routeRequestsSuggestedSettings();
     const applianceDetail = this._applianceDetail && this._applianceDetail.detail;
-    const statusText = setupHealthRoute
+    const selectedRecommendation = payload && payload.selected_recommendation;
+    const selectedRecommendationLabel = selectedRecommendation
+      && (selectedRecommendation.display_label || selectedRecommendation.title || this._panelText("recommendations.suggested_setting"));
+    const statusText = selectedRecommendation
+      ? this._panelText("headers.suggested_settings")
+      : setupHealthRoute
       ? this._setupHealthText("heading")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings")
@@ -21,7 +26,9 @@ export class PanelShellMethods {
       : nilmWorkspaceRoute
       ? this._panelText("headers.nilm_workspace")
       : this._statusText(payload && payload.status);
-    const headerTitle = setupHealthRoute
+    const headerTitle = selectedRecommendation
+      ? this._panelText("recommendations.recommendation_evidence")
+      : setupHealthRoute
       ? this._setupHealthText("heading")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings")
@@ -32,14 +39,16 @@ export class PanelShellMethods {
       : nilmWorkspaceRoute
       ? this._panelText("headers.nilm_workspace")
       : (circuit && circuit.name) || (alert && alert.circuit_id) || this._panelText("headers.alert_evidence");
-    const headerMessage = setupHealthRoute
+    const headerMessage = selectedRecommendation
+      ? this._panelTextFormat("recommendations.previewing_evidence", { label: selectedRecommendationLabel })
+      : setupHealthRoute
       ? this._setupHealthText("header_message")
       : suggestedSettingsRoute
       ? this._panelText("headers.suggested_settings_message")
       : applianceInsightsRoute
       ? this._panelText("headers.appliance_insights_message")
       : applianceDetailRoute
-      ? (applianceDetail && applianceDetail.next_step) || (this._applianceDetail && this._applianceDetail.next_step) || this._panelText("headers.appliance_detail_message")
+      ? this._applianceDetailHeaderMessage(applianceDetail, this._applianceDetail)
       : nilmWorkspaceRoute
       ? circuit && circuit.name
         ? this._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: circuit.name })
@@ -323,7 +332,7 @@ export class PanelShellMethods {
         .metric .metric-heading {
           align-items: center;
           display: flex;
-          gap: 6px;
+          gap: 12px;
         }
         .metric-heading ha-icon {
           color: var(--secondary-text-color, #5f6b7a);
@@ -364,6 +373,28 @@ export class PanelShellMethods {
         .chart text {
           fill: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
+        }
+        .chart [data-chart-point] {
+          cursor: crosshair;
+        }
+        .chart-crosshair {
+          display: none;
+          pointer-events: none;
+          stroke: var(--primary-text-color, #1f2933);
+          stroke-dasharray: 3 3;
+          stroke-width: 1;
+        }
+        .chart-crosshair[data-visible="true"] {
+          display: block;
+        }
+        .chart-readout {
+          color: var(--primary-text-color, #1f2933);
+          font-size: 13px;
+          min-height: 20px;
+          padding-top: 4px;
+        }
+        .chart-readout[aria-hidden="true"] {
+          visibility: hidden;
         }
         .axis, .grid {
           stroke: var(--divider-color, #d8dde6);
@@ -498,6 +529,41 @@ export class PanelShellMethods {
           gap: 8px;
           margin-top: 10px;
         }
+        .recommendation-layout {
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .recommendation-summary,
+        .recommendation-support,
+        .recommendation-evidence,
+        .setting-impact-preview {
+          display: grid;
+          gap: 8px;
+          min-width: 0;
+        }
+        .recommendation-values {
+          display: grid;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .recommendation-value {
+          align-items: baseline;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+        }
+        .recommendation-value span,
+        .recommendation-value strong {
+          font-size: 14px;
+          margin: 0;
+        }
+        .recommendation-evidence-line {
+          display: block;
+        }
+        .recommendation-evidence-actions {
+          margin: 14px 0;
+        }
         .appliance-insights-controls {
           align-items: end;
           display: grid;
@@ -582,6 +648,22 @@ export class PanelShellMethods {
           gap: 12px;
           grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         }
+        .appliance-detail-overview {
+          align-items: start;
+          display: grid;
+          gap: 16px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .appliance-detail-facts {
+          display: grid;
+          gap: 16px;
+        }
+        .appliance-detail-facts .summary {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .appliance-detail-timeline {
+          align-self: start;
+        }
         .appliance-comparison {
           background: var(--secondary-background-color, #f4f6f8);
           border: 1px solid var(--divider-color, #d8dde6);
@@ -597,6 +679,20 @@ export class PanelShellMethods {
         }
         .appliance-comparison strong {
           font-size: 20px;
+        }
+        .appliance-comparison-columns {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .appliance-comparison-columns > div {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+        .appliance-comparison-columns span {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
         }
         .appliance-comparison .comparison-summary {
           color: var(--secondary-text-color, #5f6b7a);
@@ -960,6 +1056,8 @@ export class PanelShellMethods {
             padding: 16px;
           }
           .evidence-investigation,
+          .appliance-detail-overview,
+          .recommendation-layout,
           .nilm-review-layout {
             grid-template-columns: minmax(0, 1fr);
           }
@@ -1032,11 +1130,12 @@ export class PanelShellMethods {
       ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
-      ${this._renderSelectedRecommendationEvidence()}
-      ${this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceInsights() ? this._renderApplianceInsightsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit)))))}
+      ${selectedRecommendation ? this._renderSelectedRecommendationEvidence() : (this._routeRequestsSetupHealth() ? this._renderSetupHealthBody() : (this._routeRequestsSuggestedSettings() ? this._renderSuggestedSettingsBody() : (this._routeRequestsApplianceInsights() ? this._renderApplianceInsightsBody() : (this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody() : (this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody() : this._renderEvidenceBody(alert, circuit))))))}
+      ${this._renderActionConfirmation()}
       </main>
     `;
 
+    this._attachChartInspectors();
     this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
     this._listen("[data-retry-alert-history]", () => {
       const alert = this._payload && this._payload.alert;
@@ -1087,7 +1186,9 @@ export class PanelShellMethods {
       });
     }
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
-    this._listen("#relearn_baseline", () => this._callAction("relearn_baseline"));
+    this._listen("#relearn_baseline", () => this._requestActionConfirmation("relearn_baseline"));
+    this._listen("#cancel_action_confirmation", () => this._cancelActionConfirmation());
+    this._listen("#confirm_action", () => this._confirmPendingAction());
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
@@ -1296,7 +1397,7 @@ export class PanelShellMethods {
     for (const link of this.shadowRoot.querySelectorAll("[data-setup-health-path]")) {
       link.addEventListener("click", (event) => {
         event.preventDefault();
-        this._navigate(link.getAttribute("href"));
+        this._openOptionsPath(link.getAttribute("href"));
       });
     }
     this._restoreNilmFocus(nilmFocus);

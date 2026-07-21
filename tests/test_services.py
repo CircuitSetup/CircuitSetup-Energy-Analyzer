@@ -163,6 +163,40 @@ def test_alert_notification_message_ends_with_one_evidence_link() -> None:
     assert "sensor.hvac_l2_current" not in message
 
 
+@pytest.mark.parametrize(
+    ("value_metric", "observed", "baseline", "expected"),
+    (
+        ("real_power", 125.0, 100.0, "Observed value (Real power): 125 W"),
+        ("circuit_capacity", 14.25, 12.0, "Observed value (Circuit capacity): 14.25 A"),
+        ("apparent_power", 140.0, 110.0, "Observed value (Apparent power): 140 VA"),
+        ("reactive_power", 42.0, 30.0, "Observed value (Reactive power): 42 VAR"),
+        ("power_factor", 0.82, 0.95, "Observed value (Power factor): 0.82"),
+    ),
+)
+def test_alert_notification_message_uses_metric_qualifiers(
+    value_metric: str,
+    observed: float,
+    baseline: float,
+    expected: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="appliance",
+        severity=Severity.WARNING,
+        message="Observed value changed.",
+        feature="behavior_change",
+        value_metric=value_metric,
+        observed_value=observed,
+        baseline_value=baseline,
+    )
+
+    assert expected in alert_notification_message(alert)
+
+
 def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
@@ -318,7 +352,7 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
         "**Water Heater**\n\nPossible issue: Water Heater demand was high"
     )
     assert "Baseline value" not in message
-    assert "Comparison value: 4100.0" in message
+    assert "Observed value (Demand monthly peak): 4100 W" in message
 
 
 def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() -> None:
@@ -374,9 +408,7 @@ def test_repair_issue_id_for_circuit_problem_is_stable() -> None:
 
     issue_id = issue_id_for_circuit_problem("mains", "missing_source_entities")
     assert issue_id.startswith(f"{DOMAIN}_mains_missing_source_entities_")
-    assert issue_id == issue_id_for_circuit_problem(
-        "mains", "missing_source_entities"
-    )
+    assert issue_id == issue_id_for_circuit_problem("mains", "missing_source_entities")
 
 
 def test_repair_issue_id_does_not_collide_on_underscores() -> None:
@@ -465,8 +497,6 @@ async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
         "recommended_action": "Add a cumulative kWh sensor to Refrigerator",
         "source_entities": "sensor.fridge_power",
     }
-
-
 
 
 def test_nilm_label_schema_validates_required_fields() -> None:
@@ -614,29 +644,38 @@ def test_nilm_assignment_service_schemas_validate_required_fields() -> None:
         NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA,
     )
 
-    assert NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
-        {
-            "circuit_id": "mains",
-            "signature_id": "signature_1",
-            "label": "Dishwasher",
-            "appliance_id": "dishwasher",
-        }
-    )["label"] == "Dishwasher"
-    assert NILM_ASSIGN_SESSION_SERVICE_SCHEMA(
-        {
-            "circuit_id": "mains",
-            "session_id": "session_1",
-            "signature_fingerprint": "fingerprint_1",
-            "label": "Dishwasher",
-        }
-    )["session_id"] == "session_1"
-    assert NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA(
-        {
-            "circuit_id": "mains",
-            "interval_id": "label-1",
-            "label": "Dishwasher",
-        }
-    )["interval_id"] == "label-1"
+    assert (
+        NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
+            {
+                "circuit_id": "mains",
+                "signature_id": "signature_1",
+                "label": "Dishwasher",
+                "appliance_id": "dishwasher",
+            }
+        )["label"]
+        == "Dishwasher"
+    )
+    assert (
+        NILM_ASSIGN_SESSION_SERVICE_SCHEMA(
+            {
+                "circuit_id": "mains",
+                "session_id": "session_1",
+                "signature_fingerprint": "fingerprint_1",
+                "label": "Dishwasher",
+            }
+        )["session_id"]
+        == "session_1"
+    )
+    assert (
+        NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA(
+            {
+                "circuit_id": "mains",
+                "interval_id": "label-1",
+                "label": "Dishwasher",
+            }
+        )["interval_id"]
+        == "label-1"
+    )
 
     with pytest.raises(vol.Invalid):
         NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA(
@@ -661,9 +700,10 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
         UTILITY_COMPARISON_SETTINGS_SERVICE_SCHEMA,
     )
 
-    assert SENSITIVITY_SERVICE_SCHEMA(
-        {"circuit_id": "fridge", "preset": "quiet"}
-    ) == {"circuit_id": "fridge", "preset": "quiet"}
+    assert SENSITIVITY_SERVICE_SCHEMA({"circuit_id": "fridge", "preset": "quiet"}) == {
+        "circuit_id": "fridge",
+        "preset": "quiet",
+    }
     assert MAINTENANCE_START_SERVICE_SCHEMA(
         {
             "circuit_id": "fridge",
@@ -685,9 +725,7 @@ def test_user_experience_service_schemas_validate_required_fields() -> None:
     }
     assert ALERT_FEEDBACK_SERVICE_SCHEMA(
         {"entity_id": "sensor.fridge_health_summary"}
-    ) == {
-        "entity_id": "sensor.fridge_health_summary"
-    }
+    ) == {"entity_id": "sensor.fridge_health_summary"}
     assert NILM_SIGNATURE_SERVICE_SCHEMA(
         {"circuit_id": "mains", "signature_id": "signature_1"}
     ) == {"circuit_id": "mains", "signature_id": "signature_1"}
@@ -847,9 +885,9 @@ def test_setting_recommendation_service_schemas_validate_fields() -> None:
     )
 
     assert RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA({}) == {}
-    assert RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA(
-        {"circuit_id": "fridge"}
-    ) == {"circuit_id": "fridge"}
+    assert RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA({"circuit_id": "fridge"}) == {
+        "circuit_id": "fridge"
+    }
     assert RECOMMENDATION_ACTION_SERVICE_SCHEMA(
         {ATTR_RECOMMENDATION_ID: "recommendation-1"}
     ) == {ATTR_RECOMMENDATION_ID: "recommendation-1"}
@@ -1377,10 +1415,7 @@ async def test_circuit_services_reject_conflicting_circuit_and_entity_targets() 
 
     with pytest.raises(
         HomeAssistantError,
-        match=(
-            "circuit_id 'hvac' does not match entity_id target circuit "
-            "'fridge'"
-        ),
+        match=("circuit_id 'hvac' does not match entity_id target circuit 'fridge'"),
     ):
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
             SimpleNamespace(
@@ -1503,14 +1538,11 @@ async def test_circuit_services_fail_fast_for_unknown_entity_target() -> None:
     with pytest.raises(
         HomeAssistantError,
         match=(
-            "Could not derive circuit_id from entity_id "
-            "'sensor.unknown_health_summary'"
+            "Could not derive circuit_id from entity_id 'sensor.unknown_health_summary'"
         ),
     ):
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
-            SimpleNamespace(
-                data={"entity_id": "sensor.unknown_health_summary"}
-            )
+            SimpleNamespace(data={"entity_id": "sensor.unknown_health_summary"})
         )
 
     assert coordinator.calls == []
@@ -1571,8 +1603,9 @@ async def test_recalculate_recommendations_all_target_remains_explicit() -> None
 
 
 @pytest.mark.asyncio
-async def test_setting_recommendation_services_require_unique_or_explicit_entry(
-) -> None:
+async def test_setting_recommendation_services_require_unique_or_explicit_entry() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_APPLY_SETTING_RECOMMENDATION,
         HomeAssistantError,
@@ -1655,8 +1688,7 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
 
 
 @pytest.mark.asyncio
-async def test_setting_recommendation_services_accept_single_entity_target(
-) -> None:
+async def test_setting_recommendation_services_accept_single_entity_target() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_APPLY_SETTING_RECOMMENDATION,
         SERVICE_DENY_SETTING_RECOMMENDATION,
@@ -1746,8 +1778,7 @@ async def test_setting_recommendation_services_accept_single_entity_target(
 
 
 @pytest.mark.asyncio
-async def test_setting_recommendation_entity_target_ignores_stored_history(
-) -> None:
+async def test_setting_recommendation_entity_target_ignores_stored_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_APPLY_SETTING_RECOMMENDATION,
         async_setup_services,
@@ -1848,8 +1879,7 @@ async def test_setting_recommendation_entity_target_ignores_stored_history(
 
 
 @pytest.mark.asyncio
-async def test_setting_recommendation_entity_target_ignores_state_history(
-) -> None:
+async def test_setting_recommendation_entity_target_ignores_state_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_APPLY_SETTING_RECOMMENDATION,
         async_setup_services,
@@ -2436,9 +2466,7 @@ async def test_nilm_assignment_services_dispatch_to_matching_coordinator() -> No
             self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
             self.store_data = FeatureStoreData(
                 nilm_signatures={"mains": [{"signature_id": "signature_1"}]},
-                nilm_label_intervals_by_circuit={
-                    "mains": [{"interval_id": "label-1"}]
-                },
+                nilm_label_intervals_by_circuit={"mains": [{"interval_id": "label-1"}]},
             )
 
         def async_set_updated_data(self, data) -> None:
@@ -3811,8 +3839,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_mark_nilm_signature_expected", ("mains", "signature_1")),
         ("async_merge_nilm_signatures", ("mains", "signature_2", "signature_1")),
     ]
-
-
 
 
 @pytest.mark.asyncio
