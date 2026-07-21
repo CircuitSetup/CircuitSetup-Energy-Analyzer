@@ -5,22 +5,13 @@ from typing import Any
 from urllib.parse import urlencode
 
 from ..const import (
-    CONF_ADVANCED_SETTINGS,
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
-    CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
-    CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
-    CONF_OUTDOOR_TEMPERATURE_ENTITY,
-    CONF_RAIN_INTENSITY_ENTITY,
-    CONF_RAIN_PUMP_CORRELATION_ENABLED,
-    CONF_RAIN_SENSOR_ENTITY,
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
-    CONF_WATER_FLOW_CORRELATION_ENABLED,
-    CONF_WATER_FLOW_SENSOR_ENTITIES,
 )
 from ..entity import circuit_info_from_config
 from ..localized_text import translation_section
@@ -30,12 +21,6 @@ from ..profiles import get_profile_definition
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
 SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
 
-_WEATHER_CONTEXT_PROFILES = {
-    ApplianceProfile.HVAC,
-    ApplianceProfile.HVAC_COMPRESSOR,
-    ApplianceProfile.HVAC_BLOWER,
-    ApplianceProfile.ELECTRIC_HEAT,
-}
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
@@ -51,17 +36,6 @@ _HIGH_POWER_PROFILES = {
     ApplianceProfile.EV_CHARGER,
     ApplianceProfile.SOLAR_INVERTER,
     ApplianceProfile.MAINS_NILM,
-}
-_PUMP_WATER_CONTEXT_PROFILES = {
-    ApplianceProfile.SUMP_PUMP,
-    ApplianceProfile.WATER_PUMP,
-    ApplianceProfile.WELL_PUMP,
-}
-_FLOW_WATER_CONTEXT_PROFILES = {
-    ApplianceProfile.WATER_PUMP,
-    ApplianceProfile.WELL_PUMP,
-    ApplianceProfile.WATER_HEATER,
-    ApplianceProfile.WASHER,
 }
 _UTILITY_COMPARISON_SETUP_STATUSES = {
     "unconfigured",
@@ -747,17 +721,6 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                 )
             )
 
-        if _setup_health_needs_temperature_source(coordinator, raw_circuit):
-            issues.append(
-                _setup_health_issue(
-                    "Add outdoor temperature source",
-                    f"Add an outdoor temperature source for {circuit.name}",
-                    circuit,
-                    "HVAC weather context needs an outdoor temperature source.",
-                    issue="missing_temperature_source",
-                )
-            )
-
         if (
             _setup_health_status(
                 state,
@@ -804,34 +767,6 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                         "orientation, or a mapping mismatch."
                     ),
                     issue="check_ct_direction",
-                )
-            )
-
-        if _setup_health_needs_rain_context_source(coordinator, raw_circuit):
-            issues.append(
-                _setup_health_issue(
-                    "Add rain source",
-                    f"Add a rain sensor for {circuit.name}",
-                    circuit,
-                    (
-                        "Rain-pump context is enabled, but no rain or rain-intensity "
-                        "source is configured."
-                    ),
-                    issue="missing_rain_context_source",
-                )
-            )
-
-        if _setup_health_needs_water_flow_source(coordinator, raw_circuit):
-            issues.append(
-                _setup_health_issue(
-                    "Add water-flow source",
-                    f"Add a water-flow sensor for {circuit.name}",
-                    circuit,
-                    (
-                        "Water-flow context is enabled, but no linked or global "
-                        "flow source is configured."
-                    ),
-                    issue="missing_water_flow_source",
                 )
             )
 
@@ -1148,55 +1083,6 @@ def _setup_health_needs_capacity_settings(coordinator: Any, circuit: Any) -> boo
     )
 
 
-def _setup_health_needs_temperature_source(coordinator: Any, circuit: Any) -> bool:
-    profile = _appliance_profile(circuit)
-    return profile in _WEATHER_CONTEXT_PROFILES and not _has_temperature_source(
-        coordinator,
-    )
-
-
-def _setup_health_needs_rain_context_source(coordinator: Any, circuit: Any) -> bool:
-    profile = _appliance_profile(circuit)
-    return (
-        profile in _PUMP_WATER_CONTEXT_PROFILES
-        and _advanced_setting_bool(
-            coordinator,
-            circuit,
-            CONF_RAIN_PUMP_CORRELATION_ENABLED,
-            default=True,
-        )
-        and not _has_any_configured_entity(
-            coordinator,
-            CONF_RAIN_SENSOR_ENTITY,
-            CONF_RAIN_INTENSITY_ENTITY,
-        )
-    )
-
-
-def _setup_health_needs_water_flow_source(coordinator: Any, circuit: Any) -> bool:
-    profile = _appliance_profile(circuit)
-    return (
-        profile in _FLOW_WATER_CONTEXT_PROFILES
-        and _advanced_setting_bool(
-            coordinator,
-            circuit,
-            CONF_WATER_FLOW_CORRELATION_ENABLED,
-            default=True,
-        )
-        and _advanced_setting_bool(
-            coordinator,
-            circuit,
-            CONF_EXPECTS_WATER_FLOW,
-            default=True,
-        )
-        and not _has_linked_water_flow_source(coordinator, circuit)
-        and not _has_any_configured_entity(
-            coordinator,
-            CONF_WATER_FLOW_SENSOR_ENTITIES,
-        )
-    )
-
-
 def _setup_health_utility_comparison_setup_status(
     coordinator: Any,
     circuit_id: str,
@@ -1424,57 +1310,8 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
     return isinstance(settings, Mapping) and bool(settings)
 
 
-def _advanced_settings(coordinator: Any, circuit: Any) -> Mapping[str, Any]:
-    circuit_id = _circuit_id(circuit)
-    settings = _coordinator_config_value(coordinator, CONF_ADVANCED_SETTINGS)
-    if isinstance(settings, Mapping):
-        circuit_settings = settings.get(circuit_id, {})
-        if isinstance(circuit_settings, Mapping):
-            return circuit_settings
-    return {}
-
-
-def _advanced_setting_bool(
-    coordinator: Any,
-    circuit: Any,
-    key: str,
-    *,
-    default: bool,
-) -> bool:
-    value = _advanced_settings(coordinator, circuit).get(key, default)
-    return bool(value)
-
-
-def _has_temperature_source(coordinator: Any) -> bool:
-    value = _coordinator_config_value(coordinator, CONF_OUTDOOR_TEMPERATURE_ENTITY)
-    return value is not None and bool(str(value).strip())
-
-
 def _has_mains_source(coordinator: Any) -> bool:
     value = _coordinator_config_value(coordinator, CONF_MAINS_SOURCE_ENTITIES)
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, tuple, set)):
-        return any(bool(str(item).strip()) for item in value)
-    return False
-
-
-def _has_any_configured_entity(coordinator: Any, *keys: str) -> bool:
-    for key in keys:
-        value = _coordinator_config_value(coordinator, key)
-        if isinstance(value, str) and value.strip():
-            return True
-        if isinstance(value, (list, tuple, set)) and any(
-            bool(str(item).strip()) for item in value
-        ):
-            return True
-    return False
-
-
-def _has_linked_water_flow_source(coordinator: Any, circuit: Any) -> bool:
-    value = _advanced_settings(coordinator, circuit).get(
-        CONF_LINKED_FLOW_SENSOR_ENTITIES,
-    )
     if isinstance(value, str):
         return bool(value.strip())
     if isinstance(value, (list, tuple, set)):

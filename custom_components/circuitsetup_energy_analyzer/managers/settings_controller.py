@@ -155,18 +155,20 @@ class SettingsController:
         changed = False
 
         for config in target_configs:
-            advisor_inputs = self.advisor_inputs_for_config(config, now)
-            recommendations = build_settings_recommendations(advisor_inputs)
-            recommendations.extend(
-                self.unhelpful_alert_setting_recommendations(
-                    config,
-                    now,
-                    existing_recommendation_ids={
-                        recommendation.recommendation_id
-                        for recommendation in recommendations
-                    },
-                ),
-            )
+            recommendations = []
+            if coordinator.processor_runtime.learning_mature(config, now):
+                advisor_inputs = self.advisor_inputs_for_config(config, now)
+                recommendations = build_settings_recommendations(advisor_inputs)
+                recommendations.extend(
+                    self.unhelpful_alert_setting_recommendations(
+                        config,
+                        now,
+                        existing_recommendation_ids={
+                            recommendation.recommendation_id
+                            for recommendation in recommendations
+                        },
+                    ),
+                )
             recommendation_ids = {
                 recommendation.recommendation_id
                 for recommendation in recommendations

@@ -9,7 +9,7 @@ from .models import CircuitConfig, CircuitSample, PowerFlowMode, SensorRole
 STALE_AFTER = timedelta(minutes=10)
 FUTURE_TIMESTAMP_TOLERANCE = timedelta(seconds=30)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
-NEGATIVE_LOAD_TOLERANCE_W = 2.0
+NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
 _POWER_ROLES = {
     SensorRole.REAL_POWER,

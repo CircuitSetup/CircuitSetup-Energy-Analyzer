@@ -41,11 +41,9 @@ def configured_context_entity(
     options: Mapping[str, Any] | None,
     key: str,
 ) -> str:
-    for source in (options or {}, entry_data):
-        entity_id = str(source.get(key, "") or "").strip()
-        if entity_id:
-            return entity_id
-    return ""
+    options = options or {}
+    raw = options[key] if key in options else entry_data.get(key, "")
+    return str(raw or "").strip()
 
 
 def configured_context_entities(

@@ -2863,6 +2863,48 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_user_flow_rejects_claimed_source_in_later_group() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    sources = ["sensor.refrigerator_power", "sensor.microwave_power"]
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user({CONF_EXTRA_SOURCE_ENTITIES: sources})
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Kitchen Appliances",
+            "appliance_profile": "mixed",
+            "included_sensors": sources,
+        }
+    )
+
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Microwave",
+            "appliance_profile": "microwave",
+            "included_sensors": ["sensor.microwave_power"],
+        }
+    )
+
+    assert result["step_id"] == "assign"
+    assert result["errors"] == {"base": "invalid_circuit_assignments"}
+
+    result = await flow.async_step_assign({"include_circuit": False})
+    assert result["step_id"] == "utility"
+    circuits = flow._pending_final_config[CONF_CIRCUITS]
+    assert len(circuits) == 1
+    assert [sensor["entity_id"] for sensor in circuits[0]["sensors"]] == sources
+
+
 @pytest.mark.parametrize("leg_token", ["leg", "line", "phase"])
 @pytest.mark.asyncio
 async def test_user_flow_detects_numeric_leg_suffixes_as_dual_phase(
@@ -3195,6 +3237,45 @@ def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
     ]
 
 
+def test_assignment_review_does_not_offer_sensors_owned_by_other_appliances() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    source_entities = ["sensor.kitchen_power", "sensor.kitchen_current"]
+    circuits = [
+        {
+            "circuit_id": "refrigerator",
+            "name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+            "mode": "single_phase",
+            "sensors": [{"entity_id": source_entities[0]}],
+        },
+        {
+            "circuit_id": "microwave",
+            "name": "Microwave",
+            "appliance_profile": "microwave",
+            "mode": "single_phase",
+            "sensors": [{"entity_id": source_entities[1]}],
+        },
+    ]
+    flow = SimpleNamespace(hass=None, async_show_form=lambda **kwargs: kwargs)
+
+    config_flow._start_assignment_review(
+        flow,
+        {
+            CONF_SOURCE_ENTITIES: source_entities,
+            CONF_EXTRA_SOURCE_ENTITIES: source_entities,
+        },
+        existing_circuits=circuits,
+        show_picker=True,
+        update_existing=True,
+    )
+
+    assert [group["available_entity_ids"] for group in flow._assignment_groups] == [
+        (source_entities[0],),
+        (source_entities[1],),
+    ]
+
+
 def test_removed_assignment_sensors_remain_available_as_candidates() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
@@ -3308,6 +3389,74 @@ def test_automatic_assignments_route_meter_metrics_and_use_channel_names(
     )
     assert circuit is not None
     assert circuit["sensors"][0]["role"] == "peak_current"
+
+
+def test_automatic_assignments_exclude_total_titles_but_keep_saved() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    source = "sensor.circuitsetup_energy_meter_24x_a4e634_channel_1_power"
+    source_names = {source: "CircuitSetup Energy Meter House Total"}
+
+    assert assignment_groups_from_sources([source], source_names=source_names) == []
+
+    saved = {
+        "circuit_id": "house_total",
+        "name": "House Total",
+        "appliance_profile": "mixed",
+        "mode": "mixed",
+        "sensors": [{"entity_id": source, "role": "real_power"}],
+    }
+    groups = assignment_groups_from_sources(
+        [source],
+        source_names=source_names,
+        existing_circuits=[saved],
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["circuit_id"] == "house_total"
+
+
+def test_empty_assignment_sensor_list_does_not_offer_placeholder_value() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _assignment_schema,
+        _strict_string_list,
+    )
+
+    schema = _assignment_schema(
+        {
+            "name": "Circuit",
+            "appliance_profile": "mixed",
+            "entity_ids": (),
+        }
+    )
+
+    assert "included_sensors" not in _schema_keys(schema)
+    assert (
+        _strict_string_list(
+            ["__no_items_available__"],
+            invalid_error_key="invalid_circuit_assignments",
+        )
+        == []
+    )
+
+
+def test_unassigned_filtered_sources_remain_available_for_later_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _final_config_without_assignment_review,
+    )
+
+    source = "sensor.car_charger_l1_harmonic_power"
+    final_config = _final_config_without_assignment_review(
+        {
+            CONF_EXTRA_SOURCE_ENTITIES: [source],
+            CONF_SOURCE_ENTITIES: [source],
+        }
+    )
+
+    assert final_config[CONF_EXTRA_SOURCE_ENTITIES] == [source]
+    assert final_config[CONF_SOURCE_ENTITIES] == []
 
 
 def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
@@ -3843,7 +3992,10 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
 
     assert result["type"] == "form"
     assert result["step_id"] == "select_assignment"
-    assert _schema_keys(result["data_schema"]) == {"selected_assignment"}
+    assert _schema_keys(result["data_schema"]) == {
+        "selected_assignment",
+        "remove_assignments",
+    }
     assert assignment_picker_options(circuits) == [
         {
             "value": "upstairs_hvac",
@@ -4026,6 +4178,129 @@ async def test_options_assignment_review_keeps_removed_extra_sources_inactive() 
         "sensor.refrigerator_power",
         "sensor.microwave_power",
     ]
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_review_can_reassign_inactive_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    refrigerator = {
+        "circuit_id": "refrigerator",
+        "name": "Kitchen Refrigerator",
+        "appliance_profile": "refrigerator",
+        "mode": "single_phase",
+        "power_flow": "load",
+        "retention_mode": "standard",
+        "sensors": [
+            {"entity_id": "sensor.refrigerator_power", "role": "real_power"},
+        ],
+    }
+    sensorless = {
+        "circuit_id": "needs_repair",
+        "name": "Needs Repair",
+        "appliance_profile": "mixed",
+        "mode": "mixed",
+        "sensors": [],
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: ["sensor.refrigerator_power"],
+            CONF_EXTRA_SOURCE_ENTITIES: [
+                "sensor.refrigerator_power",
+                "sensor.microwave_power",
+            ],
+            CONF_CIRCUITS: [refrigerator, sensorless],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert result["step_id"] == "select_assignment"
+
+    result = await flow.async_step_select_assignment(
+        {"selected_assignment": "refrigerator"}
+    )
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": [
+                "sensor.refrigerator_power",
+                "sensor.microwave_power",
+            ],
+            "circuit_name": "Kitchen Appliances",
+            "appliance_profile": "mixed",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.refrigerator_power",
+        "sensor.microwave_power",
+    ]
+    assert [
+        sensor["entity_id"]
+        for sensor in result["data"][CONF_CIRCUITS][0]["sensors"]
+    ] == ["sensor.refrigerator_power", "sensor.microwave_power"]
+    assert result["data"][CONF_CIRCUITS][1] == sensorless
+
+
+@pytest.mark.asyncio
+async def test_options_assignment_review_can_bulk_remove_appliances() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    circuits = [
+        {
+            "circuit_id": circuit_id,
+            "name": circuit_id.title(),
+            "appliance_profile": "mixed",
+            "mode": "mixed",
+            "power_flow": "load",
+            "retention_mode": "standard",
+            "sensors": [
+                {"entity_id": f"sensor.{circuit_id}_power", "role": "real_power"}
+            ],
+        }
+        for circuit_id in ("first", "second", "third")
+    ]
+    source_entities = [
+        "sensor.first_power",
+        "sensor.second_power",
+        "sensor.third_power",
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: source_entities,
+            CONF_EXTRA_SOURCE_ENTITIES: source_entities,
+            CONF_CIRCUITS: circuits,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_assign()
+    assert _schema_keys(result["data_schema"]) == {
+        "selected_assignment",
+        "remove_assignments",
+    }
+
+    result = await flow.async_step_select_assignment(
+        {
+            "selected_assignment": "third",
+            "remove_assignments": ["first", "second"],
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_CIRCUITS] == [circuits[2]]
+    assert result["data"][CONF_SOURCE_ENTITIES] == ["sensor.third_power"]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == source_entities
 
 
 @pytest.mark.asyncio

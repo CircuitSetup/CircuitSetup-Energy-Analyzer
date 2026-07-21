@@ -356,9 +356,9 @@ def test_build_circuit_sample_flags_negative_load_power() -> None:
 
 @pytest.mark.parametrize(
     ("power_w", "has_issue"),
-    ((-1.99, False), (-2.0, True)),
+    ((-4.99, False), (-5.0, True)),
 )
-def test_negative_load_power_repair_starts_at_two_watts(
+def test_negative_load_power_repair_starts_at_five_watts(
     power_w: float,
     has_issue: bool,
 ) -> None:

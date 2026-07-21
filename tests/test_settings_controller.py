@@ -127,6 +127,9 @@ class _SettingsCoordinator:
                 self._record_settings_recommendation_episode_key
             ),
         )
+        self.processor_runtime = SimpleNamespace(
+            learning_mature=lambda config, now: True,
+        )
         self.circuit_configs = [
             SimpleNamespace(
                 circuit_id="fridge",

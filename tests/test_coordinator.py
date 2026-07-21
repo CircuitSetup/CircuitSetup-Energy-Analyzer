@@ -8325,7 +8325,7 @@ async def test_runtime_dual_phase_missing_leg_power_creates_setup_health_repair(
 
 
 @pytest.mark.asyncio
-async def test_runtime_enabled_rain_context_without_source_creates_repair(
+async def test_runtime_without_rain_source_disables_optional_correlation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -8382,11 +8382,12 @@ async def test_runtime_enabled_rain_context_without_source_creates_repair(
 
     await coordinator.async_process_update()
 
-    assert ("sump_pump", "missing_rain_context_source") in issues
+    assert ("sump_pump", "missing_rain_context_source") not in issues
+    assert "sump_pump" not in coordinator.state.rain_pump_context_by_circuit
 
 
 @pytest.mark.asyncio
-async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
+async def test_runtime_without_water_flow_source_disables_optional_correlation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -8443,7 +8444,8 @@ async def test_runtime_enabled_water_flow_context_without_source_creates_repair(
 
     await coordinator.async_process_update()
 
-    assert ("washer", "missing_water_flow_source") in issues
+    assert ("washer", "missing_water_flow_source") not in issues
+    assert "washer" not in coordinator.state.water_flow_context_by_circuit
 
 
 @pytest.mark.asyncio
@@ -9010,6 +9012,7 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     by_circuit = {config.circuit_id: config for config in coordinator.circuit_configs}
 
     assert set(by_circuit) == {
+        "mains",
         "cs_energy_analyzer_demo_refrigerator",
         "cs_energy_analyzer_demo_hvac",
         "cs_energy_analyzer_demo_water_heater",
@@ -9017,6 +9020,10 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         "cs_energy_analyzer_demo_dryer",
         "cs_energy_analyzer_demo_pool_pump",
         "cs_energy_analyzer_demo_basement_lights",
+    }
+    assert {sensor.role for sensor in by_circuit["mains"].sensors} == {
+        SensorRole.ENERGY,
+        SensorRole.VOLTAGE,
     }
     fridge = by_circuit["cs_energy_analyzer_demo_refrigerator"]
     assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
@@ -9313,9 +9320,13 @@ def test_runtime_uses_leg_aware_mains_voltage_as_appliance_context() -> None:
     assert ev_sample.voltage == 120.0
     assert ev_sample.leg_a_voltage == 119.0
     assert ev_sample.leg_b_voltage == 121.0
+    assert {sensor.role for sensor in configs["mains"].sensors} == {
+        SensorRole.VOLTAGE
+    }
     assert all(
         SensorRole.VOLTAGE not in {sensor.role for sensor in config.sensors}
-        for config in coordinator.circuit_configs
+        for circuit_id, config in configs.items()
+        if circuit_id != "mains"
     )
 
 
@@ -12140,12 +12151,27 @@ async def test_runtime_persists_energy_usage_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_builds_settings_recommendation_after_maturity() -> None:
+async def test_coordinator_waits_for_learning_before_settings_recommendation() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "days": [
+                    {"usage_kwh": 5.8},
+                    {"usage_kwh": 6.1},
+                    {"usage_kwh": 7.4},
+                    {"usage_kwh": 6.7},
+                    {"usage_kwh": 8.9},
+                    {"usage_kwh": 9.8},
+                    {"usage_kwh": 7.9},
+                ],
+            }
+        },
+    )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
         entry_data={
@@ -12164,24 +12190,14 @@ async def test_coordinator_builds_settings_recommendation_after_maturity() -> No
                 "hvac": {"daily_spike_ratio": 0.25},
             },
         },
-        store_data=FeatureStoreData(
-            energy_usage_by_circuit={
-                "hvac": {
-                    "days": [
-                        {"usage_kwh": 5.8},
-                        {"usage_kwh": 6.1},
-                        {"usage_kwh": 7.4},
-                        {"usage_kwh": 6.7},
-                        {"usage_kwh": 8.9},
-                        {"usage_kwh": 9.8},
-                        {"usage_kwh": 7.9},
-                    ],
-                }
-            },
-        ),
+        store_data=store_data,
         now_fn=lambda: now,
     )
 
+    await coordinator.async_recalculate_setting_recommendations()
+    assert "hvac" not in coordinator.state.settings_recommendations_by_circuit
+
+    store_data.events.extend(_completed_learning_events("hvac", now))
     await coordinator.async_recalculate_setting_recommendations()
 
     recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
@@ -12312,6 +12328,7 @@ async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> N
             },
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
             alert_feedback={
                 fingerprint: {
                     "fingerprint": fingerprint,
@@ -12726,6 +12743,7 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
             },
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("hvac", now),
             energy_usage_by_circuit={
                 "hvac": {
                     "days": [
