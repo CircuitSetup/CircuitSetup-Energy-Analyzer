@@ -3011,12 +3011,13 @@ def _final_config_from_single_assignment_update(
             continue
         retained_circuit = dict(circuit)
         if replacement_entity_ids:
+            existing_sensors = list(circuit.get("sensors", ()))
             retained_sensors = [
                 sensor
-                for sensor in circuit.get("sensors", ())
+                for sensor in existing_sensors
                 if _sensor_entity_id_from_raw(sensor) not in replacement_entity_ids
             ]
-            if not retained_sensors:
+            if existing_sensors and not retained_sensors:
                 continue
             retained_circuit["sensors"] = retained_sensors
         final_circuits.append(retained_circuit)

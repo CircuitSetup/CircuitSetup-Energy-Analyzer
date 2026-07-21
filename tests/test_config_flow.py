@@ -4060,6 +4060,13 @@ async def test_options_assignment_review_can_reassign_inactive_source() -> None:
             {"entity_id": "sensor.refrigerator_power", "role": "real_power"},
         ],
     }
+    sensorless = {
+        "circuit_id": "needs_repair",
+        "name": "Needs Repair",
+        "appliance_profile": "mixed",
+        "mode": "mixed",
+        "sensors": [],
+    }
     entry = SimpleNamespace(
         data={},
         options={
@@ -4068,7 +4075,7 @@ async def test_options_assignment_review_can_reassign_inactive_source() -> None:
                 "sensor.refrigerator_power",
                 "sensor.microwave_power",
             ],
-            CONF_CIRCUITS: [refrigerator],
+            CONF_CIRCUITS: [refrigerator, sensorless],
         },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
@@ -4102,6 +4109,7 @@ async def test_options_assignment_review_can_reassign_inactive_source() -> None:
         sensor["entity_id"]
         for sensor in result["data"][CONF_CIRCUITS][0]["sensors"]
     ] == ["sensor.refrigerator_power", "sensor.microwave_power"]
+    assert result["data"][CONF_CIRCUITS][1] == sensorless
 
 
 @pytest.mark.asyncio
