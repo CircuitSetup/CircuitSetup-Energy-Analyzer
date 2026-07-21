@@ -31,6 +31,10 @@ def test_context_source_presence_helpers() -> None:
         {},
         {CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain"},
     )
+    assert not has_rain_context_source_configured(
+        {CONF_RAIN_SENSOR_ENTITY: "binary_sensor.rain"},
+        {CONF_RAIN_SENSOR_ENTITY: ""},
+    )
 
 
 def test_flow_entities_prefer_linked_settings_then_global_sources() -> None:

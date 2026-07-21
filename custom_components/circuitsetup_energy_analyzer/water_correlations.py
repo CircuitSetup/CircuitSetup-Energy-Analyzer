@@ -93,8 +93,9 @@ def evaluate_rain_pump_correlation(inputs: RainPumpCorrelationInput) -> dict[str
     compressor_runtime = _round_minutes(inputs.compressor_runtime_minutes)
     compressor_duty_cycle = max(float(inputs.compressor_duty_cycle_percent), 0.0)
     if compressor_runtime > 0.0 and compressor_duty_cycle > 0.0:
-        compressor_adjustment = (
-            compressor_runtime * (compressor_duty_cycle / 100.0) * 0.5
+        compressor_adjustment = min(
+            compressor_runtime * (compressor_duty_cycle / 100.0) * 0.5,
+            dry_baseline * 1.5,
         )
         contributing_factors.append("compressor")
 

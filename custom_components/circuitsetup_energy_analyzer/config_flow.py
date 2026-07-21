@@ -263,6 +263,7 @@ FIELD_INCLUDE_CIRCUIT = "include_circuit"
 FIELD_REMOVE_FROM_ANALYSIS = "remove_from_analysis"
 FIELD_INCLUDED_SENSORS = "included_sensors"
 FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
+FIELD_REMOVE_ASSIGNMENTS = "remove_assignments"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
@@ -291,6 +292,7 @@ FIELD_BILLING_MIN_ELAPSED_DAYS = "billing_min_elapsed_days"
 FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
+_SELECTOR_NO_ITEMS_VALUE = "__no_items_available__"
 _SOURCE_METRIC_SUFFIXES = (
     "_peak_current",
     "_peak_amps",
@@ -915,7 +917,7 @@ def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
         items: list[str] = []
         for raw_item in re.split(r"[\n,]+", value):
             item = raw_item.strip()
-            if item:
+            if item and item != _SELECTOR_NO_ITEMS_VALUE:
                 items.append(item)
         return items
     if isinstance(value, Mapping) or not isinstance(value, (list, tuple, set)):
@@ -925,7 +927,7 @@ def _strict_string_list(value: Any, *, invalid_error_key: str) -> list[str]:
     for item in value:
         if not isinstance(item, str):
             raise SetupValidationError(invalid_error_key)
-        if item:
+        if item and item != _SELECTOR_NO_ITEMS_VALUE:
             items.append(item)
     return items
 
@@ -1446,7 +1448,13 @@ DATA_SCHEMA = _setup_schema()
 
 
 def _assignment_schema(group: Mapping[str, Any]) -> Any:
-    entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
+    entity_ids = [
+        str(entity_id)
+        for entity_id in group.get(
+            "available_entity_ids",
+            group.get("entity_ids", ()),
+        )
+    ]
     schema: dict[Any, Any] = {
         vol.Required(
             FIELD_INCLUDE_CIRCUIT,
@@ -1460,12 +1468,18 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=False,
             )
         ] = bool
-    schema.update(
-        {
+    if entity_ids:
+        selected = set(_selected_entity_ids_for_group(group))
+        schema[
             vol.Required(
                 FIELD_INCLUDED_SENSORS,
-                default=_selected_entity_ids_for_group(group),
-            ): _multi_select_selector(_assignment_sensor_options(entity_ids)),
+                default=[
+                    entity_id for entity_id in entity_ids if entity_id in selected
+                ],
+            )
+        ] = _multi_select_selector(_assignment_sensor_options(entity_ids))
+    schema.update(
+        {
             vol.Required(
                 FIELD_CIRCUIT_NAME,
                 default=str(group.get("name") or ""),
@@ -1492,6 +1506,10 @@ def _assignment_picker_schema(groups: Iterable[Mapping[str, Any]]) -> Any:
                 FIELD_SELECTED_ASSIGNMENT,
                 default=default,
             ): _select_selector(options),
+            vol.Optional(
+                FIELD_REMOVE_ASSIGNMENTS,
+                default=[],
+            ): _multi_select_selector(options),
         }
     )
 
@@ -2438,13 +2456,22 @@ def assignment_groups_from_sources(
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
     ]
+    existing_circuit_list = [
+        circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
+    ]
+    existing_sensor_entities = {
+        entity_id
+        for circuit in existing_circuit_list
+        for entity_id in _sensor_entity_ids_from_circuit(circuit)
+    }
     grouped_entities = [
         entity_id
         for entity_id in non_mains_entities
-        if "harmonic" not in entity_id.lower()
-    ]
-    existing_circuit_list = [
-        circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
+        if entity_id in existing_sensor_entities
+        or not _automatic_assignment_sensor_excluded(
+            entity_id,
+            source_name_by_entity.get(entity_id, ""),
+        )
     ]
 
     groups: dict[str, list[str]] = {}
@@ -2480,7 +2507,7 @@ def assignment_groups_from_sources(
             saved_sensor_entities = _sensor_entity_ids_from_circuit(saved_circuit)
             selected_entity_ids = tuple(
                 entity_id
-                for entity_id in entity_ids
+                for entity_id in non_mains_entities
                 if entity_id in saved_sensor_entities
             ) or tuple(entity_ids)
             saved_profile = _normalize_assignment_profile(
@@ -2499,6 +2526,7 @@ def assignment_groups_from_sources(
             group.update(
                 {
                     "circuit_id": stable_circuit_id or group["group_id"],
+                    "entity_ids": selected_entity_ids,
                     "name": str(saved_circuit.get("name") or group["name"]),
                     "appliance_profile": saved_profile,
                     "mode": _assignment_mode_for_profile_and_entities(
@@ -2520,7 +2548,20 @@ def assignment_groups_from_sources(
                 }
             )
         assignment_groups.append(group)
-    return assignment_groups
+    unique_groups: dict[str, dict[str, Any]] = {}
+    for group in assignment_groups:
+        unique_groups.setdefault(_assignment_group_value(group), group)
+    return list(unique_groups.values())
+
+
+def _automatic_assignment_sensor_excluded(
+    entity_id: str,
+    source_name: str = "",
+) -> bool:
+    tokens = set(
+        _slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_")
+    )
+    return bool(tokens & {"harmonic", "total"})
 
 
 def _saved_circuit_for_group(
@@ -2661,7 +2702,18 @@ def _start_assignment_review(
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
-    source_entities = _assignment_review_source_entities(pending_config)
+    source_entities = list(
+        dict.fromkeys(
+            [
+                *_assignment_review_source_entities(pending_config),
+                *(
+                    entity_id
+                    for circuit in existing_circuit_list
+                    for entity_id in _sensor_entity_ids_from_circuit(circuit)
+                ),
+            ]
+        )
+    )
     states = getattr(getattr(flow, "hass", None), "states", None)
     source_names = (
         {
@@ -2683,6 +2735,30 @@ def _start_assignment_review(
         mains_source_entities=pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
         existing_circuits=existing_circuit_list,
     )
+    mains_entities = set(pending_config.get(CONF_MAINS_SOURCE_ENTITIES, []))
+    assignable_entities = [
+        entity_id
+        for entity_id in source_entities
+        if entity_id not in mains_entities
+        and not _automatic_assignment_sensor_excluded(
+            entity_id,
+            source_names.get(entity_id, ""),
+        )
+    ]
+    groups = [
+        {
+            **group,
+            "available_entity_ids": tuple(
+                dict.fromkeys(
+                    [
+                        *assignable_entities,
+                        *_selected_entity_ids_for_group(group),
+                    ]
+                )
+            ),
+        }
+        for group in groups
+    ]
     if update_existing:
         groups = [
             {**group, "allow_remove_from_analysis": True}
@@ -2706,7 +2782,6 @@ def _final_config_without_assignment_review(
     pending_config: Mapping[str, Any],
 ) -> dict[str, Any]:
     final_config = dict(pending_config)
-    final_config[CONF_EXTRA_SOURCE_ENTITIES] = []
     final_config[CONF_SOURCE_ENTITIES] = []
     final_config[CONF_CIRCUITS] = []
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = ""
@@ -2745,6 +2820,13 @@ def _handle_assignment_review_submission(
     except SetupValidationError:
         raise
     if circuit is not None:
+        claimed_entity_ids = {
+            entity_id
+            for reviewed_circuit in reviewed_circuits
+            for entity_id in _sensor_entity_ids_from_circuit(reviewed_circuit)
+        }
+        if claimed_entity_ids.intersection(_sensor_entity_ids_from_circuit(circuit)):
+            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
         reviewed_circuits.append(circuit)
     flow._reviewed_circuits = reviewed_circuits
     flow._assignment_index = index + 1
@@ -2822,7 +2904,13 @@ def _included_entity_ids_for_assignment(
     group: Mapping[str, Any],
     user_input: Mapping[str, Any],
 ) -> list[str]:
-    allowed_entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
+    allowed_entity_ids = [
+        str(entity_id)
+        for entity_id in group.get(
+            "available_entity_ids",
+            group.get("entity_ids", ()),
+        )
+    ]
     allowed = set(allowed_entity_ids)
     raw_selected = user_input.get(
         FIELD_INCLUDED_SENSORS,
@@ -2863,16 +2951,16 @@ def _final_config_from_reviewed_circuits(
     circuits: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
     circuit_list = [dict(circuit) for circuit in circuits]
-    assigned_source_entities = list(
-        dict.fromkeys(
-            str(sensor.get("entity_id"))
-            for circuit in circuit_list
-            for sensor in circuit.get("sensors", ())
-            if isinstance(sensor, Mapping) and sensor.get("entity_id")
-        )
-    )
+    assigned_source_entities = [
+        str(sensor.get("entity_id"))
+        for circuit in circuit_list
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+    ]
     if not assigned_source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    if len(assigned_source_entities) != len(set(assigned_source_entities)):
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
 
     final_config = dict(pending_config)
     final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
@@ -2906,6 +2994,11 @@ def _final_config_from_single_assignment_update(
 ) -> dict[str, Any]:
     reviewed = [dict(circuit) for circuit in reviewed_circuits]
     replacement = reviewed[0] if reviewed else None
+    replacement_entity_ids = (
+        set(_sensor_entity_ids_from_circuit(replacement))
+        if replacement is not None
+        else set()
+    )
     selected_entity_ids = _assignment_entity_ids_from_group(selected_group)
     final_circuits: list[dict[str, Any]] = []
     replaced = False
@@ -2916,7 +3009,18 @@ def _final_config_from_single_assignment_update(
             if replacement is not None:
                 final_circuits.append(replacement)
             continue
-        final_circuits.append(dict(circuit))
+        retained_circuit = dict(circuit)
+        if replacement_entity_ids:
+            existing_sensors = list(circuit.get("sensors", ()))
+            retained_sensors = [
+                sensor
+                for sensor in existing_sensors
+                if _sensor_entity_id_from_raw(sensor) not in replacement_entity_ids
+            ]
+            if existing_sensors and not retained_sensors:
+                continue
+            retained_circuit["sensors"] = retained_sensors
+        final_circuits.append(retained_circuit)
     if replacement is not None and not replaced:
         final_circuits.append(replacement)
     if not final_circuits:
@@ -2949,6 +3053,27 @@ def _final_config_from_single_assignment_update(
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits(
         final_circuits
     )
+    return final_config
+
+
+def _final_config_from_assignment_removals(
+    pending_config: Mapping[str, Any],
+    existing_circuits: Iterable[Mapping[str, Any]],
+    groups: Iterable[Mapping[str, Any]],
+    selected_group_ids: Iterable[str],
+) -> dict[str, Any]:
+    final_config = dict(pending_config)
+    final_circuits = [dict(circuit) for circuit in existing_circuits]
+    groups_by_id = {_assignment_group_value(group): group for group in groups}
+    for group_id in selected_group_ids:
+        final_config = _final_config_from_single_assignment_update(
+            final_config,
+            final_circuits,
+            group_id,
+            groups_by_id[group_id],
+            (),
+        )
+        final_circuits = list(final_config.get(CONF_CIRCUITS, ()))
     return final_config
 
 
@@ -3619,6 +3744,28 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             if not groups:
                 return await self.async_step_assign()
             return _assignment_picker_form(self)
+
+        try:
+            remove_assignments = _strict_string_list(
+                user_input.get(FIELD_REMOVE_ASSIGNMENTS, []),
+                invalid_error_key=ERROR_INVALID_CIRCUIT_ASSIGNMENTS,
+            )
+        except SetupValidationError as err:
+            return _assignment_picker_form(self, errors={"base": err.error_key})
+        group_ids = {_assignment_group_value(group) for group in groups}
+        if any(group_id not in group_ids for group_id in remove_assignments):
+            return _assignment_picker_form(
+                self,
+                errors={"base": ERROR_INVALID_CIRCUIT_ASSIGNMENTS},
+            )
+        if remove_assignments:
+            final_config = _final_config_from_assignment_removals(
+                getattr(self, "_pending_config", {}) or {},
+                getattr(self, "_assignment_existing_circuits", []) or [],
+                groups,
+                remove_assignments,
+            )
+            return self.async_create_entry(title="", data=final_config)
 
         selected = str(user_input.get(FIELD_SELECTED_ASSIGNMENT) or "")
         for group in groups:

@@ -632,11 +632,17 @@ def test_assignment_picker_text_is_human_readable() -> None:
     data = strings["options"]["step"]["select_assignment"]["data"]
     descriptions = strings["options"]["step"]["select_assignment"]["data_description"]
 
-    assert data == {"selected_assignment": "Assignment"}
+    assert data == {
+        "selected_assignment": "Assignment",
+        "remove_assignments": "Remove Appliances",
+    }
     assert descriptions == {
         "selected_assignment": (
             "Choose the existing appliance or circuit assignment to edit."
-        )
+        ),
+        "remove_assignments": (
+            "Select one or more appliances to remove together instead of editing one."
+        ),
     }
     assert "x of" not in strings["options"]["step"]["select_assignment"][
         "description"

@@ -1911,13 +1911,13 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
 
     assert setup_health_value(coordinator_for(hvac)) == "Configure breaker amps"
 
-    weather_context = coordinator_for(
+    optional_weather_context = coordinator_for(
         hvac,
         store_data=FeatureStoreData(
             capacity_settings_by_circuit={"hvac": {"breaker_amps": 40.0}},
         ),
     )
-    assert setup_health_value(weather_context) == "Add outdoor temperature source"
+    assert setup_health_value(optional_weather_context) == "Ready"
 
     missing_mains = coordinator_for(
         mains,
@@ -2221,7 +2221,7 @@ def test_setup_health_attributes_bound_oversized_strings() -> None:
     assert attrs["stale_sources"] == [bounded_source]
 
 
-def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
+def test_setup_health_ignores_unselected_optional_context_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
         setup_health_value,
@@ -2272,18 +2272,14 @@ def test_setup_health_reports_fixable_context_and_utility_setup_gaps() -> None:
 
     attrs = setup_health_attributes(coordinator)
 
-    assert setup_health_value(coordinator) == "Add rain source"
-    assert attrs["missing_rain_sources"] == ["sump_pump"]
-    assert attrs["missing_water_flow_sources"] == ["washer"]
+    assert setup_health_value(coordinator) == "Add measured kWh source"
+    assert attrs["missing_rain_sources"] == []
+    assert attrs["missing_water_flow_sources"] == []
     assert attrs["utility_comparison_setup_issues"] == ["mains"]
-    assert attrs["primary_issue"] == "missing_rain_context_source"
+    assert attrs["primary_issue"] == "utility_comparison_missing_measured_source"
     assert attrs["primary_severity"] == "warning"
-    assert attrs["issue_summary"] == (
-        "3 warnings: Add a rain sensor for Sump Pump (+2 more)"
-    )
+    assert attrs["issue_summary"] == "1 warning: Add measured kWh source for Mains"
     assert [issue["issue"] for issue in attrs["issues"]] == [
-        "missing_rain_context_source",
-        "missing_water_flow_source",
         "utility_comparison_missing_measured_source",
     ]
 
