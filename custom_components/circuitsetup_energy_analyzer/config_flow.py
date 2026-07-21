@@ -2820,6 +2820,13 @@ def _handle_assignment_review_submission(
     except SetupValidationError:
         raise
     if circuit is not None:
+        claimed_entity_ids = {
+            entity_id
+            for reviewed_circuit in reviewed_circuits
+            for entity_id in _sensor_entity_ids_from_circuit(reviewed_circuit)
+        }
+        if claimed_entity_ids.intersection(_sensor_entity_ids_from_circuit(circuit)):
+            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
         reviewed_circuits.append(circuit)
     flow._reviewed_circuits = reviewed_circuits
     flow._assignment_index = index + 1
@@ -2944,16 +2951,16 @@ def _final_config_from_reviewed_circuits(
     circuits: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
     circuit_list = [dict(circuit) for circuit in circuits]
-    assigned_source_entities = list(
-        dict.fromkeys(
-            str(sensor.get("entity_id"))
-            for circuit in circuit_list
-            for sensor in circuit.get("sensors", ())
-            if isinstance(sensor, Mapping) and sensor.get("entity_id")
-        )
-    )
+    assigned_source_entities = [
+        str(sensor.get("entity_id"))
+        for circuit in circuit_list
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping) and sensor.get("entity_id")
+    ]
     if not assigned_source_entities:
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
+    if len(assigned_source_entities) != len(set(assigned_source_entities)):
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
 
     final_config = dict(pending_config)
     final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities

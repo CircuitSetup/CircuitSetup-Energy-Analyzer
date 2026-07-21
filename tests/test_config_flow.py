@@ -2857,6 +2857,48 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_user_flow_rejects_claimed_source_in_later_group() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerConfigFlow,
+    )
+
+    sources = ["sensor.refrigerator_power", "sensor.microwave_power"]
+    flow = CircuitSetupEnergyAnalyzerConfigFlow()
+
+    result = await flow.async_step_user({CONF_EXTRA_SOURCE_ENTITIES: sources})
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Kitchen Appliances",
+            "appliance_profile": "mixed",
+            "included_sensors": sources,
+        }
+    )
+
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "circuit_name": "Microwave",
+            "appliance_profile": "microwave",
+            "included_sensors": ["sensor.microwave_power"],
+        }
+    )
+
+    assert result["step_id"] == "assign"
+    assert result["errors"] == {"base": "invalid_circuit_assignments"}
+
+    result = await flow.async_step_assign({"include_circuit": False})
+    assert result["step_id"] == "utility"
+    circuits = flow._pending_final_config[CONF_CIRCUITS]
+    assert len(circuits) == 1
+    assert [sensor["entity_id"] for sensor in circuits[0]["sensors"]] == sources
+
+
 @pytest.mark.parametrize("leg_token", ["leg", "line", "phase"])
 @pytest.mark.asyncio
 async def test_user_flow_detects_numeric_leg_suffixes_as_dual_phase(
