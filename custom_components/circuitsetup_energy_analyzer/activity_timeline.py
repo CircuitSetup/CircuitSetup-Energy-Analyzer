@@ -63,6 +63,7 @@ def build_recent_activity_timeline(
         key=lambda item: str(item["timestamp"]),
         reverse=True,
     )
+    all_items = _deduplicate_items(all_items)
     visible_items = all_items[:max_items]
     if not all_items:
         return RecentActivityTimeline(
@@ -82,13 +83,25 @@ def build_recent_activity_timeline(
         status="activity",
         window_hours=window_hours,
         total_count=len(all_items),
-        event_count=len(event_items),
-        alert_count=len(alert_items),
-        observation_count=len(observation_items),
+        event_count=sum(item["kind"] == "event" for item in all_items),
+        alert_count=sum(item["kind"] == "alert" for item in all_items),
+        observation_count=sum(item["kind"] == "observation" for item in all_items),
         latest_title=str(latest["title"]),
         latest_timestamp=str(latest["timestamp"]),
         items=visible_items,
     )
+
+
+def _deduplicate_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for item in items:
+        key = tuple((name, repr(value)) for name, value in sorted(item.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
 
 
 def timeline_payload(summary: RecentActivityTimeline) -> dict[str, Any]:
@@ -152,8 +165,7 @@ def _observation_matches_circuit(
 ) -> bool:
     if isinstance(observation, Observation):
         return (
-            observation.circuit_id == circuit_id
-            and observation.observed_at >= cutoff
+            observation.circuit_id == circuit_id and observation.observed_at >= cutoff
         )
     if not isinstance(observation, dict):
         return False

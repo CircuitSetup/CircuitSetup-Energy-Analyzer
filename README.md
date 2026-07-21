@@ -131,7 +131,10 @@ questions instead of raw diagnostic entity lists:
 
 - **Appliance Detail** combines current activity, health, electrical state,
   energy state, Today vs Normal comparisons, behavior expectations, active
-  alerts, first checks, and actions for one appliance or circuit.
+  alerts, first checks, and actions for one appliance or circuit. Empty evidence
+  and check sections stay hidden, the activity facts and deduplicated history
+  share a two-column layout, and the history graph moves between 24 hours, 7
+  days, and 30 days with point inspection in the chart readout.
 - **Appliance Status** keeps activity, electrical health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
@@ -159,10 +162,12 @@ questions instead of raw diagnostic entity lists:
   wording does not crowd out electrical or data-quality issues.
 - **Advanced setting suggestions** show current value, default value, suggested
   value, what the setting controls, why the suggestion exists, expected effect,
-  and reset/apply/dismiss actions. Supported threshold suggestions also include
-  a bounded, non-mutating preview of the alerts or operating-state changes the
-  candidate would have produced from up to 14 days and 500 retained samples.
-  The preview is historical guidance, not a prediction of future behavior.
+  and reset/apply/dismiss actions. Recommendation Evidence opens as a focused
+  view with those actions at the top. Supported threshold suggestions include
+  an inline historical-impact summary only when enough retained history exists;
+  it is a bounded, non-mutating preview of the alerts or operating-state changes
+  the candidate would have produced from up to 14 days and 500 samples. The
+  preview is historical guidance, not a prediction of future behavior.
 - **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
   each appliance's own normal separately from top energy users and can stay in
   the panel or use a persistent/mobile notification target.
@@ -198,11 +203,16 @@ questions instead of raw diagnostic entity lists:
 8. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
 9. Open **Appliance Circuit Assignments**.
 10. For each detected group, confirm:
-   - Whether to include the circuit.
+   - Whether to analyze the appliance.
    - The circuit name.
    - The appliance type.
    - The selected source sensors.
    - The automatically derived circuit mode and power-flow mode shown in the review text.
+
+Each source sensor can belong to only one appliance. Removing a sensor or an
+appliance returns its source sensors to the assignment picker so they can be
+assigned again. Existing appliances use the explicit **Remove From Analysis**
+action instead of a second include/exclude control.
 11. Save the configuration.
 12. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
 13. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, or other feature settings.
@@ -324,7 +334,7 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It now presents a visual appliance story with Household Overview, Today's Energy, Appliance Status, Mains/Solar/NILM, Energy Tracking, Appliance Run Timeline, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes use tabs to summarize Needs Review, Assigned, Published, and Ignored / Expected work; selecting a review card opens its focused inspector without repeating controls, and each decision is committed with a single **Apply** action. The dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. Its visual appliance story defaults to four columns and presents Household Overview, Today's Energy, Energy Tracking, and Appliance Run Timeline near the top, followed by Appliance Status, Mains/Solar/NILM, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. Appliance cost and projected-cost rows are included when those entities are available. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes use tabs to summarize Needs Review, Assigned, Published, and Ignored / Expected work; selecting a review card opens its focused inspector without repeating controls, and each decision is committed with a single **Apply** action. The dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
 
 For manual dashboards, start with one simple card per important appliance:
 
@@ -596,7 +606,7 @@ Configure per-circuit billing settings from:
 
 Configure the shared fallback rate and Time-of-Use rate, start/end times, seven weekday switches, and label from the **CircuitSetup Energy Analyzer** device entities. These controls are global and do not appear in an appliance's Advanced Circuit Settings.
 
-Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
+Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Prefer **Utility Energy Entity** for normal setup. **Recorder Statistic ID (advanced)** is only for utility kWh that exists in Home Assistant recorder statistics without a corresponding entity. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
 
 Time-of-use settings use time controls for the peak start/end times and one switch for each weekday, so normal setup does not require typing comma-separated weekday numbers.
 
@@ -678,7 +688,7 @@ This feature is read-only. Use ordinary Home Assistant automations if you want t
 
 Utility comparison checks whether utility-reported kWh roughly agrees with measured kWh over the same period.
 
-Configure it on a mains or aggregate circuit. You can use a utility/Opower entity, a recorder statistic ID, or let the analyzer choose automatically when possible.
+Configure it on a mains or aggregate circuit. Use a utility/Opower energy entity when one is available. Enter a Recorder Statistic ID only for utility kWh that has no entity; the analyzer does not preselect a discovered statistic because its identity may be ambiguous.
 
 Utility comparison settings are available from:
 

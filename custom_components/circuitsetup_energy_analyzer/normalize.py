@@ -9,7 +9,7 @@ from .models import CircuitConfig, CircuitSample, PowerFlowMode, SensorRole
 STALE_AFTER = timedelta(minutes=10)
 FUTURE_TIMESTAMP_TOLERANCE = timedelta(seconds=30)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
-NEGATIVE_LOAD_TOLERANCE_W = 5.0
+NEGATIVE_LOAD_TOLERANCE_W = 2.0
 
 _POWER_ROLES = {
     SensorRole.REAL_POWER,
@@ -181,7 +181,7 @@ def _negative_load_power_issue(
     return (
         power_flow is PowerFlowMode.LOAD
         and real_power is not None
-        and real_power < -NEGATIVE_LOAD_TOLERANCE_W
+        and real_power <= -NEGATIVE_LOAD_TOLERANCE_W
     )
 
 
@@ -193,7 +193,7 @@ def _normalize_real_power(
         return None, None
 
     if power_flow is PowerFlowMode.LOAD:
-        if real_power < -NEGATIVE_LOAD_TOLERANCE_W:
+        if real_power <= -NEGATIVE_LOAD_TOLERANCE_W:
             return None, "unexpected_export"
         return max(real_power, 0.0), "load"
 

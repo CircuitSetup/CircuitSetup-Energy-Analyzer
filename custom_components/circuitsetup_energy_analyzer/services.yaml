@@ -1569,8 +1569,8 @@ set_utility_comparison_settings:
         entity:
           domain: sensor
     utility_statistic_id:
-      name: Utility Statistic ID
-      description: Optional Opower or utility statistic ID from Developer Tools Statistics.
+      name: Recorder Statistic ID (advanced)
+      description: Optional utility kWh recorder statistic without an entity; otherwise use Utility Energy Entity.
       required: false
       example: opower:utility_elec_consumption
       selector:

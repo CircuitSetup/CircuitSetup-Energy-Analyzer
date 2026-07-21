@@ -95,6 +95,7 @@ from .services import (
     SERVICE_UNDO_SETTING_RECOMMENDATION,
     SERVICE_VALIDATE_NILM_SESSION,
 )
+from .settings_advisor import SETTING_LABELS
 from .ux import alert_evidence_detail, friendly_feature_name
 
 DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
@@ -1242,6 +1243,7 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
             "title",
             "summary",
             "circuit_id",
+            "circuit_name",
             "setting_key",
             "setting_label",
             "feature",
@@ -1257,6 +1259,11 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
                 payload[key] = value
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
+    circuit_id = str(payload.get("circuit_id") or "").strip()
+    if circuit_id and not str(payload.get("circuit_name") or "").strip():
+        config = _config_for_circuit(coordinator, circuit_id)
+        if config is not None:
+            payload["circuit_name"] = config.name
     payload["display_label"] = _recommendation_display_label(payload)
     _add_setting_impact_preview(payload, coordinator)
     _add_recommendation_guidance(payload)
@@ -1274,14 +1281,32 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
 
 def _recommendation_display_label(payload: Mapping[str, Any]) -> str:
-    for key in ("title", "summary", "setting_label"):
+    label = ""
+    for key in ("title", "summary"):
         value = str(payload.get(key) or "").strip()
         if value:
-            return value
-    feature = str(payload.get("feature") or "").strip()
-    if feature:
-        return friendly_feature_name(feature)
-    return _panel_text("recommendations", "suggested_setting")
+            label = value
+            break
+    if not label:
+        setting_key = str(payload.get("setting_key") or "").strip()
+        label = SETTING_LABELS.get(
+            setting_key,
+            str(payload.get("setting_label") or "").strip(),
+        )
+    if not label:
+        feature = str(payload.get("feature") or "").strip()
+        label = (
+            friendly_feature_name(feature)
+            if feature
+            else _panel_text("recommendations", "suggested_setting")
+        )
+    circuit_name = str(payload.get("circuit_name") or "").strip()
+    if not circuit_name:
+        circuit_id = str(payload.get("circuit_id") or "").strip()
+        circuit_name = friendly_feature_name(circuit_id) if circuit_id else ""
+    if circuit_name and not label.casefold().startswith(circuit_name.casefold()):
+        return f"{circuit_name} {label}"
+    return label
 
 
 def _recommendation_actions(

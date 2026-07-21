@@ -183,6 +183,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._lastActionMessage = "";
     this._alertDecision = "";
     this._inlineFeedback = { scope: "", kind: "", message: "" };
+    this._pendingConfirmationAction = "";
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._nilmWorkspaceMutationId = 0;
@@ -222,7 +223,21 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     installRouteChangeDispatcher();
     this._restoreStoredActionMessage();
     this._addRouteListeners();
-    this._loadEvidenceIfRouteChanged({ force: true });
+    const recoveredHass = this._upgradeProperty("hass");
+    this._upgradeProperty("panel");
+    if (!recoveredHass && this._hass && this._hass.callApi) {
+      this._loadEvidenceIfRouteChanged({ force: true });
+    }
+  }
+
+  _upgradeProperty(name) {
+    if (!Object.prototype.hasOwnProperty.call(this, name)) {
+      return false;
+    }
+    const value = this[name];
+    delete this[name];
+    this[name] = value;
+    return true;
   }
 
   disconnectedCallback() {
@@ -354,26 +369,97 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (this._hass && this._hass.callApi) {
       return this._hass.callApi("GET", apiPath);
     }
-    const response = await fetch(fetchPath);
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
-    }
-    return response.json();
+    throw new Error(`Home Assistant API is not ready for ${fetchPath}`);
   }
 
   async _postJson(apiPath, fetchPath, body) {
     if (this._hass && this._hass.callApi) {
       return this._hass.callApi("POST", apiPath, body);
     }
-    const response = await fetch(fetchPath, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
+    throw new Error(`Home Assistant API is not ready for ${fetchPath}`);
+  }
+
+  async _openOptionsFlow(action) {
+    const entryId = action && action.entry_id;
+    const requestedStep = action && action.options_step;
+    if (!entryId || !requestedStep || !this._hass || !this._hass.callApi) {
+      if (action && action.path) {
+        this._navigate(action.path);
+      }
+      return;
     }
-    return response.json();
+    const started = await this._hass.callApi(
+      "POST",
+      "config/config_entries/options/flow",
+      { handler: entryId },
+    );
+    const flowId = started && started.flow_id;
+    if (!flowId) {
+      throw new Error("Home Assistant did not start the options flow");
+    }
+    const flowPath = `config/config_entries/options/flow/${flowId}`;
+    let current = started;
+    if (current.type === "menu") {
+      current = await this._hass.callApi("POST", flowPath, {
+        next_step_id: requestedStep === "advanced_settings" ? "advanced" : requestedStep,
+      });
+    }
+    if (action.circuit_id && current.step_id === "select_advanced_circuit") {
+      await this._hass.callApi("POST", flowPath, {
+        circuit_id: action.circuit_id,
+      });
+    }
+    this._navigate(`/config/integrations/config_flow/${flowId}`);
+  }
+
+  _openOptionsPath(path) {
+    const url = new URL(path, window.location.origin);
+    const params = new URLSearchParams(url.hash.replace(/^#/, ""));
+    const entryId = params.get("config_entry");
+    const optionsStep = params.get("options_step");
+    if (entryId && optionsStep) {
+      return this._openOptionsFlow({
+        entry_id: entryId,
+        circuit_id: params.get("circuit_id") || "",
+        options_step: optionsStep,
+        path,
+      });
+    }
+    this._navigate(path);
+    return Promise.resolve();
+  }
+
+  _requestActionConfirmation(actionKey) {
+    this._pendingConfirmationAction = actionKey;
+    this._render();
+  }
+
+  _cancelActionConfirmation() {
+    this._pendingConfirmationAction = "";
+    this._render();
+  }
+
+  _confirmPendingAction() {
+    const actionKey = this._pendingConfirmationAction;
+    this._pendingConfirmationAction = "";
+    this._render();
+    if (actionKey) {
+      return this._callAction(actionKey);
+    }
+    return Promise.resolve();
+  }
+
+  _renderActionConfirmation() {
+    if (this._pendingConfirmationAction !== "relearn_baseline") {
+      return "";
+    }
+    return `
+      <ha-dialog open heading="${this._escape(this._panelText("confirmations.relearn_title"))}">
+        <p>${this._escape(this._panelText("confirmations.relearn_message"))}</p>
+        <button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</button>
+        <button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</button>
+      </ha-dialog>
+    `;
   }
 
   async _callAction(actionKey, options = {}) {
@@ -384,6 +470,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       data: { alert_id: fallbackAlert && fallbackAlert.alert_id },
     };
     if (!this._guardActionCall(action, actionKey, options.feedbackScope)) {
+      return;
+    }
+    if (action.entry_id && action.options_step) {
+      await this._openOptionsFlow(action);
       return;
     }
     if (action.path) {
@@ -652,7 +742,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   _renderSettingImpactPreview(recommendation) {
     const preview = recommendation && recommendation.impact_preview;
-    if (!preview) {
+    if (!preview || preview.available === false || Number(preview.observations_evaluated || 0) <= 0) {
       return "";
     }
     const stateChanges = preview.current_state_change_count !== null && preview.current_state_change_count !== undefined;
@@ -679,18 +769,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const limitations = Array.isArray(preview.limitations) && preview.limitations.length
       ? `<p class="muted"><strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong> ${this._escape(preview.limitations.join(" "))}</p>`
       : "";
-    const impact = preview.available === false ? "" : `
+    return `<div class="setting-impact-preview">
+        <strong>${this._escape(this._panelText("recommendations.preview_history"))}</strong>
         ${window}
         <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
         <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
-        ${examples}`;
-    return `<details class="disclosure setting-impact-preview">
-      <summary>${this._escape(this._panelText("recommendations.preview_history"))}</summary>
-      <div class="disclosure-content">
-        ${impact}
+        ${examples}
         ${limitations}
-      </div>
-    </details>`;
+    </div>`;
   }
 
   _overlayEntitySummary(item) {

@@ -16,6 +16,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
     CONF_SELECTED_ENTITY_GROUPS,
+    CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -374,9 +375,7 @@ def test_enable_summary_registry_entries_repairs_newly_promoted_entities(
     }
 
 
-def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> (
-    None
-):
+def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> None:
     import sys
     from types import ModuleType
 
@@ -570,9 +569,7 @@ def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
 
     assert fake_registry.updated == [("binary_sensor.fridge_learning", None)]
     assert (
-        fake_registry.entities[
-            "binary_sensor.fridge_data_quality_problem"
-        ].hidden_by
+        fake_registry.entities["binary_sensor.fridge_data_quality_problem"].hidden_by
         == "user"
     )
 
@@ -805,13 +802,10 @@ async def test_binary_sensor_setup_preserves_disabled_registry_entries(
         == "integration"
     )
     assert (
-        fake_registry.entities["binary_sensor.fridge_running"].entity_category
-        is None
+        fake_registry.entities["binary_sensor.fridge_running"].entity_category is None
     )
     assert fake_registry.entities["binary_sensor.freezer_running"].disabled_by == "user"
-    assert "entry-1_fridge_running" in {
-        entity.unique_id for entity in added_entities
-    }
+    assert "entry-1_fridge_running" in {entity.unique_id for entity in added_entities}
 
 
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
@@ -1235,10 +1229,7 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert leg_imbalance_value(state, "fridge") == 66.7
     assert leg_imbalance_status_value(state, "fridge") == "imbalanced"
     assert metric_consistency_score_value(state, "fridge") == 50.0
-    assert (
-        metric_consistency_status_value(state, "fridge")
-        == "apparent_power_mismatch"
-    )
+    assert metric_consistency_status_value(state, "fridge") == "apparent_power_mismatch"
     assert balance_power_value(state, "fridge") == 2300.0
     assert monitored_power_value(state, "fridge") == 2700.0
     assert monitored_coverage_value(state, "fridge") == 54.0
@@ -1386,6 +1377,8 @@ def test_nilm_unknown_load_attributes_are_bounded() -> None:
         "signature-4",
     ]
     assert all("sample_history" not in load for load in attrs["unknown_loads"])
+
+
 def test_recent_activity_attributes_are_bounded() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -1428,13 +1421,14 @@ def test_recent_activity_attributes_are_bounded() -> None:
                 "timestamp": f"2026-06-13T12:{index:02d}:00+00:00",
                 "title": f"Activity {index}",
                 "detail": (
-                    "Retained activity detail with extra context with extra "
-                    "context..."
+                    "Retained activity detail with extra context with extra context..."
                 ),
             }
             for index in range(5)
         ],
     }
+
+
 def test_setup_health_treats_optional_energy_and_metric_inputs_as_ready() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -1557,6 +1551,55 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
     assert checklist["nilm_enabled"]["status"] == "optional"
     assert checklist["learning_progress"]["status"] == "ok"
     assert attrs["checklist_ready_count"] == 10
+
+
+def test_setup_health_source_status_does_not_depend_on_assignments() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(),
+        options={CONF_SOURCE_ENTITIES: ["sensor.unassigned_power"]},
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+    assert checklist["source_data_found"]["status"] == "ok"
+    assert "fix" not in checklist["source_data_found"]
+    assert "open_path" not in checklist["source_data_found"]
+    assert checklist["circuit_assignments_reviewed"]["status"] == "needs_attention"
+
+
+def test_setup_health_valid_ct_row_has_no_action() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+        entry_id="entry-1",
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+    assert checklist["ct_direction_valid"]["status"] == "ok"
+    assert "fix" not in checklist["ct_direction_valid"]
+    assert "open_path" not in checklist["ct_direction_valid"]
 
 
 def test_setup_health_dashboard_checklist_survives_reload_status() -> None:
@@ -1705,12 +1748,18 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
     assert electrical_health_value(power_quality_only_state, "pump") == (
         "Possible Power Quality Change"
     )
-    assert electrical_health_attributes(power_quality_only_state, "pump")[
-        "status_explanation"
-    ] == "Power-quality evidence has changed from the learned baseline."
-    assert electrical_health_attributes(power_quality_only_state, "pump")[
-        "power_quality_alert_confirmed"
-    ] is False
+    assert (
+        electrical_health_attributes(power_quality_only_state, "pump")[
+            "status_explanation"
+        ]
+        == "Power-quality evidence has changed from the learned baseline."
+    )
+    assert (
+        electrical_health_attributes(power_quality_only_state, "pump")[
+            "power_quality_alert_confirmed"
+        ]
+        is False
+    )
 
     score_only_state = AnalyzerState(
         metric_consistency_status_by_circuit={"mixed": "missing_metrics"},
@@ -1721,9 +1770,10 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
 
     power_only_state = AnalyzerState()
     assert energy_summary_value(power_only_state, "pump") == "Needs Energy Data"
-    assert energy_summary_attributes(power_only_state, "pump")[
-        "summary_explanation"
-    ] == "No cumulative kWh evidence is available for this circuit."
+    assert (
+        energy_summary_attributes(power_only_state, "pump")["summary_explanation"]
+        == "No cumulative kWh evidence is available for this circuit."
+    )
 
 
 def test_electrical_health_marks_confirmed_power_quality_alert() -> None:
@@ -1748,9 +1798,10 @@ def test_electrical_health_marks_confirmed_power_quality_alert() -> None:
         },
     )
 
-    assert electrical_health_attributes(state, "pump")[
-        "power_quality_alert_confirmed"
-    ] is True
+    assert (
+        electrical_health_attributes(state, "pump")["power_quality_alert_confirmed"]
+        is True
+    )
 
 
 def test_activity_summary_prefers_operating_state_lane() -> None:
@@ -1798,8 +1849,7 @@ def test_activity_summary_reports_unavailable_operating_state() -> None:
     )
 
 
-def test_operating_state_helpers_do_not_fallback_when_snapshot_is_unavailable(
-) -> None:
+def test_operating_state_helpers_do_not_fallback_when_snapshot_is_unavailable() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         is_appliance_running,
     )
@@ -1879,9 +1929,7 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
         AnalyzerState(
             data_quality_checklist_by_circuit={
                 "fridge": {
-                    "quality_issues": [
-                        "sensor.fridge_power negative_real_power_load"
-                    ],
+                    "quality_issues": ["sensor.fridge_power negative_real_power_load"],
                     "required_sensors_present": True,
                 }
             }
@@ -2414,9 +2462,7 @@ def test_setup_health_merges_utility_comparison_config_sources_per_circuit() -> 
     attrs = setup_health_attributes(coordinator)
 
     assert attrs["utility_comparison_setup_issues"] == ["mains"]
-    assert attrs["issues"][0]["issue"] == (
-        "utility_comparison_missing_utility_source"
-    )
+    assert attrs["issues"][0]["issue"] == ("utility_comparison_missing_utility_source")
 
 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
@@ -2543,9 +2589,8 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
     assert imbalance.status == "imbalanced"
     assert imbalance.imbalance_percent >= 50.0
 
-    reported_va = (
-        (_demo_source_value("hvac_l1", SensorRole.APPARENT_POWER) or 0.0)
-        + (_demo_source_value("hvac_l2", SensorRole.APPARENT_POWER) or 0.0)
+    reported_va = (_demo_source_value("hvac_l1", SensorRole.APPARENT_POWER) or 0.0) + (
+        _demo_source_value("hvac_l2", SensorRole.APPARENT_POWER) or 0.0
     )
     reported_pf = (
         (_demo_source_value("hvac_l1", SensorRole.POWER_FACTOR) or 0.0)
@@ -2565,14 +2610,11 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
     assert consistency.status in {"apparent_power_mismatch", "metric_mismatch"}
 
     assert (
-        (_demo_source_value("washer", SensorRole.REAL_POWER) or 0.0)
-        > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
-    )
-    assert (
-        (_demo_source_value("dryer_l1", SensorRole.REAL_POWER) or 0.0)
-        + (_demo_source_value("dryer_l2", SensorRole.REAL_POWER) or 0.0)
-        > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
-    )
+        _demo_source_value("washer", SensorRole.REAL_POWER) or 0.0
+    ) > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
+    assert (_demo_source_value("dryer_l1", SensorRole.REAL_POWER) or 0.0) + (
+        _demo_source_value("dryer_l2", SensorRole.REAL_POWER) or 0.0
+    ) > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
 
 
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
@@ -2729,8 +2771,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
             EntityTier.DIAGNOSTIC
         )
         assert (
-            descriptions[diagnostic_status_key].entity_registry_enabled_default
-            is False
+            descriptions[diagnostic_status_key].entity_registry_enabled_default is False
         )
 
     for key in descriptions:
@@ -2862,8 +2903,7 @@ def test_weather_context_sensor_exposes_readable_status_and_evidence() -> None:
     assert weather_context_value(state, "custom") == "Needs Manual Review"
     assert weather_context_value(state, "plain") == "Learning"
     assert (
-        weather_context_value(SimpleNamespace(), "missing")
-        == "No Temperature Source"
+        weather_context_value(SimpleNamespace(), "missing") == "No Temperature Source"
     )
     assert weather_context_attributes(state, "missing") == {}
 
@@ -2892,8 +2932,7 @@ def test_weather_context_attributes_are_bounded() -> None:
                 "explanation": long_explanation,
                 "comparison_samples": comparison_samples,
                 "temperature_bins": {
-                    f"bin_{index:02d}": {"sample_count": index}
-                    for index in range(8)
+                    f"bin_{index:02d}": {"sample_count": index} for index in range(8)
                 },
             }
         }
@@ -2924,6 +2963,8 @@ def test_weather_context_attributes_are_bounded() -> None:
     assert attrs["temperature_bins"] == {
         f"bin_{index:02d}": {"sample_count": index} for index in range(5)
     }
+
+
 def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -2947,6 +2988,8 @@ def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
     assert description.entity_registry_visible_default is True
     assert entity.icon == "mdi:thermometer-lines"
     assert entity._attr_entity_category is None
+
+
 def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -3241,10 +3284,7 @@ def test_nilm_helpers_are_feature_module_exports() -> None:
     )
     assert feature_module.nilm_topology_status_value is nilm_topology_status_value
     assert feature_module.nilm_unknown_loads_value is nilm_unknown_loads_value
-    assert (
-        feature_module.nilm_unknown_loads_attributes
-        is nilm_unknown_loads_attributes
-    )
+    assert feature_module.nilm_unknown_loads_attributes is nilm_unknown_loads_attributes
 
 
 def test_status_sensor_entities_explain_machine_status_values() -> None:
@@ -3272,9 +3312,7 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
     )
     assert solar_status.native_value == "Inconsistent Export"
     assert solar_status.extra_state_attributes["raw_status"] == "inconsistent_export"
-    assert "CT orientation" in solar_status.extra_state_attributes[
-        "status_explanation"
-    ]
+    assert "CT orientation" in solar_status.extra_state_attributes["status_explanation"]
 
 
 def test_energy_usage_sensors_explain_waiting_for_delta() -> None:
@@ -3335,9 +3373,10 @@ def test_energy_summary_explains_automatic_kwh_helper_startup() -> None:
     )
 
     assert energy_summary_value(state, "fridge") == "Learning"
-    assert "automatic kWh helper" in energy_summary_attributes(state, "fridge")[
-        "summary_explanation"
-    ]
+    assert (
+        "automatic kWh helper"
+        in energy_summary_attributes(state, "fridge")["summary_explanation"]
+    )
 
 
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
@@ -3379,12 +3418,8 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
     assert descriptions["learning"].entity_registry_visible_default is False
     assert descriptions["learning"].entity_registry_enabled_default is False
     assert descriptions["learning"].entity_tier is EntityTier.DIAGNOSTIC
-    assert (
-        descriptions["data_quality_problem"].entity_registry_visible_default is False
-    )
-    assert (
-        descriptions["data_quality_problem"].entity_registry_enabled_default is False
-    )
+    assert descriptions["data_quality_problem"].entity_registry_visible_default is False
+    assert descriptions["data_quality_problem"].entity_registry_enabled_default is False
     assert descriptions["data_quality_problem"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["maintenance"].entity_registry_visible_default is False
     assert descriptions["maintenance"].entity_registry_enabled_default is False
@@ -3428,6 +3463,8 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
         )
         assert entity.icon == icon
         assert entity.icon != "mdi:eye"
+
+
 @pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
@@ -3467,18 +3504,13 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     )
     assert setup_health.native_value == "Ready"
     assert setup_health.extra_state_attributes["blocking_issue_count"] == 0
-    assert (
-        setup_health.extra_state_attributes["next_step"]
-        == "No setup action needed"
-    )
+    assert setup_health.extra_state_attributes["next_step"] == "No setup action needed"
     assert getattr(setup_health, "device_info", None) is None
     effective_rate = added_entities[1]
     assert effective_rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
     assert effective_rate.native_value == 0.0
     assert effective_rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
-    assert added_entities[2].device_info["identifiers"] == {
-        (DOMAIN, "entry-1_fridge")
-    }
+    assert added_entities[2].device_info["identifiers"] == {(DOMAIN, "entry-1_fridge")}
     assert not isinstance(added_entities[2].state, AnalyzerState)
     assert added_entities[2].coordinator_state is coordinator.data
 
@@ -3572,15 +3604,11 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         if unique_id.startswith("entry-1_nilm_assignment-dishwasher_")
     } == {"entry-1_nilm_assignment-dishwasher_estimated_running"}
 
-    estimated_power = sensor_by_id[
-        "entry-1_nilm_assignment-dishwasher_estimated_power"
-    ]
+    estimated_power = sensor_by_id["entry-1_nilm_assignment-dishwasher_estimated_power"]
     estimated_daily_energy = sensor_by_id[
         "entry-1_nilm_assignment-dishwasher_estimated_daily_energy"
     ]
-    running = binary_by_id[
-        "entry-1_nilm_assignment-dishwasher_estimated_running"
-    ]
+    running = binary_by_id["entry-1_nilm_assignment-dishwasher_estimated_running"]
     assert estimated_power.native_value == 0.0
     assert estimated_daily_energy.native_value == 0.818
     assert running.is_on is False
@@ -3769,8 +3797,7 @@ async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() 
     await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
 
     assert not any(
-        entity.unique_id.startswith("entry-1_nilm_")
-        for entity in added_entities
+        entity.unique_id.startswith("entry-1_nilm_") for entity in added_entities
     )
 
 
@@ -3874,10 +3901,6 @@ async def test_sensor_setup_entry_omits_non_current_sensors() -> None:
     }.isdisjoint(unique_ids)
 
 
-
-
-
-
 @pytest.mark.asyncio
 async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
@@ -3922,26 +3945,29 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
         "entry-1_hvac_capacity_usage",
         "entry-1_hvac_leg_imbalance",
     } <= unique_ids
-    assert not {
-        "entry-1_hvac_nilm_signature_count",
-        "entry-1_hvac_balance_power",
-        "entry-1_hvac_solar_generation_power",
-        "entry-1_hvac_utility_comparison_difference",
-        "entry-1_hvac_billing_cycle_usage",
-        "entry-1_hvac_cost_cycle",
-        "entry-1_hvac_power_quality_score",
-        "entry-1_hvac_power_quality_evidence",
-        "entry-1_hvac_reactive_power_drift",
-        "entry-1_hvac_apparent_power_drift",
-        "entry-1_hvac_power_factor_drift",
-        "entry-1_hvac_metric_consistency_score",
-        "entry-1_hvac_metric_consistency_status",
-        "entry-1_hvac_leg_imbalance_status",
-        "entry-1_hvac_run_cycle_count",
-        "entry-1_hvac_run_cycle_runtime",
-        "entry-1_hvac_run_cycle_duty_cycle",
-        "entry-1_hvac_run_cycle_status",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_hvac_nilm_signature_count",
+            "entry-1_hvac_balance_power",
+            "entry-1_hvac_solar_generation_power",
+            "entry-1_hvac_utility_comparison_difference",
+            "entry-1_hvac_billing_cycle_usage",
+            "entry-1_hvac_cost_cycle",
+            "entry-1_hvac_power_quality_score",
+            "entry-1_hvac_power_quality_evidence",
+            "entry-1_hvac_reactive_power_drift",
+            "entry-1_hvac_apparent_power_drift",
+            "entry-1_hvac_power_factor_drift",
+            "entry-1_hvac_metric_consistency_score",
+            "entry-1_hvac_metric_consistency_status",
+            "entry-1_hvac_leg_imbalance_status",
+            "entry-1_hvac_run_cycle_count",
+            "entry-1_hvac_run_cycle_runtime",
+            "entry-1_hvac_run_cycle_duty_cycle",
+            "entry-1_hvac_run_cycle_status",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4002,12 +4028,15 @@ async def test_sensor_setup_entry_adds_selected_cycle_and_electrical_graph_group
         "entry-1_hvac_electrical_health",
         "entry-1_hvac_leg_imbalance",
     } <= unique_ids
-    assert not {
-        "entry-1_hvac_run_cycle_status",
-        "entry-1_hvac_power_quality_evidence",
-        "entry-1_hvac_metric_consistency_status",
-        "entry-1_hvac_leg_imbalance_status",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_hvac_run_cycle_status",
+            "entry-1_hvac_power_quality_evidence",
+            "entry-1_hvac_metric_consistency_status",
+            "entry-1_hvac_leg_imbalance_status",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4056,16 +4085,19 @@ async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities
         "entry-1_hvac_standby_status",
         "entry-1_hvac_weather_context",
     } <= unique_ids
-    assert not {
-        "entry-1_hvac_billing_cycle_forecast",
-        "entry-1_hvac_billing_cycle_budget_usage",
-        "entry-1_hvac_billing_cycle_status",
-        "entry-1_hvac_cost_current_rate",
-        "entry-1_hvac_cost_cycle_forecast",
-        "entry-1_hvac_cost_status",
-        "entry-1_hvac_standby_threshold",
-        "entry-1_hvac_outdoor_temperature",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_hvac_billing_cycle_forecast",
+            "entry-1_hvac_billing_cycle_budget_usage",
+            "entry-1_hvac_billing_cycle_status",
+            "entry-1_hvac_cost_current_rate",
+            "entry-1_hvac_cost_cycle_forecast",
+            "entry-1_hvac_cost_status",
+            "entry-1_hvac_standby_threshold",
+            "entry-1_hvac_outdoor_temperature",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4115,16 +4147,17 @@ async def test_sensor_setup_entry_adds_selected_billing_forecast_group_only() ->
         "entry-1_hvac_billing_cycle_forecast",
         "entry-1_hvac_cost_cycle_forecast",
     } <= unique_ids
-    assert not {
-        "entry-1_hvac_billing_cycle_budget_usage",
-        "entry-1_hvac_billing_cycle_status",
-        "entry-1_hvac_cost_current_rate",
-        "entry-1_hvac_cost_status",
-        "entry-1_hvac_standby_threshold",
-        "entry-1_hvac_outdoor_temperature",
-    } & unique_ids
-
-
+    assert (
+        not {
+            "entry-1_hvac_billing_cycle_budget_usage",
+            "entry-1_hvac_billing_cycle_status",
+            "entry-1_hvac_cost_current_rate",
+            "entry-1_hvac_cost_status",
+            "entry-1_hvac_standby_threshold",
+            "entry-1_hvac_outdoor_temperature",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4175,23 +4208,24 @@ async def test_sensor_setup_entry_adds_car_charger_specific_diagnostics() -> Non
         "entry-1_car_charger_leg_imbalance",
         "entry-1_car_charger_daily_energy_usage",
     } <= unique_ids
-    assert not {
-        "entry-1_car_charger_run_cycle_count",
-        "entry-1_car_charger_run_cycle_status",
-        "entry-1_car_charger_leg_imbalance_status",
-        "entry-1_car_charger_metric_consistency_score",
-        "entry-1_car_charger_metric_consistency_status",
-        "entry-1_car_charger_power_factor_drift",
-        "entry-1_car_charger_standby_status",
-        "entry-1_car_charger_nilm_signature_count",
-        "entry-1_car_charger_balance_power",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_car_charger_run_cycle_count",
+            "entry-1_car_charger_run_cycle_status",
+            "entry-1_car_charger_leg_imbalance_status",
+            "entry-1_car_charger_metric_consistency_score",
+            "entry-1_car_charger_metric_consistency_status",
+            "entry-1_car_charger_power_factor_drift",
+            "entry-1_car_charger_standby_status",
+            "entry-1_car_charger_nilm_signature_count",
+            "entry-1_car_charger_balance_power",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
-    None
-):
+async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
@@ -4222,12 +4256,15 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> (
         "entry-1_pool_pump_electrical_health",
         "entry-1_pool_pump_current_demand",
     } <= unique_ids
-    assert not {
-        "entry-1_pool_pump_metric_consistency_score",
-        "entry-1_pool_pump_metric_consistency_status",
-        "entry-1_pool_pump_leg_imbalance",
-        "entry-1_pool_pump_leg_imbalance_status",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_pool_pump_metric_consistency_score",
+            "entry-1_pool_pump_metric_consistency_status",
+            "entry-1_pool_pump_leg_imbalance",
+            "entry-1_pool_pump_leg_imbalance_status",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4264,10 +4301,13 @@ async def test_sensor_setup_entry_does_not_create_leg_imbalance_for_mains_nilm()
         "entry-1_mains_nilm_signature_count",
         "entry-1_mains_balance_power",
     } <= unique_ids
-    assert not {
-        "entry-1_mains_leg_imbalance",
-        "entry-1_mains_leg_imbalance_status",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_mains_leg_imbalance",
+            "entry-1_mains_leg_imbalance_status",
+        }
+        & unique_ids
+    )
 
 
 @pytest.mark.asyncio
@@ -4365,9 +4405,7 @@ async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -> (
-    None
-):
+async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
@@ -4439,9 +4477,12 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
     by_entity_id = {
         f"sensor.{entity.suggested_object_id}": entity for entity in source_entities
     }
-    assert by_entity_id[
-        "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
-    ].device_class == "power"
+    assert (
+        by_entity_id[
+            "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
+        ].device_class
+        == "power"
+    )
     assert (
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_pool_pump_active_power"
@@ -4454,19 +4495,23 @@ async def test_sensor_setup_entry_materializes_selected_demo_source_entities() -
         ].native_value
         == 0.86
     )
-    assert by_entity_id[
-        "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
-    ].icon == "mdi:sine-wave"
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"].icon
+        == "mdi:sine-wave"
+    )
     assert (
         by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"].native_value
         == 119.6
     )
     assert "sensor.cs_energy_analyzer_demo_pool_pump_voltage" not in by_entity_id
-    assert getattr(
-        by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"],
-        "device_info",
-        None,
-    ) is None
+    assert (
+        getattr(
+            by_entity_id["sensor.cs_energy_analyzer_demo_mains_l1_voltage"],
+            "device_info",
+            None,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -4618,9 +4663,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         == 14.2
     )
     assert (
-        by_entity_id[
-            "sensor.cs_energy_analyzer_demo_washer_active_power"
-        ].native_value
+        by_entity_id["sensor.cs_energy_analyzer_demo_washer_active_power"].native_value
         == 420.0
     )
     assert (
@@ -4628,9 +4671,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         == 4.2
     )
     assert (
-        by_entity_id[
-            "sensor.cs_energy_analyzer_demo_washer_power_factor"
-        ].native_value
+        by_entity_id["sensor.cs_energy_analyzer_demo_washer_power_factor"].native_value
         == 0.83
     )
     assert (
@@ -4639,12 +4680,14 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         ].native_value
         == 280.0
     )
-    assert by_entity_id[
-        "sensor.cs_energy_analyzer_demo_dryer_l1_energy"
-    ].native_value == 63.7
-    assert by_entity_id[
-        "sensor.cs_energy_analyzer_demo_dryer_l2_energy"
-    ].native_value == 63.1
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_dryer_l1_energy"].native_value
+        == 63.7
+    )
+    assert (
+        by_entity_id["sensor.cs_energy_analyzer_demo_dryer_l2_energy"].native_value
+        == 63.1
+    )
     assert (
         by_entity_id[
             "sensor.cs_energy_analyzer_demo_dryer_l1_active_power"
@@ -4658,9 +4701,7 @@ async def test_sensor_setup_entry_materializes_demo_laundry_sources() -> None:
         == 2550.0
     )
     assert (
-        by_entity_id[
-            "sensor.cs_energy_analyzer_demo_dryer_l1_current"
-        ].native_value
+        by_entity_id["sensor.cs_energy_analyzer_demo_dryer_l1_current"].native_value
         == 21.8
     )
     assert (
@@ -5004,12 +5045,15 @@ async def test_sensor_setup_entry_adds_mains_energy_without_appliance_cycles() -
         "entry-1_mains_current_demand",
         "entry-1_mains_daily_energy_usage",
     } <= unique_ids
-    assert not {
-        "entry-1_mains_run_cycle_count",
-        "entry-1_mains_standby_status",
-        "entry-1_mains_billing_cycle_usage",
-        "entry-1_mains_cost_cycle",
-    } & unique_ids
+    assert (
+        not {
+            "entry-1_mains_run_cycle_count",
+            "entry-1_mains_standby_status",
+            "entry-1_mains_billing_cycle_usage",
+            "entry-1_mains_cost_cycle",
+        }
+        & unique_ids
+    )
 
 
 def test_stale_entity_registry_entries_identifies_only_inapplicable_entities() -> None:
@@ -5195,9 +5239,7 @@ async def test_binary_sensor_setup_selected_expert_diagnostics_preserve_visibili
         == "integration"
     )
     assert (
-        fake_registry.entities[
-            "binary_sensor.well_pump_data_quality_problem"
-        ].hidden_by
+        fake_registry.entities["binary_sensor.well_pump_data_quality_problem"].hidden_by
         == "user"
     )
     assert fake_registry.removed == []
@@ -5373,7 +5415,7 @@ async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch(
                             "binary_sensor.washer_water_flow"
                         ]
                     }
-                }
+                },
             },
             entry_data={},
         ),

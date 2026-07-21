@@ -1186,7 +1186,13 @@ def test_feature_store_preserves_settings_recommendations() -> None:
     restored = feature_store_data_from_dict(raw)
     serialized = feature_store_data_to_dict(restored)
 
-    assert serialized["settings_recommendations"] == raw["settings_recommendations"]
+    expected_recommendations = {
+        key: dict(value) for key, value in raw["settings_recommendations"].items()
+    }
+    expected_recommendations["rec-hvac-daily-spike"]["setting_label"] = (
+        "Daily Spike Ratio"
+    )
+    assert serialized["settings_recommendations"] == expected_recommendations
     assert (
         serialized["settings_recommendation_decisions"]
         == raw["settings_recommendation_decisions"]

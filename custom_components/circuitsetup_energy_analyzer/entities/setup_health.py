@@ -10,12 +10,14 @@ from ..const import (
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXPECTS_WATER_FLOW,
+    CONF_EXTRA_SOURCE_ENTITIES,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_PUMP_CORRELATION_ENABLED,
     CONF_RAIN_SENSOR_ENTITY,
+    CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -291,6 +293,16 @@ def _setup_health_checklist(
 ) -> list[dict[str, Any]]:
     circuits = _setup_health_circuits(coordinator)
     has_circuits = bool(circuits)
+    has_sources = any(
+        getattr(circuit, "sensors", ()) for _, circuit in circuits
+    ) or any(
+        _setup_health_config_value(coordinator, key)
+        for key in (
+            CONF_SOURCE_ENTITIES,
+            CONF_EXTRA_SOURCE_ENTITIES,
+            CONF_MAINS_SOURCE_ENTITIES,
+        )
+    )
     source_circuits = _setup_health_issue_circuits(
         issues,
         issue_keys={
@@ -337,7 +349,7 @@ def _setup_health_checklist(
         _setup_health_checklist_item(
             "source_data_found",
             _setup_health_checklist_value("source_data_found", "title"),
-            "ok" if has_circuits and not source_circuits else "needs_attention",
+            "ok" if has_sources and not source_circuits else "needs_attention",
             _setup_health_checklist_value("source_data_found", "why_it_matters"),
             affected_circuits=source_circuits,
             fix=(
@@ -363,7 +375,10 @@ def _setup_health_checklist(
         ),
         _setup_health_checklist_item(
             "ct_direction_valid",
-            _setup_health_checklist_value("ct_direction_valid", "title"),
+            _setup_health_checklist_value(
+                "ct_direction_valid",
+                "title_attention" if ct_circuits else "title",
+            ),
             "ok" if not ct_circuits else "needs_attention",
             _setup_health_checklist_value("ct_direction_valid", "why_it_matters"),
             affected_circuits=ct_circuits,
@@ -473,8 +488,7 @@ def _setup_health_checklist_item(
             affected_circuits[:_MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS],
         )
         item["affected_circuits_truncated_count"] = max(
-            len(affected_circuits)
-            - _MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS,
+            len(affected_circuits) - _MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS,
             0,
         )
     if status not in {"ok", "optional"}:
@@ -520,8 +534,6 @@ def _setup_health_options_path(
 ) -> str | None:
     if not options_step:
         return None
-    if options_step == "advanced_settings":
-        return SETUP_HEALTH_OPEN_PATH
     entry_id = getattr(coordinator, "entry_id", None)
     if not isinstance(entry_id, str) or not entry_id:
         return None
@@ -567,9 +579,7 @@ def _bounded_setup_health_issue(
     coordinator: Any,
     issue: Mapping[str, Any],
 ) -> dict[str, Any]:
-    bounded = {
-        key: _bounded_setup_health_value(value) for key, value in issue.items()
-    }
+    bounded = {key: _bounded_setup_health_value(value) for key, value in issue.items()}
     path = _setup_health_issue_open_path(coordinator, bounded)
     if path is None:
         bounded.pop("open_path", None)
@@ -598,10 +608,7 @@ def _bounded_setup_health_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_bounded_setup_health_value(item) for item in value)
     if isinstance(value, dict):
-        return {
-            key: _bounded_setup_health_value(item)
-            for key, item in value.items()
-        }
+        return {key: _bounded_setup_health_value(item) for key, item in value.items()}
     return value
 
 
@@ -751,11 +758,14 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                 )
             )
 
-        if _setup_health_status(
-            state,
-            "leg_imbalance_status_by_circuit",
-            circuit_id,
-        ) == "not_dual_phase":
+        if (
+            _setup_health_status(
+                state,
+                "leg_imbalance_status_by_circuit",
+                circuit_id,
+            )
+            == "not_dual_phase"
+        ):
             issues.append(
                 _setup_health_issue(
                     "Review circuit assignments",
@@ -937,10 +947,7 @@ def _setup_health_data_quality_issue(
                 issue_text,
             ),
         )
-    if (
-        checklist.get("required_sensors_present") is False
-        or "missing" in issue_text
-    ):
+    if checklist.get("required_sensors_present") is False or "missing" in issue_text:
         return _setup_health_issue(
             "Review circuit assignments",
             f"Review source sensors for {circuit.name}",
@@ -1029,8 +1036,7 @@ def _setup_health_learning_guidance(
     energy_usage_status: str | None = None,
 ) -> tuple[str, str]:
     circuit_name = str(
-        getattr(circuit, "name", "")
-        or getattr(circuit, "circuit_id", "this circuit")
+        getattr(circuit, "name", "") or getattr(circuit, "circuit_id", "this circuit")
     )
     if energy_usage_status == "waiting_for_delta":
         energy_evidence = _setup_health_mapping(
@@ -1224,9 +1230,7 @@ def _setup_health_utility_comparison_issue(
             "Add utility comparison source",
             f"Add utility comparison source for {circuit.name}",
             circuit,
-            (
-                "Utility comparison is enabled, but utility kWh has no data."
-            ),
+            ("Utility comparison is enabled, but utility kWh has no data."),
             issue="utility_comparison_missing_utility_source",
         )
     if status == "missing_measured":
@@ -1234,9 +1238,7 @@ def _setup_health_utility_comparison_issue(
             "Add measured kWh source",
             f"Add measured kWh source for {circuit.name}",
             circuit,
-            (
-                "Utility comparison is enabled, but measured kWh has no data."
-            ),
+            ("Utility comparison is enabled, but measured kWh has no data."),
             issue="utility_comparison_missing_measured_source",
         )
     return _setup_health_issue(
@@ -1323,17 +1325,25 @@ def _source_entities_mentioned_in_issues(circuit: Any, issue_text: str) -> list[
 
 
 def _source_entities(circuit: Any) -> list[str]:
-    sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        "sensors",
-        (),
+    sensors = (
+        circuit.get("sensors", ())
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            "sensors",
+            (),
+        )
     )
     source_entities: list[str] = []
     for sensor in sensors or ():
-        entity_id = sensor.get("entity_id") if isinstance(sensor, Mapping) else getattr(
-            sensor,
-            "entity_id",
-            None,
+        entity_id = (
+            sensor.get("entity_id")
+            if isinstance(sensor, Mapping)
+            else getattr(
+                sensor,
+                "entity_id",
+                None,
+            )
         )
         if (
             isinstance(entity_id, str)
@@ -1345,17 +1355,25 @@ def _source_entities(circuit: Any) -> list[str]:
 
 
 def _sensor_roles(circuit: Any) -> set[SensorRole]:
-    sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        "sensors",
-        (),
+    sensors = (
+        circuit.get("sensors", ())
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            "sensors",
+            (),
+        )
     )
     roles: set[SensorRole] = set()
     for sensor in sensors or ():
-        role = sensor.get("role") if isinstance(sensor, Mapping) else getattr(
-            sensor,
-            "role",
-            None,
+        role = (
+            sensor.get("role")
+            if isinstance(sensor, Mapping)
+            else getattr(
+                sensor,
+                "role",
+                None,
+            )
         )
         try:
             roles.add(SensorRole(role))
@@ -1377,13 +1395,15 @@ def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
         return None
 
 
-
-
 def _circuit_mode(circuit: Any) -> CircuitMode | None:
-    raw_mode = circuit.get("mode") if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        "mode",
-        None,
+    raw_mode = (
+        circuit.get("mode")
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            "mode",
+            None,
+        )
     )
     try:
         return CircuitMode(raw_mode)

@@ -121,6 +121,7 @@ except (ImportError, ModuleNotFoundError):
     ) -> Any:
         return schema
 
+
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -218,6 +219,7 @@ from .recommendation_guidance import (
     recommendation_setting_default_value,
     recommendation_setting_expected_effect,
 )
+from .settings_advisor import SETTING_LABELS
 from .solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
@@ -698,16 +700,8 @@ def _demo_source_bundle_enabled_for_entry_values(
     )
 
 
-
-
 def _demo_unsuffixed_source_entity_id(entity_id: str) -> str:
     return re.sub(r"_\d+$", "", entity_id)
-
-
-
-
-
-
 
 
 def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
@@ -732,9 +726,7 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
             invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
         )
     )
-    source_entities = list(
-        dict.fromkeys([*source_entities, *extra_source_entities])
-    )
+    source_entities = list(dict.fromkeys([*source_entities, *extra_source_entities]))
     if demo_source_bundle_enabled:
         source_entities = _with_demo_source_bundle(source_entities)
     mains_source_entities = _normalize_demo_source_entity_ids(
@@ -1129,9 +1121,7 @@ def _source_device_selector_config() -> dict[str, Any]:
 def _select_selector(options: Iterable[Any]) -> Any:
     option_list = list(options)
     values = [
-        str(option.get("value"))
-        if isinstance(option, Mapping)
-        else str(option)
+        str(option.get("value")) if isinstance(option, Mapping) else str(option)
         for option in option_list
     ]
     return _selector({"select": {"options": option_list}}, vol.In(tuple(values)))
@@ -1447,17 +1437,19 @@ DATA_SCHEMA = _setup_schema()
 
 def _assignment_schema(group: Mapping[str, Any]) -> Any:
     entity_ids = [str(entity_id) for entity_id in group.get("entity_ids", ())]
-    schema: dict[Any, Any] = {
-        vol.Required(
-            FIELD_INCLUDE_CIRCUIT,
-            default=True,
-        ): bool,
-    }
+    schema: dict[Any, Any] = {}
     if bool(group.get("allow_remove_from_analysis", False)):
         schema[
             vol.Optional(
                 FIELD_REMOVE_FROM_ANALYSIS,
                 default=False,
+            )
+        ] = bool
+    else:
+        schema[
+            vol.Required(
+                FIELD_INCLUDE_CIRCUIT,
+                default=True,
             )
         ] = bool
     schema.update(
@@ -1629,10 +1621,7 @@ def _utility_schema(
             ): _single_sensor_entity_selector(),
             vol.Optional(
                 FIELD_UTILITY_STATISTIC_ID,
-                default=str(
-                    settings.get(FIELD_UTILITY_STATISTIC_ID)
-                    or _first_or_empty(utility_statistic_ids)
-                ),
+                default=str(settings.get(FIELD_UTILITY_STATISTIC_ID) or ""),
             ): statistic_selector,
             vol.Optional(
                 FIELD_UTILITY_SOURCE_TYPE,
@@ -2214,9 +2203,10 @@ def _is_advanced_mixed_context(context: Mapping[str, str]) -> bool:
 
 
 def _is_advanced_solar_only_context(context: Mapping[str, str]) -> bool:
-    return (
-        context.get("profile") == ApplianceProfile.SOLAR_INVERTER.value
-        and not _is_advanced_mains_context(context)
+    return context.get(
+        "profile"
+    ) == ApplianceProfile.SOLAR_INVERTER.value and not _is_advanced_mains_context(
+        context
     )
 
 
@@ -2447,13 +2437,91 @@ def assignment_groups_from_sources(
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
 
-    groups: dict[str, list[str]] = {}
-    for entity_id in grouped_entities:
-        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
-        groups.setdefault(circuit_id, []).append(entity_id)
+    owners_by_entity: dict[str, set[int]] = {}
+    inferred_group_owners: dict[str, set[int]] = {}
+    for index, circuit in enumerate(existing_circuit_list):
+        for entity_id in _sensor_entity_ids_from_circuit(circuit):
+            owners_by_entity.setdefault(entity_id, set()).add(index)
+            inferred_group_owners.setdefault(
+                _assignment_circuit_id_from_entity_id(entity_id),
+                set(),
+            ).add(index)
 
     assignment_groups: list[dict[str, Any]] = []
-    for circuit_id, entity_ids in groups.items():
+    claimed_entities: set[str] = set()
+    for index, saved_circuit in enumerate(existing_circuit_list):
+        saved_sensor_entities = _sensor_entity_ids_from_circuit(saved_circuit)
+        entity_ids = [
+            entity_id
+            for entity_id in grouped_entities
+            if owners_by_entity.get(entity_id) == {index}
+            or (
+                not owners_by_entity.get(entity_id)
+                and inferred_group_owners.get(
+                    _assignment_circuit_id_from_entity_id(entity_id)
+                )
+                == {index}
+            )
+        ]
+        entity_ids.extend(
+            entity_id
+            for entity_id in saved_sensor_entities
+            if owners_by_entity.get(entity_id) == {index}
+            and entity_id not in entity_ids
+        )
+        claimed_entities.update(entity_ids)
+        stable_circuit_id = str(
+            saved_circuit.get("circuit_id") or saved_circuit.get("id") or ""
+        ).strip()
+        group_id = stable_circuit_id or _slugify(
+            str(saved_circuit.get("name") or "circuit")
+        )
+        saved_profile = _normalize_assignment_profile(
+            str(saved_circuit.get("appliance_profile") or ApplianceProfile.MIXED.value)
+        )
+        selected_entity_ids = tuple(
+            entity_id for entity_id in entity_ids if entity_id in saved_sensor_entities
+        ) or tuple(entity_ids)
+        assignment_groups.append(
+            {
+                "group_id": group_id,
+                "circuit_id": group_id,
+                "entity_ids": tuple(entity_ids),
+                "name": str(
+                    saved_circuit.get("name") or _friendly_name_from_id(group_id)
+                ),
+                "appliance_profile": saved_profile,
+                "mode": (
+                    _assignment_mode_for_profile_and_entities(
+                        saved_profile,
+                        selected_entity_ids,
+                    )
+                    if selected_entity_ids
+                    else str(saved_circuit.get("mode") or CircuitMode.MIXED.value)
+                ),
+                "power_flow": _normalize_power_flow(
+                    str(saved_circuit.get("power_flow") or "")
+                ),
+                "retention_mode": _normalize_retention_mode(
+                    str(
+                        saved_circuit.get(
+                            "retention_mode",
+                            DEFAULT_RETENTION_MODE,
+                        )
+                    )
+                ),
+                "selected_entity_ids": selected_entity_ids,
+            }
+        )
+
+    unowned_groups: dict[str, list[str]] = {}
+    for entity_id in grouped_entities:
+        if entity_id in claimed_entities or owners_by_entity.get(entity_id):
+            continue
+        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
+        unowned_groups.setdefault(circuit_id, []).append(entity_id)
+
+    for circuit_id, entity_ids in unowned_groups.items():
         profile, mode = _suggest_assignment_profile_mode(circuit_id, entity_ids)
         if profile == ApplianceProfile.MIXED.value:
             friendly_names = [
@@ -2468,58 +2536,15 @@ def assignment_groups_from_sources(
             if friendly_profile != ApplianceProfile.MIXED.value:
                 profile = friendly_profile
                 mode = _assignment_mode_for_profile_and_entities(profile, entity_ids)
-        group = {
-            "group_id": circuit_id,
-            "entity_ids": tuple(entity_ids),
-            "name": _friendly_name_from_id(circuit_id),
-            "appliance_profile": profile,
-            "mode": mode,
-        }
-        saved_circuit = _saved_circuit_for_group(group, existing_circuit_list)
-        if saved_circuit is not None:
-            saved_sensor_entities = _sensor_entity_ids_from_circuit(saved_circuit)
-            selected_entity_ids = tuple(
-                entity_id
-                for entity_id in entity_ids
-                if entity_id in saved_sensor_entities
-            ) or tuple(entity_ids)
-            saved_profile = _normalize_assignment_profile(
-                str(
-                    saved_circuit.get(
-                        "appliance_profile",
-                        group["appliance_profile"],
-                    )
-                )
-            )
-            stable_circuit_id = str(
-                saved_circuit.get("circuit_id")
-                or saved_circuit.get("id")
-                or ""
-            ).strip()
-            group.update(
-                {
-                    "circuit_id": stable_circuit_id or group["group_id"],
-                    "name": str(saved_circuit.get("name") or group["name"]),
-                    "appliance_profile": saved_profile,
-                    "mode": _assignment_mode_for_profile_and_entities(
-                        saved_profile,
-                        selected_entity_ids,
-                    ),
-                    "power_flow": _normalize_power_flow(
-                        str(saved_circuit.get("power_flow") or "")
-                    ),
-                    "retention_mode": _normalize_retention_mode(
-                        str(
-                            saved_circuit.get(
-                                "retention_mode",
-                                DEFAULT_RETENTION_MODE,
-                            )
-                        )
-                    ),
-                    "selected_entity_ids": selected_entity_ids,
-                }
-            )
-        assignment_groups.append(group)
+        assignment_groups.append(
+            {
+                "group_id": circuit_id,
+                "entity_ids": tuple(entity_ids),
+                "name": _friendly_name_from_id(circuit_id),
+                "appliance_profile": profile,
+                "mode": mode,
+            }
+        )
     return assignment_groups
 
 
@@ -2562,10 +2587,7 @@ def _sensor_entity_id_from_raw(sensor: Any) -> str:
 
 def _assignment_group_value(group: Mapping[str, Any]) -> str:
     return str(
-        group.get("circuit_id")
-        or group.get("group_id")
-        or group.get("id")
-        or ""
+        group.get("circuit_id") or group.get("group_id") or group.get("id") or ""
     )
 
 
@@ -2684,10 +2706,7 @@ def _start_assignment_review(
         existing_circuits=existing_circuit_list,
     )
     if update_existing:
-        groups = [
-            {**group, "allow_remove_from_analysis": True}
-            for group in groups
-        ]
+        groups = [{**group, "allow_remove_from_analysis": True} for group in groups]
     flow._pending_config = dict(pending_config)
     flow._assignment_groups = groups
     flow._assignment_index = 0
@@ -2850,8 +2869,7 @@ def _assignment_sensor_options(entity_ids: Iterable[str]) -> list[dict[str, str]
         {
             "value": entity_id,
             "label": (
-                f"{_friendly_name_from_id(entity_id.split('.')[-1])} "
-                f"({entity_id})"
+                f"{_friendly_name_from_id(entity_id.split('.')[-1])} ({entity_id})"
             ),
         }
         for entity_id in entity_ids
@@ -2863,6 +2881,7 @@ def _final_config_from_reviewed_circuits(
     circuits: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
     circuit_list = [dict(circuit) for circuit in circuits]
+    _validate_unique_assignment_sensors(circuit_list)
     assigned_source_entities = list(
         dict.fromkeys(
             str(sensor.get("entity_id"))
@@ -2919,6 +2938,7 @@ def _final_config_from_single_assignment_update(
         final_circuits.append(dict(circuit))
     if replacement is not None and not replaced:
         final_circuits.append(replacement)
+    _validate_unique_assignment_sensors(final_circuits)
     if not final_circuits:
         return _final_config_from_empty_assignment_update(
             pending_config,
@@ -2950,6 +2970,17 @@ def _final_config_from_single_assignment_update(
         final_circuits
     )
     return final_config
+
+
+def _validate_unique_assignment_sensors(
+    circuits: Iterable[Mapping[str, Any]],
+) -> None:
+    seen: set[str] = set()
+    for circuit in circuits:
+        for entity_id in _sensor_entity_ids_from_circuit(circuit):
+            if entity_id in seen:
+                raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
+            seen.add(entity_id)
 
 
 def _final_config_from_empty_assignment_update(
@@ -3936,9 +3967,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 )
             )
             matching_detail_level: str | None = None
-            if (
-                not remove_dashboard
-                and dashboard_layout_exceeds_entity_detail(layout, current_detail_level)
+            if not remove_dashboard and dashboard_layout_exceeds_entity_detail(
+                layout, current_detail_level
             ):
                 if not apply_entity_detail_profile:
                     return self.async_show_form(
@@ -3950,14 +3980,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                             apply_entity_detail_profile=apply_entity_detail_profile,
                         ),
                         errors={
-                            "base": (
-                                "dashboard_layout_requires_higher_entity_detail"
-                            )
+                            "base": ("dashboard_layout_requires_higher_entity_detail")
                         },
                     )
-                matching_detail_level = entity_detail_level_for_dashboard_layout(
-                    layout
-                )
+                matching_detail_level = entity_detail_level_for_dashboard_layout(layout)
                 detail_updates[CONF_ENTITY_DETAIL_LEVEL] = matching_detail_level
             coordinator = _options_flow_coordinator(self)
             if coordinator is not None:
@@ -4284,18 +4310,15 @@ def _recommendation_summary(recommendations: Iterable[Any]) -> str:
         current_value = _recommendation_value(recommendation, "current_value")
         suggested_value = _recommendation_value(recommendation, "suggested_value")
         lines.append(
-            "  Current value: "
-            f"{_format_recommendation_value(current_value, unit)}"
+            f"  Current value: {_format_recommendation_value(current_value, unit)}"
         )
         default_value = _recommendation_default_value(recommendation)
         if default_value is not None:
             lines.append(
-                "  Default value: "
-                f"{_format_recommendation_value(default_value, unit)}"
+                f"  Default value: {_format_recommendation_value(default_value, unit)}"
             )
         lines.append(
-            "  Suggested value: "
-            f"{_format_recommendation_value(suggested_value, unit)}"
+            f"  Suggested value: {_format_recommendation_value(suggested_value, unit)}"
         )
         reason = str(_recommendation_value(recommendation, "reason") or "").strip()
         if reason:
@@ -4336,10 +4359,12 @@ def _recommendation_circuit_label(recommendation: Any) -> str:
 
 
 def _recommendation_setting_label(recommendation: Any) -> str:
+    setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
+    if setting_key in SETTING_LABELS:
+        return SETTING_LABELS[setting_key]
     label = str(_recommendation_value(recommendation, "setting_label") or "").strip()
     if label:
         return label
-    setting_key = str(_recommendation_value(recommendation, "setting_key") or "")
     return _friendly_name_from_id(setting_key) if setting_key else "Setting"
 
 
@@ -5212,18 +5237,24 @@ def _utility_settings_from_input(
     if not bool(user_input.get(FIELD_ENABLE_UTILITY_COMPARISON, False)):
         return circuit_id, {}
 
-    source_type = str(
-        user_input.get(FIELD_UTILITY_SOURCE_TYPE, DEFAULT_UTILITY_SOURCE_TYPE)
-    ).strip().lower()
+    source_type = (
+        str(user_input.get(FIELD_UTILITY_SOURCE_TYPE, DEFAULT_UTILITY_SOURCE_TYPE))
+        .strip()
+        .lower()
+    )
     if source_type not in VALID_UTILITY_SOURCE_TYPES:
         raise SetupValidationError("invalid_utility_source_type")
 
-    statistic_period = str(
-        user_input.get(
-            FIELD_UTILITY_STATISTIC_PERIOD,
-            DEFAULT_UTILITY_STATISTIC_PERIOD,
+    statistic_period = (
+        str(
+            user_input.get(
+                FIELD_UTILITY_STATISTIC_PERIOD,
+                DEFAULT_UTILITY_STATISTIC_PERIOD,
+            )
         )
-    ).strip().lower()
+        .strip()
+        .lower()
+    )
     if statistic_period not in VALID_UTILITY_STATISTIC_PERIODS:
         raise SetupValidationError("invalid_utility_statistic_period")
 
@@ -5231,12 +5262,8 @@ def _utility_settings_from_input(
     utility_energy_entity = str(
         user_input.get(FIELD_UTILITY_ENERGY_ENTITY) or ""
     ).strip()
-    utility_statistic_id = str(
-        user_input.get(FIELD_UTILITY_STATISTIC_ID) or ""
-    ).strip()
-    utility_cost_entity = str(
-        user_input.get(FIELD_UTILITY_COST_ENTITY) or ""
-    ).strip()
+    utility_statistic_id = str(user_input.get(FIELD_UTILITY_STATISTIC_ID) or "").strip()
+    utility_cost_entity = str(user_input.get(FIELD_UTILITY_COST_ENTITY) or "").strip()
     if utility_energy_entity:
         settings[FIELD_UTILITY_ENERGY_ENTITY] = utility_energy_entity
     if utility_statistic_id:

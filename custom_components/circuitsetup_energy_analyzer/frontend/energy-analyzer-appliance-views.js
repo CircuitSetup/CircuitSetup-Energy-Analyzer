@@ -468,9 +468,10 @@ export function createApplianceViewMethods({
     const description = item.why_it_matters || this._setupHealthChecklistText(item.item_id, "why_it_matters") || this._setupHealthText("fallbacks.review_item_reason");
     const title = item.title || this._setupHealthChecklistText(item.item_id, "title") || this._friendlyFeature(item.item_id || this._setupHealthText("fallbacks.setup_item"));
     const affectedLabel = this._setupHealthText("labels.affected");
+    const showStatus = !(item.item_id === "learning_progress" && item.status === "learning");
     return `
       <div class="metric">
-        <span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>
+        ${showStatus ? `<span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>` : ""}
         <strong>${this._escape(title)}</strong>
         <p>${this._escape(description)}</p>
         ${affected.length ? `<p class="muted">${this._escape(affectedLabel)}: ${this._escape(affected.join(", "))}</p>` : ""}
@@ -486,7 +487,6 @@ export function createApplianceViewMethods({
         <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
         <strong>${this._escape(item.fix || item.recommended_action || item.state || this._setupHealthText("fallbacks.review_setup"))}</strong>
         <p>${this._escape(item.reason || this._setupHealthText("fallbacks.review_item_reason"))}</p>
-        ${item.affected_circuit_name || item.affected_circuit ? `<p class="muted">${this._escape(this._setupHealthText("labels.circuit"))}: ${this._escape(item.affected_circuit_name || item.affected_circuit)}</p>` : ""}
         ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
       </div>
     `);
@@ -549,44 +549,48 @@ export function createApplianceViewMethods({
     }
     return `
       ${this._renderApplianceDetailHistory(payload.history)}
-      <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
-        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
-        ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
-        ${detail.source_type === "nilm_estimate" && (detail.mains_source || detail.mains_circuit_id) ? this._metric(this._panelText("appliance_detail.mains_source"), detail.mains_source || detail.mains_circuit_id, "mdi:home-lightning-bolt-outline") : ""}
-        ${detail.source_quality ? this._metric(this._panelText("appliance_detail.data_quality"), detail.source_quality.label || this._friendlyFeature(detail.source_quality.status), "mdi:database-check-outline") : ""}
-        ${detail.learning_readiness ? this._metric(this._panelText("appliance_detail.learning_readiness"), detail.learning_readiness.label || this._friendlyFeature(detail.learning_readiness.status), "mdi:school-outline") : ""}
-        ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
-      </section>
-      <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
-        ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state, "mdi:lightning-bolt")}
-        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
-        ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
-      </section>
-      <section class="panel summary">
-        ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
-        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
-        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
-      </section>
-      <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
-        ${this._renderApplianceTimeline(detail.recent_timeline)}
-      </section>
+      <div class="appliance-detail-overview">
+        <div class="appliance-detail-facts">
+          <section class="panel summary">
+            ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+            ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+            ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
+            ${detail.source_type === "nilm_estimate" && (detail.mains_source || detail.mains_circuit_id) ? this._metric(this._panelText("appliance_detail.mains_source"), detail.mains_source || detail.mains_circuit_id, "mdi:home-lightning-bolt-outline") : ""}
+            ${detail.source_quality ? this._metric(this._panelText("appliance_detail.data_quality"), detail.source_quality.label || this._friendlyFeature(detail.source_quality.status), "mdi:database-check-outline") : ""}
+            ${detail.learning_readiness ? this._metric(this._panelText("appliance_detail.learning_readiness"), detail.learning_readiness.label || this._friendlyFeature(detail.learning_readiness.status), "mdi:school-outline") : ""}
+            ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
+          </section>
+          <section class="panel summary">
+            ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+            ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state, "mdi:lightning-bolt")}
+            ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+            ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
+          </section>
+          <section class="panel summary">
+            ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
+            ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
+            ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
+            ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
+          </section>
+        </div>
+        <section class="panel appliance-detail-timeline">
+          <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
+          ${this._renderApplianceTimeline(detail.recent_timeline)}
+        </section>
+      </div>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
-        ${this._renderApplianceComparisons(detail.today_vs_normal)}
+        ${this._renderApplianceComparisons(detail.today_vs_normal, detail.learning_readiness)}
       </section>
       ${this._renderWhyEnergyChanged(detail.energy_change_explanation)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
       </section>
-      <section class="panel">
+      ${this._actionableApplianceChecks(detail.what_to_check_first).length ? `<section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.what_to_check_first"))}</h2>
-        ${this._renderSimpleList(detail.what_to_check_first, detail.next_step || this._panelText("appliance_detail.no_immediate_check"))}
-      </section>
+        ${this._renderSimpleList(this._actionableApplianceChecks(detail.what_to_check_first), "")}
+      </section>` : ""}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
@@ -597,7 +601,11 @@ export function createApplianceViewMethods({
   _renderWhyEnergyChanged(energy_change_explanation) {
     const heading = this._panelText("appliance_detail.why_energy_changed");
     if (!energy_change_explanation) {
-      return `<section class="panel"><h2>${this._escape(heading)}</h2><p class="muted">${this._escape(this._panelText("appliance_detail.energy_change_insufficient"))}</p></section>`;
+      return "";
+    }
+    const totalChange = Number(energy_change_explanation.total_change_percent);
+    if (Number.isFinite(totalChange) && Math.abs(totalChange) < 0.5) {
+      return "";
     }
     const contributions = [
       ["runtime", energy_change_explanation.runtime_contribution_percent],
@@ -667,7 +675,14 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceTimeline(timeline) {
-    const items = Array.isArray(timeline && timeline.items) ? timeline.items : [];
+    const rawItems = Array.isArray(timeline && timeline.items) ? timeline.items : [];
+    const seen = new Set();
+    const items = rawItems.filter((item) => {
+      const key = [item.timestamp, item.title, item.detail].join("\u0000");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (!items.length) {
       const title = timeline && timeline.latest_title ? timeline.latest_title : this._panelText("appliance_detail.no_recent_activity");
       return `<p class="muted">${this._escape(title)}</p>`;
@@ -681,10 +696,22 @@ export function createApplianceViewMethods({
     `).join("")}</ol>`;
   }
 
-  _renderApplianceComparisons(comparisons) {
-    const items = Array.isArray(comparisons) ? comparisons : [];
+  _renderApplianceComparisons(comparisons, learningReadiness = {}) {
+    const items = (Array.isArray(comparisons) ? comparisons : []).filter((item) => (
+      item.current_value !== null
+      && item.current_value !== undefined
+      && ((item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined)
+        || (item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined)
+        || (item.configured_warning_value !== null && item.configured_warning_value !== undefined)
+        || (item.configured_limit_value !== null && item.configured_limit_value !== undefined))
+    ));
     if (!items.length) {
-      return `<p class="muted">${this._escape(this._panelText("appliance_detail.learning_ranges"))}</p>`;
+      const complete = Number(learningReadiness.days_complete);
+      const required = Number(learningReadiness.days_required);
+      if (Number.isFinite(complete) && Number.isFinite(required) && required > 0) {
+        return `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.learning_progress", { complete, required }))}</p>`;
+      }
+      return `<p class="muted">${this._escape(learningReadiness.label || this._panelText("appliance_detail.learning_ranges"))}</p>`;
     }
     return `<div class="appliance-comparison-grid">${items.map((item) => {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
@@ -717,15 +744,17 @@ export function createApplianceViewMethods({
       return `
         <div class="appliance-comparison">
           <span class="comparison-label">${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
-          <strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong>
-          <p class="comparison-summary">${this._escape(this._panelTextFormat("appliance_detail.comparison_summary", { normal, status: this._friendlyFeature(item.status) }))}</p>
+          <div class="appliance-comparison-columns">
+            <div><span>${this._escape(this._panelText("common.today"))}</span><strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong></div>
+            <div><span>${this._escape(this._panelText("common.normal"))}</span><strong>${this._escape(normal)}</strong></div>
+          </div>
+          <p class="comparison-summary">${this._escape(this._friendlyFeature(item.status))}</p>
           ${fullPeriod}
           ${configuredWarning}
           ${configuredLimit}
           ${asOf}
           ${projection}
           ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
-          ${item.source ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.source_value", { source: this._friendlyFeature(item.source) }))}</p>` : ""}
         </div>
       `;
     }).join("")}</div>`;
@@ -764,11 +793,37 @@ export function createApplianceViewMethods({
   }
 
   _zoomApplianceHistoryGraph(factor) {
-    this._zoomGraphWindow(
-      this._applianceDetailHistoryGraphWindow(),
-      factor,
-      (next) => { this._applianceDetailHistoryWindow = next; },
-    );
+    const history = this._applianceDetail && this._applianceDetail.history;
+    const periods = Array.isArray(history && history.period_hours)
+      ? history.period_hours.map(Number).filter(Number.isFinite).sort((left, right) => left - right)
+      : [];
+    const currentIndex = periods.indexOf(Number(this._applianceDetailHistoryHours));
+    if (currentIndex < 0) {
+      return undefined;
+    }
+    const nextIndex = factor < 1
+      ? Math.max(currentIndex - 1, 0)
+      : Math.min(currentIndex + 1, periods.length - 1);
+    if (nextIndex === currentIndex) {
+      return undefined;
+    }
+    return this._loadApplianceDetailHistory(periods[nextIndex]);
+  }
+
+  _actionableApplianceChecks(checks) {
+    return (Array.isArray(checks) ? checks : []).filter((item) => {
+      const text = String(item || "").trim();
+      return text && !/^no .+ (?:is |are )?needed/i.test(text) && !/^no action needed/i.test(text);
+    });
+  }
+
+  _applianceDetailHeaderMessage(detail, payload = {}) {
+    const nextStep = String((detail && detail.next_step) || (payload && payload.next_step) || "").trim();
+    const activeAlerts = Array.isArray(detail && detail.active_alerts) ? detail.active_alerts : [];
+    if (nextStep && (activeAlerts.length || !/alert|evidence/i.test(nextStep))) {
+      return nextStep;
+    }
+    return this._panelText("headers.appliance_detail_message");
   }
 
   _panApplianceHistoryGraph(direction) {

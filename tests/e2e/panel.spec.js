@@ -279,8 +279,7 @@ test("alert responses and setting preview actions call their services", async ({
 
   const recommendations = panel.locator('[data-alert-disclosure="recommendations"]');
   await recommendations.locator("summary").first().click();
-  const preview = recommendations.locator("details.setting-impact-preview");
-  await preview.locator("summary").click();
+  const preview = recommendations.locator(".setting-impact-preview");
   await expect(preview).toContainText("24");
   await expect(preview).toContainText("Recent history only.");
   await recommendations.locator('[data-recommendation-action="apply"]').click();

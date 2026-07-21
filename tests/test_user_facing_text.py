@@ -44,12 +44,10 @@ def _frontend_source() -> str:
 
 
 def _run_panel_node_script(body: str) -> None:
-    translation_path = (
-        INTEGRATION_DIR / "translations" / "en.json"
-    )
+    translation_path = INTEGRATION_DIR / "translations" / "en.json"
     panel_text_statement = (
         "const __panelText = JSON.parse("
-        f"fs.readFileSync({json.dumps(str(translation_path))}, \"utf8\")"
+        f'fs.readFileSync({json.dumps(str(translation_path))}, "utf8")'
         ").config_panel.panel;\n"
     )
     panel_class_statement = json.dumps(
@@ -227,7 +225,7 @@ EXPECTED_UTILITY_LABELS = {
     "circuit_id": "Circuit",
     "utility_energy_entity": "Utility Energy Entity",
     "utility_cost_entity": "Utility Cost Entity",
-    "utility_statistic_id": "Utility Statistic ID",
+    "utility_statistic_id": "Recorder Statistic ID (advanced)",
     "utility_source_type": "Utility Source Type",
     "utility_statistic_period": "Utility Statistic Period",
     "measured_energy_entities": "Measured Energy Entities",
@@ -381,7 +379,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "utility_energy_entity": "Utility Energy Entity",
     "utility_cost_entity": "Utility Cost Entity",
     "utility_source_type": "Utility Source Type",
-    "utility_statistic_id": "Utility Statistic ID",
+    "utility_statistic_id": "Recorder Statistic ID (advanced)",
     "utility_statistic_period": "Utility Statistic Period",
     "warning_ratio": "Warning Ratio",
     "window_days": "Window Days",
@@ -414,9 +412,10 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
-    assert "saves these source settings" in strings["config"]["step"]["user"][
-        "description"
-    ].lower()
+    assert (
+        "saves these source settings"
+        in strings["config"]["step"]["user"]["description"].lower()
+    )
 
 
 def test_options_flow_labels_are_human_readable_and_described() -> None:
@@ -464,9 +463,10 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
     for days in ("14 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
-    assert "saves these source settings" in strings["options"]["step"]["sources"][
-        "description"
-    ].lower()
+    assert (
+        "saves these source settings"
+        in strings["options"]["step"]["sources"]["description"].lower()
+    )
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
     assert entity_detail["data"]["selected_entity_groups"] == "Expert Entity Groups"
@@ -476,8 +476,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "simple" in entity_detail["data_description"]["entity_detail_level"].lower()
     assert "creates" in entity_detail["data_description"]["entity_detail_level"].lower()
     assert (
-        "expert"
-        in entity_detail["data_description"]["selected_entity_groups"].lower()
+        "expert" in entity_detail["data_description"]["selected_entity_groups"].lower()
     )
     dashboard = strings["options"]["step"]["dashboard"]
     assert dashboard["data"]["dashboard_layout"] == "Dashboard Layout"
@@ -499,16 +498,16 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "save a matching entity detail level"
         in dashboard["data_description"]["apply_entity_detail_profile"].lower()
     )
-    assert "reloads" in dashboard["data_description"][
-        "apply_entity_detail_profile"
-    ].lower()
+    assert (
+        "reloads"
+        in dashboard["data_description"]["apply_entity_detail_profile"].lower()
+    )
     assert (
         "instead of creating or updating"
         in dashboard["data_description"]["remove_dashboard"].lower()
     )
     assert (
-        "dashboard_layout_requires_higher_entity_detail"
-        in strings["options"]["error"]
+        "dashboard_layout_requires_higher_entity_detail" in strings["options"]["error"]
     )
 
 
@@ -517,9 +516,7 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
 
     for section in ("config", "options"):
         utility_data = strings[section]["step"]["utility"]["data"]
-        utility_descriptions = strings[section]["step"]["utility"][
-            "data_description"
-        ]
+        utility_descriptions = strings[section]["step"]["utility"]["data_description"]
         assert utility_data == EXPECTED_UTILITY_LABELS
         assert utility_descriptions.keys() == EXPECTED_UTILITY_LABELS.keys()
         assert all("_" not in label for label in utility_data.values())
@@ -569,9 +566,7 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     }
     assert section_labels == EXPECTED_ADVANCED_SECTION_LABELS
     assert section_data == EXPECTED_ADVANCED_SETTINGS_LABELS
-    assert section_descriptions.keys() == (
-        EXPECTED_ADVANCED_SETTINGS_LABELS.keys()
-    )
+    assert section_descriptions.keys() == (EXPECTED_ADVANCED_SETTINGS_LABELS.keys())
     assert settings_step["data"] == EXPECTED_ADVANCED_TOP_LEVEL_LABELS
     assert all("_" not in label for label in section_data.values())
     assert "selected_appliance" not in settings_step["description"]
@@ -586,14 +581,17 @@ def test_advanced_settings_labels_are_human_readable_and_described() -> None:
     assert "billing" in settings_step["description"].lower()
     assert "standby" in settings_step["description"].lower()
     billing_fields = settings_step["sections"]["billing_cost_settings"]["data"]
-    assert not {
-        "default_rate_per_kwh",
-        "tou_rate_per_kwh",
-        "tou_start",
-        "tou_end",
-        "tou_weekdays",
-        "tou_name",
-    } & billing_fields.keys()
+    assert (
+        not {
+            "default_rate_per_kwh",
+            "tou_rate_per_kwh",
+            "tou_start",
+            "tou_end",
+            "tou_weekdays",
+            "tou_name",
+        }
+        & billing_fields.keys()
+    )
 
 
 def test_assignment_flow_labels_are_human_readable_and_described() -> None:
@@ -603,7 +601,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         data = strings[section]["step"]["assign"]["data"]
         descriptions = strings[section]["step"]["assign"]["data_description"]
         assert data == {
-            "include_circuit": "Include Circuit",
+            "include_circuit": "Analyze this appliance",
             "remove_from_analysis": "Remove From Analysis",
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
@@ -638,9 +636,10 @@ def test_assignment_picker_text_is_human_readable() -> None:
             "Choose the existing appliance or circuit assignment to edit."
         )
     }
-    assert "x of" not in strings["options"]["step"]["select_assignment"][
-        "description"
-    ].lower()
+    assert (
+        "x of"
+        not in strings["options"]["step"]["select_assignment"]["description"].lower()
+    )
     assert strings["options"]["step"]["select_assignment"]["title"] == (
         "Appliance Circuit Assignments"
     )
@@ -653,14 +652,14 @@ def test_runtime_english_translation_is_the_single_source() -> None:
 
     for section, step in (
         ("config", "user"),
-            ("config", "utility"),
-            ("config", "assign"),
-            ("config", "nilm"),
-            ("options", "sources"),
-            ("options", "mains"),
-            ("options", "nilm"),
-            ("options", "utility"),
-            ("options", "entity_detail"),
+        ("config", "utility"),
+        ("config", "assign"),
+        ("config", "nilm"),
+        ("options", "sources"),
+        ("options", "mains"),
+        ("options", "nilm"),
+        ("options", "utility"),
+        ("options", "entity_detail"),
         ("options", "select_assignment"),
         ("options", "select_advanced_circuit"),
         ("options", "advanced_settings"),
@@ -868,8 +867,7 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     )
     dashboard = yaml.safe_load(dashboard_text)
     section_titles = {
-        section.get("title")
-        for section in _dashboard_sections(dashboard)
+        section.get("title") for section in _dashboard_sections(dashboard)
     }
 
     assert {
@@ -961,11 +959,11 @@ def test_dashboard_example_removes_static_alert_evidence_view() -> None:
     assert "Open from notifications" not in dashboard_text
     assert refs.isdisjoint(
         {
-        "sensor.hvac_alert_evidence",
-        "sensor.hvac_leg_imbalance",
-        "sensor.hvac_power_quality_score",
-        "sensor.hvac_reactive_power_drift",
-        "sensor.hvac_power_factor_drift",
+            "sensor.hvac_alert_evidence",
+            "sensor.hvac_leg_imbalance",
+            "sensor.hvac_power_quality_score",
+            "sensor.hvac_reactive_power_drift",
+            "sensor.hvac_power_factor_drift",
         }
     )
 
@@ -1022,10 +1020,7 @@ def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() ->
     assert coverage_gauges[0]["name"] == "Known Load Share"
     assert len(load_match_cards) == 1
     assert load_match_cards[0]["type"] == "entities"
-    assert {
-        row["entity"]: row["name"]
-        for row in load_match_cards[0]["entities"]
-    } == {
+    assert {row["entity"]: row["name"] for row in load_match_cards[0]["entities"]} == {
         "sensor.mains_nilm_monitored_power": "Known Appliance Load",
         "sensor.mains_nilm_balance_power": "Unassigned Mains Load",
         "sensor.mains_nilm_monitored_coverage": "Known Load Share",
@@ -1189,15 +1184,10 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
 def test_readme_explains_running_observation_and_alert_distinction() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
+    assert "Running is the current operating state used for automations." in readme
+    assert "Observation recorded means the analyzer noticed something unusual" in readme
     assert (
-        "Running is the current operating state used for automations." in readme
-    )
-    assert (
-        "Observation recorded means the analyzer noticed something unusual" in readme
-    )
-    assert (
-        "Possible issue means repeated evidence crossed the alert threshold."
-        in readme
+        "Possible issue means repeated evidence crossed the alert threshold." in readme
     )
 
 
@@ -1283,8 +1273,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     alert_input = blueprint["blueprint"]["input"]["alert_states"]
     defaults = alert_input["default"]
     options = {
-        option["value"]
-        for option in alert_input["selector"]["select"]["options"]
+        option["value"] for option in alert_input["selector"]["select"]["options"]
     }
 
     assert "possible_issue" in defaults
@@ -1362,13 +1351,13 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsApplianceDetail() ? this._renderApplianceDetailBody()",
         "_renderApplianceDetail",
         "_renderApplianceDetailBody",
-        "_panelText(\"headers.appliance_detail\")",
-        "_panelText(\"appliance_detail.today_vs_normal\")",
+        '_panelText("headers.appliance_detail")',
+        '_panelText("appliance_detail.today_vs_normal")',
         "detail.recent_timeline",
         "_renderApplianceTimeline",
-        "_panelText(\"appliance_detail.behavior_expectations\")",
-        "_panelText(\"common.source\")",
-        "_panelText(\"common.confidence\")",
+        '_panelText("appliance_detail.behavior_expectations")',
+        '_panelText("common.source")',
+        '_panelText("common.confidence")',
         "NILM_WORKSPACE_CALL_API_PATH",
         "nilm_workspace",
         "NILM_WORKSPACE_QUERY_PARAM",
@@ -1378,26 +1367,26 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody()",
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
-        "_panelText(\"headers.nilm_workspace\")",
+        '_panelText("headers.nilm_workspace")',
         "_renderNilmWorkspaceLanes(workspace)",
         "_renderNilmReviewLayout(workspace)",
         "_nilmLaneItems",
         "_nilmSelectedReviewItem",
-        "_panelText(\"nilm_workspace.review_lanes\")",
-        "_panelText(\"nilm_workspace.known_load_overlays\")",
-        "_panelText(\"nilm_workspace.solar_net_overlays\")",
+        '_panelText("nilm_workspace.review_lanes")',
+        '_panelText("nilm_workspace.known_load_overlays")',
+        '_panelText("nilm_workspace.solar_net_overlays")',
         "data-nilm-overlay-toggle",
         "_toggleNilmOverlaySeries",
         "_visibleNilmWorkspaceSeries",
-        "_panelText(\"nilm_workspace.estimated_appliances_title\")",
+        '_panelText("nilm_workspace.estimated_appliances_title")',
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
         "estimated_daily_energy",
         "model_status",
-            "_renderNilmValidation",
-            "ground_truth_entity_id",
-            "_panelText(\"nilm_workspace.sessions_title\")",
-        "_panelText(\"nilm_workspace.edges_title\")",
+        "_renderNilmValidation",
+        "ground_truth_entity_id",
+        '_panelText("nilm_workspace.sessions_title")',
+        '_panelText("nilm_workspace.edges_title")',
         "data-nilm-signature-fingerprint",
         "_focusNilmSignatureOnGraph",
         "_focusNilmGraphWindowForSignature",
@@ -1408,8 +1397,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-${prefix}-window",
         "_zoomNilmGraph",
         "_panNilmGraph",
-            "_nilmWorkspaceGraphWindow",
-            "_renderNilmLabelIntervalEditor",
+        "_nilmWorkspaceGraphWindow",
+        "_renderNilmLabelIntervalEditor",
         "_renderNilmAssignmentActions",
         "_callNilmWorkspaceItemAction",
         "_callNilmLabelIntervalAction",
@@ -1420,7 +1409,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "data-nilm-assignment-action",
         "data-nilm-assignment-merge-target",
         "profile_options",
-        "<select id=\"nilm_assignment_profile_",
+        '<select id="nilm_assignment_profile_',
         'collectionKey === "sessions"',
         "`#nilm_session_label_${index}`",
         "data-nilm-existing-assignment",
@@ -1444,8 +1433,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'this._callAction("open_appliance_detail"))',
         "apply_setting_recommendation",
         "dismiss_setting_recommendation",
-        "_panelTextFormat(\"chart.accessible_summary\"",
-        "_panelTextFormat(\"chart.graph_times\"",
+        '_panelTextFormat("chart.accessible_summary"',
+        '_panelTextFormat("chart.graph_times"',
         "_timeZone",
         "_chartTimeTicks",
         "_chartDateKey",
@@ -1542,14 +1531,14 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "window.prompt" not in asset
     assert "Label this NILM signature" not in asset
     assert 'placeholder="sensor.dishwasher_power"' not in asset
-    assert "<select id=\"nilm_merge_target_" not in asset
+    assert '<select id="nilm_merge_target_' not in asset
     assert (
         "querySelector(`#nilm_assignment_label_${index}`)\n"
         "        || this.shadowRoot.querySelector(`#nilm_session_label_${index}`)"
         not in asset
     )
     assert (
-        'entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)'
+        "entities.map((entityId) => `<code>${this._escape(entityId)}</code>`)"
         not in asset
     )
     assert "Source Entities" not in asset
@@ -1570,19 +1559,20 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
     assert "data-expected-schedule" not in asset
     assert "${this._escape(item.entity_id)}" not in asset
     assert "this._escape(signature.signature_id)}</strong>" not in asset
-    assert "recommendation.recommendation_id || \"Recommendation\"" not in asset
+    assert 'recommendation.recommendation_id || "Recommendation"' not in asset
     assert "deny_setting_recommendation" not in asset
     assert '_recommendationActionButton(recommendation, index, "deny"' not in asset
     assert "border-radius: 12px" not in asset
     assert "border-radius: 16px" not in asset
     assert "border-radius: 999px" not in asset
     assert all(
-        int(radius) <= 8
-        for radius in re.findall(r"border-radius:\s*(\d+)px", asset)
+        int(radius) <= 8 for radius in re.findall(r"border-radius:\s*(\d+)px", asset)
     )
 
 
-def test_appliance_detail_uses_home_assistant_currency_without_hardcoded_dollars() -> None:
+def test_appliance_detail_uses_home_assistant_currency_without_hardcoded_dollars() -> (
+    None
+):
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -1628,7 +1618,8 @@ for (const expected of [
   "Cost Today",
   "€0.60",
   "Cost today",
-  "Normal €0.45 - €0.55",
+  "Normal",
+  "€0.45 - €0.55",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
@@ -1682,7 +1673,9 @@ for (const expected of [
     )
 
 
-def test_appliance_detail_shows_full_period_normals_and_limits_without_projection() -> None:
+def test_appliance_detail_shows_full_period_normals_and_limits_without_projection() -> (
+    None
+):
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -1782,11 +1775,7 @@ const html = panel._renderSettingImpactPreview({ impact_preview: {
   examples_added: ["new example"],
   limitations: ["A reliable preview is unavailable because retained history contains only alerts selected by the current setting."],
 } });
-assert.match(html, /Limitations/);
-assert.match(html, /current setting/);
-for (const claim of ["23 retained observations", "37 alerts", "41 alerts", "old example", "new example"]) {
-  assert.ok(!html.includes(claim), `unexpected incomplete claim: ${claim}`);
-}
+assert.equal(html, "");
 """
     )
 
@@ -1874,6 +1863,90 @@ for (const removed of [
     )
 
 
+def test_appliance_detail_hides_empty_guidance_and_uses_split_overview() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._applianceDetail = {
+  status: "ok",
+  detail: {
+    activity_state: "Idle",
+    current_power_w: 2,
+    source_type: "direct_meter",
+    source_quality: { status: "fresh", label: "Fresh" },
+    learning_readiness: { status: "learning", label: "Learning", days_complete: 3, days_required: 7 },
+    confidence: null,
+    health_state: "Ready",
+    electrical_state: "Normal",
+    energy_state: "Normal",
+    model_status: null,
+    daily_energy_kwh: 0.2,
+    runtime_today_seconds: 0,
+    run_count_today: 0,
+    cost_today: null,
+    recent_timeline: { items: [] },
+    today_vs_normal: [],
+    energy_change_explanation: null,
+    expectations: [],
+    what_to_check_first: [],
+    active_alerts: [],
+  },
+};
+const html = panel._renderApplianceDetailBody();
+assert.ok(html.includes('class="appliance-detail-overview"'));
+assert.ok(html.includes("Appliance Activity History"));
+assert.ok(!html.includes("Why Energy Changed"));
+assert.ok(!html.includes("What To Check First"));
+assert.ok(html.includes("3 days of learning out of 7 days complete"));
+assert.equal(
+  panel._applianceDetailHeaderMessage(panel._applianceDetail.detail, panel._applianceDetail),
+  "Appliance behavior summary.",
+);
+"""
+    )
+
+
+def test_appliance_comparisons_show_today_and_normal_without_source() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "current_power_w",
+  label: "Current power",
+  unit: "W",
+  current_value: 820,
+  normal_low: 300,
+  normal_high: 600,
+  status: "higher",
+  source: "contextual_baseline",
+}], { days_complete: 7, days_required: 7 });
+for (const expected of ["Today", "Normal", "820 W", "300 W - 600 W"]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
+}
+assert.ok(!html.includes("Source Contextual Baseline"));
+"""
+    )
+
+
+def test_appliance_history_zoom_uses_supported_period_ladder() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const panel = new context.Panel();
+  const requested = [];
+  panel._applianceDetail = { history: { period_hours: [24, 168, 720] } };
+  panel._loadApplianceDetailHistory = async (hours) => { requested.push(hours); panel._applianceDetailHistoryHours = hours; };
+  panel._applianceDetailHistoryHours = 168;
+  await panel._zoomApplianceHistoryGraph(0.5);
+  await panel._zoomApplianceHistoryGraph(2);
+  panel._applianceDetailHistoryHours = 720;
+  await panel._zoomApplianceHistoryGraph(0.5);
+  assert.deepEqual(requested, [24, 168, 168]);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
 def test_alert_technical_details_keep_metric_boxes() -> None:
     asset = _frontend_source()
 
@@ -1938,8 +2011,8 @@ for (const expected of [
   'data-appliance-history-period',
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
-  "<title>Fridge Power: 128 W",
-  "<title>Fridge Energy: 1.2 kWh",
+  'data-chart-point="1"',
+  'data-chart-readout',
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
@@ -2192,6 +2265,8 @@ def test_scoped_load_error_contracts() -> None:
 })();
 """
     )
+
+
 def test_alert_decision_render_contracts() -> None:
     _run_panel_node_script(
         """
@@ -2326,6 +2401,8 @@ def test_alert_decision_render_contracts() -> None:
 })();
 """
     )
+
+
 def test_alert_decision_action_contracts() -> None:
     _run_panel_node_script(
         """
@@ -2539,6 +2616,8 @@ def test_alert_decision_action_contracts() -> None:
 })();
 """
     )
+
+
 def test_focused_nilm_history_request_contracts() -> None:
     _run_panel_node_script(
         """
@@ -2718,6 +2797,7 @@ def test_focused_nilm_history_request_contracts() -> None:
 """
     )
 
+
 def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
     asset = _frontend_source()
 
@@ -2728,6 +2808,8 @@ def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
 
     assert graph < lanes < review < secondary
     assert "_renderNilmReviewQueue" not in asset
+
+
 def test_nilm_lane_rendering_contracts() -> None:
     _run_panel_node_script(
         """
@@ -3094,6 +3176,7 @@ def test_nilm_lane_rendering_contracts() -> None:
 """
     )
 
+
 def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
     asset = _frontend_source()
     command_rule = re.search(r"button, a\.button\s*\{(?P<body>.*?)\}", asset, re.DOTALL)
@@ -3113,6 +3196,8 @@ def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
     assert "outline: none" in asset
     assert "0 0 0 2px var(--card-background-color" in asset
     assert "0 0 0 5px var(--primary-color" in asset
+
+
 def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     _run_panel_node_script(
         """
@@ -3304,6 +3389,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
 """
     )
 
+
 def test_nilm_lane_count_badge_respects_radius_limit() -> None:
     asset = _frontend_source()
     start = asset.index(".nilm-lane strong {")
@@ -3312,6 +3398,8 @@ def test_nilm_lane_count_badge_respects_radius_limit() -> None:
 
     assert "border-radius: 8px" in rule
     assert "999px" not in rule
+
+
 def test_nilm_decision_render_contracts() -> None:
     _run_panel_node_script(
         """
@@ -3482,6 +3570,7 @@ def test_nilm_decision_render_contracts() -> None:
 """
     )
 
+
 def test_panel_action_message_clears_on_evidence_route_change() -> None:
     _run_panel_node_script(
         """
@@ -3574,7 +3663,7 @@ for (const expected of [
     )
 
 
-def test_chart_points_include_hover_titles_with_label_and_value() -> None:
+def test_chart_points_use_an_in_graph_readout_instead_of_tooltips() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -3597,9 +3686,17 @@ const html = panel._chartSvg(
     y_axis_label: "W",
   },
 );
-if (!html.includes("<title>Kitchen Fridge: 123.46 W at ")) {
-  throw new Error(`expected point hover title with label and value: ${html}`);
+for (const expected of [
+  'data-chart-point="1"',
+  'data-chart-name="Kitchen Fridge"',
+  'data-chart-value="123.46"',
+  'data-chart-unit="W"',
+  'data-chart-readout',
+  'data-chart-crosshair',
+]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }
+assert.ok(!html.includes("<title>Kitchen Fridge"), "point tooltips must not be rendered");
 """
     )
 
@@ -3864,8 +3961,7 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
     )
     assert (
         'this._panelText("recommendations.applied_suggested_settings"), '
-        "grouped.applied"
-        in asset
+        "grouped.applied" in asset
     )
     assert 'status === "applied"' in asset
     assert "originalIndex" in asset
@@ -3933,11 +4029,11 @@ if (rendered !== "74%") {
 def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     asset = _frontend_source()
     setup_health_api_path = (
-        'const SETUP_HEALTH_API_PATH = '
+        "const SETUP_HEALTH_API_PATH = "
         '"/api/circuitsetup_energy_analyzer/setup_health";'
     )
     setup_health_call_api_path = (
-        'const SETUP_HEALTH_CALL_API_PATH = '
+        "const SETUP_HEALTH_CALL_API_PATH = "
         '"circuitsetup_energy_analyzer/setup_health";'
     )
 
@@ -3947,7 +4043,7 @@ def test_setup_health_panel_route_is_wired_to_read_only_payload() -> None:
     assert "_routeRequestsSetupHealth" in asset
     assert "_loadSetupHealth" in asset
     assert 'routeUrl.searchParams.get("entry_id")' in asset
-    assert "SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : \"\"}" in asset
+    assert 'SETUP_HEALTH_CALL_API_PATH}${query ? `?${query}` : ""}' in asset
     assert "_renderSetupHealthBody" in asset
 
 
@@ -3955,12 +4051,12 @@ def test_appliance_insights_panel_route_and_api_contract() -> None:
     asset = _frontend_source()
 
     for expected in (
-        'const APPLIANCE_INSIGHTS_API_PATH = '
+        "const APPLIANCE_INSIGHTS_API_PATH = "
         '"/api/circuitsetup_energy_analyzer/appliance_insights";',
-        'const APPLIANCE_INSIGHTS_CALL_API_PATH = '
+        "const APPLIANCE_INSIGHTS_CALL_API_PATH = "
         '"circuitsetup_energy_analyzer/appliance_insights";',
         'const APPLIANCE_INSIGHTS_QUERY_PARAM = "appliance_insights";',
-        "routeUrl.searchParams.get(APPLIANCE_INSIGHTS_QUERY_PARAM) === \"1\"",
+        'routeUrl.searchParams.get(APPLIANCE_INSIGHTS_QUERY_PARAM) === "1"',
         "_routeRequestsApplianceInsights",
         "_loadApplianceInsights",
         "_renderApplianceInsightsBody",
@@ -3985,7 +4081,9 @@ def test_appliance_insights_panel_exposes_filter_and_sort_controls() -> None:
         assert expected in asset
 
 
-def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks() -> None:
+def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks() -> (
+    None
+):
     asset = _frontend_source()
 
     for expected in (
@@ -4043,6 +4141,13 @@ panel._setupHealth = {
       fix: "Choose entity detail level",
       open_path: `${basePath}&options_step=entity_detail`,
     },
+    {
+      item_id: "learning_progress",
+      status: "learning",
+      title: "Learning progress",
+      why_it_matters: "Learning is still in progress.",
+      fix: "Keep collecting data",
+    },
   ],
   issues: [
     {
@@ -4064,6 +4169,8 @@ for (const unexpected of [
   "What To Check First",
   "This affects appliance analysis quality.",
   "source_data_found",
+  ">Learning<",
+  "Circuit: HVAC",
 ]) {
   if (rendered.includes(unexpected)) {
     throw new Error(`unexpected setup health duplicate or raw text: ${unexpected}`);
@@ -4119,6 +4226,11 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         assert checklist[item_id]["title"]
         assert checklist[item_id]["why_it_matters"]
         assert checklist[item_id]["fix"]
+
+    assert (
+        "{circuit_name}"
+        in translations["issues"]["unexpected_negative_real_power"]["description"]
+    )
 
     source_text = "\n".join(
         path.read_text(encoding="utf-8")
@@ -4276,6 +4388,37 @@ def test_notification_and_dashboard_text_live_in_translations() -> None:
         assert text not in source_text
 
 
+def test_backend_ux_notification_and_advisor_text_live_in_translations() -> None:
+    translations = _translations()["config_panel"]
+    translated_text = json.dumps(
+        {
+            "ux": translations["ux"],
+            "notifications": translations["notifications"],
+            "settings_advisor": translations["settings_advisor"],
+        }
+    )
+    source_text = "\n".join(
+        (INTEGRATION_DIR / filename).read_text(encoding="utf-8")
+        for filename in ("ux.py", "notifications.py", "settings_advisor.py")
+    )
+
+    for text in (
+        "Quiet",
+        "Demand and capacity evidence can show unusual operating load, but it is not an electrical safety verification.",
+        "Needs data",
+        "Reactive-to-real power ratio",
+        "This is a repeated change from the learned electrical pattern, not an electrical safety diagnosis.",
+        "Weekly Appliance Digest",
+        "Daily Appliance Summary",
+        "Standby Power Threshold",
+        "Energy Usage",
+        "Observed sustained EV charger current samples; lower the warning ratio without inferring breaker size.",
+        "High solar surplus should represent the upper end of observed export events.",
+    ):
+        assert text in translated_text
+        assert text not in source_text
+
+
 def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None:
     asset = _frontend_source()
 
@@ -4285,27 +4428,216 @@ def test_dynamic_alert_evidence_panel_previews_recommendation_evidence() -> None
     assert 'this._panelTextFormat("recommendations.previewing_evidence"' in asset
 
 
+def test_recommendation_evidence_is_an_exclusive_actionable_view() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._loading = false;
+panel._error = "";
+panel._listen = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._payload = {
+  status: "ok",
+  alert: {
+    circuit_id: "washer",
+    message: "ALERT ISSUE SENTINEL",
+    feature: "daily_energy",
+  },
+  circuit: { name: "Washer" },
+  selected_recommendation: {
+    recommendation_id: "washer:daily:v1",
+    display_label: "Daily threshold",
+    current_value: 10,
+    default_value: 12,
+    suggested_value: 14,
+    expected_effect: "Reduce nuisance alerts.",
+    evidence_preview: "Observed Days: 8; Daily P95: 13.8",
+    actions: {
+      apply: { enabled: true },
+      dismiss: { enabled: true },
+      reset: { enabled: true },
+    },
+  },
+  setting_recommendations: [{ recommendation_id: "washer:daily:v1" }],
+};
+panel._render();
+const html = panel.shadowRoot.innerHTML;
+for (const expected of [
+  "Recommendation Evidence",
+  'data-recommendation-action="apply"',
+  'data-recommendation-action="dismiss"',
+  'data-recommendation-action="reset"',
+  "Reduce nuisance alerts.",
+  "Observed Days",
+  "Daily P95",
+]) {
+  assert.ok(html.includes(expected), `missing ${expected}`);
+}
+assert.ok(
+  html.indexOf('data-recommendation-action="apply"') < html.indexOf('class="recommendation-values"'),
+  "recommendation actions must precede evidence",
+);
+for (const unexpected of ["ALERT ISSUE SENTINEL", "Respond to this alert", "What To Check First"]) {
+  assert.ok(!html.includes(unexpected), `unexpected alert content: ${unexpected}`);
+}
+"""
+    )
+
+
+def test_suggested_setting_uses_two_columns_and_inline_historical_impact() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+const html = panel._renderRecommendationSectionContent("Suggested Settings", [{
+  originalIndex: 0,
+  recommendation: {
+    display_label: "Daily threshold",
+    current_value: 10,
+    default_value: 12,
+    suggested_value: 14,
+    expected_effect: "Reduce low-value alerts.",
+    evidence_preview: "Observed Days: 8; Daily P95: 13.8",
+    impact_preview: {
+      available: true,
+      observations_evaluated: 23,
+      history_start: "2026-07-01T12:00:00Z",
+      history_end: "2026-07-13T12:00:00Z",
+      current_alert_count: 4,
+      candidate_alert_count: 2,
+      current_state_change_count: null,
+      candidate_state_change_count: null,
+      examples_removed: [],
+      examples_added: [],
+      limitations: [],
+    },
+    actions: {},
+  },
+}]);
+for (const expected of [
+  'class="recommendation-layout"',
+  'class="recommendation-values"',
+  'class="recommendation-evidence-line"',
+  "Observed Days: 8",
+  "Daily P95: 13.8",
+  "Historical impact:",
+]) {
+  assert.ok(html.includes(expected), `missing ${expected}`);
+}
+assert.ok(!html.includes("<details"), "historical impact must not be a disclosure");
+assert.equal((html.match(/recommendation-value/g) || []).length, 4);
+"""
+    )
+
+
+def test_panel_waits_for_authenticated_hass_before_loading() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel.isConnected = true;
+let loads = 0;
+panel._loadEvidence = () => { loads += 1; };
+panel.connectedCallback();
+assert.equal(loads, 0);
+panel.hass = { callApi: async () => ({}) };
+assert.equal(loads, 1);
+"""
+    )
+
+
+def test_panel_recovers_hass_assigned_before_custom_element_upgrade() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel.isConnected = true;
+const authenticatedHass = { callApi: async () => ({}) };
+Object.defineProperty(panel, "hass", {
+  configurable: true,
+  enumerable: true,
+  value: authenticatedHass,
+  writable: true,
+});
+let loads = 0;
+panel._loadEvidence = () => { loads += 1; };
+panel.connectedCallback();
+assert.equal(panel._hass, authenticatedHass);
+assert.equal(loads, 1);
+assert.equal(Object.prototype.hasOwnProperty.call(panel, "hass"), false);
+"""
+    )
+
+
+def test_panel_opens_the_requested_options_flow_step() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const calls = [];
+  const panel = new context.Panel();
+  panel._hass = {
+    callApi: async (method, path, data) => {
+      calls.push({ method, path, data });
+      if (path === "config/config_entries/options/flow") {
+        return { type: "menu", flow_id: "flow-1" };
+      }
+      if (data.next_step_id) {
+        return { type: "form", flow_id: "flow-1", step_id: "select_advanced_circuit" };
+      }
+      return { type: "form", flow_id: "flow-1", step_id: "advanced_settings" };
+    },
+  };
+  let destination = "";
+  panel._navigate = (path) => { destination = path; };
+  await panel._openOptionsFlow({
+    entry_id: "entry-1",
+    circuit_id: "fridge",
+    options_step: "advanced_settings",
+  });
+  assert.equal(JSON.stringify(calls), JSON.stringify([
+    { method: "POST", path: "config/config_entries/options/flow", data: { handler: "entry-1" } },
+    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { next_step_id: "advanced" } },
+    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { circuit_id: "fridge" } },
+  ]));
+  assert.equal(destination, "/config/integrations/config_flow/flow-1");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_relearn_baseline_requires_confirmation() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._pendingConfirmationAction = "relearn_baseline";
+const html = panel._renderActionConfirmation();
+for (const expected of ["<ha-dialog", "Relearn Baseline", "restart learning"]) {
+  if (!html.includes(expected)) {
+    throw new Error(`missing ${expected}: ${html}`);
+  }
+}
+"""
+    )
+
+
 def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
     asset = _frontend_source()
 
     preview = asset.index(
-        'this._recommendationActionButton(recommendation, originalIndex, '
+        "this._recommendationActionButton(recommendation, originalIndex, "
         '"preview", this._panelText("actions.labels.preview_evidence"), true)'
     )
     apply = asset.index(
-        'this._recommendationActionButton(recommendation, originalIndex, '
+        "this._recommendationActionButton(recommendation, originalIndex, "
         '"apply", this._panelText("actions.labels.apply"))'
     )
     dismiss = asset.index(
-        'this._recommendationActionButton(recommendation, originalIndex, '
+        "this._recommendationActionButton(recommendation, originalIndex, "
         '"dismiss", this._panelText("actions.labels.dismiss"), true)'
     )
     undo = asset.index(
-        'this._recommendationActionButton(recommendation, originalIndex, '
+        "this._recommendationActionButton(recommendation, originalIndex, "
         '"undo", this._panelText("actions.labels.undo"), true)'
     )
     reset = asset.index(
-        'this._recommendationActionButton(recommendation, originalIndex, '
+        "this._recommendationActionButton(recommendation, originalIndex, "
         '"reset", this._panelText("actions.labels.reset_default"), true)'
     )
 
@@ -4326,8 +4658,7 @@ def test_dynamic_alert_evidence_panel_preserves_nilm_label_drafts() -> None:
 
     assert "this._nilmLabelDrafts = new Map();" in asset
     assert (
-        "input.addEventListener(\"input\", () => this._rememberNilmLabelDraft("
-        in asset
+        'input.addEventListener("input", () => this._rememberNilmLabelDraft(' in asset
     )
     assert "this._nilmLabelDraftKey(signature)" in asset
     assert "this._nilmLabelDrafts.get(draftKey)" in asset
@@ -4378,6 +4709,8 @@ def test_dynamic_alert_evidence_panel_action_and_time_contracts() -> None:
     assert "Change Type" not in asset
     assert "Merge Assignment" not in asset
     assert "Evidence Window" not in asset
+
+
 def test_nilm_decision_action_contracts() -> None:
     _run_panel_node_script(
         """
@@ -4908,6 +5241,7 @@ def test_nilm_decision_action_contracts() -> None:
 """
     )
 
+
 def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
     asset = _frontend_source()
 
@@ -4915,10 +5249,10 @@ def test_alert_evidence_informational_metrics_are_scoped_and_unframed() -> None:
     scoped_style = asset[scoped_start : asset.index("}", scoped_start)]
     for selector in (
         ".evidence-meta .metric",
-        '[data-evidence-comparison] .metric',
+        "[data-evidence-comparison] .metric",
     ):
         assert selector in scoped_style
-    assert '[data-evidence-technical] .metric' not in scoped_style
+    assert "[data-evidence-technical] .metric" not in scoped_style
     for declaration in (
         "background: transparent;",
         "border: 0;",
@@ -4942,7 +5276,9 @@ def test_evidence_visual_blocks_use_white_card_surfaces() -> None:
     )
 
     assert surface_rule is not None
-    assert "background: var(--card-background-color, #fff);" in surface_rule.group("body")
+    assert "background: var(--card-background-color, #fff);" in surface_rule.group(
+        "body"
+    )
     assert "padding: 16px 0 0;" in surface_rule.group("body")
     assert "border:" not in surface_rule.group("body")
     assert "box-shadow:" not in surface_rule.group("body")
@@ -5487,12 +5823,11 @@ def test_nilm_interval_action_contracts() -> None:
 """
     )
 
+
 def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
     asset = _frontend_source()
 
-    summary_start = asset.index(
-        "        [data-evidence-technical] > summary {"
-    )
+    summary_start = asset.index("        [data-evidence-technical] > summary {")
     summary_style = asset[summary_start : asset.index("}", summary_start)]
     for declaration in (
         "box-sizing: border-box;",
@@ -5533,7 +5868,9 @@ def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
         'class="disclosure section-surface" data-nilm-secondary-details',
     ):
         assert marker in asset
-    assert 'class="evidence-section evidence-investigation section-surface"' not in asset
+    assert (
+        'class="evidence-section evidence-investigation section-surface"' not in asset
+    )
     assert 'class="nilm-review-layout section-surface"' not in asset
 
 
@@ -5770,6 +6107,7 @@ def test_alert_evidence_render_contracts() -> None:
 })();
 """
     )
+
 
 def test_dynamic_alert_evidence_panel_formats_iso_offsets_as_local_time() -> None:
     asset = _frontend_source()
@@ -6128,9 +6466,9 @@ def test_recommendation_action_services_document_entity_targets() -> None:
         assert fields["recommendation_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
         assert "analyzer entity" in fields["entity_id"]["description"]
-        assert "exactly one pending recommendation" in fields[
-            "entity_id"
-        ]["description"]
+        assert (
+            "exactly one pending recommendation" in fields["entity_id"]["description"]
+        )
 
 
 def test_readme_includes_status_glossary_for_machine_values() -> None:
@@ -6238,9 +6576,7 @@ def test_readme_includes_practical_usage_guide() -> None:
 def test_readme_documents_assignment_defaults() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert (
-        "choose the appliance type, circuit mode, power-flow mode" not in readme_text
-    )
+    assert "choose the appliance type, circuit mode, power-flow mode" not in readme_text
     for expected in (
         "integration suggests an appliance type",
         "Home Assistant friendly name as a",
@@ -6275,7 +6611,10 @@ def test_readme_explains_notification_evidence_workflow() -> None:
     assert "dynamically selects graph entities" in normalized_text
     assert "docs/dashboard-example.yaml" in readme_text
     assert "Persistent notifications include one final Markdown link" in normalized_text
-    assert "link directly to **Review Suggested Settings** in the evidence panel" in readme_text
+    assert (
+        "link directly to **Review Suggested Settings** in the evidence panel"
+        in readme_text
+    )
     assert "visual comparison" in normalized_text
     assert "graph-first evidence" in normalized_text
     assert "focused inspector" in normalized_text
@@ -6322,9 +6661,7 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "dashboard action still runs from Configure" in readme_text
     assert "**Standard**: Simple plus feature-level mains" in readme_text
     assert "appliance evidence navigation" in readme_text
-    assert "**Expert**: Standard plus the diagnostics/evidence section" in (
-        readme_text
-    )
+    assert "**Expert**: Standard plus the diagnostics/evidence section" in (readme_text)
     assert "does not add diagnostic/detail entity cards automatically" in readme_text
     assert "graph/detail cards for the Expert groups you selected" not in readme_text
     assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text
@@ -6437,8 +6774,7 @@ def test_readme_explains_compatible_meter_support_and_links_product() -> None:
     assert "other compatible meters" in readme_text
     assert (
         "power, current, voltage, energy, frequency, reactive power, "
-        "apparent power, or power factor"
-        in readme_text
+        "apparent power, or power factor" in readme_text
     )
     assert (
         "https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/"
@@ -6478,9 +6814,9 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         if ref in focused_native_refs:
             assert width <= 520, f"{ref} should stay at native card/panel scale"
         assert height >= 250, f"{ref} is too short to show readable UI"
-        assert not (
-            width >= 1800 and height >= 1000
-        ), f"{ref} looks like a full-screen capture rather than a cropped UI panel"
+        assert not (width >= 1800 and height >= 1000), (
+            f"{ref} looks like a full-screen capture rather than a cropped UI panel"
+        )
 
 
 def _dashboard_cards(node: object) -> list[dict[str, object]]:

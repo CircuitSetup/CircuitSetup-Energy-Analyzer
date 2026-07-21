@@ -44,7 +44,7 @@ export const evidence = {
     {
       recommendation_id: "energy-threshold",
       status: "pending",
-      display_label: "Daily energy threshold",
+      display_label: "Kitchen Appliances Daily Energy Threshold",
       current_value: 2.2,
       default_value: 2.5,
       suggested_value: 2.6,

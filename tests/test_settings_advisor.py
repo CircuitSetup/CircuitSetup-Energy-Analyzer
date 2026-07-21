@@ -50,6 +50,21 @@ def test_setting_recommendation_round_trips_preserving_storage_fields() -> None:
     assert raw["advisor_version"] == advisor.ADVISOR_VERSION
 
 
+def test_stored_watt_suffix_label_migrates_to_power_name() -> None:
+    advisor = _advisor()
+    recommendation = _recommendation(
+        advisor,
+        setting_key="standby_threshold_w",
+        setting_label="Standby Threshold W",
+    )
+
+    restored = advisor.recommendation_from_dict(
+        advisor.recommendation_to_dict(recommendation)
+    )
+
+    assert restored.setting_label == "Standby Power Threshold"
+
+
 def test_recommendation_unique_key_uses_circuit_and_setting() -> None:
     advisor = _advisor()
 
@@ -544,6 +559,7 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
     )
 
     assert recommendation.suggested_value == 7.0
+    assert recommendation.setting_label == "Standby Power Threshold"
     assert recommendation.group == "Standby"
     assert recommendation.evidence["p95_standby_w"] == 5.2
 
@@ -634,6 +650,7 @@ def test_dual_phase_recommendation_uses_observed_leg_balance() -> None:
 
     assert imbalance.suggested_value == 0.15
     assert minimum_power.suggested_value == 4000
+    assert minimum_power.setting_label == "Leg Imbalance Minimum Total Power"
 
 
 def test_dual_phase_recommendation_does_not_loosen_imbalance_ratio() -> None:
@@ -778,8 +795,11 @@ def test_mains_and_solar_recommendations_use_aggregate_patterns() -> None:
     )
 
     assert balance.suggested_value == 200.0
+    assert balance.setting_label == "Negative Balance Power Tolerance"
     assert surplus.suggested_value == 900.0
+    assert surplus.setting_label == "Solar Surplus Power Threshold"
     assert high_surplus.suggested_value == 2600.0
+    assert high_surplus.setting_label == "High Solar Surplus Power Threshold"
 
 
 def test_recommendation_guidance_covers_advanced_setting_families() -> None:
