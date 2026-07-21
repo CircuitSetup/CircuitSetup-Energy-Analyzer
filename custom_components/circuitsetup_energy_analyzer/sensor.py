@@ -5,7 +5,9 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import timedelta
 from time import monotonic
 from typing import Any
+from urllib.parse import urlencode
 
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .appliance_metadata import appliance_icon_for_profile
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -187,6 +189,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "data_quality_problem": data_quality_problem,
         "maintenance_active": maintenance_active,
         "active_alert_count": active_alert_count,
+        "evidence_path": _circuit_evidence_path(circuit_id),
         "next_step": _health_summary_next_step(
             readiness,
             data_quality_problem=data_quality_problem,
@@ -791,6 +794,7 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
             state,
             circuit_id,
         ),
+        "evidence_path": _circuit_evidence_path(circuit_id),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
         "leg_status_explanation": _status_explanation(leg_status),
@@ -833,6 +837,7 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "billing_cycle_forecast_kwh": billing_cycle_forecast_value(state, circuit_id),
         "cost_cycle": cost_cycle_value(state, circuit_id),
         "cost_cycle_forecast": cost_cycle_forecast_value(state, circuit_id),
+        "evidence_path": _circuit_evidence_path(circuit_id),
         "summary_explanation": explanation,
         "energy_usage_explanation": _status_explanation(energy_usage_status),
         "billing_cycle_explanation": _status_explanation(billing_status),
@@ -844,6 +849,10 @@ def _health_summary_raw_status(summary: str, readiness: str) -> str:
         return readiness
     normalized = summary.strip().lower().replace(" ", "_")
     return normalized or "ready"
+
+
+def _circuit_evidence_path(circuit_id: str) -> str:
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode({'circuit_id': circuit_id})}"
 
 
 def _health_summary_explanation(summary: str, readiness: str) -> str:

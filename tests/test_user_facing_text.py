@@ -1233,6 +1233,16 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "url:" in blueprint_text
 
 
+def test_readme_describes_blueprint_summary_sensor_evidence() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert (
+        "The blueprint uses the selected summary sensor's explanation and "
+        "circuit-specific `evidence_path` when available."
+        in readme
+    )
+
+
 def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
     from jinja2 import Template
 
@@ -1266,6 +1276,50 @@ def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
 
     assert configured_path == "/custom-dashboard/alert-evidence?alert_id=1"
     assert fallback_path == "/circuitsetup-energy-analyzer-evidence"
+
+
+def test_alert_blueprint_uses_summary_sensor_explanations() -> None:
+    from jinja2 import Template
+
+    class BlueprintLoader(yaml.SafeLoader):
+        pass
+
+    BlueprintLoader.add_constructor(
+        "!input",
+        lambda loader, node: loader.construct_scalar(node),
+    )
+    blueprint_path = (
+        ROOT
+        / "blueprints"
+        / "automation"
+        / "circuitsetup_energy_analyzer"
+        / "energy_alert_notification.yaml"
+    )
+    blueprint = yaml.load(blueprint_path.read_text(encoding="utf-8"), BlueprintLoader)
+    evidence_template = Template(blueprint["variables"]["alert_evidence"])
+
+    def render(attributes: dict[str, str]) -> str:
+        return evidence_template.render(
+            trigger={
+                "to_state": {
+                    "state": "Possible issue",
+                    "attributes": attributes,
+                }
+            }
+        ).strip()
+
+    assert render(
+        {
+            "friendly_name": "Washer Electrical Health",
+            "status_explanation": "Reported electrical measurements disagree.",
+        }
+    ) == "Reported electrical measurements disagree."
+    assert render(
+        {
+            "friendly_name": "Washer Energy Summary",
+            "summary_explanation": "Energy use is above the configured threshold.",
+        }
+    ) == "Energy use is above the configured threshold."
 
 
 def test_alert_blueprint_matches_current_summary_alert_states() -> None:

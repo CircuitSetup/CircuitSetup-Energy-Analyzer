@@ -1641,6 +1641,9 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert health_attrs["active_alert_count"] == 2
     assert health_attrs["next_step"] == "Review source sensor data"
     assert health_attrs["learning_progress"] == 0.0
+    assert health_attrs["evidence_path"] == (
+        "/circuitsetup-energy-analyzer-evidence?circuit_id=washer"
+    )
 
     assert activity_summary_value(state, "washer") == "Running"
     assert activity_summary_attributes(state, "washer") == {
@@ -1662,6 +1665,9 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert electrical_attrs["power_quality_evidence"] == (
         "Possible issue: apparent power changed"
     )
+    assert electrical_attrs["evidence_path"] == (
+        "/circuitsetup-energy-analyzer-evidence?circuit_id=washer"
+    )
 
     assert energy_summary_value(state, "washer") == "High Usage"
     energy_attrs = energy_summary_attributes(state, "washer")
@@ -1670,6 +1676,9 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert energy_attrs["daily_energy_usage_kwh"] == 13.1
     assert energy_attrs["summary_explanation"] == (
         "Energy use is above a configured threshold or budget."
+    )
+    assert energy_attrs["evidence_path"] == (
+        "/circuitsetup-energy-analyzer-evidence?circuit_id=washer"
     )
 
 

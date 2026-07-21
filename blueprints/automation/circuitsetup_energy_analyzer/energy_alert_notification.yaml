@@ -126,9 +126,12 @@ variables:
     {{ base_state | lower | trim | replace(' ', '_') | replace('-', '_') }}
   alert_evidence: >-
     {% if trigger.to_state %}
-      {{ trigger.to_state.attributes.evidence
-         or trigger.to_state.attributes.message
-         or trigger.to_state.attributes.friendly_name
+      {{ trigger.to_state.attributes.get('evidence')
+         or trigger.to_state.attributes.get('message')
+         or trigger.to_state.attributes.get('status_explanation')
+         or trigger.to_state.attributes.get('summary_explanation')
+         or trigger.to_state.attributes.get('power_quality_evidence')
+         or trigger.to_state.attributes.get('friendly_name')
          or trigger.to_state.state }}
     {% else %}
       Alert entity changed.
