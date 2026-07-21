@@ -801,6 +801,8 @@ blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yam
 
 Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states. Electrical Health's **Possible Power Quality Change** waits for confirmed repeated alert evidence before the blueprint notifies.
 
+The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
+
 Companion App mobile notifications can use the `evidence_path` template variable for `data.url` and Android `data.clickAction`, so tapping the notification opens the same Home Assistant evidence view.
 
 ## Practical automations
