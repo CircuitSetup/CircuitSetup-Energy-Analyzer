@@ -76,7 +76,11 @@ def circuit_configs_from_entry_data(
         )
     )
 
-    if not any(config.mode is CircuitMode.MAINS_NILM for config in configs):
+    if not any(
+        config.mode is CircuitMode.MAINS_NILM
+        or config.circuit_id == "mains"
+        for config in configs
+    ):
         mains_config = mains_context_config_from_sources(entry_data, options)
         if mains_config is not None:
             configs.append(mains_config)
