@@ -12140,12 +12140,27 @@ async def test_runtime_persists_energy_usage_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_builds_settings_recommendation_after_maturity() -> None:
+async def test_coordinator_waits_for_learning_before_settings_recommendation() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "hvac": {
+                "days": [
+                    {"usage_kwh": 5.8},
+                    {"usage_kwh": 6.1},
+                    {"usage_kwh": 7.4},
+                    {"usage_kwh": 6.7},
+                    {"usage_kwh": 8.9},
+                    {"usage_kwh": 9.8},
+                    {"usage_kwh": 7.9},
+                ],
+            }
+        },
+    )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
         entry_data={
@@ -12164,24 +12179,14 @@ async def test_coordinator_builds_settings_recommendation_after_maturity() -> No
                 "hvac": {"daily_spike_ratio": 0.25},
             },
         },
-        store_data=FeatureStoreData(
-            energy_usage_by_circuit={
-                "hvac": {
-                    "days": [
-                        {"usage_kwh": 5.8},
-                        {"usage_kwh": 6.1},
-                        {"usage_kwh": 7.4},
-                        {"usage_kwh": 6.7},
-                        {"usage_kwh": 8.9},
-                        {"usage_kwh": 9.8},
-                        {"usage_kwh": 7.9},
-                    ],
-                }
-            },
-        ),
+        store_data=store_data,
         now_fn=lambda: now,
     )
 
+    await coordinator.async_recalculate_setting_recommendations()
+    assert "hvac" not in coordinator.state.settings_recommendations_by_circuit
+
+    store_data.events.extend(_completed_learning_events("hvac", now))
     await coordinator.async_recalculate_setting_recommendations()
 
     recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
@@ -12312,6 +12317,7 @@ async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> N
             },
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
             alert_feedback={
                 fingerprint: {
                     "fingerprint": fingerprint,
@@ -12726,6 +12732,7 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
             },
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("hvac", now),
             energy_usage_by_circuit={
                 "hvac": {
                     "days": [

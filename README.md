@@ -749,7 +749,7 @@ The analyzer uses two different Home Assistant surfaces:
 | **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
-Routine behavior and settings-suggestion notifications wait until that appliance or mains circuit finishes learning. Direct circuit-capacity, configured demand-limit, dual-phase imbalance, and concrete NILM topology mismatch alerts can still notify during learning.
+Routine behavior, suggested settings, and their notifications wait until that appliance or mains circuit finishes learning. Direct circuit-capacity, configured demand-limit, dual-phase imbalance, and concrete NILM topology mismatch alerts can still notify during learning.
 
 When an alert appears:
 
