@@ -224,7 +224,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["daily_energy_kwh"] == 1.82
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
-    assert detail["cost_today"] == 0.46
+    assert detail["cost_today"] is None
     assert detail["source_quality"] == {
         "status": "fresh",
         "label": "Fresh",
@@ -318,7 +318,7 @@ def test_direct_appliance_detail_hides_alert_actions_without_an_alert() -> None:
     assert "relearn_baseline" in payload["actions"]
 
 
-def test_direct_appliance_detail_uses_the_circuit_rate_not_the_global_rate() -> None:
+def test_direct_appliance_detail_does_not_reprice_daily_energy() -> None:
     from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
         appliance_detail_for_circuit,
     )
@@ -329,7 +329,7 @@ def test_direct_appliance_detail_uses_the_circuit_rate_not_the_global_rate() -> 
     detail = appliance_detail_for_circuit(coordinator, "fridge")
 
     assert detail is not None
-    assert detail.cost_today == 0.46
+    assert detail.cost_today is None
 
 
 def test_direct_appliance_detail_preserves_explicitly_unavailable_cost() -> None:

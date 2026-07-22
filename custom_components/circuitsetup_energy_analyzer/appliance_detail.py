@@ -1878,13 +1878,6 @@ def _state_int_value(value: Any) -> int | None:
         return None
 
 
-def _positive_state_number(state: Any, field: str, key: str) -> float | None:
-    value = _state_number(state, field, key)
-    if value is None or value <= 0.0:
-        return None
-    return value
-
-
 def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
     evidence = _mapping_for_circuit(
         state,
@@ -1896,10 +1889,7 @@ def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
         return None
     if accumulated is not None:
         return accumulated
-    return _estimated_cost(
-        _state_number(state, "daily_energy_usage_by_circuit", circuit_id),
-        _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id),
-    )
+    return None
 
 
 def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:
