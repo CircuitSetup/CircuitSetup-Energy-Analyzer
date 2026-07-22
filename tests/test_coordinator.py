@@ -174,6 +174,23 @@ def _completed_learning_events(
     ]
 
 
+def _learned_real_power_baselines(
+    circuit_id: str,
+    real_power_w: float,
+) -> dict[str, BaselineStats]:
+    return {
+        f"{circuit_id}:real_power": BaselineStats(
+            feature="real_power",
+            sample_count=20,
+            median=real_power_w,
+            mad=max(abs(real_power_w) * 0.05, 1.0),
+            p10=real_power_w * 0.9,
+            p90=real_power_w * 1.1,
+            confidence=1.0,
+        )
+    }
+
+
 @pytest.mark.asyncio
 async def test_process_update_promotes_new_expected_schedule_alerts(
     monkeypatch,
@@ -220,6 +237,7 @@ async def test_process_update_promotes_new_expected_schedule_alerts(
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["pool_pump"] = False
     await coordinator.async_process_update()
 
     assert calls == [now]
@@ -4270,6 +4288,7 @@ async def test_expected_alert_feedback_does_not_suppress_unrelated_feature(
         now_fn=lambda: now + timedelta(days=1),
     )
 
+    coordinator.state.learning_by_circuit["fridge"] = False
     _, active_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(alerts=[unrelated_alert], notifications=[unrelated_alert])
     )
@@ -4717,6 +4736,10 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
                 }
             ],
         },
+        store_data=FeatureStoreData(
+            events=_completed_learning_events("hvac", now),
+            baselines=_learned_real_power_baselines("hvac", 3600.0),
+        ),
         now_fn=lambda: holder["time"],
     )
 
@@ -7171,6 +7194,7 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
         ),
         now_fn=lambda: now,
     )
+    coordinator.state.learning_by_circuit["mains"] = False
     coordinator._nilm_unmatched_edges["mains"] = [
         NilmEdge(
             timestamp=now - timedelta(minutes=45),
@@ -7245,6 +7269,7 @@ async def test_nilm_virtual_low_confidence_notification_prompts_validation(
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     notify_virtual = getattr(coordinator, "_notify_nilm_virtual_appliances", None)
     assert notify_virtual is not None
     active_alerts = await notify_virtual(now)
@@ -7303,6 +7328,7 @@ async def test_suppressed_nilm_alert_is_stored_once(
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     await coordinator._notify_nilm_virtual_appliances(now)
     await coordinator._notify_nilm_virtual_appliances(now)
 
@@ -7356,6 +7382,7 @@ async def test_nilm_virtual_needs_validation_notification_uses_review_category(
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     active_alerts = await coordinator._notify_nilm_virtual_appliances(now)
 
     assert sent_notifications
@@ -7404,6 +7431,7 @@ async def test_nilm_virtual_conflict_notification_uses_model_drift_category(
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     active_alerts = await coordinator._notify_nilm_virtual_appliances(now)
 
     assert sent_notifications
@@ -10175,6 +10203,10 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
             ],
         },
         options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
+            baselines=_learned_real_power_baselines("fridge", 300.0),
+        ),
         now_fn=lambda: holder["time"],
     )
 
@@ -10442,6 +10474,10 @@ async def test_runtime_alerts_on_repeated_known_load_topology_mismatch(
             ],
         },
         options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+        store_data=FeatureStoreData(
+            events=_completed_learning_events("fridge", now),
+            baselines=_learned_real_power_baselines("fridge", 600.0),
+        ),
         now_fn=lambda: holder["time"],
     )
 
@@ -10704,7 +10740,7 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
 
 
 @pytest.mark.asyncio
-async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
+async def test_runtime_real_power_fallback_waits_while_optional_metrics_learn(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -10798,9 +10834,10 @@ async def test_runtime_real_power_fallback_alerts_while_optional_metrics_learn(
         coordinator.store_data.events = daily_events
         await coordinator.async_process_update()
 
-    assert notifications
-    alert = notifications[0]
-    assert alert.feature == "real_power"
+    assert notifications == []
+    assert coordinator.state.active_alerts_by_circuit["fridge"][0].feature == (
+        "real_power"
+    )
     assert coordinator.state.learning_by_circuit["fridge"] is True
     assert coordinator._baseline_values["fridge:reactive_power"] == [20.0, 20.0, 20.0]
     assert "fridge:reactive_power" not in coordinator.store_data.baselines
@@ -11284,6 +11321,7 @@ async def test_contextual_alert_feedback_only_suppresses_matching_context(
         now_fn=lambda: datetime(2026, 6, 2, 12, 5, tzinfo=UTC),
     )
 
+    coordinator.state.learning_by_circuit["hvac"] = False
     assert (
         await coordinator.async_mark_alert_expected(
             notification_id_for_alert(expected_alert)
@@ -11997,6 +12035,12 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
 
     class FakeStates:
         def get(self, entity_id: str):
+            if entity_id == "sensor.fridge_power":
+                return SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=holder["time"],
+                )
             assert entity_id == "sensor.fridge_energy"
             return SimpleNamespace(
                 state=str(holder["energy"]),
@@ -12014,6 +12058,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
                     "mode": "single_phase",
                     "appliance_profile": "refrigerator",
                     "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
                         {"entity_id": "sensor.fridge_energy", "role": "energy"},
                     ],
                 }
@@ -12021,6 +12066,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
+            baselines=_learned_real_power_baselines("fridge", 100.0),
             energy_usage_by_circuit={
                 "fridge": {
                     "last_energy_kwh": 100.0,
@@ -12198,6 +12244,7 @@ async def test_coordinator_waits_for_learning_before_settings_recommendation() -
     assert "hvac" not in coordinator.state.settings_recommendations_by_circuit
 
     store_data.events.extend(_completed_learning_events("hvac", now))
+    coordinator.state.learning_by_circuit["hvac"] = False
     await coordinator.async_recalculate_setting_recommendations()
 
     recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
@@ -12272,6 +12319,7 @@ async def test_operating_detection_recommendations_after_maturity() -> None:
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["fridge"] = False
     await coordinator.async_recalculate_setting_recommendations()
 
     recommendations = coordinator.state.settings_recommendations_by_circuit["fridge"]
@@ -12350,6 +12398,7 @@ async def test_repeated_unhelpful_alert_suggests_safe_daily_spike_setting() -> N
         now_fn=lambda: now,
     )
 
+    coordinator.state.learning_by_circuit["fridge"] = False
     await coordinator.async_recalculate_setting_recommendations("fridge")
 
     recommendation = coordinator.state.settings_recommendations_by_circuit["fridge"][0]
@@ -12725,15 +12774,26 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda entity_id: SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now,
+                )
+            ),
+            data={},
+        ),
         entry_data={
             CONF_CIRCUITS: [
                 {
                     "circuit_id": "hvac",
                     "name": "HVAC",
-                    "mode": "dual_phase",
+                    "mode": "single_phase",
                     "appliance_profile": "hvac",
-                    "sensors": [],
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"},
+                    ],
                 }
             ],
         },
@@ -12744,16 +12804,17 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("hvac", now),
+            baselines=_learned_real_power_baselines("hvac", 100.0),
             energy_usage_by_circuit={
                 "hvac": {
                     "days": [
-                        {"usage_kwh": 5.8},
-                        {"usage_kwh": 6.1},
-                        {"usage_kwh": 7.4},
-                        {"usage_kwh": 6.7},
-                        {"usage_kwh": 8.9},
-                        {"usage_kwh": 9.8},
-                        {"usage_kwh": 7.9},
+                        {"date": "2026-05-26", "usage_kwh": 5.8},
+                        {"date": "2026-05-27", "usage_kwh": 6.1},
+                        {"date": "2026-05-28", "usage_kwh": 7.4},
+                        {"date": "2026-05-29", "usage_kwh": 6.7},
+                        {"date": "2026-05-30", "usage_kwh": 8.9},
+                        {"date": "2026-05-31", "usage_kwh": 9.8},
+                        {"date": "2026-06-01", "usage_kwh": 7.9},
                     ],
                 }
             },
@@ -12763,6 +12824,7 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
 
     await coordinator.async_process_update()
 
+    assert coordinator.state.learning_by_circuit["hvac"] is False
     recommendation = coordinator.state.settings_recommendations_by_circuit["hvac"][0]
     assert recommendation["setting_key"] == "daily_spike_ratio"
     assert recommendation["suggested_value"] == 0.3
@@ -12805,6 +12867,7 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
     now_holder = {"value": now}
     store_data = FeatureStoreData(
         events=_completed_learning_events("hvac", now),
+        baselines=_learned_real_power_baselines("hvac", 100.0),
         energy_usage_by_circuit={
             "hvac": {
                 "days": [
@@ -12820,16 +12883,27 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
         },
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda entity_id: SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now_holder["value"],
+                )
+            ),
+            data={},
+        ),
         entry_id="entry-1",
         entry_data={
             CONF_CIRCUITS: [
                 {
                     "circuit_id": "hvac",
                     "name": "HVAC",
-                    "mode": "dual_phase",
+                    "mode": "single_phase",
                     "appliance_profile": "hvac",
-                    "sensors": [],
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"},
+                    ],
                 }
             ],
         },
@@ -12855,20 +12929,30 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
     repeated = store_data.settings_recommendations["hvac:daily_spike_ratio:v1"]
     assert repeated.created_at == first_created_at
     assert repeated.expires_at == first_expires_at
-    saved_after_repeat = len(saved)
     assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
 
     reloaded = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda entity_id: SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now_holder["value"],
+                )
+            ),
+            data={},
+        ),
         entry_id="entry-1",
         entry_data={
             CONF_CIRCUITS: [
                 {
                     "circuit_id": "hvac",
                     "name": "HVAC",
-                    "mode": "dual_phase",
+                    "mode": "single_phase",
                     "appliance_profile": "hvac",
-                    "sensors": [],
+                    "sensors": [
+                        {"entity_id": "sensor.hvac_power", "role": "real_power"},
+                    ],
                 }
             ],
         },
@@ -12884,7 +12968,11 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
     now_holder["value"] = now + timedelta(minutes=10)
     await reloaded.async_process_update()
 
-    assert len(saved) == saved_after_repeat
+    reloaded_recommendation = store_data.settings_recommendations[
+        "hvac:daily_spike_ratio:v1"
+    ]
+    assert reloaded_recommendation.created_at == first_created_at
+    assert reloaded_recommendation.expires_at == first_expires_at
     assert notifications == [{"entry_id": "entry-1", "total_pending": 1}]
 
 
@@ -12950,6 +13038,7 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         store_data=store_data,
         now_fn=lambda: now,
     )
+    coordinator.state.learning_by_circuit["hvac"] = False
     coordinator._refresh_settings_recommendation_state(now)
     notify = (
         coordinator.notification_controller
@@ -12965,6 +13054,7 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
         store_data=store_data,
         now_fn=lambda: now,
     )
+    reloaded.state.learning_by_circuit["hvac"] = False
     reloaded._refresh_settings_recommendation_state(now)
     notify = (
         reloaded.notification_controller
@@ -13154,6 +13244,12 @@ async def test_process_update_recommends_capacity_from_current_history(
 
     class FakeStates:
         def get(self, entity_id: str):
+            if entity_id == "sensor.ev_power":
+                return SimpleNamespace(
+                    state="6200",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=now_holder["value"],
+                )
             assert entity_id == "sensor.ev_current"
             return SimpleNamespace(
                 state="31",
@@ -13172,6 +13268,7 @@ async def test_process_update_recommends_capacity_from_current_history(
                     "mode": "single_phase",
                     "appliance_profile": "ev_charger",
                     "sensors": [
+                        {"entity_id": "sensor.ev_power", "role": "real_power"},
                         {
                             "entity_id": "sensor.ev_current",
                             "role": "current",
@@ -13183,11 +13280,12 @@ async def test_process_update_recommends_capacity_from_current_history(
         },
         options={
             CONF_ADVANCED_SETTINGS: {
-                "ev": {"warning_ratio": 0.9},
+                "ev": {"warning_ratio": 0.9, "standby_threshold_w": 8060.0},
             },
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("ev", now),
+            baselines=_learned_real_power_baselines("ev", 6200.0),
         ),
         now_fn=lambda: now_holder["value"],
     )
@@ -13292,6 +13390,12 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
 
     class FakeStates:
         def get(self, entity_id: str):
+            if entity_id == "sensor.fridge_power":
+                return SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=holder["time"],
+                )
             assert entity_id == "sensor.fridge_energy"
             return SimpleNamespace(
                 state=str(holder["energy"]),
@@ -13309,6 +13413,7 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
                     "mode": "single_phase",
                     "appliance_profile": "refrigerator",
                     "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
                         {"entity_id": "sensor.fridge_energy", "role": "energy"},
                     ],
                 }
@@ -13316,6 +13421,7 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
+            baselines=_learned_real_power_baselines("fridge", 100.0),
             energy_goal_settings_by_circuit={
                 "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
             },
@@ -13440,6 +13546,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
             ],
         },
         store_data=FeatureStoreData(
+            baselines=_learned_real_power_baselines("fridge", 0.0),
             events=[
                 *_completed_learning_events("fridge", now),
                 CircuitEvent(
@@ -13518,6 +13625,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
             ],
         },
         store_data=FeatureStoreData(
+            baselines=_learned_real_power_baselines("fridge", 0.0),
             events=[
                 *_completed_learning_events("fridge", now),
                 CircuitEvent(
@@ -13875,7 +13983,10 @@ async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
                 }
             ],
         },
-        store_data=FeatureStoreData(events=events),
+        store_data=FeatureStoreData(
+            events=events,
+            baselines=_learned_real_power_baselines("fridge", 0.0),
+        ),
         now_fn=lambda: holder["time"],
     )
 
@@ -13964,6 +14075,8 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("ev", now),
+            baselines=_learned_real_power_baselines("ev", 2600.0),
             demand_by_circuit={
                 "ev": {
                     "samples": [
@@ -14048,6 +14161,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("mains", now),
+            baselines=_learned_real_power_baselines("mains", 3700.0),
             demand_by_circuit={
                 "mains": {
                     "samples": [],
@@ -14171,6 +14285,12 @@ async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -
 
     class FakeStates:
         def get(self, entity_id: str):
+            if entity_id == "sensor.ev_power":
+                return SimpleNamespace(
+                    state="6800",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=holder["time"],
+                )
             assert entity_id == "sensor.ev_current"
             return SimpleNamespace(
                 state=str(holder["current"]),
@@ -14188,12 +14308,15 @@ async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -
                     "mode": "single_phase",
                     "appliance_profile": "ev_charger",
                     "sensors": [
+                        {"entity_id": "sensor.ev_power", "role": "real_power"},
                         {"entity_id": "sensor.ev_current", "role": "current"},
                     ],
                 }
             ],
         },
         store_data=FeatureStoreData(
+            events=_completed_learning_events("ev", now),
+            baselines=_learned_real_power_baselines("ev", 6800.0),
             capacity_settings_by_circuit={
                 "ev": {"breaker_amps": 40.0, "warning_ratio": 0.8}
             }
@@ -14543,6 +14666,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("office", now),
+            baselines=_learned_real_power_baselines("office", 46.0),
             standby_by_circuit={
                 "office": {
                     "standby_sample_format": "1m-min-v1",
@@ -14724,6 +14848,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("mains", now),
+            baselines=_learned_real_power_baselines("mains", 1000.0),
             utility_comparison_settings_by_circuit={
                 "mains": {
                     "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -15790,6 +15915,12 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
 
     class FakeStates:
         def get(self, entity_id: str):
+            if entity_id == "sensor.fridge_power":
+                return SimpleNamespace(
+                    state="100",
+                    attributes={"unit_of_measurement": "W"},
+                    last_updated=holder["time"],
+                )
             assert entity_id == "sensor.fridge_energy"
             return SimpleNamespace(
                 state=str(holder["energy"]),
@@ -15811,6 +15942,7 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
                     "billing_cycle_budget_alert_ratio": 1.0,
                     "billing_cycle_min_elapsed_days": 3,
                     "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
                         {"entity_id": "sensor.fridge_energy", "role": "energy"},
                     ],
                 }
@@ -15818,6 +15950,7 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
+            baselines=_learned_real_power_baselines("fridge", 100.0),
             billing_by_circuit={
                 "fridge": {
                     "cycle_start": "2026-06-01",

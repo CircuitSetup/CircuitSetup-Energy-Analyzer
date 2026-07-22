@@ -184,6 +184,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "raw_status": _health_summary_raw_status(summary, readiness),
         "status_label": summary,
         "status_explanation": _health_summary_explanation(summary, readiness),
+        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
         "learning_progress": learning_progress_value(state, circuit_id),
         "readiness": readiness,
         "data_quality_problem": data_quality_problem,
@@ -209,7 +210,7 @@ def readiness_value(state: Any, circuit_id: str) -> str:
     if status:
         return str(status)
 
-    if getattr(state, "learning_by_circuit", {}).get(circuit_id) is True:
+    if getattr(state, "learning_by_circuit", {}).get(circuit_id, True):
         return "learning"
     return "ready"
 
@@ -794,6 +795,7 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
             state,
             circuit_id,
         ),
+        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
@@ -837,6 +839,7 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "billing_cycle_forecast_kwh": billing_cycle_forecast_value(state, circuit_id),
         "cost_cycle": cost_cycle_value(state, circuit_id),
         "cost_cycle_forecast": cost_cycle_forecast_value(state, circuit_id),
+        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "summary_explanation": explanation,
         "energy_usage_explanation": _status_explanation(energy_usage_status),
@@ -2638,6 +2641,11 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             attributes,
         )
         status_attributes = dict(attributes or {})
+        status_attributes["learning"] = getattr(
+            self.coordinator_state,
+            "learning_by_circuit",
+            {},
+        ).get(self.circuit_id, True)
         status_attributes["raw_status"] = str(raw_status)
         status_attributes["status_label"] = _status_label(raw_status)
         status_attributes["status_explanation"] = _status_explanation(raw_status)

@@ -156,7 +156,10 @@ class SettingsController:
 
         for config in target_configs:
             recommendations = []
-            if coordinator.processor_runtime.learning_mature(config, now):
+            if not coordinator.state.learning_by_circuit.get(
+                config.circuit_id,
+                True,
+            ):
                 advisor_inputs = self.advisor_inputs_for_config(config, now)
                 recommendations = build_settings_recommendations(advisor_inputs)
                 recommendations.extend(

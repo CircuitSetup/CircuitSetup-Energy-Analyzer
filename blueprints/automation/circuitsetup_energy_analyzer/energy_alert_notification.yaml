@@ -153,6 +153,7 @@ condition:
          | list %}
       {{ trigger.to_state is not none
          and alert_state_normalized in selected_states
+         and not trigger.to_state.attributes.get('learning', true)
          and (
            alert_state_normalized != 'possible_power_quality_change'
            or trigger.to_state.attributes.power_quality_alert_confirmed
