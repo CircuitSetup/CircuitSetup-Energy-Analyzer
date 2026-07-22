@@ -1439,6 +1439,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderApplianceDetailBody",
         '_panelText("headers.appliance_detail")',
         '_panelText("appliance_detail.today_vs_normal")',
+        "data-appliance-daily-cost",
+        "payload.daily_totals",
+        "average_cost_per_day",
+        "average_kwh_per_day",
         "detail.recent_timeline",
         "_renderApplianceTimeline",
         '_panelText("appliance_detail.behavior_expectations")',
@@ -1680,6 +1684,8 @@ panel._applianceDetail = {
     runtime_today_seconds: 7200,
     run_count_today: 3,
     cost_today: 0.6,
+    average_cost_per_day: 0.5,
+    average_kwh_per_day: 2.1,
     recent_timeline: { items: [] },
     today_vs_normal: [{
       metric_id: "cost_today",
@@ -1697,11 +1703,19 @@ panel._applianceDetail = {
     what_to_check_first: [],
     active_alerts: []
   },
+  daily_totals: [
+    { date: "2026-07-10", energy_kwh: 2, cost: 0.5 },
+    { date: "2026-07-11", energy_kwh: 2.2, cost: 0.55 },
+  ],
   actions: {}
 };
 const html = panel._renderApplianceDetailBody();
 for (const expected of [
+  'data-appliance-daily-cost',
   "Cost Today",
+  "Average Cost per Day",
+  "kWh Today",
+  "Average kWh per Day",
   "€0.60",
   "Cost today",
   "Normal",
@@ -1714,6 +1728,9 @@ for (const expected of [
 if (html.includes("$")) {
   throw new Error(`cost display hardcoded dollars: ${html}`);
 }
+assert.equal((html.match(/>Cost Today</g) || []).length, 1);
+assert.equal((html.match(/class="chart"/g) || []).length, 2);
+assert.ok(!html.includes("What To Check First"));
 """
     )
 

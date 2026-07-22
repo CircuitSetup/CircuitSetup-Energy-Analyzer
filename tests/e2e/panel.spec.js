@@ -261,6 +261,15 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
 
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.getByText("Projected end of day")).toBeVisible();
+  const dailyCost = panel.locator("[data-appliance-daily-cost]");
+  await expect(dailyCost).toBeVisible();
+  await expect(dailyCost.locator("svg.chart")).toHaveCount(2);
+  await expect(dailyCost).toContainText("Cost Today");
+  await expect(dailyCost).toContainText("Average Cost per Day");
+  await expect(dailyCost).toContainText("kWh Today");
+  await expect(dailyCost).toContainText("Average kWh per Day");
+  await expect(panel.getByRole("heading", { name: "What To Check First" })).toHaveCount(0);
+  await expect(panel.getByText("Cost Today", { exact: true })).toHaveCount(1);
 
   await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
   await expect.poll(() => page.evaluate(() => {
