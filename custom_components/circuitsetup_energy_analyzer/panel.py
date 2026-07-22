@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -742,9 +742,9 @@ def _appliance_daily_totals(
     )
     time_zone = time_zone() if callable(time_zone) else None
     today = (
-        local_date(now, time_zone).isoformat()
+        local_date(now, time_zone)
         if time_zone is not None and now.tzinfo is not None
-        else now.date().isoformat()
+        else now.date()
     )
     rate = getattr(
         coordinator.state,
@@ -760,8 +760,14 @@ def _appliance_daily_totals(
         if (
             not isinstance(day, Mapping)
             or day.get("complete") is not True
-            or day.get("date") == today
         ):
+            continue
+        date_text = str(day.get("date") or "")
+        try:
+            day_date = date.fromisoformat(date_text)
+        except ValueError:
+            continue
+        if day_date.isoformat() != date_text or day_date >= today:
             continue
         try:
             energy_kwh = round(max(float(day["usage_kwh"]), 0.0), 3)
@@ -769,7 +775,7 @@ def _appliance_daily_totals(
             continue
         complete.append(
             {
-                "date": str(day.get("date") or ""),
+                "date": date_text,
                 "energy_kwh": energy_kwh,
                 "cost": round(energy_kwh * rate, 2)
                 if rate is not None and rate > 0

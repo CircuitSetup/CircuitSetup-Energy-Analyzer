@@ -5241,3 +5241,31 @@ def test_utility_rate_uses_matching_entity_usage_not_comparison_statistic(
     values = {update.path: update.value for update in updates}
 
     assert values[("utility_cost_rate_by_circuit", "mains")] == 0.25
+
+
+def test_utility_comparison_does_not_overwrite_a_valid_rate_with_zero_cost() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        utility_comparison as utility_processor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
+        compare_utility_energy,
+    )
+
+    result = compare_utility_energy(
+        settings=UtilityComparisonSettings(),
+        utility_kwh=10.0,
+        measured_kwh=10.0,
+        measured_entity_ids=("sensor.panel_import_energy",),
+        comparison_source="explicit_entities",
+    )
+
+    updates = utility_processor.utility_comparison_state_updates(
+        "mains",
+        result,
+        utility_cost=0.0,
+        utility_rate_kwh=120.0,
+    )
+
+    assert ("utility_cost_rate_by_circuit", "mains") not in {
+        update.path for update in updates
+    }

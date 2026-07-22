@@ -239,7 +239,7 @@ def utility_comparison_state_updates(
 ) -> list[StateUpdate]:
     """Build analyzer state updates for one utility comparison result."""
     rate_per_kwh = utility_rate_per_kwh(utility_cost, utility_rate_kwh)
-    return [
+    updates = [
         StateUpdate(
             ("utility_comparison_difference_kwh_by_circuit", circuit_id),
             result.difference_kwh,
@@ -261,11 +261,12 @@ def utility_comparison_state_updates(
                 utility_cost_entity=utility_cost_entity,
             ),
         ),
-        StateUpdate(
-            ("utility_cost_rate_by_circuit", circuit_id),
-            rate_per_kwh or 0.0,
-        ),
     ]
+    if rate_per_kwh is not None:
+        updates.append(
+            StateUpdate(("utility_cost_rate_by_circuit", circuit_id), rate_per_kwh)
+        )
+    return updates
 
 
 def utility_comparison_message(

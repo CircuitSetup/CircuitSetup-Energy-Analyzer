@@ -567,7 +567,11 @@ export function createEvidenceViewMethods({
       unit,
       start: this._formatDateTime(new Date(minTime)),
       end: this._formatDateTime(new Date(maxTime)),
-    });
+    }) + (rightAxis ? ` ${this._panelTextFormat("chart.accessible_right_axis", {
+      min: this._formatNumber(rightMinValue),
+      max: this._formatNumber(rightMaxValue),
+      unit: ` ${alert.right_y_axis_label}`,
+    })}` : "");
 
     return `
       <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${selectAttrs}>

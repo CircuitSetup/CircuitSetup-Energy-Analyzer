@@ -596,9 +596,25 @@ export function createApplianceViewMethods({
 
   _renderApplianceDailyCost(payload, detail) {
     const rows = Array.isArray(payload.daily_totals) ? payload.daily_totals : [];
+    const dailyDateTimestamp = (value) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+      if (!match) return Number.NaN;
+      const [year, month, day] = match.slice(1).map(Number);
+      const utcNoon = Date.UTC(year, month - 1, day, 12);
+      const utcDate = new Date(utcNoon);
+      if (utcDate.getUTCFullYear() !== year || utcDate.getUTCMonth() !== month - 1 || utcDate.getUTCDate() !== day) return Number.NaN;
+      try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+          timeZone: this._timeZone(), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+        }).formatToParts(utcDate).map((part) => [part.type, part.value]));
+        return utcNoon - (Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute)) - utcNoon);
+      } catch (_error) {
+        return utcNoon;
+      }
+    };
     const series = (key) => rows.map((row) => ({
-      time: Date.parse(`${row.date}T12:00:00`),
-      value: Number(row[key]),
+      time: dailyDateTimestamp(row.date),
+      value: row[key] === null || row[key] === undefined ? Number.NaN : Number(row[key]),
     })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
     const energy = series("energy_kwh");
     const cost = series("cost");

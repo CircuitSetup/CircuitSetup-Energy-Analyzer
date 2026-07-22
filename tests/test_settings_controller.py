@@ -58,6 +58,7 @@ class _SettingsCoordinator:
     def __init__(self, recommendation: SettingRecommendation) -> None:
         self.state = SimpleNamespace(
             cost_current_rate_by_circuit={},
+            utility_cost_rate_by_circuit={},
             leg_imbalance_evidence_by_circuit={},
             metric_consistency_evidence_by_circuit={},
             balance_evidence_by_circuit={},
@@ -957,6 +958,21 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
     ]
     assert coordinator.updated == [coordinator.state] * 3
     assert coordinator.saved == [coordinator.now] * 3
+
+
+@pytest.mark.asyncio
+async def test_removing_utility_rate_sources_clears_the_last_known_rate() -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.25
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="",
+        utility_cost_entity="",
+    )
+
+    assert "mains" not in coordinator.state.utility_cost_rate_by_circuit
 
 
 @pytest.mark.asyncio

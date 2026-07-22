@@ -1737,6 +1737,36 @@ assert.ok(!html.includes("What To Check First"));
     )
 
 
+def test_appliance_daily_cost_chart_omits_absent_costs_and_keeps_home_assistant_dates() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { currency: "USD", time_zone: "America/New_York" } };
+const noRateHtml = panel._renderApplianceDailyCost({ daily_totals: [
+  { date: "2026-01-01", energy_kwh: 2.0, cost: null },
+  { date: "2026-01-02", energy_kwh: 2.1, cost: undefined },
+  { date: "2026-01-03", energy_kwh: 2.2, cost: Number.NaN },
+] }, {});
+assert.equal((noRateHtml.match(/class="chart"/g) || []).length, 1);
+assert.ok(!noRateHtml.includes("data-chart-right-axis"));
+assert.ok(!noRateHtml.includes('stroke-dasharray="6 4"'));
+
+const browserParse = context.Date.parse;
+context.Date.parse = (value) => browserParse(String(value).endsWith("T12:00:00") ? `${value}+09:00` : value);
+const timezoneHtml = panel._renderApplianceDailyCost({ daily_totals: [
+  { date: "2026-01-01", energy_kwh: 2.0, cost: null },
+] }, {});
+const time = Number(timezoneHtml.match(/data-chart-time="(\\d+)"/)[1]);
+const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+}).formatToParts(new Date(time)).map((part) => [part.type, part.value]));
+assert.equal(`${parts.year}-${parts.month}-${parts.day}`, "2026-01-01");
+"""
+    )
+
+
 def test_appliance_detail_labels_projected_energy_ranges_and_status() -> None:
     _run_panel_node_script(
         """
@@ -3854,6 +3884,7 @@ for (const expected of [
 ]) {
   assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }
+assert.match(html, /Values range from 2[.]5 kWh to 2[.]5 kWh.*Right axis ranges from 0[.]6 EUR to 0[.]6 EUR/);
 """
     )
 
@@ -6894,6 +6925,9 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "sensor.<circuit>_daily_energy_usage" in readme_text
     assert "Average kWh per Day" in readme_text
     assert "Average Cost per Day" in readme_text
+    assert "effective main-analyzer rate" in readme_text
+    assert "configured default/base rate" in readme_text
+    assert "last known valid Opower-derived rate" in readme_text
     assert "up to seven completed days" in readme_text
     assert "up to 30 completed days" in readme_text
     assert "Energy Usage Today can show 0 kWh for two different reasons" in readme_text

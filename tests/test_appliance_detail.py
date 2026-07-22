@@ -278,7 +278,11 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
             }
             for day in range(1, 22)
         ]
-        + [{"date": "2026-07-22", "usage_kwh": 1.0, "complete": True}],
+        + [
+            {"date": "2026-07-22", "usage_kwh": 1.0, "complete": True},
+            {"date": "2026-07-23", "usage_kwh": 1.0, "complete": True},
+            {"date": "not-a-date", "usage_kwh": 1.0, "complete": True},
+        ],
     }
 
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
@@ -293,7 +297,7 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
         "energy_kwh": 2.0,
         "cost": 0.4,
     }
-    assert all(item["date"] != "2026-07-22" for item in payload["daily_totals"])
+    assert all(item["date"] < "2026-07-22" for item in payload["daily_totals"])
 
 
 def test_appliance_detail_payload_includes_energy_change_explanation() -> None:
