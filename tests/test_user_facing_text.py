@@ -6786,11 +6786,13 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
 
     assert "Core Appliance Status Sensors" in readme_text
     assert "Energy Usage Today" in readme_text
+    assert "Daily Energy Usage" not in readme_text
+    assert "sensor.<circuit>_daily_energy_usage" in readme_text
     assert "Average kWh per Day" in readme_text
     assert "Average Cost per Day" in readme_text
     assert "up to seven completed days" in readme_text
     assert "up to 30 completed days" in readme_text
-    assert "Daily Energy Usage can show 0 kWh for two different reasons" in readme_text
+    assert "Energy Usage Today can show 0 kWh for two different reasons" in readme_text
     assert "Waiting For Energy Change" in readme_text
     assert "waiting_for_delta" in readme_text
     assert "true zero usage" in readme_text
