@@ -1003,10 +1003,15 @@ Start with these on dashboards.
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
-| Daily Energy Usage | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
+| Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
+| Cost Today | `sensor.<circuit>_cost_today` | Today's estimated cost at the current active electricity rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average daily cost from the completed-day energy average at the current active electricity rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data is available. | `kWh` |
 | Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Core/default visible for appliance circuits with active-power sensors. | `on`, `off` |
 
 Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
+
+The appliance detail view graphs daily energy and cost for up to 30 completed days. Cost values use the current active electricity rate, so they are estimates rather than historical tariff reconstruction.
 
 ### Running Vs Observations Vs Alerts
 
@@ -1050,7 +1055,10 @@ These require cumulative energy inputs. Use Home Assistant's Energy Dashboard fo
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
+| **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
+| **Cost Today** | `sensor.<circuit>_cost_today` | Today's estimated cost at the current active electricity rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Average Cost per Day** | `sensor.<circuit>_average_cost_per_day` | Average daily cost from the completed-day energy average at the current active electricity rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Average kWh per Day** | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data exists. | `kWh` |
 | **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Expert Energy Detail group. | Percentage values |
 | **Energy Usage Status** | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. Use this to tell true zero usage from "waiting for first kWh increase." | Expert Energy Detail group. | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |
 | **Energy Goal Usage** | `sensor.<circuit>_energy_goal_usage` | Today's usage as a percent of the configured daily goal. | Expert Energy Detail group. | Percentage values |
