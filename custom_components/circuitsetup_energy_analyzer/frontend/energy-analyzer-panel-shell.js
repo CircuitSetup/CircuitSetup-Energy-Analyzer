@@ -98,6 +98,9 @@ export class PanelShellMethods {
           display: grid;
           gap: 8px;
         }
+        .page-header h1 {
+          color: var(--primary-text-color, #000);
+        }
         .summary {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -562,7 +565,29 @@ export class PanelShellMethods {
           display: block;
         }
         .recommendation-evidence-actions {
-          margin: 14px 0;
+          margin-top: 16px;
+        }
+        .selected-recommendation-evidence .recommendation-summary,
+        .selected-recommendation-evidence .recommendation-support {
+          align-content: start;
+        }
+        .selected-recommendation-evidence h2,
+        .selected-recommendation-evidence strong {
+          color: var(--primary-text-color, #000);
+        }
+        .selected-recommendation-evidence p,
+        .selected-recommendation-evidence .muted {
+          color: var(--primary-text-color, #1f2933);
+        }
+        .selected-recommendation-evidence .recommendation-support > p > strong,
+        .selected-recommendation-evidence .recommendation-evidence > strong,
+        .selected-recommendation-evidence .setting-impact-preview strong {
+          font-size: 14px;
+        }
+        .recommendation-evidence-graph {
+          display: grid;
+          gap: 8px;
+          margin-top: 16px;
         }
         .appliance-insights-controls {
           align-items: end;

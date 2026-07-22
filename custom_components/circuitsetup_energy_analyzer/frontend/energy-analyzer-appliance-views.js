@@ -678,7 +678,11 @@ export function createApplianceViewMethods({
     const rawItems = Array.isArray(timeline && timeline.items) ? timeline.items : [];
     const seen = new Set();
     const items = rawItems.filter((item) => {
-      const key = [item.timestamp, item.title, item.detail].join("\u0000");
+      const timestamp = Date.parse(item.timestamp || "");
+      const displayedMinute = Number.isFinite(timestamp)
+        ? Math.floor(timestamp / 60000)
+        : item.timestamp;
+      const key = [displayedMinute, item.title, item.detail].join("\u0000");
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -793,6 +797,34 @@ export function createApplianceViewMethods({
   }
 
   _zoomApplianceHistoryGraph(factor) {
+    const window = this._applianceDetailHistoryGraphWindow();
+    if (!window || !Number.isFinite(factor) || factor <= 0) {
+      return undefined;
+    }
+    const hour = 60 * 60 * 1000;
+    const span = window.end - window.start;
+    const fullSpan = window.max - window.min;
+    if (factor < 1 || span < fullSpan) {
+      const nextSpan = factor < 1
+        ? span > 168 * hour
+          ? 168 * hour
+          : span > 24 * hour
+            ? 24 * hour
+            : Math.max(15 * 60 * 1000, span * factor)
+        : span < 24 * hour
+          ? Math.min(24 * hour, fullSpan)
+          : span < 168 * hour
+            ? Math.min(168 * hour, fullSpan)
+            : fullSpan;
+      const center = (window.start + window.end) / 2;
+      this._setGraphWindow(
+        center - nextSpan / 2,
+        center + nextSpan / 2,
+        window,
+        (next) => { this._applianceDetailHistoryWindow = next; },
+      );
+      return undefined;
+    }
     const history = this._applianceDetail && this._applianceDetail.history;
     const periods = Array.isArray(history && history.period_hours)
       ? history.period_hours.map(Number).filter(Number.isFinite).sort((left, right) => left - right)
@@ -801,9 +833,7 @@ export function createApplianceViewMethods({
     if (currentIndex < 0) {
       return undefined;
     }
-    const nextIndex = factor < 1
-      ? Math.max(currentIndex - 1, 0)
-      : Math.min(currentIndex + 1, periods.length - 1);
+    const nextIndex = Math.min(currentIndex + 1, periods.length - 1);
     if (nextIndex === currentIndex) {
       return undefined;
     }
@@ -819,8 +849,7 @@ export function createApplianceViewMethods({
 
   _applianceDetailHeaderMessage(detail, payload = {}) {
     const nextStep = String((detail && detail.next_step) || (payload && payload.next_step) || "").trim();
-    const activeAlerts = Array.isArray(detail && detail.active_alerts) ? detail.active_alerts : [];
-    if (nextStep && (activeAlerts.length || !/alert|evidence/i.test(nextStep))) {
+    if (nextStep && !/alert|evidence/i.test(nextStep)) {
       return nextStep;
     }
     return this._panelText("headers.appliance_detail_message");
@@ -838,11 +867,15 @@ export function createApplianceViewMethods({
     if (!window) {
       return "";
     }
+    const history = this._applianceDetail && this._applianceDetail.history;
+    const canLoadMore = Array.isArray(history && history.period_hours)
+      && history.period_hours.some((hours) => Number(hours) > this._applianceDetailHistoryHours);
     return this._renderHistoryGraphControls(
       window,
       "appliance-history-graph",
       "data-appliance-history-graph",
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
+      canLoadMore,
     );
   }
 
