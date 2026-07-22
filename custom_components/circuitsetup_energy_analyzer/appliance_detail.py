@@ -1898,7 +1898,7 @@ def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
         return accumulated
     return _estimated_cost(
         _state_number(state, "daily_energy_usage_by_circuit", circuit_id),
-        _state_number(state, "cost_current_rate_by_circuit", circuit_id),
+        _positive_state_number(state, "cost_current_rate_by_circuit", circuit_id),
     )
 
 

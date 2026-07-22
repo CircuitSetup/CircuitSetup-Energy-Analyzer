@@ -348,6 +348,20 @@ def test_direct_appliance_detail_preserves_explicitly_unavailable_cost() -> None
     assert detail.cost_today is None
 
 
+def test_direct_appliance_detail_does_not_estimate_with_missing_tariff() -> None:
+    from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
+        appliance_detail_for_circuit,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.cost_current_rate_by_circuit["fridge"] = 0.0
+
+    detail = appliance_detail_for_circuit(coordinator, "fridge")
+
+    assert detail is not None
+    assert detail.cost_today is None
+
+
 def test_direct_appliance_detail_hides_missing_metric_prompt_when_metrics_exist() -> (
     None
 ):
