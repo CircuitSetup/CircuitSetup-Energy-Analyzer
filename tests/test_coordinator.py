@@ -191,6 +191,28 @@ def _learned_real_power_baselines(
     }
 
 
+def _completed_energy_learning_history(
+    circuit_id: str,
+    now: datetime,
+    *,
+    last_energy_kwh: float = 0.0,
+) -> dict[str, dict[str, object]]:
+    return {
+        circuit_id: {
+            "last_energy_kwh": last_energy_kwh,
+            "last_sample_at": (now - timedelta(minutes=5)).isoformat(),
+            "days": [
+                {
+                    "date": (now.date() - timedelta(days=offset)).isoformat(),
+                    "usage_kwh": 100.0,
+                    "complete": True,
+                }
+                for offset in range(1, 31)
+            ],
+        }
+    }
+
+
 @pytest.mark.asyncio
 async def test_process_update_promotes_new_expected_schedule_alerts(
     monkeypatch,
@@ -3216,6 +3238,7 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
                 confidence=1.0,
             )
         },
+        energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         hass,
@@ -4739,6 +4762,7 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
         store_data=FeatureStoreData(
             events=_completed_learning_events("hvac", now),
             baselines=_learned_real_power_baselines("hvac", 3600.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("hvac", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -10206,6 +10230,9 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
             baselines=_learned_real_power_baselines("fridge", 300.0),
+            energy_usage_by_circuit=_completed_energy_learning_history(
+                "fridge", now
+            ),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -10477,6 +10504,9 @@ async def test_runtime_alerts_on_repeated_known_load_topology_mismatch(
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
             baselines=_learned_real_power_baselines("fridge", 600.0),
+            energy_usage_by_circuit=_completed_energy_learning_history(
+                "fridge", now
+            ),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -10728,6 +10758,9 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
                         1.0,
                     )
                 },
+                energy_usage_by_circuit=_completed_energy_learning_history(
+                    "fridge", now
+                ),
             ),
             now_fn=lambda: now,
         )
@@ -10983,6 +11016,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
                     "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
                 )
             },
+            energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -11803,6 +11837,7 @@ async def test_runtime_notifies_power_quality_relationship_change_after_maturity
                     "apparent_power_residual", 20, 0.0, 1.0, -1.0, 1.0, 1.0
                 ),
             },
+            energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -11910,6 +11945,9 @@ async def test_runtime_detects_motor_power_quality_shift_from_watts_amps_pf_and_
                     "power_factor_deficit", 20, 0.03, 0.01, 0.01, 0.06, 1.0
                 ),
             },
+            energy_usage_by_circuit=_completed_energy_learning_history(
+                "pool_pump", now, last_energy_kwh=348.0
+            ),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -12807,14 +12845,16 @@ async def test_process_update_builds_settings_recommendation_after_maturity() ->
             baselines=_learned_real_power_baselines("hvac", 100.0),
             energy_usage_by_circuit={
                 "hvac": {
+                    "last_energy_kwh": 0.0,
+                    "last_sample_at": (now - timedelta(minutes=5)).isoformat(),
                     "days": [
-                        {"date": "2026-05-26", "usage_kwh": 5.8},
-                        {"date": "2026-05-27", "usage_kwh": 6.1},
-                        {"date": "2026-05-28", "usage_kwh": 7.4},
-                        {"date": "2026-05-29", "usage_kwh": 6.7},
-                        {"date": "2026-05-30", "usage_kwh": 8.9},
-                        {"date": "2026-05-31", "usage_kwh": 9.8},
-                        {"date": "2026-06-01", "usage_kwh": 7.9},
+                        {"date": "2026-05-26", "usage_kwh": 5.8, "complete": True},
+                        {"date": "2026-05-27", "usage_kwh": 6.1, "complete": True},
+                        {"date": "2026-05-28", "usage_kwh": 7.4, "complete": True},
+                        {"date": "2026-05-29", "usage_kwh": 6.7, "complete": True},
+                        {"date": "2026-05-30", "usage_kwh": 8.9, "complete": True},
+                        {"date": "2026-05-31", "usage_kwh": 9.8, "complete": True},
+                        {"date": "2026-06-01", "usage_kwh": 7.9, "complete": True},
                     ],
                 }
             },
@@ -12870,14 +12910,16 @@ async def test_process_update_preserves_recommendation_episode_on_repeat(
         baselines=_learned_real_power_baselines("hvac", 100.0),
         energy_usage_by_circuit={
             "hvac": {
+                "last_energy_kwh": 0.0,
+                "last_sample_at": (now - timedelta(minutes=5)).isoformat(),
                 "days": [
-                    {"date": "2026-05-26", "usage_kwh": 5.8},
-                    {"date": "2026-05-27", "usage_kwh": 6.1},
-                    {"date": "2026-05-28", "usage_kwh": 7.4},
-                    {"date": "2026-05-29", "usage_kwh": 6.7},
-                    {"date": "2026-05-30", "usage_kwh": 8.9},
-                    {"date": "2026-05-31", "usage_kwh": 9.8},
-                    {"date": "2026-06-01", "usage_kwh": 7.9},
+                    {"date": "2026-05-26", "usage_kwh": 5.8, "complete": True},
+                    {"date": "2026-05-27", "usage_kwh": 6.1, "complete": True},
+                    {"date": "2026-05-28", "usage_kwh": 7.4, "complete": True},
+                    {"date": "2026-05-29", "usage_kwh": 6.7, "complete": True},
+                    {"date": "2026-05-30", "usage_kwh": 8.9, "complete": True},
+                    {"date": "2026-05-31", "usage_kwh": 9.8, "complete": True},
+                    {"date": "2026-06-01", "usage_kwh": 7.9, "complete": True},
                 ],
             }
         },
@@ -13280,12 +13322,17 @@ async def test_process_update_recommends_capacity_from_current_history(
         },
         options={
             CONF_ADVANCED_SETTINGS: {
-                "ev": {"warning_ratio": 0.9, "standby_threshold_w": 8060.0},
+                "ev": {
+                    "warning_ratio": 0.9,
+                    "standby_threshold_w": 8060.0,
+                    "daily_spike_ratio": 0.3,
+                },
             },
         },
         store_data=FeatureStoreData(
             events=_completed_learning_events("ev", now),
             baselines=_learned_real_power_baselines("ev", 6200.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("ev", now),
         ),
         now_fn=lambda: now_holder["value"],
     )
@@ -13425,13 +13472,9 @@ async def test_runtime_notifies_daily_energy_goal_exceeded(monkeypatch) -> None:
             energy_goal_settings_by_circuit={
                 "fridge": {"daily_goal_kwh": 12.0, "goal_alert_ratio": 1.0}
             },
-            energy_usage_by_circuit={
-                "fridge": {
-                    "last_energy_kwh": 100.0,
-                    "last_sample_at": "2026-06-03T00:00:00+00:00",
-                    "days": [],
-                }
-            },
+            energy_usage_by_circuit=_completed_energy_learning_history(
+                "fridge", now, last_energy_kwh=100.0
+            ),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -13556,6 +13599,7 @@ async def test_runtime_notifies_configured_activity_left_on(monkeypatch) -> None
                 )
             ],
             activity_alert_settings_by_circuit={"fridge": {"max_active_minutes": 30.0}},
+            energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -13640,6 +13684,7 @@ async def test_runtime_notifies_configured_activity_inactive_too_long(
                 ),
             ],
             activity_alert_settings_by_circuit={"fridge": {"max_idle_minutes": 180.0}},
+            energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -13986,6 +14031,7 @@ async def test_runtime_notifies_repeated_long_run_cycle_after_maturity(
         store_data=FeatureStoreData(
             events=events,
             baselines=_learned_real_power_baselines("fridge", 0.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
         ),
         now_fn=lambda: holder["time"],
     )
@@ -14077,6 +14123,7 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
         store_data=FeatureStoreData(
             events=_completed_learning_events("ev", now),
             baselines=_learned_real_power_baselines("ev", 2600.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("ev", now),
             demand_by_circuit={
                 "ev": {
                     "samples": [
@@ -14162,6 +14209,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
         store_data=FeatureStoreData(
             events=_completed_learning_events("mains", now),
             baselines=_learned_real_power_baselines("mains", 3700.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("mains", now),
             demand_by_circuit={
                 "mains": {
                     "samples": [],
@@ -14317,6 +14365,7 @@ async def test_runtime_tracks_circuit_capacity_and_notifies_limit(monkeypatch) -
         store_data=FeatureStoreData(
             events=_completed_learning_events("ev", now),
             baselines=_learned_real_power_baselines("ev", 6800.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("ev", now),
             capacity_settings_by_circuit={
                 "ev": {"breaker_amps": 40.0, "warning_ratio": 0.8}
             }
@@ -14667,6 +14716,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
         store_data=FeatureStoreData(
             events=_completed_learning_events("office", now),
             baselines=_learned_real_power_baselines("office", 46.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("office", now),
             standby_by_circuit={
                 "office": {
                     "standby_sample_format": "1m-min-v1",
@@ -14849,6 +14899,7 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
         store_data=FeatureStoreData(
             events=_completed_learning_events("mains", now),
             baselines=_learned_real_power_baselines("mains", 1000.0),
+            energy_usage_by_circuit=_completed_energy_learning_history("mains", now),
             utility_comparison_settings_by_circuit={
                 "mains": {
                     "utility_energy_entity": "sensor.opower_current_bill_usage",
@@ -15951,6 +16002,9 @@ async def test_runtime_tracks_billing_cycle_and_notifies_budget(
         store_data=FeatureStoreData(
             events=_completed_learning_events("fridge", now),
             baselines=_learned_real_power_baselines("fridge", 100.0),
+            energy_usage_by_circuit=_completed_energy_learning_history(
+                "fridge", now, last_energy_kwh=190.0
+            ),
             billing_by_circuit={
                 "fridge": {
                     "cycle_start": "2026-06-01",

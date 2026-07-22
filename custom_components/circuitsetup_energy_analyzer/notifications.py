@@ -254,6 +254,26 @@ async def async_create_alert_notification(
         return
 
 
+async def async_dismiss_persistent_notification(
+    hass: Any,
+    notification_id: str,
+) -> None:
+    """Dismiss a persistent notification if Home Assistant is available."""
+    try:
+        from homeassistant.components import persistent_notification
+    except ModuleNotFoundError:
+        return
+
+    dismiss = getattr(persistent_notification, "async_dismiss", None)
+    if dismiss is None:
+        return
+
+    try:
+        dismiss(hass, notification_id)
+    except (AttributeError, TypeError):
+        return
+
+
 async def async_create_settings_recommendation_notification(
     hass: Any,
     entry_id: str,
