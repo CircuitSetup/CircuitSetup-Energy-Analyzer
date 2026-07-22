@@ -3858,6 +3858,54 @@ for (const expected of [
     )
 
 
+def test_dual_axis_series_scale_to_their_own_min_and_max() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "Energy", unit: "kWh", points: [
+      { time: Date.parse("2026-06-24T18:00:00Z"), value: 1.9 },
+      { time: Date.parse("2026-06-24T19:00:00Z"), value: 2.3 },
+    ] },
+    { name: "Cost", unit: "USD", axis: "right", points: [
+      { time: Date.parse("2026-06-24T18:00:00Z"), value: 0.34 },
+      { time: Date.parse("2026-06-24T19:00:00Z"), value: 0.41 },
+    ] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const pointY = (name, value) => Number(
+  Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => (
+    circle[0].includes(`data-chart-name="${name}"`)
+      && circle[0].includes(`data-chart-value="${value}"`)
+  ))[0].match(/cy="([^"]+)"/)[1],
+);
+assert.equal(pointY("Energy", "2.3"), 18);
+assert.equal(pointY("Energy", "1.9"), 278);
+assert.equal(pointY("Cost", "0.41"), 18);
+assert.equal(pointY("Cost", "0.34"), 278);
+"""
+    )
+
+
+def test_default_chart_keeps_legacy_minimum_range() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg([{ name: "Cost", points: [
+  { time: Date.parse("2026-06-24T18:00:00Z"), value: 0.34 },
+  { time: Date.parse("2026-06-24T19:00:00Z"), value: 0.41 },
+] }], { y_axis_label: "USD" });
+const maxPoint = Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => circle[0].includes('data-chart-value="0.41"'))[0];
+assert.equal(maxPoint.match(/cy="([^"]+)"/)[1], "259.8");
+assert.ok(!html.includes("data-chart-right-axis"));
+"""
+    )
+
+
 def test_chart_keeps_data_in_svg_without_visible_fallback() -> None:
     _run_panel_node_script(
         r"""

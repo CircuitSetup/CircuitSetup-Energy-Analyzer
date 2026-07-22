@@ -477,11 +477,12 @@ export function createEvidenceViewMethods({
     const rightMinValue = rightPoints.length ? Math.min(...rightPoints.map((point) => point.value)) : minValue;
     const rightMaxValue = rightPoints.length ? Math.max(...rightPoints.map((point) => point.value)) : maxValue;
     const timeRange = Math.max(maxTime - minTime, 1);
-    const valueRange = Math.max(maxValue - minValue, 1);
+    const valueRange = Math.max(maxValue - minValue, rightAxis ? Number.EPSILON : 1);
+    const rightValueRange = Math.max(rightMaxValue - rightMinValue, Number.EPSILON);
     const x = (time) => padLeft + ((time - minTime) / timeRange) * (width - padLeft - padRight);
     const y = (value, axis = "left") => {
       const axisMin = axis === "right" ? rightMinValue : minValue;
-      const axisRange = axis === "right" ? Math.max(rightMaxValue - rightMinValue, 1) : valueRange;
+      const axisRange = axis === "right" ? rightValueRange : valueRange;
       return padTop + (1 - ((value - axisMin) / axisRange)) * (height - padTop - padBottom);
     };
     const unitLabel = alert.y_axis_label || "";
