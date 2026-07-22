@@ -146,7 +146,7 @@
       },
       "refresh_sources": {
         "title": "Refresh Source Sensors",
-        "description": "Rescan the currently selected Source Devices for added or renamed electrical sensors. Manual extra sources and other settings will be preserved. Submit to refresh sensors and reload the integration.",
+        "description": "Rescan the currently selected Source Devices for added or renamed electrical sensors. Manual extra sources and other settings will be preserved. If a previous device sensor is no longer found, review its appliance assignment before the integration reloads.",
         "submit": "Refresh Source Sensors"
       },
       "mains": {

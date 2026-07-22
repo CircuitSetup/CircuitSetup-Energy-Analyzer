@@ -1223,7 +1223,10 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     async def discover(hass, source_devices):
         assert hass is flow.hass
         assert tuple(source_devices) == ("meter-device",)
-        return ["sensor.fridge_active_power", "sensor.fridge_current"]
+        return [
+            "sensor.kitchen_refrigerator_active_power",
+            "sensor.kitchen_refrigerator_current",
+        ]
 
     monkeypatch.setattr(
         config_flow,
@@ -1246,6 +1249,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
         {
             "circuit_id": "fridge",
             "name": "Fridge",
+            "appliance_profile": "refrigerator",
             "sensors": [
                 {
                     "entity_id": "sensor.fridge_power",
@@ -1273,29 +1277,59 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
 
     result = await flow.async_step_refresh_sources({})
 
+    assert result["type"] == "form"
+    assert result["step_id"] == "select_assignment"
+    assert config_entries.reloads == []
+    assert entry.options[CONF_CIRCUITS] == existing_circuits
+    fridge_group = next(
+        group
+        for group in flow._assignment_groups
+        if group["circuit_id"] == "fridge"
+    )
+    assert "sensor.fridge_power" not in fridge_group["available_entity_ids"]
+    assert "sensor.fridge_power" not in fridge_group["selected_entity_ids"]
+
+    result = await flow.async_step_select_assignment(
+        {
+            "selected_assignment": "fridge",
+            "remove_assignments": [],
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "included_sensors": [
+                "sensor.kitchen_refrigerator_active_power",
+                "sensor.kitchen_refrigerator_current",
+            ],
+            "circuit_name": "Fridge",
+            "appliance_profile": "refrigerator",
+            "circuit_retention_mode": "diagnostic",
+        }
+    )
+
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SOURCE_ENTITIES] == [
-        "sensor.fridge_active_power",
-        "sensor.fridge_current",
+        "sensor.kitchen_refrigerator_active_power",
+        "sensor.kitchen_refrigerator_current",
         "sensor.manual_power",
     ]
     assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.manual_power"]
-    assert result["data"][CONF_CIRCUITS] == [
+    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == "fridge"
+    assert result["data"][CONF_CIRCUITS][0]["sensors"] == [
         {
-            **existing_circuits[0],
-            "sensors": [
-                {
-                    "entity_id": "sensor.fridge_active_power",
-                    "role": "real_power",
-                    "leg": None,
-                },
-                {
-                    "entity_id": "sensor.fridge_current",
-                    "role": "current",
-                    "leg": None,
-                },
-            ],
-        }
+            "entity_id": "sensor.kitchen_refrigerator_active_power",
+            "role": "real_power",
+            "leg": None,
+        },
+        {
+            "entity_id": "sensor.kitchen_refrigerator_current",
+            "role": "current",
+            "leg": None,
+        },
     ]
     assert result["data"][CONF_SENSITIVITY] == "quiet"
     assert result["data"][CONF_RETENTION_MODE] == "diagnostic"

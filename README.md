@@ -107,7 +107,7 @@ During setup, you choose:
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
 | **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
 
-After adding or renaming sensors on a selected source device, use **Refresh Source Sensors** in the integration options to rescan that device while preserving manual extra sources and the rest of the configuration.
+After adding or renaming sensors on a selected source device, use **Refresh Source Sensors** in the integration options to rescan that device while preserving manual extra sources and the rest of the configuration. If a previous device sensor is no longer found, the flow opens **Appliance Circuit Assignments** so you can choose its replacement before reloading.
 
 ![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
 

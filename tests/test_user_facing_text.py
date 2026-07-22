@@ -473,6 +473,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert refresh_sources["title"] == "Refresh Source Sensors"
     assert "added or renamed" in refresh_sources["description"].lower()
     assert "manual extra sources" in refresh_sources["description"].lower()
+    assert "review its appliance assignment" in refresh_sources["description"].lower()
     assert "reload" in refresh_sources["description"].lower()
     assert refresh_sources["submit"] == "Refresh Source Sensors"
     assert (

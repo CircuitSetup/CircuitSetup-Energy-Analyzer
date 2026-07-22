@@ -3645,6 +3645,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self._assignment_groups: list[dict[str, Any]] = []
         self._assignment_index = 0
         self._reviewed_circuits: list[dict[str, Any]] = []
+        self._reload_after_assignment = False
 
     async def async_step_init(
         self,
@@ -3761,10 +3762,35 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             - set(source_input[CONF_EXTRA_SOURCE_ENTITIES])
             - set(validated[CONF_SOURCE_ENTITIES])
         )
+        if stale_device_source_entities:
+            self._reload_after_assignment = True
+            assignment_result = _start_assignment_review(
+                self,
+                updated_options,
+                existing_circuits=_options_existing_circuits(self._config_entry),
+                show_picker=True,
+                update_existing=True,
+            )
+            self._assignment_groups = [
+                {
+                    **group,
+                    "available_entity_ids": tuple(
+                        entity_id
+                        for entity_id in group.get("available_entity_ids", ())
+                        if entity_id not in stale_device_source_entities
+                    ),
+                    "selected_entity_ids": tuple(
+                        entity_id
+                        for entity_id in _selected_entity_ids_for_group(group)
+                        if entity_id not in stale_device_source_entities
+                    ),
+                }
+                for group in self._assignment_groups
+            ]
+            return assignment_result
         updated_options = _options_with_merged_source_circuit_sensors(
             self._config_entry,
             updated_options,
-            remove_source_entities=stale_device_source_entities,
         )
         await _async_save_options_flow_config(self, updated_options)
         return self.async_create_entry(title="", data=updated_options)
@@ -3808,6 +3834,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 return assignment_result
             final_config = assignment_result
             if bool(getattr(self, "_assignment_update_existing", False)):
+                if self._reload_after_assignment:
+                    await _async_save_options_flow_config(self, final_config)
                 return self.async_create_entry(title="", data=final_config)
             return self.async_create_entry(title="", data=final_config)
 
@@ -3844,6 +3872,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 groups,
                 remove_assignments,
             )
+            if self._reload_after_assignment:
+                await _async_save_options_flow_config(self, final_config)
             return self.async_create_entry(title="", data=final_config)
 
         selected = str(user_input.get(FIELD_SELECTED_ASSIGNMENT) or "")
@@ -5010,14 +5040,11 @@ def _options_with_updates(
 def _options_with_merged_source_circuit_sensors(
     config_entry: config_entries.ConfigEntry,
     options: Mapping[str, Any],
-    *,
-    remove_source_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     updated_options = dict(options)
     merged_circuits = _circuits_with_merged_source_circuit_sensors(
         updated_options,
         updated_options.get(CONF_CIRCUITS, _options_existing_circuits(config_entry)),
-        remove_source_entities=remove_source_entities,
     )
     if merged_circuits is None:
         return updated_options
@@ -5032,23 +5059,12 @@ def _options_with_merged_source_circuit_sensors(
 def _circuits_with_merged_source_circuit_sensors(
     config: Mapping[str, Any],
     existing_circuits: Iterable[Any],
-    *,
-    remove_source_entities: Iterable[str] = (),
 ) -> list[dict[str, Any]] | None:
-    removed_entities = set(remove_source_entities)
-    changed = False
-    circuits: list[dict[str, Any]] = []
-    for circuit in existing_circuits:
-        if not isinstance(circuit, Mapping):
-            continue
-        sensors = _copied_circuit_sensors(circuit)
-        retained_sensors = [
-            sensor
-            for sensor in sensors
-            if _sensor_entity_id_from_raw(sensor) not in removed_entities
-        ]
-        changed = changed or len(retained_sensors) != len(sensors)
-        circuits.append({**circuit, "sensors": retained_sensors})
+    circuits = [
+        {**circuit, "sensors": _copied_circuit_sensors(circuit)}
+        for circuit in existing_circuits
+        if isinstance(circuit, Mapping)
+    ]
     if not circuits:
         return None
 
@@ -5064,6 +5080,7 @@ def _circuits_with_merged_source_circuit_sensors(
             invalid_error_key="invalid_mains_source_entities",
         )
     )
+    changed = False
     for entity_id in _strict_string_list(
         config.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
