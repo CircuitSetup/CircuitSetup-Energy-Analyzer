@@ -2641,6 +2641,11 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             attributes,
         )
         status_attributes = dict(attributes or {})
+        status_attributes["learning"] = getattr(
+            self.coordinator_state,
+            "learning_by_circuit",
+            {},
+        ).get(self.circuit_id, True)
         status_attributes["raw_status"] = str(raw_status)
         status_attributes["status_label"] = _status_label(raw_status)
         status_attributes["status_explanation"] = _status_explanation(raw_status)

@@ -3303,6 +3303,7 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     state = AnalyzerState(
+        learning_by_circuit={"pool": False},
         solar_flow_status_by_circuit={"pool": "inconsistent_export"},
     )
     coordinator = SimpleNamespace(data=state)
@@ -3319,6 +3320,7 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
         description=descriptions["solar_flow_status"],
     )
     assert solar_status.native_value == "Inconsistent Export"
+    assert solar_status.extra_state_attributes["learning"] is False
     assert solar_status.extra_state_attributes["raw_status"] == "inconsistent_export"
     assert "CT orientation" in solar_status.extra_state_attributes["status_explanation"]
 
