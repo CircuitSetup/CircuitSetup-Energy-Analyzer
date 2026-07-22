@@ -3890,6 +3890,32 @@ assert.equal(pointY("Cost", "0.34"), 278);
     )
 
 
+def test_dual_axis_preserves_tiny_positive_ranges() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const start = Date.parse("2026-06-24T18:00:00Z");
+const end = Date.parse("2026-06-24T19:00:00Z");
+const html = panel._chartSvg(
+  [
+    { name: "Energy", unit: "kWh", points: [{ time: start, value: 0 }, { time: end, value: 1e-17 }] },
+    { name: "Cost", unit: "USD", axis: "right", points: [{ time: start, value: 0 }, { time: end, value: 1e-18 }] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const pointY = (name, time) => Number(
+  Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => (
+    circle[0].includes(`data-chart-name="${name}"`)
+      && circle[0].includes(`data-chart-time="${time}"`)
+  ))[0].match(/cy="([^"]+)"/)[1],
+);
+assert.equal(pointY("Energy", end), 18);
+assert.equal(pointY("Cost", end), 18);
+"""
+    )
+
+
 def test_default_chart_keeps_legacy_minimum_range() -> None:
     _run_panel_node_script(
         """
