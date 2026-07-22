@@ -66,21 +66,19 @@ test("real Home Assistant loads panel routes and accepts a reversible mutation",
     );
   }
 
-  await page.goto(
-    "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=fridge",
-  );
+  await page.goto("/circuitsetup-energy-analyzer-evidence?circuit_id=fridge");
   const panel = page.locator("circuitsetup-energy-analyzer-panel");
   await expect(panel.locator("h1")).toHaveText("Kitchen Fridge", {
     timeout: 30_000,
   });
-  const mutation = await page.request.post(
-    "/api/services/circuitsetup_energy_analyzer/relearn_baseline",
-    {
-      data: { circuit_id: "fridge" },
-      headers: { Authorization: "Bearer " + token },
-    },
-  );
-  expect(mutation.ok(), await mutation.text()).toBeTruthy();
+  await panel.locator("#relearn_baseline").click();
+  await expect(panel.locator("#cancel_action_confirmation")).toBeVisible();
+  await expect(panel.locator("#confirm_action")).toBeVisible();
+  await panel.locator("#cancel_action_confirmation").click();
+  await expect(panel.locator("ha-dialog")).toHaveCount(0);
+  await panel.locator("#relearn_baseline").click();
+  await panel.locator("#confirm_action").click();
+  await expect(panel.locator("ha-dialog")).toHaveCount(0);
   expect(browserErrors).toEqual([]);
   expect(failedIntegrationResponses).toEqual([]);
 });

@@ -262,9 +262,60 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.getByText("Projected end of day")).toBeVisible();
 
+  await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
+  await expect.poll(() => page.evaluate(() => {
+    const graphWindow = window.__panel._applianceDetailHistoryGraphWindow();
+    return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
+  })).toBe(24);
+  const beforePan = await page.evaluate(() => window.__panel._applianceDetailHistoryGraphWindow().start);
+  await panel.locator('[data-appliance-history-graph-pan="-0.5"]').click();
+  await expect.poll(() => page.evaluate(() => window.__panel._applianceDetailHistoryGraphWindow().start)).toBeLessThan(beforePan);
+  await panel.locator('[data-appliance-history-graph-zoom="2"]').click();
+  await expect.poll(() => page.evaluate(() => {
+    const graphWindow = window.__panel._applianceDetailHistoryGraphWindow();
+    return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
+  })).toBe(168);
+
   const period = panel.locator("[data-appliance-history-period]");
   await period.selectOption("24");
   await expect(period).toHaveValue("24");
+});
+
+test("Review Evidence keeps recommendation data, graph, and actions in order", async ({ page, isMobile }) => {
+  test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/alert_evidence") || !url.searchParams.has("recommendation_id")) {
+      return false;
+    }
+    const selected = {
+      ...evidence.setting_recommendations[0],
+      evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
+      actions: {
+        ...evidence.setting_recommendations[0].actions,
+        dismiss: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "dismiss_setting_recommendation",
+          data: { recommendation_id: "energy-threshold" },
+        },
+      },
+    };
+    await route.fulfill({ json: { ...evidence, selected_recommendation: selected } });
+    return true;
+  });
+  const panel = await openPanel(page, "?circuit_id=kitchen&recommendation_id=energy-threshold");
+
+  await expect(panel.locator("h1")).toHaveText("Review Evidence");
+  await expect(panel.getByText("Reviewing evidence for Kitchen Appliances Daily Energy Threshold.")).toHaveCount(1);
+  await expect(panel.locator(".recommendation-values")).toContainText("2.2 kWh");
+  await expect(panel.locator("[data-recommendation-evidence-graph] svg.chart")).toBeVisible();
+  const order = await panel.locator(".selected-recommendation-evidence").evaluate((section) => ({
+    data: section.querySelector(".recommendation-values").getBoundingClientRect().top,
+    graph: section.querySelector("svg.chart").getBoundingClientRect().top,
+    actions: section.querySelector(".recommendation-evidence-actions").getBoundingClientRect().top,
+  }));
+  expect(order.data).toBeLessThan(order.graph);
+  expect(order.graph).toBeLessThan(order.actions);
+  await expect(panel.getByText("Respond to this alert")).toHaveCount(0);
 });
 
 test("alert responses and setting preview actions call their services", async ({ page, isMobile }) => {

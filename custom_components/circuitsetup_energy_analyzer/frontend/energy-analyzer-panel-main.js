@@ -380,36 +380,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   async _openOptionsFlow(action) {
-    const entryId = action && action.entry_id;
-    const requestedStep = action && action.options_step;
-    if (!entryId || !requestedStep || !this._hass || !this._hass.callApi) {
-      if (action && action.path) {
-        this._navigate(action.path);
-      }
-      return;
+    if (action && action.path) {
+      this._navigate(action.path);
     }
-    const started = await this._hass.callApi(
-      "POST",
-      "config/config_entries/options/flow",
-      { handler: entryId },
-    );
-    const flowId = started && started.flow_id;
-    if (!flowId) {
-      throw new Error("Home Assistant did not start the options flow");
-    }
-    const flowPath = `config/config_entries/options/flow/${flowId}`;
-    let current = started;
-    if (current.type === "menu") {
-      current = await this._hass.callApi("POST", flowPath, {
-        next_step_id: requestedStep === "advanced_settings" ? "advanced" : requestedStep,
-      });
-    }
-    if (action.circuit_id && current.step_id === "select_advanced_circuit") {
-      await this._hass.callApi("POST", flowPath, {
-        circuit_id: action.circuit_id,
-      });
-    }
-    this._navigate(`/config/integrations/config_flow/${flowId}`);
   }
 
   _openOptionsPath(path) {
@@ -456,8 +429,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <ha-dialog open heading="${this._escape(this._panelText("confirmations.relearn_title"))}">
         <p>${this._escape(this._panelText("confirmations.relearn_message"))}</p>
-        <button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</button>
-        <button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</button>
+        <mwc-button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</mwc-button>
+        <mwc-button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</mwc-button>
       </ha-dialog>
     `;
   }

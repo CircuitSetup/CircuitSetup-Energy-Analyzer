@@ -132,6 +132,16 @@ def appliance_detail_for_circuit(
         config=config,
     )
     first_checks = _first_checks(electrical_attrs.get("what_to_check_first"))
+    quality = _mapping_for_circuit(
+        state,
+        "data_quality_checklist_by_circuit",
+        config.circuit_id,
+    )
+    if (
+        electrical_attrs.get("metric_consistency_status") == "missing_metrics"
+        and quality.get("optional_sensors_present") is True
+    ):
+        first_checks = ()
     comparisons = metric_comparisons_for_circuit(coordinator, config, state)
     expectations = appliance_expectations_for_circuit(
         coordinator,
@@ -1867,12 +1877,15 @@ def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
         "cost_evidence_by_circuit",
         circuit_id,
     )
-    if evidence.get("cost_today_status") == "unavailable":
-        return None
     accumulated = _state_number(state, "cost_today_by_circuit", circuit_id)
+    if evidence.get("cost_today_status") == "unavailable" and accumulated is not None:
+        return None
     if accumulated is not None:
         return accumulated
-    return None
+    return _estimated_cost(
+        _state_number(state, "daily_energy_usage_by_circuit", circuit_id),
+        _state_number(state, "cost_current_rate_by_circuit", circuit_id),
+    )
 
 
 def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:

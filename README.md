@@ -163,9 +163,10 @@ questions instead of raw diagnostic entity lists:
   to three per appliance, and semantically deduplicated so repeated energy
   wording does not crowd out electrical or data-quality issues.
 - **Advanced setting suggestions** show current value, default value, suggested
-  value, what the setting controls, why the suggestion exists, expected effect,
-  and reset/apply/dismiss actions. Recommendation Evidence opens as a focused
-  view with those actions at the top. Supported threshold suggestions include
+  value with units, what the setting controls, why the suggestion exists,
+  expected effect, and reset/apply/dismiss actions. **Review Evidence** opens a
+  focused view with related history followed by those actions. Supported
+  threshold suggestions include
   an inline historical-impact summary only when enough retained history exists;
   it is a bounded, non-mutating preview of the alerts or operating-state changes
   the candidate would have produced from up to 14 days and 500 samples. The

@@ -1955,7 +1955,8 @@ panel._applianceDetail = {
     energy_change_explanation: null,
     expectations: [],
     what_to_check_first: [],
-    active_alerts: [],
+    next_step: "Review alert evidence",
+    active_alerts: [{ message: "No linked evidence", severity: "watch" }],
   },
 };
 const html = panel._renderApplianceDetailBody();
@@ -1968,6 +1969,21 @@ assert.equal(
   panel._applianceDetailHeaderMessage(panel._applianceDetail.detail, panel._applianceDetail),
   "Appliance behavior summary.",
 );
+"""
+    )
+
+
+def test_appliance_timeline_deduplicates_items_shown_in_the_same_minute() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+const html = panel._renderApplianceTimeline({ items: [
+  { timestamp: "2026-07-11T12:00:05Z", title: "Started", detail: "Compressor started." },
+  { timestamp: "2026-07-11T12:00:41Z", title: "Started", detail: "Compressor started." },
+  { timestamp: "2026-07-11T12:05:00Z", title: "Stopped", detail: "Compressor stopped." },
+] });
+assert.equal((html.match(/Compressor started\./g) || []).length, 1);
+assert.equal((html.match(/Compressor stopped\./g) || []).length, 1);
 """
     )
 
@@ -1994,7 +2010,7 @@ assert.ok(!html.includes("Source Contextual Baseline"));
     )
 
 
-def test_appliance_history_zoom_uses_supported_period_ladder() -> None:
+def test_appliance_history_zoom_uses_supported_viewport_ladder() -> None:
     _run_panel_node_script(
         r"""
 (async () => {
@@ -2003,11 +2019,19 @@ def test_appliance_history_zoom_uses_supported_period_ladder() -> None:
   panel._applianceDetail = { history: { period_hours: [24, 168, 720] } };
   panel._loadApplianceDetailHistory = async (hours) => { requested.push(hours); panel._applianceDetailHistoryHours = hours; };
   panel._applianceDetailHistoryHours = 168;
+  panel._applianceDetailHistoryBounds = { min: 0, max: 168 * 60 * 60 * 1000 };
+  panel._render = () => {};
   await panel._zoomApplianceHistoryGraph(0.5);
+  assert.equal(panel._applianceDetailHistoryGraphWindow().end - panel._applianceDetailHistoryGraphWindow().start, 24 * 60 * 60 * 1000);
+  panel._panApplianceHistoryGraph(-0.5);
+  assert.ok(panel._applianceDetailHistoryGraphWindow().start < 72 * 60 * 60 * 1000);
   await panel._zoomApplianceHistoryGraph(2);
-  panel._applianceDetailHistoryHours = 720;
-  await panel._zoomApplianceHistoryGraph(0.5);
-  assert.deepEqual(requested, [24, 168, 168]);
+  assert.equal(panel._applianceDetailHistoryGraphWindow().end - panel._applianceDetailHistoryGraphWindow().start, 168 * 60 * 60 * 1000);
+  panel._applianceDetailHistoryHours = 24;
+  panel._applianceDetailHistoryBounds = { min: 0, max: 24 * 60 * 60 * 1000 };
+  panel._applianceDetailHistoryWindow = null;
+  await panel._zoomApplianceHistoryGraph(2);
+  assert.deepEqual(requested, [168]);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
@@ -4371,7 +4395,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
     for text in (
         "Appliance Detail",
         "NILM Workspace",
-        "Recommendation Evidence",
+        "Review Evidence",
         "Respond to this alert",
         "Pause alerts for maintenance",
         "Tune this circuit",
@@ -4508,6 +4532,10 @@ panel._payload = {
     circuit_id: "washer",
     message: "ALERT ISSUE SENTINEL",
     feature: "daily_energy",
+    graph_entities: ["sensor.washer_power"],
+    graph_window_start: "2026-07-11T10:00:00Z",
+    graph_window_end: "2026-07-11T12:00:00Z",
+    y_axis_label: "W",
   },
   circuit: { name: "Washer" },
   selected_recommendation: {
@@ -4516,6 +4544,7 @@ panel._payload = {
     current_value: 10,
     default_value: 12,
     suggested_value: 14,
+    unit: "W",
     expected_effect: "Reduce nuisance alerts.",
     evidence_preview: "Observed Days: 8; Daily P95: 13.8",
     actions: {
@@ -4526,24 +4555,36 @@ panel._payload = {
   },
   setting_recommendations: [{ recommendation_id: "washer:daily:v1" }],
 };
+panel._historySeries = [[
+  { entity_id: "sensor.washer_power", state: "10", last_changed: "2026-07-11T10:00:00Z" },
+  { entity_id: "sensor.washer_power", state: "14", last_changed: "2026-07-11T12:00:00Z" },
+]];
 panel._render();
 const html = panel.shadowRoot.innerHTML;
 for (const expected of [
-  "Recommendation Evidence",
+  "Review Evidence",
+  "Reviewing evidence for Daily threshold.",
   'data-recommendation-action="apply"',
   'data-recommendation-action="dismiss"',
   'data-recommendation-action="reset"',
   "Reduce nuisance alerts.",
   "Observed Days",
   "Daily P95",
+  'class="chart"',
+  ">10 W<",
+  ">12 W<",
+  ">14 W<",
 ]) {
   assert.ok(html.includes(expected), `missing ${expected}`);
 }
 assert.ok(
-  html.indexOf('data-recommendation-action="apply"') < html.indexOf('class="recommendation-values"'),
-  "recommendation actions must precede evidence",
+  html.indexOf('class="recommendation-values"') < html.indexOf('class="chart"')
+    && html.indexOf('class="chart"') < html.indexOf('data-recommendation-action="apply"'),
+  "recommendation data and graph must precede actions",
 );
-for (const unexpected of ["ALERT ISSUE SENTINEL", "Respond to this alert", "What To Check First"]) {
+assert.equal((html.match(/Review Evidence/g) || []).length, 1);
+assert.equal((html.match(/Reviewing evidence for/g) || []).length, 1);
+for (const unexpected of ["Recommendation Evidence", "Previewing evidence", "ALERT ISSUE SENTINEL", "Respond to this alert", "What To Check First"]) {
   assert.ok(!html.includes(unexpected), `unexpected alert content: ${unexpected}`);
 }
 """
@@ -4561,6 +4602,7 @@ const html = panel._renderRecommendationSectionContent("Suggested Settings", [{
     current_value: 10,
     default_value: 12,
     suggested_value: 14,
+    unit: "W",
     expected_effect: "Reduce low-value alerts.",
     evidence_preview: "Observed Days: 8; Daily P95: 13.8",
     impact_preview: {
@@ -4586,6 +4628,9 @@ for (const expected of [
   "Observed Days: 8",
   "Daily P95: 13.8",
   "Historical impact:",
+  ">10 W<",
+  ">12 W<",
+  ">14 W<",
 ]) {
   assert.ok(html.includes(expected), `missing ${expected}`);
 }
@@ -4632,7 +4677,7 @@ assert.equal(Object.prototype.hasOwnProperty.call(panel, "hass"), false);
     )
 
 
-def test_panel_opens_the_requested_options_flow_step() -> None:
+def test_panel_falls_back_to_the_integration_page_for_options_links() -> None:
     _run_panel_node_script(
         r"""
 (async () => {
@@ -4656,13 +4701,10 @@ def test_panel_opens_the_requested_options_flow_step() -> None:
     entry_id: "entry-1",
     circuit_id: "fridge",
     options_step: "advanced_settings",
+    path: "/config/integrations/integration/circuitsetup_energy_analyzer",
   });
-  assert.equal(JSON.stringify(calls), JSON.stringify([
-    { method: "POST", path: "config/config_entries/options/flow", data: { handler: "entry-1" } },
-    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { next_step_id: "advanced" } },
-    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { circuit_id: "fridge" } },
-  ]));
-  assert.equal(destination, "/config/integrations/config_flow/flow-1");
+  assert.deepEqual(calls, []);
+  assert.equal(destination, "/config/integrations/integration/circuitsetup_energy_analyzer");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
@@ -4674,7 +4716,13 @@ def test_relearn_baseline_requires_confirmation() -> None:
 const panel = new context.Panel();
 panel._pendingConfirmationAction = "relearn_baseline";
 const html = panel._renderActionConfirmation();
-for (const expected of ["<ha-dialog", "Relearn Baseline", "restart learning"]) {
+for (const expected of [
+  "<ha-dialog",
+  "Relearn Baseline",
+  "restart learning",
+  '<mwc-button slot="secondaryAction" id="cancel_action_confirmation">',
+  '<mwc-button slot="primaryAction" id="confirm_action">',
+]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
