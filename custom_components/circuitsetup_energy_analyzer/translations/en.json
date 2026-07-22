@@ -108,6 +108,7 @@
         "description": "Choose an options area to configure. Start with source selection, then mains sensors and NILM settings, and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
         "menu_options": {
           "sources": "🔌 Edit Source Selection",
+          "refresh_sources": "🔄 Refresh Source Sensors",
           "mains": "⚡ Edit Mains Sensors & NILM Setting",
           "assign": "🏷️ Appliance Circuit Assignments",
           "utility": "📊 Utility / Opower Comparison",
@@ -142,6 +143,11 @@
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
+      },
+      "refresh_sources": {
+        "title": "Refresh Source Sensors",
+        "description": "Rescan the currently selected Source Devices for added or renamed electrical sensors. Manual extra sources and other settings will be preserved. Submit to refresh sensors and reload the integration.",
+        "submit": "Refresh Source Sensors"
       },
       "mains": {
         "title": "Edit Mains Sensors & NILM Setting",
@@ -487,6 +493,8 @@
       }
     },
     "error": {
+      "no_source_devices": "Select at least one Source Device in Edit Source Selection before refreshing.",
+      "no_source_device_entities": "No supported electrical sensors were found on the selected Source Devices. Existing settings were not changed.",
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
