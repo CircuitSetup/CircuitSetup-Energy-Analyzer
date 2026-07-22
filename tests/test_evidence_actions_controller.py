@@ -36,6 +36,7 @@ class _ActionCoordinator:
         self.saved: list[datetime] = []
         self.dirty_count = 0
         self.relearned: list[str] = []
+        self.dismissed_alert_ids: list[str] = []
         self.now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
         self.store_persistence = SimpleNamespace(
             async_save_if_dirty=self._record_store_save,
@@ -43,6 +44,9 @@ class _ActionCoordinator:
         )
         self.circuit_registry = SimpleNamespace(
             config_for_circuit=self._lookup_config_for_circuit,
+        )
+        self.notification_controller = SimpleNamespace(
+            async_dismiss_alert_notification=self._dismiss_alert_notification,
         )
 
     def current_time(self) -> datetime:
@@ -63,6 +67,9 @@ class _ActionCoordinator:
 
     async def _record_store_save(self, now: datetime) -> None:
         self.saved.append(now)
+
+    async def _dismiss_alert_notification(self, alert_id: str) -> None:
+        self.dismissed_alert_ids.append(alert_id)
 
     def _record_store_dirty(self) -> None:
         self.dirty_count += 1

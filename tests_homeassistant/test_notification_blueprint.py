@@ -70,7 +70,11 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     assert await async_setup_component(hass, "persistent_notification", {})
     persistent_notification.async_register_callback(
         hass,
-        lambda _update_type, items: notifications.extend(items.values()),
+        lambda update_type, items: (
+            notifications.extend(items.values())
+            if update_type is not persistent_notification.UpdateType.REMOVED
+            else None
+        ),
     )
 
     assert await async_setup_component(
@@ -108,6 +112,21 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     )
     await hass.async_block_till_done()
 
+    assert events == []
+    assert notifications == []
+
+    hass.states.async_set("sensor.washer_energy_summary", "Normal")
+    await hass.async_block_till_done()
+    state.active_alerts_by_circuit["washer"] = [
+        SimpleNamespace(feature="daily_energy_usage_spike")
+    ]
+    hass.states.async_set(
+        "sensor.washer_energy_summary",
+        energy_summary_value(state, "washer"),
+        energy_summary_attributes(state, "washer"),
+    )
+    await hass.async_block_till_done()
+
     assert len(events) == 1
     assert events[0].data == {
         "evidence": "Energy use is above a configured threshold or budget.",
@@ -123,6 +142,29 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         "[Open evidence graph]"
         "(/circuitsetup-energy-analyzer-evidence?circuit_id=washer)"
         in notifications[0]["message"]
+    )
+    assert notifications[0]["notification_id"] == (
+        "circuitsetup_energy_analyzer_blueprint_sensor_washer_energy_summary"
+    )
+
+    notification_updates = []
+    persistent_notification.async_register_callback(
+        hass,
+        lambda update_type, items: notification_updates.append((update_type, items)),
+    )
+    state.active_alerts_by_circuit.clear()
+    hass.states.async_set(
+        "sensor.washer_energy_summary",
+        energy_summary_value(state, "washer"),
+        energy_summary_attributes(state, "washer"),
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.washer_energy_summary").state == "High Usage"
+    assert any(
+        update_type is persistent_notification.UpdateType.REMOVED
+        and notifications[0]["notification_id"] in items
+        for update_type, items in notification_updates
     )
 
     hass.states.async_set("sensor.washer_electrical_health", "Normal")

@@ -39,6 +39,7 @@ from .operating_detection import (
     PROFILE_RUNNING_ON_THRESHOLDS_W,
     operating_state_is_running,
 )
+from .state import circuit_is_learning
 
 try:
     from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -92,7 +93,7 @@ def is_learning(
     appliance_profile: ApplianceProfile | None = None,
 ) -> bool:
     """Return whether a circuit is still in its learning period."""
-    return bool(getattr(state, "learning_by_circuit", {}).get(circuit_id, True))
+    return circuit_is_learning(state, circuit_id)
 
 
 def has_data_quality_problem(

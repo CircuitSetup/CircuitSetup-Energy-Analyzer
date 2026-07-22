@@ -456,8 +456,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return `
       <ha-dialog open heading="${this._escape(this._panelText("confirmations.relearn_title"))}">
         <p>${this._escape(this._panelText("confirmations.relearn_message"))}</p>
-        <button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</button>
-        <button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</button>
+        <mwc-button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</mwc-button>
+        <mwc-button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</mwc-button>
       </ha-dialog>
     `;
   }

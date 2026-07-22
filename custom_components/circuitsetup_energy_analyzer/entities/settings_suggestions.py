@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ..state import circuit_is_learning
+
 SETTINGS_SUGGESTIONS_ATTRIBUTE_MAX_ITEMS = 5
 SETTINGS_SUGGESTIONS_ATTRIBUTE_FIELDS = (
     "recommendation_id",
@@ -46,7 +48,7 @@ def settings_suggestions_attributes(state: Any, circuit_id: str) -> dict[str, An
     ]
     return {
         "pending_count": settings_suggestions_value(state, circuit_id),
-        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
+        "learning": circuit_is_learning(state, circuit_id),
         "shown_count": len(shown_recommendations),
         "has_more": len(recommendation_items) > len(shown_recommendations),
         "recommendations": shown_recommendations,

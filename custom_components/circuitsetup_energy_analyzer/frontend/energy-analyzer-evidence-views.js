@@ -336,7 +336,6 @@ export function createEvidenceViewMethods({
     if (!recommendation) {
       return "";
     }
-    const label = recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting");
     const evidenceCount = Number(recommendation.evidence_key_count || 0);
     const omittedCount = Number(recommendation.evidence_omitted_key_count || 0);
     const evidenceSummary = recommendation.evidence_preview
@@ -349,15 +348,15 @@ export function createEvidenceViewMethods({
       ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.evidence_count", { count: evidenceCount, omitted }))}</p>`
       : "";
     const originalIndex = this._selectedRecommendationIndex(recommendation);
+    const alert = this._payload && this._payload.alert;
+    const graph = alert && Array.isArray(alert.graph_entities) && alert.graph_entities.length
+      ? `<div class="recommendation-evidence-graph" data-recommendation-evidence-graph>
+          <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
+          ${this._renderChart(alert)}
+        </div>`
+      : "";
     return `
-      <section class="panel">
-        <h2>${this._escape(this._panelText("recommendations.recommendation_evidence"))}</h2>
-        <p class="muted">${this._escape(this._panelTextFormat("recommendations.previewing_evidence", { label }))}</p>
-        <div class="actions recommendation-evidence-actions">
-          ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
-          ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", this._panelText("actions.labels.dismiss"), true)}
-          ${this._recommendationActionButton(recommendation, originalIndex, "reset", this._panelText("actions.labels.reset_default"), true)}
-        </div>
+      <section class="panel selected-recommendation-evidence">
         <div class="recommendation-layout">
           <div class="recommendation-summary">
             ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
@@ -369,6 +368,12 @@ export function createEvidenceViewMethods({
             ${countSummary}
             ${this._renderSettingImpactPreview(recommendation)}
           </div>
+        </div>
+        ${graph}
+        <div class="actions recommendation-evidence-actions">
+          ${this._recommendationActionButton(recommendation, originalIndex, "apply", this._panelText("actions.labels.apply"))}
+          ${this._recommendationActionButton(recommendation, originalIndex, "dismiss", this._panelText("actions.labels.dismiss"), true)}
+          ${this._recommendationActionButton(recommendation, originalIndex, "reset", this._panelText("actions.labels.reset_default"), true)}
         </div>
       </section>
     `;
@@ -414,7 +419,7 @@ export function createEvidenceViewMethods({
       rows.push([this._panelText("common.suggested"), suggestedValue]);
     }
     return rows.length ? `<div class="recommendation-values">${rows.map(([label, value]) => `
-      <div class="recommendation-value"><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>
+      <div class="recommendation-value"><span>${this._escape(label)}</span><strong>${this._escape(this._formatComparisonValue(recommendation, value))}</strong></div>
     `).join("")}</div>` : "";
   }
 
@@ -641,7 +646,7 @@ export function createEvidenceViewMethods({
     }
   }
 
-  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText) {
+  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false) {
     if (!window) {
       return "";
     }
@@ -649,7 +654,7 @@ export function createEvidenceViewMethods({
     const fullSpan = window.max - window.min;
     const minSpan = 15 * 60 * 1000;
     const zoomInDisabled = span <= minSpan ? "disabled" : "";
-    const zoomOutDisabled = span >= fullSpan ? "disabled" : "";
+    const zoomOutDisabled = span >= fullSpan && !canLoadMore ? "disabled" : "";
     const panEarlierDisabled = window.start <= window.min ? "disabled" : "";
     const panLaterDisabled = window.end >= window.max ? "disabled" : "";
     const zoomInLabel = this._panelText("actions.labels.zoom_in");

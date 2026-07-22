@@ -48,6 +48,7 @@ export const evidence = {
       current_value: 2.2,
       default_value: 2.5,
       suggested_value: 2.6,
+      unit: "kWh",
       expected_effect: "Reduce repeat alerts caused by known cooking loads.",
       impact_preview: {
         history_start: "2026-07-01T00:00:00Z",

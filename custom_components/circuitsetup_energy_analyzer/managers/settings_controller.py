@@ -69,6 +69,7 @@ from ..solar_flow import (
     SOLAR_SURPLUS_THRESHOLD_W,
 )
 from ..standby import StandbySettings
+from ..state import circuit_is_learning
 from ..tariff import GLOBAL_COST_SETTINGS_KEY
 from ..usage import EnergyUsageSettings
 from ..utility_comparison import (
@@ -156,10 +157,7 @@ class SettingsController:
 
         for config in target_configs:
             recommendations = []
-            if not coordinator.state.learning_by_circuit.get(
-                config.circuit_id,
-                True,
-            ):
+            if not circuit_is_learning(coordinator.state, config.circuit_id):
                 advisor_inputs = self.advisor_inputs_for_config(config, now)
                 recommendations = build_settings_recommendations(advisor_inputs)
                 recommendations.extend(
