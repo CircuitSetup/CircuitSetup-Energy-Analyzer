@@ -149,6 +149,17 @@
         "description": "Rescan the currently selected Source Devices for added or renamed electrical sensors. Manual extra sources and other settings will be preserved. If a previous device sensor is no longer found, review its appliance assignment before the integration reloads.",
         "submit": "Refresh Source Sensors"
       },
+      "refresh_mains": {
+        "title": "Review Refreshed Mains Sensors",
+        "description": "One or more previous mains sensors are no longer available. Select their current replacements before continuing the source refresh.",
+        "data": {
+          "mains_source_entities": "Mains Source Entities"
+        },
+        "data_description": {
+          "mains_source_entities": "Select the current whole-panel or aggregate sensors used for mains analysis, utility comparison, and experimental NILM."
+        },
+        "submit": "Continue Source Refresh"
+      },
       "mains": {
         "title": "Edit Mains Sensors & NILM Setting",
         "description": "Select optional aggregate mains sensors used for Mains NILM and whole-home comparison features, and choose the experimental NILM settings that use them.",

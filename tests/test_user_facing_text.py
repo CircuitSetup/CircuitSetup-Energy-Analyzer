@@ -480,6 +480,12 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
         "existing settings were not changed"
         in strings["options"]["error"]["no_source_device_entities"].lower()
     )
+    refresh_mains = strings["options"]["step"]["refresh_mains"]
+    assert refresh_mains["title"] == "Review Refreshed Mains Sensors"
+    assert "current replacements" in refresh_mains["description"].lower()
+    assert refresh_mains["data"]["mains_source_entities"] == (
+        "Mains Source Entities"
+    )
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
     assert entity_detail["data"]["selected_entity_groups"] == "Expert Entity Groups"
@@ -676,6 +682,7 @@ def test_runtime_english_translation_is_the_single_source() -> None:
         ("config", "nilm"),
         ("options", "sources"),
         ("options", "refresh_sources"),
+        ("options", "refresh_mains"),
         ("options", "mains"),
         ("options", "nilm"),
         ("options", "utility"),

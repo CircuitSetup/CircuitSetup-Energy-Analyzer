@@ -3646,6 +3646,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self._assignment_index = 0
         self._reviewed_circuits: list[dict[str, Any]] = []
         self._reload_after_assignment = False
+        self._refresh_source_input: dict[str, Any] | None = None
+        self._refresh_available_source_entities: list[str] = []
+        self._refresh_stale_source_entities: set[str] = set()
 
     async def async_step_init(
         self,
@@ -3757,20 +3760,81 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         updated_options = _options_with_updates(self._config_entry, validated)
+        available_source_entities = await _async_discover_energy_source_entities(
+            getattr(self, "hass", None)
+        )
+        stale_mains_source_entities = set(
+            source_input[CONF_MAINS_SOURCE_ENTITIES]
+        ) - set(available_source_entities)
+        if stale_mains_source_entities:
+            self._refresh_source_input = source_input
+            self._refresh_available_source_entities = available_source_entities
+            self._pending_config = updated_options
+            return self._show_refresh_mains_form()
+        return await self._async_finish_source_refresh(source_input, updated_options)
+
+    async def async_step_refresh_mains(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Review mains sources that changed during source refresh."""
+        if user_input is None:
+            return self._show_refresh_mains_form()
+
+        try:
+            pending_config = dict(self._pending_config or {})
+            pending_config[CONF_MAINS_SOURCE_ENTITIES] = _strict_string_list(
+                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                invalid_error_key="invalid_mains_source_entities",
+            )
+            validated = validate_options_input(pending_config)
+        except SetupValidationError as err:
+            return self._show_refresh_mains_form({"base": err.error_key})
+
+        updated_options = {**pending_config, **validated}
+        return await self._async_finish_source_refresh(
+            self._refresh_source_input or _options_source_payload(self._config_entry),
+            updated_options,
+        )
+
+    async def _async_finish_source_refresh(
+        self,
+        source_input: Mapping[str, Any],
+        updated_options: Mapping[str, Any],
+    ) -> config_entries.ConfigFlowResult:
+        """Save a source refresh or review every stale circuit first."""
         stale_device_source_entities = (
             set(source_input[CONF_SOURCE_ENTITIES])
             - set(source_input[CONF_EXTRA_SOURCE_ENTITIES])
-            - set(validated[CONF_SOURCE_ENTITIES])
+            - set(updated_options[CONF_SOURCE_ENTITIES])
         )
-        if stale_device_source_entities:
+        existing_circuits = [
+            circuit
+            for circuit in _options_existing_circuits(self._config_entry)
+            if isinstance(circuit, Mapping)
+        ]
+        affected_circuits = [
+            circuit
+            for circuit in existing_circuits
+            if stale_device_source_entities.intersection(
+                _sensor_entity_ids_from_circuit(circuit)
+            )
+        ]
+        if affected_circuits:
             self._reload_after_assignment = True
-            assignment_result = _start_assignment_review(
+            self._refresh_stale_source_entities = stale_device_source_entities
+            _start_assignment_review(
                 self,
                 updated_options,
-                existing_circuits=_options_existing_circuits(self._config_entry),
+                existing_circuits=existing_circuits,
                 show_picker=True,
-                update_existing=True,
+                update_existing=False,
             )
+            affected_circuit_ids = {
+                str(circuit.get("circuit_id") or circuit.get("id") or "").strip()
+                or _slugify(str(circuit.get("name") or "circuit"))
+                for circuit in affected_circuits
+            }
             self._assignment_groups = [
                 {
                     **group,
@@ -3786,8 +3850,15 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     ),
                 }
                 for group in self._assignment_groups
+                if _assignment_group_value(group) in affected_circuit_ids
             ]
-            return assignment_result
+            self._reviewed_circuits = [
+                dict(circuit)
+                for circuit in existing_circuits
+                if circuit not in affected_circuits
+            ]
+            self._assignment_index = 0
+            return _assignment_review_form(self)
         updated_options = _options_with_merged_source_circuit_sensors(
             self._config_entry,
             updated_options,
@@ -3833,9 +3904,19 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             if assignment_result.get("type") == "form":
                 return assignment_result
             final_config = assignment_result
+            if self._reload_after_assignment:
+                final_config[CONF_SOURCE_ENTITIES] = (
+                    _source_entities_after_assignment_update(
+                        self._pending_config or final_config,
+                        final_config.get(CONF_CIRCUITS, []),
+                        removed_source_entities=(
+                            self._refresh_stale_source_entities
+                        ),
+                    )
+                )
+                await _async_save_options_flow_config(self, final_config)
+                return self.async_create_entry(title="", data=final_config)
             if bool(getattr(self, "_assignment_update_existing", False)):
-                if self._reload_after_assignment:
-                    await _async_save_options_flow_config(self, final_config)
                 return self.async_create_entry(title="", data=final_config)
             return self.async_create_entry(title="", data=final_config)
 
@@ -4310,6 +4391,35 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         return self.async_show_form(
             step_id="sources",
             data_schema=_options_schema(self._config_entry, source_entity_ids),
+            errors=errors or {},
+        )
+
+    def _show_refresh_mains_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        source_input = self._refresh_source_input or {}
+        stale_mains = set(source_input.get(CONF_MAINS_SOURCE_ENTITIES, ())) - set(
+            self._refresh_available_source_entities
+        )
+        pending_config = self._pending_config or {}
+        selected_mains = [
+            entity_id
+            for entity_id in pending_config.get(CONF_MAINS_SOURCE_ENTITIES, ())
+            if entity_id not in stale_mains
+        ]
+        return self.async_show_form(
+            step_id="refresh_mains",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_MAINS_SOURCE_ENTITIES,
+                        default=selected_mains,
+                    ): _energy_entity_list_selector(
+                        self._refresh_available_source_entities
+                    )
+                }
+            ),
             errors=errors or {},
         )
 
