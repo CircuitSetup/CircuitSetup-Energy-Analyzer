@@ -605,10 +605,14 @@ export function createApplianceViewMethods({
     const currency = this._hass && this._hass.config && this._hass.config.currency
       ? String(this._hass.config.currency)
       : "USD";
-    const charts = [
-      energy.length ? this._chartSvg([{ name: this._panelText("appliance_detail.kwh_per_day"), unit: "kWh", points: energy }], { y_axis_label: "kWh" }) : "",
-      cost.length ? this._chartSvg([{ name: this._panelText("appliance_detail.cost_per_day"), unit: "currency", points: cost }], { y_axis_label: currency }) : "",
-    ].join("");
+    const dailySeries = [
+      energy.length && { name: this._panelText("appliance_detail.kwh_per_day"), unit: "kWh", points: energy },
+      cost.length && { name: this._panelText("appliance_detail.cost_per_day"), unit: currency, axis: energy.length ? "right" : "left", points: cost },
+    ].filter(Boolean);
+    const charts = dailySeries.length ? this._chartSvg(dailySeries, {
+      y_axis_label: energy.length ? "kWh" : currency,
+      ...(energy.length && cost.length ? { right_y_axis_label: currency } : {}),
+    }) : "";
     return `<section class="panel" data-appliance-daily-cost>
       <h2>${this._escape(this._panelText("appliance_detail.daily_cost_and_energy"))}</h2>
       ${charts || `<p class="muted">${this._escape(this._panelText("appliance_detail.no_completed_days"))}</p>`}

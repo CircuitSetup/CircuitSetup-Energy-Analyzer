@@ -1729,7 +1729,9 @@ if (html.includes("$")) {
   throw new Error(`cost display hardcoded dollars: ${html}`);
 }
 assert.equal((html.match(/>Cost Today</g) || []).length, 1);
-assert.equal((html.match(/class="chart"/g) || []).length, 2);
+assert.equal((html.match(/class="chart"/g) || []).length, 1);
+assert.ok(html.includes('data-chart-right-axis="EUR"'));
+assert.equal((html.match(/stroke-dasharray="6 4"/g) || []).length, 1);
 assert.ok(!html.includes("What To Check First"));
 """
     )
@@ -3799,6 +3801,7 @@ const html = panel._chartSvg(
   [
     {
       name: "Kitchen Fridge",
+      unit: "kWh",
       points: [
         {
           time: Date.parse("2026-06-24T18:12:00Z"),
@@ -3824,6 +3827,33 @@ for (const expected of [
   assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }
 assert.ok(!html.includes("<title>Kitchen Fridge"), "point tooltips must not be rendered");
+assert.ok(!html.includes("data-chart-right-axis"), "default charts must keep a single axis");
+"""
+    )
+
+
+def test_chart_supports_opt_in_dual_axes_with_series_units() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "kWh per Day", unit: "kWh", points: [{ time: Date.parse("2026-06-24T18:12:00Z"), value: 2.5 }] },
+    { name: "Cost per Day", unit: "EUR", axis: "right", points: [{ time: Date.parse("2026-06-24T18:12:00Z"), value: 0.6 }] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "EUR" },
+);
+for (const expected of [
+  'data-chart-right-axis="EUR"',
+  'data-chart-unit="kWh"',
+  'data-chart-unit="EUR"',
+  'stroke-dasharray="6 4"',
+  '>kWh<',
+  '>EUR<',
+]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
+}
 """
     )
 

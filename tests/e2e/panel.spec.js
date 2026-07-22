@@ -263,7 +263,9 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await expect(panel.getByText("Projected end of day")).toBeVisible();
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
   await expect(dailyCost).toBeVisible();
-  await expect(dailyCost.locator("svg.chart")).toHaveCount(2);
+  await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
+  await expect(dailyCost.locator('[data-chart-right-axis="USD"]')).toBeVisible();
+  await expect(dailyCost.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(1);
   await expect(dailyCost).toContainText("Cost Today");
   await expect(dailyCost).toContainText("Average Cost per Day");
   await expect(dailyCost).toContainText("kWh Today");
