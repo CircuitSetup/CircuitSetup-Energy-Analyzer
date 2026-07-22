@@ -295,6 +295,7 @@ class EvidenceActionController:
     def retire_alert_id(self, alert_id: str) -> None:
         """Remove an alert from stored and active evidence after user action."""
         coordinator = self._coordinator
+        retired = self.alert_for_id(alert_id)
         coordinator.store_data.alerts = [
             alert
             for alert in coordinator.store_data.alerts
@@ -322,6 +323,18 @@ class EvidenceActionController:
             circuit_id: max(alert_anomaly_score(alert) for alert in alerts)
             for circuit_id, alerts in coordinator.state.active_alerts_by_circuit.items()
         }
+        if retired is not None:
+            cached_evidence = getattr(
+                coordinator.state,
+                "alert_evidence_by_circuit",
+                {},
+            )
+            cached = cached_evidence.get(retired.circuit_id)
+            if not isinstance(cached, Mapping) or cached.get("alert_id") in {
+                None,
+                alert_id,
+            }:
+                cached_evidence.pop(retired.circuit_id, None)
         coordinator.store_persistence.mark_dirty()
 
     def alert_for_id(self, alert_id: str) -> AlertEvidence | None:
