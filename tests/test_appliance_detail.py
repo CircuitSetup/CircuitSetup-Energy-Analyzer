@@ -332,6 +332,22 @@ def test_direct_appliance_detail_uses_the_circuit_rate_not_the_global_rate() -> 
     assert detail.cost_today == 0.46
 
 
+def test_direct_appliance_detail_preserves_explicitly_unavailable_cost() -> None:
+    from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
+        appliance_detail_for_circuit,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.cost_evidence_by_circuit["fridge"] = {
+        "cost_today_status": "unavailable"
+    }
+
+    detail = appliance_detail_for_circuit(coordinator, "fridge")
+
+    assert detail is not None
+    assert detail.cost_today is None
+
+
 def test_direct_appliance_detail_hides_missing_metric_prompt_when_metrics_exist() -> (
     None
 ):
@@ -361,6 +377,30 @@ def test_direct_appliance_detail_hides_missing_metric_prompt_when_metrics_exist(
 
     assert detail is not None
     assert detail.what_to_check_first == ()
+
+
+def test_direct_detail_keeps_missing_metric_prompt_for_incomplete_metrics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.appliance_detail import (
+        appliance_detail_for_circuit,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.state.metric_consistency_status_by_circuit["fridge"] = (
+        "missing_metrics"
+    )
+    coordinator.state.data_quality_checklist_by_circuit["fridge"].update(
+        {
+            "optional_sensors_present": True,
+            "metric_roles_present": ["energy", "real_power", "voltage"],
+        }
+    )
+
+    detail = appliance_detail_for_circuit(coordinator, "fridge")
+
+    assert detail is not None
+    assert detail.what_to_check_first == (
+        "Add matching electrical metrics such as watts, amps, voltage, VA, or PF.",
+    )
 
 
 def test_direct_appliance_detail_payload_includes_recent_timeline() -> None:

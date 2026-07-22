@@ -139,7 +139,7 @@ def appliance_detail_for_circuit(
     )
     if (
         electrical_attrs.get("metric_consistency_status") == "missing_metrics"
-        and quality.get("optional_sensors_present") is True
+        and _metric_comparison_sources_complete(quality)
     ):
         first_checks = ()
     comparisons = metric_comparisons_for_circuit(coordinator, config, state)
@@ -1774,6 +1774,20 @@ def _first_checks(value: Any) -> tuple[str, ...]:
     return tuple(str(item).strip() for item in _iter_items(value) if str(item).strip())
 
 
+def _metric_comparison_sources_complete(checklist: Mapping[str, Any]) -> bool:
+    roles = {str(role) for role in checklist.get("metric_roles_present") or ()}
+    has_expected_apparent_power = {"voltage", "current"} <= roles
+    has_reported_apparent_power = "apparent_power" in roles
+    has_apparent_power_comparison = (
+        has_expected_apparent_power and has_reported_apparent_power
+    )
+    has_power_factor_comparison = {
+        "real_power",
+        "power_factor",
+    } <= roles and (has_expected_apparent_power or has_reported_apparent_power)
+    return has_apparent_power_comparison or has_power_factor_comparison
+
+
 def _state_number(state: Any, field: str, key: str) -> float | None:
     mapping = getattr(state, field, {})
     if not isinstance(mapping, Mapping) or key not in mapping:
@@ -1878,7 +1892,7 @@ def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
         circuit_id,
     )
     accumulated = _state_number(state, "cost_today_by_circuit", circuit_id)
-    if evidence.get("cost_today_status") == "unavailable" and accumulated is not None:
+    if evidence.get("cost_today_status") == "unavailable":
         return None
     if accumulated is not None:
         return accumulated
