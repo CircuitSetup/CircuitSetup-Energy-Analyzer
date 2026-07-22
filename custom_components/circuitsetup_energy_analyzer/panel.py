@@ -28,6 +28,7 @@ from .entities.setup_health import (
     setup_health_value,
 )
 from .expected_schedule import schedule_settings_from_dict
+from .local_time import local_date
 from .localized_text import translation_section
 from .models import (
     AlertEvidence,
@@ -732,6 +733,19 @@ def _appliance_daily_totals(
         histories.get(detail.circuit_id, {}) if isinstance(histories, Mapping) else {}
     )
     days = history.get("days", []) if isinstance(history, Mapping) else []
+    clock = getattr(coordinator, "current_time", None)
+    now = clock() if callable(clock) else datetime.now(UTC)
+    time_zone = getattr(
+        getattr(coordinator, "context_builder", None),
+        "time_zone",
+        None,
+    )
+    time_zone = time_zone() if callable(time_zone) else None
+    today = (
+        local_date(now, time_zone).isoformat()
+        if time_zone is not None and now.tzinfo is not None
+        else now.date().isoformat()
+    )
     rate = getattr(
         coordinator.state,
         "effective_electricity_rate_by_circuit",
@@ -743,7 +757,11 @@ def _appliance_daily_totals(
         rate = None
     complete = []
     for day in days:
-        if not isinstance(day, Mapping) or day.get("complete") is not True:
+        if (
+            not isinstance(day, Mapping)
+            or day.get("complete") is not True
+            or day.get("date") == today
+        ):
             continue
         try:
             energy_kwh = round(max(float(day["usage_kwh"]), 0.0), 3)

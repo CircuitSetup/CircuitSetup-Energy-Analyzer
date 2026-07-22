@@ -257,6 +257,10 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
     coordinator.state.average_cost_per_day_by_circuit["fridge"] = 0.3
     coordinator.state.average_kwh_per_day_by_circuit["fridge"] = 1.5
     coordinator.state.effective_electricity_rate_by_circuit["fridge"] = 0.2
+    coordinator.current_time = lambda: datetime(2026, 7, 22, 12, tzinfo=UTC)
+    coordinator.context_builder = SimpleNamespace(
+        time_zone=lambda: "America/New_York",
+    )
     coordinator.store_data.energy_usage_by_circuit["fridge"] = {
         "days": [
             {
@@ -274,7 +278,7 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
             }
             for day in range(1, 22)
         ]
-        + [{"date": "2026-07-22", "usage_kwh": 1.0, "complete": False}],
+        + [{"date": "2026-07-22", "usage_kwh": 1.0, "complete": True}],
     }
 
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
