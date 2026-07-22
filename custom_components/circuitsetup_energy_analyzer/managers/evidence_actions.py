@@ -58,6 +58,9 @@ class EvidenceActionController:
         coordinator = self._coordinator
         if self.alert_for_id(alert_id) is None:
             return False
+        await coordinator.notification_controller.async_dismiss_alert_notification(
+            alert_id
+        )
         self.retire_alert_id(alert_id)
         now = coordinator.current_time()
         coordinator.refresh_all_ux_state(now)
@@ -202,6 +205,9 @@ class EvidenceActionController:
             "evidence_count": evidence_count,
         }
         coordinator.apply_nilm_alert_feedback(alert, action, now)
+        await coordinator.notification_controller.async_dismiss_alert_notification(
+            alert_id
+        )
         self.retire_alert_id(alert_id)
         coordinator.refresh_all_ux_state(now)
         coordinator.async_set_updated_data(coordinator.state)

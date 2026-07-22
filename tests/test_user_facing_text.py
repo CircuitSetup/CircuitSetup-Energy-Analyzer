@@ -1351,7 +1351,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     } <= options
 
     state_template = Template(blueprint["variables"]["alert_state_normalized"])
-    condition_template = Template(blueprint["condition"][0]["value_template"])
+    condition_template = Template(blueprint["variables"]["alert_is_actionable"])
 
     def condition_matches(
         state: str,
@@ -1359,12 +1359,15 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         *,
         power_quality_alert_confirmed: bool = False,
         learning: bool | None = False,
+        alert_confirmed: bool | None = True,
     ) -> bool:
         attributes = {
             "power_quality_alert_confirmed": power_quality_alert_confirmed,
         }
         if learning is not None:
             attributes["learning"] = learning
+        if alert_confirmed is not None:
+            attributes["alert_confirmed"] = alert_confirmed
         trigger = {
             "to_state": {
                 "state": state,
@@ -1381,6 +1384,16 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
 
     assert not condition_matches("Possible issue", defaults, learning=None)
     assert not condition_matches("Possible issue", defaults, learning=True)
+    assert not condition_matches(
+        "Possible issue",
+        defaults,
+        alert_confirmed=None,
+    )
+    assert not condition_matches(
+        "Possible issue",
+        defaults,
+        alert_confirmed=False,
+    )
     assert condition_matches("Possible issue", defaults, learning=False)
     assert condition_matches("Possible issue: Cycle Duration", defaults)
     assert condition_matches("High Usage", defaults)

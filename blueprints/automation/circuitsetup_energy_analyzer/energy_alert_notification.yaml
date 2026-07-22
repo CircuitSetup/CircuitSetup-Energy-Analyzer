@@ -2,9 +2,9 @@ blueprint:
   name: CircuitSetup Energy Analyzer Alerts
   description: >-
     Create friendly notifications and optional follow-up actions when selected
-    CircuitSetup Energy Analyzer alert entities report a selected alert state. Companion
-    App mobile notifications can use data.url and data.clickAction with the
-    evidence_path template variable.
+    CircuitSetup Energy Analyzer entities report a selected alert state backed by
+    current alert evidence. Companion App mobile notifications can use data.url and
+    data.clickAction with the evidence_path template variable.
   domain: automation
   input:
     alert_entities:
@@ -110,14 +110,20 @@ max: 10
 
 trigger:
   - platform: state
+    id: alert
     entity_id: !input alert_entities
     for: !input for_duration
+  - platform: state
+    id: state_changed
+    entity_id: !input alert_entities
 
 variables:
   alert_states: !input alert_states
   create_persistent_notification: !input persistent_notification
   notification_title: !input notification_title
   alert_entity_id: "{{ trigger.entity_id }}"
+  persistent_notification_id: >-
+    circuitsetup_energy_analyzer_blueprint_{{ alert_entity_id | replace('.', '_') }}
   alert_entity_name: "{{ trigger.to_state.name if trigger.to_state else trigger.entity_id }}"
   alert_state: "{{ trigger.to_state.state if trigger.to_state else 'unknown' }}"
   alert_state_normalized: >-
@@ -137,47 +143,60 @@ variables:
       Alert entity changed.
     {% endif %}
   evidence_path: >-
-    {{- trigger.to_state.attributes.evidence_path
-        if trigger.to_state and trigger.to_state.attributes.evidence_path
+    {{- trigger.to_state.attributes.get('evidence_path')
+        if trigger.to_state and trigger.to_state.attributes.get('evidence_path')
         else '/circuitsetup-energy-analyzer-evidence' -}}
-
-condition:
-  - condition: template
-    value_template: >-
-      {% set selected_states = alert_states
-         | map('string')
-         | map('lower')
-         | map('trim')
-         | map('replace', ' ', '_')
-         | map('replace', '-', '_')
-         | list %}
-      {{ trigger.to_state is not none
-         and alert_state_normalized in selected_states
-         and not trigger.to_state.attributes.get('learning', true)
-         and (
-           alert_state_normalized != 'possible_power_quality_change'
-           or trigger.to_state.attributes.power_quality_alert_confirmed
-              | default(false)
-         ) }}
+  alert_is_actionable: >-
+    {% set selected_states = alert_states
+       | map('string')
+       | map('lower')
+       | map('trim')
+       | map('replace', ' ', '_')
+       | map('replace', '-', '_')
+       | list %}
+    {{ trigger.to_state is not none
+       and alert_state_normalized in selected_states
+       and not trigger.to_state.attributes.get('learning', true)
+       and trigger.to_state.attributes.get('alert_confirmed', false)
+       and (
+         alert_state_normalized != 'possible_power_quality_change'
+         or trigger.to_state.attributes.power_quality_alert_confirmed
+            | default(false)
+       ) }}
 
 action:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ create_persistent_notification }}"
+            value_template: >-
+              {{ trigger.id == 'state_changed' and not (alert_is_actionable | bool) }}
         sequence:
-          - service: persistent_notification.create
+          - service: persistent_notification.dismiss
             data:
-              title: "{{ notification_title }}"
-              message: >-
-                {{ alert_entity_name }} reports: {{ alert_state }}.
+              notification_id: "{{ persistent_notification_id }}"
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'alert' and (alert_is_actionable | bool) }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ create_persistent_notification }}"
+                sequence:
+                  - service: persistent_notification.create
+                    data:
+                      notification_id: "{{ persistent_notification_id }}"
+                      title: "{{ notification_title }}"
+                      message: >-
+                        {{ alert_entity_name }} reports: {{ alert_state }}.
 
-                State: {{ alert_state }}
+                        State: {{ alert_state }}
 
-                Evidence: {{ alert_evidence }}
+                        Evidence: {{ alert_evidence }}
 
-                [Open evidence graph]({{ evidence_path }})
+                        [Open evidence graph]({{ evidence_path }})
 
-                Entity: {{ alert_entity_id }}
-  - choose: []
-    default: !input alert_actions
+                        Entity: {{ alert_entity_id }}
+          - choose: []
+            default: !input alert_actions

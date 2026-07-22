@@ -12,6 +12,7 @@ from ..appliance_notifications import (
 )
 from ..models import AlertEvidence, CircuitEvent, EventType, Severity
 from ..nilm_virtual import nilm_virtual_appliance_alerts
+from ..state import circuit_is_learning
 from ..weekly_digest import (
     build_weekly_digest,
     completed_week_bounds,
@@ -33,6 +34,8 @@ class NotificationController:
             compact_settings_recommendation_episode_key
         )
         self.notified_alert_ids: set[str] = set()
+        self._managed_alert_notification_ids: set[str] = set()
+        self._alert_notifications_initialized = False
         self.settings_recommendation_notification_episode_key = (
             self._stored_settings_recommendation_episode_key()
         )
@@ -73,6 +76,7 @@ class NotificationController:
                 alert.circuit_id
             ),
         )
+        self._managed_alert_notification_ids.add(alert_id)
         self._record_delivery(
             appliance_key,
             category,
@@ -83,10 +87,64 @@ class NotificationController:
         return not self._circuit_is_learning(alert.circuit_id)
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
-        state = getattr(self._coordinator, "state", None)
-        return bool(
-            getattr(state, "learning_by_circuit", {}).get(circuit_id, True)
+        return circuit_is_learning(
+            getattr(self._coordinator, "state", None),
+            circuit_id,
         )
+
+    async def async_sync_alert_notifications(self) -> None:
+        """Dismiss alert notifications whose evidence is no longer active."""
+        if not self._alert_notifications_initialized:
+            self._managed_alert_notification_ids.update(
+                notifications.notification_id_for_alert(alert)
+                for alert in getattr(self._coordinator.store_data, "alerts", ())
+            )
+            self._alert_notifications_initialized = True
+        active_alert_ids = self._active_alert_ids()
+        for alert_id in sorted(
+            self._managed_alert_notification_ids - active_alert_ids
+        ):
+            await self.async_dismiss_alert_notification(alert_id)
+        self._managed_alert_notification_ids.intersection_update(active_alert_ids)
+        self.notified_alert_ids.intersection_update(active_alert_ids)
+
+    async def async_dismiss_alert_notification(self, alert_id: str) -> None:
+        """Dismiss one managed alert notification by its evidence id."""
+        await notifications.async_dismiss_persistent_notification(
+            self._coordinator.hass,
+            alert_id,
+        )
+        self._managed_alert_notification_ids.discard(alert_id)
+        self.notified_alert_ids.discard(alert_id)
+
+    async def async_dismiss_circuit_alert_notifications(
+        self,
+        circuit_id: str,
+    ) -> None:
+        """Dismiss retained and active alert notifications for one circuit."""
+        alerts = list(getattr(self._coordinator.store_data, "alerts", ()))
+        alerts.extend(
+            getattr(
+                self._coordinator.state,
+                "active_alerts_by_circuit",
+                {},
+            ).get(circuit_id, ())
+        )
+        alert_ids = {
+            notifications.notification_id_for_alert(alert)
+            for alert in alerts
+            if alert.circuit_id == circuit_id
+        }
+        for alert_id in sorted(alert_ids):
+            await self.async_dismiss_alert_notification(alert_id)
+
+    def _active_alert_ids(self) -> set[str]:
+        state = getattr(self._coordinator, "state", None)
+        return {
+            notifications.notification_id_for_alert(alert)
+            for alerts in getattr(state, "active_alerts_by_circuit", {}).values()
+            for alert in alerts
+        }
 
     async def async_dispatch_due(self, now: datetime) -> None:
         """Deliver deferred alerts whose local quiet window has ended."""
@@ -102,15 +160,20 @@ class NotificationController:
             notifications.notification_id_for_alert(alert): alert
             for alert in getattr(self._coordinator.store_data, "alerts", ())
         }
+        active_alert_ids = self._active_alert_ids()
         for item in pending:
             if not isinstance(item, dict):
                 continue
             due = _datetime_or_none(item.get("defer_until"))
-            alert = alerts_by_id.get(str(item.get("alert_id") or ""))
+            alert_id = str(item.get("alert_id") or "")
+            alert = alerts_by_id.get(alert_id)
             if due is None or alert is None or due > now:
                 remaining.append(item)
                 continue
-            if not self._learning_allows_alert(alert):
+            if (
+                alert_id not in active_alert_ids
+                or not self._learning_allows_alert(alert)
+            ):
                 continue
             await notifications.async_create_alert_notification(
                 self._coordinator.hass,
@@ -119,6 +182,7 @@ class NotificationController:
                     alert.circuit_id
                 ),
             )
+            self._managed_alert_notification_ids.add(alert_id)
             self._record_delivery(
                 str(item.get("appliance_key") or f"circuit:{alert.circuit_id}"),
                 str(item.get("category") or "unusual_runtime"),
@@ -318,6 +382,12 @@ class NotificationController:
             if not self._circuit_is_learning(circuit_id)
         )
         if total_pending <= 0:
+            await notifications.async_dismiss_persistent_notification(
+                self._coordinator.hass,
+                notifications.settings_recommendation_notification_id(
+                    self._coordinator.entry_id
+                ),
+            )
             if sum(counts.values()) <= 0:
                 self.set_settings_recommendation_notification_episode_key(())
             return
