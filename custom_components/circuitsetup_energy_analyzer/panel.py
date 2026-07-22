@@ -699,6 +699,7 @@ def _appliance_detail_payload(
         "requested_assignment_id": requested_assignment_id,
         "requested_entry_id": requested_entry_id,
         "detail": detail_payload,
+        "daily_totals": _appliance_daily_totals(coordinator, detail),
         "history": _appliance_detail_history_payload(coordinator, detail),
         "notification_preferences": preferences_from_dict(
             raw_preferences,
@@ -718,6 +719,46 @@ def _appliance_detail_payload(
         },
         "actions": _appliance_detail_actions(coordinator, detail),
     }
+
+
+def _appliance_daily_totals(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> list[dict[str, Any]]:
+    if detail.source_type == "nilm_estimate":
+        return []
+    histories = getattr(coordinator.store_data, "energy_usage_by_circuit", {})
+    history = (
+        histories.get(detail.circuit_id, {}) if isinstance(histories, Mapping) else {}
+    )
+    days = history.get("days", []) if isinstance(history, Mapping) else []
+    rate = getattr(
+        coordinator.state,
+        "effective_electricity_rate_by_circuit",
+        {},
+    ).get(detail.circuit_id)
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        rate = None
+    complete = []
+    for day in days:
+        if not isinstance(day, Mapping) or day.get("complete") is not True:
+            continue
+        try:
+            energy_kwh = round(max(float(day["usage_kwh"]), 0.0), 3)
+        except (KeyError, TypeError, ValueError):
+            continue
+        complete.append(
+            {
+                "date": str(day.get("date") or ""),
+                "energy_kwh": energy_kwh,
+                "cost": round(energy_kwh * rate, 2)
+                if rate is not None and rate > 0
+                else None,
+            }
+        )
+    return sorted(complete, key=lambda item: item["date"])[-30:]
 
 
 def _schedule_entity_options(coordinator: Any) -> list[dict[str, str]]:

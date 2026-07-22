@@ -186,6 +186,16 @@ def appliance_detail_for_circuit(
             config.circuit_id,
         ),
         cost_today=_estimated_cost_today(state, config.circuit_id),
+        average_kwh_per_day=_state_number(
+            state,
+            "average_kwh_per_day_by_circuit",
+            config.circuit_id,
+        ),
+        average_cost_per_day=_state_number(
+            state,
+            "average_cost_per_day_by_circuit",
+            config.circuit_id,
+        ),
         today_vs_normal=comparisons,
         expectations=expectations,
         recent_timeline=_recent_timeline(state, config.circuit_id),
@@ -311,6 +321,8 @@ def _nilm_detail(
         runtime_today_seconds=state.runtime_today_seconds,
         run_count_today=state.run_count_today,
         cost_today=None,
+        average_kwh_per_day=None,
+        average_cost_per_day=None,
         today_vs_normal=comparisons,
         expectations=_nilm_expectations(
             state,
@@ -1879,17 +1891,17 @@ def _state_int_value(value: Any) -> int | None:
 
 
 def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
+    estimated = _state_number(state, "estimated_cost_today_by_circuit", circuit_id)
+    if estimated is not None:
+        return estimated
     evidence = _mapping_for_circuit(
         state,
         "cost_evidence_by_circuit",
         circuit_id,
     )
-    accumulated = _state_number(state, "cost_today_by_circuit", circuit_id)
     if evidence.get("cost_today_status") == "unavailable":
         return None
-    if accumulated is not None:
-        return accumulated
-    return None
+    return _state_number(state, "cost_today_by_circuit", circuit_id)
 
 
 def _estimated_cost(energy_kwh: float | None, rate: float | None) -> float | None:
