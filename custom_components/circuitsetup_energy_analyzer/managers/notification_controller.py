@@ -20,16 +20,6 @@ from ..weekly_digest import (
 )
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
-_LEARNING_BYPASS_ALERT_FEATURES = frozenset(
-    {
-        "circuit_capacity",
-        "demand_limit",
-        "dual_phase_leg_imbalance",
-        "nilm_leg_mismatch",
-        "nilm_topology_mismatch",
-    }
-)
-
 
 class NotificationController:
     """Coordinate persistent notifications and duplicate suppression."""
@@ -90,28 +80,12 @@ class NotificationController:
         )
 
     def _learning_allows_alert(self, alert: AlertEvidence) -> bool:
-        if (
-            alert.severity is Severity.ERROR
-            or alert.feature in _LEARNING_BYPASS_ALERT_FEATURES
-        ):
-            return True
         return not self._circuit_is_learning(alert.circuit_id)
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
-        runtime = getattr(self._coordinator, "processor_runtime", None)
-        registry = getattr(self._coordinator, "circuit_registry", None)
-        config_for_circuit = getattr(registry, "config_for_circuit", None)
-        config = (
-            config_for_circuit(circuit_id) if callable(config_for_circuit) else None
-        )
-        if runtime is not None and config is not None:
-            return not runtime.learning_mature(config, self._current_time())
         state = getattr(self._coordinator, "state", None)
         return bool(
-            getattr(state, "learning_by_circuit", {}).get(
-                circuit_id,
-                False,
-            )
+            getattr(state, "learning_by_circuit", {}).get(circuit_id, True)
         )
 
     async def async_dispatch_due(self, now: datetime) -> None:

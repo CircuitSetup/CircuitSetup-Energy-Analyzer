@@ -232,7 +232,7 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
 
 
 @pytest.mark.asyncio
-async def test_alert_notifications_wait_for_learning_except_obvious_issues(
+async def test_alert_notifications_wait_for_live_learning_state(
     monkeypatch,
 ) -> None:
     created: list[AlertEvidence] = []
@@ -261,16 +261,29 @@ async def test_alert_notifications_wait_for_learning_except_obvious_issues(
         message="Circuit capacity exceeded",
         feature="circuit_capacity",
     )
-    state = SimpleNamespace(learning_by_circuit={"dryer": True})
+    error_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="dryer",
+        severity=Severity.ERROR,
+        message="Critical issue",
+        feature="critical_issue",
+    )
+    state = SimpleNamespace(learning_by_circuit={})
+    config = SimpleNamespace(circuit_id="dryer")
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
         current_time=lambda: now,
         state=state,
+        processor_runtime=SimpleNamespace(
+            learning_mature=lambda circuit_config, timestamp: True,
+        ),
         evidence_actions=SimpleNamespace(
             alerts_paused=lambda circuit_id: False,
             has_suppressed_alert_feedback=lambda alert: False,
         ),
-        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: config,
+        ),
         store_data=SimpleNamespace(
             settings_recommendation_notification_episode_key=(),
             appliance_notification_preferences={},
@@ -281,12 +294,18 @@ async def test_alert_notifications_wait_for_learning_except_obvious_issues(
     controller = notification_controller.NotificationController(coordinator)
 
     await controller.async_notify_alert(routine_alert)
+    assert created == []
+
+    state.learning_by_circuit["dryer"] = True
     await controller.async_notify_alert(obvious_alert)
-    assert created == [obvious_alert]
+    await controller.async_notify_alert(error_alert)
+    assert created == []
 
     state.learning_by_circuit["dryer"] = False
     await controller.async_notify_alert(routine_alert)
-    assert created == [obvious_alert, routine_alert]
+    await controller.async_notify_alert(obvious_alert)
+    await controller.async_notify_alert(error_alert)
+    assert created == [routine_alert, obvious_alert, error_alert]
 
 
 @pytest.mark.asyncio
@@ -467,6 +486,7 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
         ),
         state=SimpleNamespace(
             active_alerts_by_circuit={},
+            learning_by_circuit={"dryer": False},
             learning_progress_by_circuit={"dryer": {"alert_ready": True}},
         ),
         store_data=store_data,

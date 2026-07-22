@@ -767,7 +767,7 @@ The analyzer uses two different Home Assistant surfaces:
 | **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
-Routine behavior, suggested settings, and their notifications wait until that appliance or mains circuit finishes learning. Direct circuit-capacity, configured demand-limit, dual-phase imbalance, and concrete NILM topology mismatch alerts can still notify during learning.
+Alert evidence can still be recorded during learning, but alert notifications, blueprint follow-up actions, and suggested settings wait until that appliance or mains circuit finishes learning.
 
 When an alert appears:
 
@@ -809,7 +809,7 @@ The repository includes a Home Assistant automation blueprint:
 blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml
 ```
 
-Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states. Electrical Health's **Possible Power Quality Change** waits for confirmed repeated alert evidence before the blueprint notifies.
+Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states after learning finishes. Electrical Health's **Possible Power Quality Change** also waits for confirmed repeated alert evidence before the blueprint notifies.
 
 The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
 

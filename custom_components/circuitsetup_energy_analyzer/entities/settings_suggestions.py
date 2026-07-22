@@ -46,6 +46,7 @@ def settings_suggestions_attributes(state: Any, circuit_id: str) -> dict[str, An
     ]
     return {
         "pending_count": settings_suggestions_value(state, circuit_id),
+        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
         "shown_count": len(shown_recommendations),
         "has_more": len(recommendation_items) > len(shown_recommendations),
         "recommendations": shown_recommendations,

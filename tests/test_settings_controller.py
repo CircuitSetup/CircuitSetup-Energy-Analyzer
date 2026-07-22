@@ -62,6 +62,7 @@ class _SettingsCoordinator:
             metric_consistency_evidence_by_circuit={},
             balance_evidence_by_circuit={},
             solar_flow_evidence_by_circuit={},
+            learning_by_circuit={"fridge": False},
         )
         self.entry_data = {
             CONF_ADVANCED_SETTINGS: {
@@ -529,6 +530,36 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
         item["recommendation_id"]
         for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
     ] == [generated.recommendation_id]
+
+
+def test_settings_controller_waits_for_live_learning_state(monkeypatch) -> None:
+    stale = _recommendation()
+    generated = _recommendation(
+        recommendation_id="fridge:new_threshold:v1",
+        unique_key="fridge:new_threshold",
+        setting_key="new_threshold",
+        setting_label="New Threshold",
+    )
+    coordinator = _SettingsCoordinator(stale)
+    coordinator.state.learning_by_circuit["fridge"] = True
+    controller = settings_controller.SettingsController(coordinator)
+    monkeypatch.setattr(
+        settings_controller,
+        "build_settings_recommendations",
+        lambda inputs: [generated],
+    )
+
+    changed = controller.rebuild_setting_recommendations(coordinator.now)
+
+    assert changed is True
+    assert generated.recommendation_id not in (
+        coordinator.store_data.settings_recommendations
+    )
+    assert (
+        coordinator.store_data.settings_recommendations[stale.recommendation_id].status
+        is RecommendationStatus.STALE
+    )
+    assert coordinator.state.settings_recommendation_count_by_circuit == {}
 
 
 @pytest.mark.asyncio

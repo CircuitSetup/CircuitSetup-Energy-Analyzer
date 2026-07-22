@@ -86,7 +86,21 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         energy_usage_evidence_by_circuit={
             "washer": {"status": "over_threshold", "threshold_kwh": 12.5}
         },
+        learning_by_circuit={"washer": True},
     )
+    hass.states.async_set(
+        "sensor.washer_energy_summary",
+        energy_summary_value(state, "washer"),
+        energy_summary_attributes(state, "washer"),
+    )
+    await hass.async_block_till_done()
+
+    assert events == []
+    assert notifications == []
+
+    hass.states.async_set("sensor.washer_energy_summary", "Normal")
+    await hass.async_block_till_done()
+    state.learning_by_circuit["washer"] = False
     hass.states.async_set(
         "sensor.washer_energy_summary",
         energy_summary_value(state, "washer"),
@@ -116,7 +130,8 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     provisional_state = AnalyzerState(
         power_quality_evidence_by_circuit={
             "washer": "Possible issue: reactive power changed from baseline"
-        }
+        },
+        learning_by_circuit={"washer": False},
     )
     hass.states.async_set(
         "sensor.washer_electrical_health",
@@ -138,6 +153,7 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
                 SimpleNamespace(feature="reactive_shift_under_stable_real_power")
             ]
         },
+        learning_by_circuit={"washer": False},
     )
     hass.states.async_set(
         "sensor.washer_electrical_health",

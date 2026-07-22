@@ -53,6 +53,7 @@ def _config(
 
 def _direct_state() -> AnalyzerState:
     state = AnalyzerState()
+    state.learning_by_circuit["fridge"] = False
     state.health_summary_by_circuit["fridge"] = "Ready"
     state.data_quality_checklist_by_circuit["fridge"] = {
         "required_sensors_present": True,

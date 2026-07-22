@@ -1358,13 +1358,17 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         selected_states: list[str],
         *,
         power_quality_alert_confirmed: bool = False,
+        learning: bool | None = False,
     ) -> bool:
+        attributes = {
+            "power_quality_alert_confirmed": power_quality_alert_confirmed,
+        }
+        if learning is not None:
+            attributes["learning"] = learning
         trigger = {
             "to_state": {
                 "state": state,
-                "attributes": {
-                    "power_quality_alert_confirmed": power_quality_alert_confirmed,
-                },
+                "attributes": attributes,
             }
         }
         alert_state_normalized = state_template.render(trigger=trigger).strip()
@@ -1375,7 +1379,9 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         )
         return rendered.strip() == "True"
 
-    assert condition_matches("Possible issue", defaults)
+    assert not condition_matches("Possible issue", defaults, learning=None)
+    assert not condition_matches("Possible issue", defaults, learning=True)
+    assert condition_matches("Possible issue", defaults, learning=False)
     assert condition_matches("Possible issue: Cycle Duration", defaults)
     assert condition_matches("High Usage", defaults)
     assert condition_matches("Watch", defaults)
