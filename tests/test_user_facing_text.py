@@ -426,6 +426,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
 
     assert list(init_step["menu_options"]) == [
         "sources",
+        "refresh_sources",
         "mains",
         "assign",
         "utility",
@@ -436,6 +437,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     ]
     assert init_step["menu_options"] == {
         "sources": "🔌 Edit Source Selection",
+        "refresh_sources": "🔄 Refresh Source Sensors",
         "mains": "⚡ Edit Mains Sensors & NILM Setting",
         "assign": "🏷️ Appliance Circuit Assignments",
         "utility": "📊 Utility / Opower Comparison",
@@ -466,6 +468,23 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert (
         "saves these source settings"
         in strings["options"]["step"]["sources"]["description"].lower()
+    )
+    refresh_sources = strings["options"]["step"]["refresh_sources"]
+    assert refresh_sources["title"] == "Refresh Source Sensors"
+    assert "added or renamed" in refresh_sources["description"].lower()
+    assert "manual extra sources" in refresh_sources["description"].lower()
+    assert "review its appliance assignment" in refresh_sources["description"].lower()
+    assert "reload" in refresh_sources["description"].lower()
+    assert refresh_sources["submit"] == "Refresh Source Sensors"
+    assert (
+        "existing settings were not changed"
+        in strings["options"]["error"]["no_source_device_entities"].lower()
+    )
+    refresh_mains = strings["options"]["step"]["refresh_mains"]
+    assert refresh_mains["title"] == "Review Refreshed Mains Sensors"
+    assert "current replacements" in refresh_mains["description"].lower()
+    assert refresh_mains["data"]["mains_source_entities"] == (
+        "Mains Source Entities"
     )
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
@@ -662,6 +681,8 @@ def test_runtime_english_translation_is_the_single_source() -> None:
         ("config", "assign"),
         ("config", "nilm"),
         ("options", "sources"),
+        ("options", "refresh_sources"),
+        ("options", "refresh_mains"),
         ("options", "mains"),
         ("options", "nilm"),
         ("options", "utility"),
@@ -674,7 +695,11 @@ def test_runtime_english_translation_is_the_single_source() -> None:
         translated_step = translations[section]["step"][step]
         assert translated_step["title"]
         assert translated_step["description"]
-        assert translated_step.get("data") or translated_step.get("sections")
+        assert (
+            translated_step.get("data")
+            or translated_step.get("sections")
+            or step == "refresh_sources"
+        )
 
     translated_init = translations["options"]["step"]["init"]
     assert translated_init["title"]
