@@ -4690,7 +4690,7 @@ assert.equal(Object.prototype.hasOwnProperty.call(panel, "hass"), false);
     )
 
 
-def test_panel_falls_back_to_the_integration_page_for_options_links() -> None:
+def test_panel_opens_the_requested_options_flow_step() -> None:
     _run_panel_node_script(
         r"""
 (async () => {
@@ -4716,8 +4716,12 @@ def test_panel_falls_back_to_the_integration_page_for_options_links() -> None:
     options_step: "advanced_settings",
     path: "/config/integrations/integration/circuitsetup_energy_analyzer",
   });
-  assert.deepEqual(calls, []);
-  assert.equal(destination, "/config/integrations/integration/circuitsetup_energy_analyzer");
+  assert.equal(JSON.stringify(calls), JSON.stringify([
+    { method: "POST", path: "config/config_entries/options/flow", data: { handler: "entry-1" } },
+    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { next_step_id: "advanced" } },
+    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { circuit_id: "fridge" } },
+  ]));
+  assert.equal(destination, "/config/integrations/config_flow/flow-1");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
