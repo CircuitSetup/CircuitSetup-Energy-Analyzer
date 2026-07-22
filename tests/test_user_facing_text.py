@@ -1351,7 +1351,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     } <= options
 
     state_template = Template(blueprint["variables"]["alert_state_normalized"])
-    condition_template = Template(blueprint["condition"][0]["value_template"])
+    condition_template = Template(blueprint["variables"]["alert_is_actionable"])
 
     def condition_matches(
         state: str,

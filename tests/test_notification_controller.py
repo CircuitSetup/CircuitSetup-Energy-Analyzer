@@ -19,6 +19,60 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 )
 
 
+@pytest.mark.asyncio
+async def test_alert_notifications_are_dismissed_when_evidence_is_no_longer_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active_alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 22, 12, 0, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Dryer runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    resolved_alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 22, 11, 0, tzinfo=UTC),
+        circuit_id="washer",
+        severity=Severity.WARNING,
+        message="Washer energy use changed.",
+        feature="daily_energy_usage_spike",
+    )
+    dismissed: list[str] = []
+
+    async def dismiss_notification(hass: object, notification_id: str) -> None:
+        del hass
+        dismissed.append(notification_id)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_dismiss_persistent_notification",
+        dismiss_notification,
+        raising=False,
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={"dryer": [active_alert]},
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            alerts=[resolved_alert, active_alert],
+        ),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+    controller.notified_alert_ids.update(
+        {
+            notification_id_for_alert(resolved_alert),
+            notification_id_for_alert(active_alert),
+        }
+    )
+
+    await controller.async_sync_alert_notifications()
+
+    assert dismissed == [notification_id_for_alert(resolved_alert)]
+    assert controller.notified_alert_ids == {notification_id_for_alert(active_alert)}
+
+
 def test_notification_controller_episode_key_uses_public_current_time() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     seen: list[datetime] = []
@@ -171,6 +225,45 @@ async def test_settings_notification_repeats_only_for_new_suggestions(
     await controller.async_notify_settings_recommendations_if_needed()
 
     assert notifications_created == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_settings_notification_is_dismissed_when_no_suggestions_are_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dismissed: list[str] = []
+
+    async def dismiss_notification(hass: object, notification_id: str) -> None:
+        del hass
+        dismissed.append(notification_id)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_dismiss_persistent_notification",
+        dismiss_notification,
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(),
+        entry_id="entry-1",
+        state=SimpleNamespace(
+            settings_recommendation_count_by_circuit={},
+            learning_by_circuit={},
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(("rec-1",),),
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_settings_recommendations_if_needed()
+
+    assert dismissed == [
+        notification_controller.notifications.settings_recommendation_notification_id(
+            "entry-1"
+        )
+    ]
+    assert controller.settings_recommendation_notification_episode_key == ()
 
 
 def test_settings_recommendation_notification_opens_panel_review() -> None:
@@ -377,6 +470,59 @@ async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> No
 
     coordinator.state.learning_by_circuit["dryer"] = True
     await controller.async_dispatch_due(datetime(2026, 7, 14, 12, tzinfo=UTC))
+    assert sent == []
+    assert store_data.notification_delivery_state["deferred"] == []
+
+
+@pytest.mark.asyncio
+async def test_deferred_alert_is_dropped_after_its_evidence_clears(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[AlertEvidence] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        sent.append(alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 14, 3, 30, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Runtime issue",
+        feature="run_cycle_duration_s",
+    )
+    alert_id = notification_id_for_alert(alert)
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        notification_delivery_state={
+            "deferred": [
+                {
+                    "alert_id": alert_id,
+                    "defer_until": "2026-07-14T07:00:00+00:00",
+                }
+            ]
+        },
+        alerts=[alert],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(
+            learning_by_circuit={"dryer": False},
+            active_alerts_by_circuit={},
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_dispatch_due(datetime(2026, 7, 14, 8, tzinfo=UTC))
+
     assert sent == []
     assert store_data.notification_delivery_state["deferred"] == []
 

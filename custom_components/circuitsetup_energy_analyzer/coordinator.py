@@ -463,6 +463,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
             self._mark_store_dirty()
+        await self.notification_controller.async_sync_alert_notifications()
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)
         self.async_set_updated_data(self.state)
@@ -476,6 +477,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
         now = self._now_fn()
+        await self.notification_controller.async_dismiss_circuit_alert_notifications(
+            circuit_id
+        )
         self.store_persistence.reset_baseline_for_circuit(
             circuit_id,
             self._baseline_values,

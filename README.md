@@ -787,7 +787,7 @@ When an alert appears:
 6. Use Repairs for configuration and data-quality problems.
 7. If work is planned on an appliance or circuit, use maintenance or pause-alert actions before service begins.
 
-Persistent notifications include one final Markdown link to **Open evidence** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`.
+Persistent notifications include one final Markdown link to **Open evidence** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`. The analyzer removes the notification when that alert evidence is no longer current.
 
 The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. It presents a visual comparison before graph-first evidence and the explanation, then keeps the three response choices together behind one **Apply** action. Companion App notifications can use the same target through `clickAction`.
 
@@ -812,6 +812,8 @@ blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yam
 Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states after learning finishes and the analyzer confirms current alert evidence. This keeps each notification linked to evidence that is still available for review.
 
 The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
+
+Blueprint persistent notifications use one stable notification per selected entity and are removed automatically when the selected alert is no longer current. Notifications created by older blueprint versions used generated IDs and may need to be dismissed once manually.
 
 Companion App mobile notifications can use the `evidence_path` template variable for `data.url` and Android `data.clickAction`, so tapping the notification opens the same Home Assistant evidence view.
 
