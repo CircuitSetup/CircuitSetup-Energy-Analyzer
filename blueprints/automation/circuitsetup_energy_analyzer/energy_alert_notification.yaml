@@ -2,9 +2,9 @@ blueprint:
   name: CircuitSetup Energy Analyzer Alerts
   description: >-
     Create friendly notifications and optional follow-up actions when selected
-    CircuitSetup Energy Analyzer alert entities report a selected alert state. Companion
-    App mobile notifications can use data.url and data.clickAction with the
-    evidence_path template variable.
+    CircuitSetup Energy Analyzer entities report a selected alert state backed by
+    current alert evidence. Companion App mobile notifications can use data.url and
+    data.clickAction with the evidence_path template variable.
   domain: automation
   input:
     alert_entities:
@@ -154,6 +154,7 @@ condition:
       {{ trigger.to_state is not none
          and alert_state_normalized in selected_states
          and not trigger.to_state.attributes.get('learning', true)
+         and trigger.to_state.attributes.get('alert_confirmed', false)
          and (
            alert_state_normalized != 'possible_power_quality_change'
            or trigger.to_state.attributes.power_quality_alert_confirmed

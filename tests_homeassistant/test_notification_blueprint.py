@@ -108,6 +108,21 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     )
     await hass.async_block_till_done()
 
+    assert events == []
+    assert notifications == []
+
+    hass.states.async_set("sensor.washer_energy_summary", "Normal")
+    await hass.async_block_till_done()
+    state.active_alerts_by_circuit["washer"] = [
+        SimpleNamespace(feature="daily_energy_usage_spike")
+    ]
+    hass.states.async_set(
+        "sensor.washer_energy_summary",
+        energy_summary_value(state, "washer"),
+        energy_summary_attributes(state, "washer"),
+    )
+    await hass.async_block_till_done()
+
     assert len(events) == 1
     assert events[0].data == {
         "evidence": "Energy use is above a configured threshold or budget.",

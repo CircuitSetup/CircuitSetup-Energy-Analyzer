@@ -809,7 +809,7 @@ The repository includes a Home Assistant automation blueprint:
 blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml
 ```
 
-Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states after learning finishes. Electrical Health's **Possible Power Quality Change** also waits for confirmed repeated alert evidence before the blueprint notifies.
+Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states after learning finishes and the analyzer confirms current alert evidence. This keeps each notification linked to evidence that is still available for review.
 
 The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
 

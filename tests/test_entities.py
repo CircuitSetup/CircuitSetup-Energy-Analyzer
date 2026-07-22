@@ -1685,6 +1685,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert health_attrs["raw_status"] == "possible_issue"
     assert health_attrs["status_label"] == "Possible issue"
     assert health_attrs["active_alert_count"] == 2
+    assert health_attrs["alert_confirmed"] is True
     assert health_attrs["next_step"] == "Review source sensor data"
     assert health_attrs["learning_progress"] == 0.0
     assert health_attrs["evidence_path"] == (
@@ -1705,6 +1706,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     electrical_attrs = electrical_health_attributes(state, "washer")
     assert electrical_attrs["metric_consistency_status"] == "metric_mismatch"
     assert electrical_attrs["metric_consistency_score"] == 28.5
+    assert electrical_attrs["alert_confirmed"] is True
     assert electrical_attrs["status_explanation"] == (
         "Reported electrical measurements do not agree with each other."
     )
@@ -1720,6 +1722,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert energy_attrs["energy_usage_status"] == "over_threshold"
     assert energy_attrs["billing_cycle_status"] == "projected_over_budget"
     assert energy_attrs["daily_energy_usage_kwh"] == 13.1
+    assert energy_attrs["alert_confirmed"] is True
     assert energy_attrs["summary_explanation"] == (
         "Energy use is above a configured threshold or budget."
     )
@@ -1748,6 +1751,7 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
         "A noteworthy observation was recorded, but repeated evidence is still "
         "required before an alert is raised."
     )
+    assert health_summary_attributes(state, "fridge")["alert_confirmed"] is False
 
     power_quality_only_state = AnalyzerState(
         metric_consistency_status_by_circuit={"pump": "missing_metrics"},
@@ -3303,6 +3307,9 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     state = AnalyzerState(
+        active_alerts_by_circuit={
+            "pool": [SimpleNamespace(feature="solar_flow")],
+        },
         learning_by_circuit={"pool": False},
         solar_flow_status_by_circuit={"pool": "inconsistent_export"},
     )
@@ -3320,6 +3327,7 @@ def test_status_sensor_entities_explain_machine_status_values() -> None:
         description=descriptions["solar_flow_status"],
     )
     assert solar_status.native_value == "Inconsistent Export"
+    assert solar_status.extra_state_attributes["alert_confirmed"] is True
     assert solar_status.extra_state_attributes["learning"] is False
     assert solar_status.extra_state_attributes["raw_status"] == "inconsistent_export"
     assert "CT orientation" in solar_status.extra_state_attributes["status_explanation"]
