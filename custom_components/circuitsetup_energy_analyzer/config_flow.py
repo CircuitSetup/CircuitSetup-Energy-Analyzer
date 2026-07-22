@@ -3740,10 +3740,11 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         try:
+            source_input = _options_source_payload(self._config_entry)
             validated = validate_options_input(
                 await _async_source_selection_with_device_entities(
                     getattr(self, "hass", None),
-                    _options_source_payload(self._config_entry),
+                    source_input,
                     require_device_entities=True,
                 )
             )
@@ -3755,9 +3756,15 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         updated_options = _options_with_updates(self._config_entry, validated)
+        stale_device_source_entities = (
+            set(source_input[CONF_SOURCE_ENTITIES])
+            - set(source_input[CONF_EXTRA_SOURCE_ENTITIES])
+            - set(validated[CONF_SOURCE_ENTITIES])
+        )
         updated_options = _options_with_merged_source_circuit_sensors(
             self._config_entry,
             updated_options,
+            remove_source_entities=stale_device_source_entities,
         )
         await _async_save_options_flow_config(self, updated_options)
         return self.async_create_entry(title="", data=updated_options)
@@ -5003,11 +5010,14 @@ def _options_with_updates(
 def _options_with_merged_source_circuit_sensors(
     config_entry: config_entries.ConfigEntry,
     options: Mapping[str, Any],
+    *,
+    remove_source_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     updated_options = dict(options)
     merged_circuits = _circuits_with_merged_source_circuit_sensors(
         updated_options,
         updated_options.get(CONF_CIRCUITS, _options_existing_circuits(config_entry)),
+        remove_source_entities=remove_source_entities,
     )
     if merged_circuits is None:
         return updated_options
@@ -5022,12 +5032,23 @@ def _options_with_merged_source_circuit_sensors(
 def _circuits_with_merged_source_circuit_sensors(
     config: Mapping[str, Any],
     existing_circuits: Iterable[Any],
+    *,
+    remove_source_entities: Iterable[str] = (),
 ) -> list[dict[str, Any]] | None:
-    circuits = [
-        {**circuit, "sensors": _copied_circuit_sensors(circuit)}
-        for circuit in existing_circuits
-        if isinstance(circuit, Mapping)
-    ]
+    removed_entities = set(remove_source_entities)
+    changed = False
+    circuits: list[dict[str, Any]] = []
+    for circuit in existing_circuits:
+        if not isinstance(circuit, Mapping):
+            continue
+        sensors = _copied_circuit_sensors(circuit)
+        retained_sensors = [
+            sensor
+            for sensor in sensors
+            if _sensor_entity_id_from_raw(sensor) not in removed_entities
+        ]
+        changed = changed or len(retained_sensors) != len(sensors)
+        circuits.append({**circuit, "sensors": retained_sensors})
     if not circuits:
         return None
 
@@ -5043,7 +5064,6 @@ def _circuits_with_merged_source_circuit_sensors(
             invalid_error_key="invalid_mains_source_entities",
         )
     )
-    changed = False
     for entity_id in _strict_string_list(
         config.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,

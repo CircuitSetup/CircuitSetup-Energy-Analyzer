@@ -1223,7 +1223,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     async def discover(hass, source_devices):
         assert hass is flow.hass
         assert tuple(source_devices) == ("meter-device",)
-        return ["sensor.renamed_power", "sensor.added_current"]
+        return ["sensor.fridge_active_power", "sensor.fridge_current"]
 
     monkeypatch.setattr(
         config_flow,
@@ -1248,7 +1248,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
             "name": "Fridge",
             "sensors": [
                 {
-                    "entity_id": "sensor.manual_power",
+                    "entity_id": "sensor.fridge_power",
                     "role": "real_power",
                     "leg": "single",
                 }
@@ -1260,7 +1260,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
         options={
             CONF_SOURCE_DEVICES: ["meter-device"],
             CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
-            CONF_SOURCE_ENTITIES: ["sensor.old_power", "sensor.manual_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.fridge_power", "sensor.manual_power"],
             CONF_CIRCUITS: existing_circuits,
             CONF_SENSITIVITY: "quiet",
             CONF_RETENTION_MODE: "diagnostic",
@@ -1275,12 +1275,28 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SOURCE_ENTITIES] == [
-        "sensor.renamed_power",
-        "sensor.added_current",
+        "sensor.fridge_active_power",
+        "sensor.fridge_current",
         "sensor.manual_power",
     ]
     assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.manual_power"]
-    assert result["data"][CONF_CIRCUITS] == existing_circuits
+    assert result["data"][CONF_CIRCUITS] == [
+        {
+            **existing_circuits[0],
+            "sensors": [
+                {
+                    "entity_id": "sensor.fridge_active_power",
+                    "role": "real_power",
+                    "leg": None,
+                },
+                {
+                    "entity_id": "sensor.fridge_current",
+                    "role": "current",
+                    "leg": None,
+                },
+            ],
+        }
+    ]
     assert result["data"][CONF_SENSITIVITY] == "quiet"
     assert result["data"][CONF_RETENTION_MODE] == "diagnostic"
     assert config_entries.reloads == ["entry-1"]
