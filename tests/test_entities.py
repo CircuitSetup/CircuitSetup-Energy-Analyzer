@@ -3397,6 +3397,25 @@ def test_energy_summary_explains_automatic_kwh_helper_startup() -> None:
     )
 
 
+def test_energy_learning_keeps_shared_learning_state_active() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        is_learning,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        energy_summary_attributes,
+    )
+
+    state = AnalyzerState(
+        learning_by_circuit={"hvac": False},
+        energy_usage_evidence_by_circuit={
+            "hvac": {"status": "learning"},
+        },
+    )
+
+    assert is_learning(state, "hvac") is True
+    assert energy_summary_attributes(state, "hvac")["learning"] is True
+
+
 def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,

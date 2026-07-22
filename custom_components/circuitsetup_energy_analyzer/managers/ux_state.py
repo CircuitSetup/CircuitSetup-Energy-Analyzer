@@ -26,6 +26,7 @@ from ..models import (
 )
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import resolve_operating_detection_from_settings
+from ..state import circuit_is_learning
 from ..ux import data_quality_checklist, health_summary, learning_progress
 
 
@@ -92,7 +93,7 @@ class UxStateManager:
             readiness_payload(dashboard_readiness)
         )
 
-        learning = coordinator.state.learning_by_circuit.get(circuit_id, True)
+        learning = circuit_is_learning(coordinator.state, circuit_id)
         suppression_reason = self.suppression_reason(circuit_id, learning)
         progress = learning_progress(
             config,

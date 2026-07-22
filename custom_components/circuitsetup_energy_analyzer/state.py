@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -207,6 +207,28 @@ class AnalyzerState:
     )
     settings_recommendation_count_by_circuit: dict[str, int] = field(
         default_factory=dict
+    )
+
+
+_ENERGY_LEARNING_STATUSES = frozenset({"learning", "waiting_for_delta"})
+
+
+def circuit_is_learning(
+    state: Any,
+    circuit_id: str,
+    *,
+    default: bool = True,
+) -> bool:
+    """Return whether any shared circuit learning process is still active."""
+    if bool(getattr(state, "learning_by_circuit", {}).get(circuit_id, default)):
+        return True
+    energy_evidence = getattr(state, "energy_usage_evidence_by_circuit", {}).get(
+        circuit_id,
+        {},
+    )
+    return bool(
+        isinstance(energy_evidence, Mapping)
+        and str(energy_evidence.get("status") or "") in _ENERGY_LEARNING_STATUSES
     )
 
 

@@ -17,6 +17,7 @@ from ..entity import circuit_info_from_config
 from ..localized_text import translation_section
 from ..models import ApplianceProfile, CircuitMode, SensorRole
 from ..profiles import get_profile_definition
+from ..state import circuit_is_learning
 
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
 SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
@@ -1191,7 +1192,7 @@ def _readiness_value(state: Any, circuit_id: str) -> str:
     if status:
         return str(status)
 
-    if getattr(state, "learning_by_circuit", {}).get(circuit_id) is True:
+    if circuit_is_learning(state, circuit_id, default=False):
         return "learning"
     return "ready"
 

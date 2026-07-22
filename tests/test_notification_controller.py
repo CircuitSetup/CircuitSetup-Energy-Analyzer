@@ -214,6 +214,13 @@ async def test_settings_notification_repeats_only_for_new_suggestions(
     assert notifications_created == []
 
     state.learning_by_circuit["fridge"] = False
+    state.energy_usage_evidence_by_circuit = {
+        "fridge": {"status": "learning"},
+    }
+    await controller.async_notify_settings_recommendations_if_needed()
+    assert notifications_created == []
+
+    state.energy_usage_evidence_by_circuit["fridge"]["status"] = "tracking"
     await controller.async_notify_settings_recommendations_if_needed()
     pending[0] = recommendation("rec-1", evidence=8)
     await controller.async_notify_settings_recommendations_if_needed()
@@ -399,6 +406,61 @@ async def test_alert_notifications_wait_for_live_learning_state(
     await controller.async_notify_alert(obvious_alert)
     await controller.async_notify_alert(error_alert)
     assert created == [routine_alert, obvious_alert, error_alert]
+
+
+@pytest.mark.asyncio
+async def test_alert_notifications_wait_for_energy_learning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[AlertEvidence] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        created.append(alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    now = datetime(2026, 7, 22, 12, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Runtime changed",
+        feature="run_cycle_duration_s",
+    )
+    state = SimpleNamespace(
+        learning_by_circuit={"hvac": False},
+        energy_usage_evidence_by_circuit={
+            "hvac": {"status": "learning"},
+        },
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={},
+            notification_delivery_state={},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(alert)
+    assert created == []
+
+    state.energy_usage_evidence_by_circuit["hvac"]["status"] = "tracking"
+    await controller.async_notify_alert(alert)
+    assert created == [alert]
 
 
 @pytest.mark.asyncio

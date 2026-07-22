@@ -91,6 +91,7 @@ from .nilm_virtual import (
 from .notifications import POWER_QUALITY_ALERT_FEATURES
 from .operating_detection import operating_state_is_running
 from .safety import with_electrical_safety_notice
+from .state import circuit_is_learning
 from .tariff import configured_electricity_rate, global_cost_settings
 from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
@@ -185,7 +186,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "status_label": summary,
         "status_explanation": _health_summary_explanation(summary, readiness),
         "alert_confirmed": _alert_confirmed(state, circuit_id),
-        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
+        "learning": circuit_is_learning(state, circuit_id),
         "learning_progress": learning_progress_value(state, circuit_id),
         "readiness": readiness,
         "data_quality_problem": data_quality_problem,
@@ -211,7 +212,7 @@ def readiness_value(state: Any, circuit_id: str) -> str:
     if status:
         return str(status)
 
-    if getattr(state, "learning_by_circuit", {}).get(circuit_id, True):
+    if circuit_is_learning(state, circuit_id):
         return "learning"
     return "ready"
 
@@ -803,7 +804,7 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
             circuit_id,
         ),
         "alert_confirmed": _alert_confirmed(state, circuit_id),
-        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
+        "learning": circuit_is_learning(state, circuit_id),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
@@ -848,7 +849,7 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "cost_cycle": cost_cycle_value(state, circuit_id),
         "cost_cycle_forecast": cost_cycle_forecast_value(state, circuit_id),
         "alert_confirmed": _alert_confirmed(state, circuit_id),
-        "learning": getattr(state, "learning_by_circuit", {}).get(circuit_id, True),
+        "learning": circuit_is_learning(state, circuit_id),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "summary_explanation": explanation,
         "energy_usage_explanation": _status_explanation(energy_usage_status),
@@ -2650,11 +2651,10 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             attributes,
         )
         status_attributes = dict(attributes or {})
-        status_attributes["learning"] = getattr(
+        status_attributes["learning"] = circuit_is_learning(
             self.coordinator_state,
-            "learning_by_circuit",
-            {},
-        ).get(self.circuit_id, True)
+            self.circuit_id,
+        )
         status_attributes["alert_confirmed"] = _alert_confirmed(
             self.coordinator_state,
             self.circuit_id,

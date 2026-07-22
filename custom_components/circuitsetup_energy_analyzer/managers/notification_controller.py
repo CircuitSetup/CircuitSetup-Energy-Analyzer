@@ -12,6 +12,7 @@ from ..appliance_notifications import (
 )
 from ..models import AlertEvidence, CircuitEvent, EventType, Severity
 from ..nilm_virtual import nilm_virtual_appliance_alerts
+from ..state import circuit_is_learning
 from ..weekly_digest import (
     build_weekly_digest,
     completed_week_bounds,
@@ -86,9 +87,9 @@ class NotificationController:
         return not self._circuit_is_learning(alert.circuit_id)
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
-        state = getattr(self._coordinator, "state", None)
-        return bool(
-            getattr(state, "learning_by_circuit", {}).get(circuit_id, True)
+        return circuit_is_learning(
+            getattr(self._coordinator, "state", None),
+            circuit_id,
         )
 
     async def async_sync_alert_notifications(self) -> None:

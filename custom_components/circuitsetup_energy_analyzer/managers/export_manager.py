@@ -4,6 +4,7 @@ from typing import Any
 
 from ..appliance_detail import appliance_detail_for_circuit
 from ..exporting import build_circuit_history_csv
+from ..state import circuit_is_learning
 
 
 class ExportManager:
@@ -24,7 +25,7 @@ class ExportManager:
             ),
             "anomaly_score": state.anomaly_score_by_circuit.get(circuit_id, 0.0),
             "data_quality": state.data_quality_by_circuit.get(circuit_id),
-            "learning": state.learning_by_circuit.get(circuit_id, True),
+            "learning": circuit_is_learning(state, circuit_id),
             "power_quality_score": state.power_quality_score_by_circuit.get(
                 circuit_id,
                 0.0,
