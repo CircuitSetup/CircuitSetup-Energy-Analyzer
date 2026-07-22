@@ -677,6 +677,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
     assert result["step_id"] == "init"
     assert result["menu_options"] == [
         "sources",
+        "refresh_sources",
         "mains",
         "assign",
         "utility",
@@ -1187,6 +1188,146 @@ async def test_options_sources_step_shows_source_selection_form() -> None:
     assert CONF_SOURCE_DEVICES in _schema_keys(result["data_schema"])
     assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(result["data_schema"])
     assert CONF_OUTDOOR_TEMPERATURE_ENTITY in _schema_keys(result["data_schema"])
+
+
+@pytest.mark.asyncio
+async def test_options_refresh_sources_step_requires_confirmation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_SOURCE_ENTITIES: ["sensor.old_power"],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_refresh_sources()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "refresh_sources"
+    assert not _schema_keys(result["data_schema"])
+    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.old_power"]
+
+
+@pytest.mark.asyncio
+async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    async def discover(hass, source_devices):
+        assert hass is flow.hass
+        assert tuple(source_devices) == ("meter-device",)
+        return ["sensor.renamed_power", "sensor.added_current"]
+
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities_for_devices",
+        discover,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloads: list[str] = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            entry.options = dict(kwargs["options"])
+
+        async def async_reload(self, entry_id: str) -> bool:
+            self.reloads.append(entry_id)
+            return True
+
+    existing_circuits = [
+        {
+            "circuit_id": "fridge",
+            "name": "Fridge",
+            "sensors": [
+                {
+                    "entity_id": "sensor.manual_power",
+                    "role": "real_power",
+                    "leg": "single",
+                }
+            ],
+        }
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.old_power", "sensor.manual_power"],
+            CONF_CIRCUITS: existing_circuits,
+            CONF_SENSITIVITY: "quiet",
+            CONF_RETENTION_MODE: "diagnostic",
+        },
+        entry_id="entry-1",
+    )
+    config_entries = FakeConfigEntries()
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(config_entries=config_entries)
+
+    result = await flow.async_step_refresh_sources({})
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.renamed_power",
+        "sensor.added_current",
+        "sensor.manual_power",
+    ]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.manual_power"]
+    assert result["data"][CONF_CIRCUITS] == existing_circuits
+    assert result["data"][CONF_SENSITIVITY] == "quiet"
+    assert result["data"][CONF_RETENTION_MODE] == "diagnostic"
+    assert config_entries.reloads == ["entry-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_devices", "discovered", "error_key"),
+    [
+        ([], [], "no_source_devices"),
+        (["meter-device"], [], "no_source_device_entities"),
+    ],
+)
+async def test_options_refresh_sources_preserves_options_on_failure(
+    monkeypatch,
+    source_devices,
+    discovered,
+    error_key,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    async def discover_source_entities(hass, selected_devices):
+        return discovered
+
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities_for_devices",
+        discover_source_entities,
+    )
+    original_options = {
+        CONF_SOURCE_DEVICES: source_devices,
+        CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
+        CONF_SOURCE_ENTITIES: ["sensor.old_power", "sensor.manual_power"],
+    }
+    entry = SimpleNamespace(data={}, options=dict(original_options))
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace()
+
+    result = await flow.async_step_refresh_sources({})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "refresh_sources"
+    assert result["errors"]["base"] == error_key
+    assert entry.options == original_options
 
 
 def test_demo_source_bundle_toggle_defaults_off_for_new_setup() -> None:

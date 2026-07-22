@@ -236,6 +236,8 @@ from .ux import SENSITIVITY_LABELS, normalize_sensitivity
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
+ERROR_NO_SOURCE_DEVICES = "no_source_devices"
+ERROR_NO_SOURCE_DEVICE_ENTITIES = "no_source_device_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
@@ -3652,6 +3654,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         if user_input is None:
             menu_options = [
                 "sources",
+                "refresh_sources",
                 "mains",
                 "assign",
                 "utility",
@@ -3724,6 +3727,40 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
 
         return await self._async_show_options_form()
+
+    async def async_step_refresh_sources(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Refresh sensors discovered from the selected source devices."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="refresh_sources",
+                data_schema=vol.Schema({}),
+            )
+
+        try:
+            validated = validate_options_input(
+                await _async_source_selection_with_device_entities(
+                    getattr(self, "hass", None),
+                    _options_source_payload(self._config_entry),
+                    require_device_entities=True,
+                )
+            )
+        except SetupValidationError as err:
+            return self.async_show_form(
+                step_id="refresh_sources",
+                data_schema=vol.Schema({}),
+                errors={"base": err.error_key},
+            )
+
+        updated_options = _options_with_updates(self._config_entry, validated)
+        updated_options = _options_with_merged_source_circuit_sensors(
+            self._config_entry,
+            updated_options,
+        )
+        await _async_save_options_flow_config(self, updated_options)
+        return self.async_create_entry(title="", data=updated_options)
 
     async def async_step_assign(
         self,
@@ -5738,12 +5775,16 @@ def _nonnegative_float_from_input(value: Any, *, default: float) -> float:
 async def _async_source_selection_with_device_entities(
     hass: Any,
     user_input: Mapping[str, Any],
+    *,
+    require_device_entities: bool = False,
 ) -> dict[str, Any]:
     """Return source selection with selected devices expanded to source entities."""
     source_devices = _strict_string_list(
         user_input.get(CONF_SOURCE_DEVICES, []),
         invalid_error_key="invalid_source_devices",
     )
+    if require_device_entities and not source_devices:
+        raise SetupValidationError(ERROR_NO_SOURCE_DEVICES)
     extra_source_entities = _strict_string_list(
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
@@ -5752,6 +5793,8 @@ async def _async_source_selection_with_device_entities(
         hass,
         source_devices,
     )
+    if require_device_entities and not device_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_DEVICE_ENTITIES)
     merged = list(
         dict.fromkeys(
             [
