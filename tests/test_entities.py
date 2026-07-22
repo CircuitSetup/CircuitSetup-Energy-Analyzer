@@ -2675,6 +2675,37 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     assert ENTITY_DETAIL_SIMPLE == "simple"
 
 
+def test_daily_energy_and_cost_sensor_descriptions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    state = AnalyzerState(
+        estimated_cost_today_by_circuit={"fridge": 0.48},
+        average_cost_per_day_by_circuit={"fridge": 0.3},
+        average_kwh_per_day_by_circuit={"fridge": 1.5},
+    )
+    circuit = SimpleNamespace(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile="refrigerator",
+    )
+
+    assert descriptions["daily_energy_usage"].name_suffix == "Energy Usage Today"
+    assert descriptions["cost_today"].value_fn(state, "fridge") == 0.48
+    assert descriptions["average_cost_per_day"].value_fn(state, "fridge") == 0.3
+    assert descriptions["average_kwh_per_day"].value_fn(state, "fridge") == 1.5
+    assert descriptions["average_kwh_per_day"].native_unit_of_measurement == "kWh"
+    assert CircuitAnalyzerSensor(
+        SimpleNamespace(data=state),
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["daily_energy_usage"],
+    ).unique_id.endswith("_fridge_daily_energy_usage")
+
+
 def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import (
         EntityCategory,
@@ -2698,6 +2729,9 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "electrical_health",
         "energy_summary",
         "daily_energy_usage",
+        "cost_today",
+        "average_cost_per_day",
+        "average_kwh_per_day",
         "nilm_signature_count",
         "nilm_unknown_loads",
         "weather_context",
@@ -2724,6 +2758,9 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "nilm_unknown_loads",
         "settings_suggestions",
         "daily_energy_usage",
+        "cost_today",
+        "average_cost_per_day",
+        "average_kwh_per_day",
         "weather_context",
         "rain_pump_correlation",
         "water_flow_correlation",
@@ -3533,6 +3570,7 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
         "entry-1_fridge_daily_energy_usage",
+        "entry-1_fridge_average_kwh_per_day",
     ]
     setup_health = added_entities[0]
     assert setup_health.name == "CircuitSetup Energy Analyzer Setup Health"

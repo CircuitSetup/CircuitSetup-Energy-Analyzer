@@ -682,6 +682,13 @@ def test_runtime_english_translation_is_the_single_source() -> None:
     assert translated_init["menu_options"]
 
 
+def test_daily_energy_sensor_uses_today_label() -> None:
+    label = _translations()["entity"]["sensor"]["daily_energy_usage"]["name"]
+
+    assert label == "Energy usage today"
+    assert label != "Daily energy usage"
+
+
 def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
     None
 ):

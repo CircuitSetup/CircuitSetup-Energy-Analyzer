@@ -549,7 +549,16 @@
         "name": "Water flow mismatch minutes"
       },
       "daily_energy_usage": {
-        "name": "Daily energy usage"
+        "name": "Energy usage today"
+      },
+      "cost_today": {
+        "name": "Cost today"
+      },
+      "average_cost_per_day": {
+        "name": "Average cost per day"
+      },
+      "average_kwh_per_day": {
+        "name": "Average kWh per day"
       },
       "energy_usage_share": {
         "name": "Energy usage share"
