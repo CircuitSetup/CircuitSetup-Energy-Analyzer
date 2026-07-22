@@ -786,7 +786,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
 
     assert result.store_dirty is True
     assert result.events == []
-    assert len(result.state_updates) == 3
+    assert len(result.state_updates) == 4
     assert len(result.alerts) == 1
     assert result.notifications == result.alerts
     assert policy.observations[0].feature == "daily_energy_usage_spike"
@@ -796,6 +796,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
 
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("daily_energy_usage_by_circuit", "fridge")] == 12.9
+    assert updates[("average_kwh_per_day_by_circuit", "fridge")] == 10.0
     assert updates[("energy_usage_share_by_circuit", "fridge")] == 25.8
     evidence = updates[("energy_usage_evidence_by_circuit", "fridge")]
     assert evidence["status"] == "over_threshold"
@@ -2518,10 +2519,13 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
             }
         }
     )
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.average_kwh_per_day_by_circuit["fridge"] = 1.5
     context = ProcessingContext(
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
-        state=AnalyzerState(),
+        state=state,
         store_data=store_data,
         options={},
         entry_data={},
@@ -2546,9 +2550,12 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert result.store_dirty is True
     assert result.alerts == []
     assert result.notifications == []
-    assert len(result.state_updates) == 8
+    assert len(result.state_updates) == 11
 
     updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("estimated_cost_today_by_circuit", "fridge")] == 0.48
+    assert updates[("average_cost_per_day_by_circuit", "fridge")] == 0.3
+    assert updates[("effective_electricity_rate_by_circuit", "fridge")] == 0.2
     assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.2
     assert updates[("cost_today_by_circuit", "fridge")] is None
     assert updates[("cost_today_status_by_circuit", "fridge")] == "unavailable"
@@ -2565,6 +2572,17 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert evidence["projected_cycle_cost"] == 8.18
     assert evidence["status"] == "tracking"
     assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
+
+    no_rate_result = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            cycle_start_day=1,
+        ),
+    ).process(_energy_sample(115.0), config, context)
+    no_rate_updates = {
+        update.path: update.value for update in no_rate_result.state_updates
+    }
+    assert no_rate_updates[("estimated_cost_today_by_circuit", "fridge")] is None
+    assert no_rate_updates[("average_cost_per_day_by_circuit", "fridge")] is None
 
 
 def test_cost_processor_produces_same_time_comparison_evidence() -> None:

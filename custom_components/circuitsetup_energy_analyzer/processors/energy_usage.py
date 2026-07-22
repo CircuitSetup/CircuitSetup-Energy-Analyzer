@@ -104,6 +104,10 @@ class EnergyUsageProcessor:
                     result.daily_usage_kwh,
                 ),
                 StateUpdate(
+                    ("average_kwh_per_day_by_circuit", circuit_id),
+                    result.average_kwh_per_day,
+                ),
+                StateUpdate(
                     ("energy_usage_share_by_circuit", circuit_id),
                     round(result.daily_usage_share * 100, 1),
                 ),

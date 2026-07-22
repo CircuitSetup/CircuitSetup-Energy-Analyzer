@@ -88,6 +88,9 @@ class AnalyzerState:
         default_factory=dict
     )
     daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
+    average_kwh_per_day_by_circuit: dict[str, float | None] = field(
+        default_factory=dict
+    )
     energy_usage_share_by_circuit: dict[str, float] = field(default_factory=dict)
     energy_usage_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
@@ -125,6 +128,15 @@ class AnalyzerState:
     cost_cycle_forecast_by_circuit: dict[str, float] = field(default_factory=dict)
     cost_status_by_circuit: dict[str, str] = field(default_factory=dict)
     cost_evidence_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
+    effective_electricity_rate_by_circuit: dict[str, float | None] = field(
+        default_factory=dict
+    )
+    estimated_cost_today_by_circuit: dict[str, float | None] = field(
+        default_factory=dict
+    )
+    average_cost_per_day_by_circuit: dict[str, float | None] = field(
+        default_factory=dict
+    )
     utility_cost_rate_by_circuit: dict[str, float] = field(default_factory=dict)
     current_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)
     peak_demand_w_by_circuit: dict[str, float] = field(default_factory=dict)

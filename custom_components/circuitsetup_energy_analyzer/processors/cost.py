@@ -18,7 +18,12 @@ from ..contextual_baseline import (
     stored_contextual_samples,
     upsert_contextual_sample,
 )
-from ..cost import CostSettings, record_cost_sample
+from ..cost import (
+    CostSettings,
+    _float_or_none,
+    _positive_float_or_none,
+    record_cost_sample,
+)
 from ..local_time import as_ha_local, local_date
 from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
@@ -54,6 +59,15 @@ class CostProcessor:
         circuit_id = circuit_config.circuit_id
         settings = self._settings_for_config(circuit_config, circuit_id)
         utility_rate = self._utility_rate_for_circuit(circuit_id)
+        estimate_rate = (
+            float(utility_rate)
+            if utility_rate is not None and utility_rate > 0.0
+            else _positive_float_or_none(settings.default_rate_per_kwh)
+        )
+        daily_kwh = context.state.daily_energy_usage_by_circuit.get(circuit_id)
+        average_kwh = context.state.average_kwh_per_day_by_circuit.get(circuit_id)
+        estimated_cost_today = _estimated_cost(daily_kwh, estimate_rate)
+        average_cost_per_day = _estimated_cost(average_kwh, estimate_rate)
         if utility_rate is not None and utility_rate > 0.0:
             settings = replace(
                 settings,
@@ -102,9 +116,28 @@ class CostProcessor:
                     ("cost_evidence_by_circuit", circuit_id),
                     cost_evidence_payload(result, contextual_comparison),
                 ),
+                StateUpdate(
+                    ("effective_electricity_rate_by_circuit", circuit_id),
+                    estimate_rate,
+                ),
+                StateUpdate(
+                    ("estimated_cost_today_by_circuit", circuit_id),
+                    estimated_cost_today,
+                ),
+                StateUpdate(
+                    ("average_cost_per_day_by_circuit", circuit_id),
+                    average_cost_per_day,
+                ),
             ],
             store_dirty=True,
         )
+
+
+def _estimated_cost(energy_kwh: Any, rate: float | None) -> float | None:
+    value = _float_or_none(energy_kwh)
+    if value is None or rate is None:
+        return None
+    return round(max(value, 0.0) * rate, 2)
 
 
 def cost_evidence_payload(
