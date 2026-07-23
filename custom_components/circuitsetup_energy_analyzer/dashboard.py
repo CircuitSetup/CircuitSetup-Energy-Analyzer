@@ -270,10 +270,11 @@ def build_recommended_dashboard(
         )
     for view in views:
         cards = view["sections"][0]["cards"]
+        # A full-width section has 12 card cells for each spanned view column.
         card_columns = (
-            6
+            24
             if view["path"] == "energy-costs"
-            else 12
+            else (DASHBOARD_COLUMNS * 12)
             // min(
                 DASHBOARD_COLUMNS,
                 max(1, len(cards)),

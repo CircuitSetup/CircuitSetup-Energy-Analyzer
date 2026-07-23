@@ -11,7 +11,7 @@ views:
         cards:
           - type: custom:circuitsetup-energy-analyzer-house-flow
             grid_options:
-              columns: 6
+              columns: 24
             title: Home energy summary
             setup_health_entity: sensor.circuitsetup_energy_analyzer_setup_health
             setup_health_path: /circuitsetup-energy-analyzer-evidence?setup_health=1
@@ -52,7 +52,7 @@ views:
 
           - type: custom:circuitsetup-energy-analyzer-appliance-grid
             grid_options:
-              columns: 6
+              columns: 24
             title: Appliances
             appliances:
               - circuit_id: refrigerator
@@ -86,7 +86,7 @@ views:
         cards:
           - type: history-graph
             grid_options:
-              columns: 6
+              columns: 24
             title: HVAC activity and outdoor temperature
             hours_to_show: 168
             entities:
@@ -100,7 +100,7 @@ views:
                 name: HVAC energy today
           - type: custom:circuitsetup-energy-analyzer-energy-cost
             grid_options:
-              columns: 6
+              columns: 24
             title: Energy and costs
             api_path: circuitsetup_energy_analyzer/appliance_insights
             primary_mains:
@@ -134,7 +134,7 @@ views:
         cards:
           - type: custom:circuitsetup-energy-analyzer-house-flow
             grid_options:
-              columns: 4
+              columns: 16
             mode: mains
             title: Mains and NILM
             primary_mains:
@@ -150,7 +150,7 @@ views:
               solar_surplus_power_entity: sensor.mains_solar_surplus_power
           - type: button
             grid_options:
-              columns: 4
+              columns: 16
             name: Review NILM Assignments
             icon: mdi:playlist-check
             tap_action:
@@ -158,7 +158,7 @@ views:
               navigation_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
           - type: entities
             grid_options:
-              columns: 4
+              columns: 16
             title: Billing Cycle
             entities:
               - entity: sensor.mains_billing_cycle_usage

@@ -456,7 +456,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         "custom:circuitsetup-energy-analyzer-energy-cost",
     )
     assert energy_view["sections"][0]["cards"] == [energy_card]
-    assert energy_card["grid_options"]["columns"] == 6
+    assert energy_card["grid_options"]["columns"] == 24
 
     assert {
         appliance["cost_today_entity"]
@@ -772,9 +772,9 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
     for view in _dashboard_views(dashboard):
         for section in view["sections"]:
             expected_columns = (
-                6
+                24
                 if view["path"] == "energy-costs"
-                else 12 // min(4, len(section["cards"]))
+                else 48 // min(4, len(section["cards"]))
             )
             assert {
                 card["grid_options"]["columns"] for card in section["cards"]
@@ -1104,7 +1104,7 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
             "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
         ),
         "appliance_power_entities": ["sensor.pool_pump_estimated_power"],
-        "grid_options": {"columns": 6},
+        "grid_options": {"columns": 24},
     }
     assert not [
         card for card in cards if card.get("title") == "Defined NILM appliance power"
