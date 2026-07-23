@@ -677,6 +677,7 @@ async def test_options_flow_init_offers_assignment_and_source_editing() -> None:
     assert result["step_id"] == "init"
     assert result["menu_options"] == [
         "sources",
+        "refresh_sources",
         "mains",
         "assign",
         "utility",
@@ -1187,6 +1188,300 @@ async def test_options_sources_step_shows_source_selection_form() -> None:
     assert CONF_SOURCE_DEVICES in _schema_keys(result["data_schema"])
     assert CONF_EXTRA_SOURCE_ENTITIES in _schema_keys(result["data_schema"])
     assert CONF_OUTDOOR_TEMPERATURE_ENTITY in _schema_keys(result["data_schema"])
+
+
+@pytest.mark.asyncio
+async def test_options_refresh_sources_step_requires_confirmation() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_SOURCE_ENTITIES: ["sensor.old_power"],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_refresh_sources()
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "refresh_sources"
+    assert not _schema_keys(result["data_schema"])
+    assert entry.options[CONF_SOURCE_ENTITIES] == ["sensor.old_power"]
+
+
+@pytest.mark.asyncio
+async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    async def discover(hass, source_devices):
+        assert hass is flow.hass
+        assert tuple(source_devices) == ("meter-device",)
+        return [
+            "sensor.kitchen_refrigerator_active_power",
+            "sensor.kitchen_refrigerator_current",
+            "sensor.attic_unit_active_power",
+        ]
+
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities_for_devices",
+        discover,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloads: list[str] = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            entry.options = dict(kwargs["options"])
+
+        async def async_reload(self, entry_id: str) -> bool:
+            self.reloads.append(entry_id)
+            return True
+
+    existing_circuits = [
+        {
+            "circuit_id": "fridge",
+            "name": "Fridge",
+            "appliance_profile": "refrigerator",
+            "sensors": [
+                {
+                    "entity_id": "sensor.fridge_power",
+                    "role": "real_power",
+                    "leg": "single",
+                }
+            ],
+        },
+        {
+            "circuit_id": "hvac",
+            "name": "HVAC",
+            "appliance_profile": "hvac",
+            "sensors": [
+                {
+                    "entity_id": "sensor.hvac_power",
+                    "role": "real_power",
+                    "leg": "single",
+                }
+            ],
+        },
+    ]
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.fridge_power",
+                "sensor.hvac_power",
+                "sensor.manual_power",
+            ],
+            CONF_CIRCUITS: existing_circuits,
+            CONF_SENSITIVITY: "quiet",
+            CONF_RETENTION_MODE: "diagnostic",
+        },
+        entry_id="entry-1",
+    )
+    config_entries = FakeConfigEntries()
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(config_entries=config_entries)
+
+    result = await flow.async_step_refresh_sources({})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+    assert config_entries.reloads == []
+    assert entry.options[CONF_CIRCUITS] == existing_circuits
+    assert [group["circuit_id"] for group in flow._assignment_groups] == [
+        "fridge",
+        "hvac",
+    ]
+    assert all(
+        not {
+            "sensor.fridge_power",
+            "sensor.hvac_power",
+        }.intersection(group["available_entity_ids"])
+        for group in flow._assignment_groups
+    )
+    assert all(
+        not group["selected_entity_ids"] for group in flow._assignment_groups
+    )
+
+    result = await flow.async_step_assign(
+        {
+            "included_sensors": [
+                "sensor.kitchen_refrigerator_active_power",
+                "sensor.kitchen_refrigerator_current",
+            ],
+            "circuit_name": "Fridge",
+            "appliance_profile": "refrigerator",
+            "circuit_retention_mode": "diagnostic",
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "assign"
+
+    result = await flow.async_step_assign(
+        {
+            "included_sensors": ["sensor.attic_unit_active_power"],
+            "circuit_name": "HVAC",
+            "appliance_profile": "hvac",
+            "circuit_retention_mode": "diagnostic",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_SOURCE_ENTITIES] == [
+        "sensor.kitchen_refrigerator_active_power",
+        "sensor.kitchen_refrigerator_current",
+        "sensor.attic_unit_active_power",
+        "sensor.manual_power",
+    ]
+    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.manual_power"]
+    assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == "fridge"
+    assert result["data"][CONF_CIRCUITS][0]["sensors"] == [
+        {
+            "entity_id": "sensor.kitchen_refrigerator_active_power",
+            "role": "real_power",
+            "leg": None,
+        },
+        {
+            "entity_id": "sensor.kitchen_refrigerator_current",
+            "role": "current",
+            "leg": None,
+        },
+    ]
+    assert result["data"][CONF_CIRCUITS][1]["circuit_id"] == "hvac"
+    assert result["data"][CONF_CIRCUITS][1]["sensors"] == [
+        {
+            "entity_id": "sensor.attic_unit_active_power",
+            "role": "real_power",
+            "leg": None,
+        }
+    ]
+    assert result["data"][CONF_SENSITIVITY] == "quiet"
+    assert result["data"][CONF_RETENTION_MODE] == "diagnostic"
+    assert config_entries.reloads == ["entry-1"]
+
+
+@pytest.mark.asyncio
+async def test_options_refresh_sources_reviews_renamed_mains_sensor(
+    monkeypatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    async def discover_device_entities(hass, source_devices):
+        return ["sensor.house_feed_power"]
+
+    async def discover_all_entities(hass):
+        return ["sensor.house_feed_power", "sensor.manual_power"]
+
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities_for_devices",
+        discover_device_entities,
+    )
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities",
+        discover_all_entities,
+    )
+
+    class FakeConfigEntries:
+        def __init__(self) -> None:
+            self.reloads: list[str] = []
+
+        def async_update_entry(self, entry, **kwargs) -> None:
+            entry.options = dict(kwargs["options"])
+
+        async def async_reload(self, entry_id: str) -> bool:
+            self.reloads.append(entry_id)
+            return True
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_DEVICES: ["meter-device"],
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.manual_power"],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_power"],
+        },
+        entry_id="entry-1",
+    )
+    config_entries = FakeConfigEntries()
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace(config_entries=config_entries)
+
+    result = await flow.async_step_refresh_sources({})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "refresh_mains"
+    assert config_entries.reloads == []
+
+    result = await flow.async_step_refresh_mains(
+        {CONF_MAINS_SOURCE_ENTITIES: ["sensor.house_feed_power"]}
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
+        "sensor.house_feed_power"
+    ]
+    assert "sensor.panel_mains_power" not in result["data"][CONF_SOURCE_ENTITIES]
+    assert config_entries.reloads == ["entry-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_devices", "discovered", "error_key"),
+    [
+        ([], [], "no_source_devices"),
+        (["meter-device"], [], "no_source_device_entities"),
+    ],
+)
+async def test_options_refresh_sources_preserves_options_on_failure(
+    monkeypatch,
+    source_devices,
+    discovered,
+    error_key,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    async def discover_source_entities(hass, selected_devices):
+        return discovered
+
+    monkeypatch.setattr(
+        config_flow,
+        "_async_discover_energy_source_entities_for_devices",
+        discover_source_entities,
+    )
+    original_options = {
+        CONF_SOURCE_DEVICES: source_devices,
+        CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
+        CONF_SOURCE_ENTITIES: ["sensor.old_power", "sensor.manual_power"],
+    }
+    entry = SimpleNamespace(data={}, options=dict(original_options))
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow.hass = SimpleNamespace()
+
+    result = await flow.async_step_refresh_sources({})
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "refresh_sources"
+    assert result["errors"]["base"] == error_key
+    assert entry.options == original_options
 
 
 def test_demo_source_bundle_toggle_defaults_off_for_new_setup() -> None:

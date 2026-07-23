@@ -236,6 +236,8 @@ from .ux import SENSITIVITY_LABELS, normalize_sensitivity
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
+ERROR_NO_SOURCE_DEVICES = "no_source_devices"
+ERROR_NO_SOURCE_DEVICE_ENTITIES = "no_source_device_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
@@ -3643,6 +3645,10 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self._assignment_groups: list[dict[str, Any]] = []
         self._assignment_index = 0
         self._reviewed_circuits: list[dict[str, Any]] = []
+        self._reload_after_assignment = False
+        self._refresh_source_input: dict[str, Any] | None = None
+        self._refresh_available_source_entities: list[str] = []
+        self._refresh_stale_source_entities: set[str] = set()
 
     async def async_step_init(
         self,
@@ -3652,6 +3658,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         if user_input is None:
             menu_options = [
                 "sources",
+                "refresh_sources",
                 "mains",
                 "assign",
                 "utility",
@@ -3725,6 +3732,140 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
 
         return await self._async_show_options_form()
 
+    async def async_step_refresh_sources(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Refresh sensors discovered from the selected source devices."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="refresh_sources",
+                data_schema=vol.Schema({}),
+            )
+
+        try:
+            source_input = _options_source_payload(self._config_entry)
+            validated = validate_options_input(
+                await _async_source_selection_with_device_entities(
+                    getattr(self, "hass", None),
+                    source_input,
+                    require_device_entities=True,
+                )
+            )
+        except SetupValidationError as err:
+            return self.async_show_form(
+                step_id="refresh_sources",
+                data_schema=vol.Schema({}),
+                errors={"base": err.error_key},
+            )
+
+        updated_options = _options_with_updates(self._config_entry, validated)
+        available_source_entities = await _async_discover_energy_source_entities(
+            getattr(self, "hass", None)
+        )
+        stale_mains_source_entities = set(
+            source_input[CONF_MAINS_SOURCE_ENTITIES]
+        ) - set(available_source_entities)
+        if stale_mains_source_entities:
+            self._refresh_source_input = source_input
+            self._refresh_available_source_entities = available_source_entities
+            self._pending_config = updated_options
+            return self._show_refresh_mains_form()
+        return await self._async_finish_source_refresh(source_input, updated_options)
+
+    async def async_step_refresh_mains(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Review mains sources that changed during source refresh."""
+        if user_input is None:
+            return self._show_refresh_mains_form()
+
+        try:
+            pending_config = dict(self._pending_config or {})
+            pending_config[CONF_MAINS_SOURCE_ENTITIES] = _strict_string_list(
+                user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                invalid_error_key="invalid_mains_source_entities",
+            )
+            validated = validate_options_input(pending_config)
+        except SetupValidationError as err:
+            return self._show_refresh_mains_form({"base": err.error_key})
+
+        updated_options = {**pending_config, **validated}
+        return await self._async_finish_source_refresh(
+            self._refresh_source_input or _options_source_payload(self._config_entry),
+            updated_options,
+        )
+
+    async def _async_finish_source_refresh(
+        self,
+        source_input: Mapping[str, Any],
+        updated_options: Mapping[str, Any],
+    ) -> config_entries.ConfigFlowResult:
+        """Save a source refresh or review every stale circuit first."""
+        stale_device_source_entities = (
+            set(source_input[CONF_SOURCE_ENTITIES])
+            - set(source_input[CONF_EXTRA_SOURCE_ENTITIES])
+            - set(updated_options[CONF_SOURCE_ENTITIES])
+        )
+        existing_circuits = [
+            circuit
+            for circuit in _options_existing_circuits(self._config_entry)
+            if isinstance(circuit, Mapping)
+        ]
+        affected_circuits = [
+            circuit
+            for circuit in existing_circuits
+            if stale_device_source_entities.intersection(
+                _sensor_entity_ids_from_circuit(circuit)
+            )
+        ]
+        if affected_circuits:
+            self._reload_after_assignment = True
+            self._refresh_stale_source_entities = stale_device_source_entities
+            _start_assignment_review(
+                self,
+                updated_options,
+                existing_circuits=existing_circuits,
+                show_picker=True,
+                update_existing=False,
+            )
+            affected_circuit_ids = {
+                str(circuit.get("circuit_id") or circuit.get("id") or "").strip()
+                or _slugify(str(circuit.get("name") or "circuit"))
+                for circuit in affected_circuits
+            }
+            self._assignment_groups = [
+                {
+                    **group,
+                    "available_entity_ids": tuple(
+                        entity_id
+                        for entity_id in group.get("available_entity_ids", ())
+                        if entity_id not in stale_device_source_entities
+                    ),
+                    "selected_entity_ids": tuple(
+                        entity_id
+                        for entity_id in _selected_entity_ids_for_group(group)
+                        if entity_id not in stale_device_source_entities
+                    ),
+                }
+                for group in self._assignment_groups
+                if _assignment_group_value(group) in affected_circuit_ids
+            ]
+            self._reviewed_circuits = [
+                dict(circuit)
+                for circuit in existing_circuits
+                if circuit not in affected_circuits
+            ]
+            self._assignment_index = 0
+            return _assignment_review_form(self)
+        updated_options = _options_with_merged_source_circuit_sensors(
+            self._config_entry,
+            updated_options,
+        )
+        await _async_save_options_flow_config(self, updated_options)
+        return self.async_create_entry(title="", data=updated_options)
+
     async def async_step_assign(
         self,
         user_input: dict[str, Any] | None = None,
@@ -3763,6 +3904,18 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             if assignment_result.get("type") == "form":
                 return assignment_result
             final_config = assignment_result
+            if self._reload_after_assignment:
+                final_config[CONF_SOURCE_ENTITIES] = (
+                    _source_entities_after_assignment_update(
+                        self._pending_config or final_config,
+                        final_config.get(CONF_CIRCUITS, []),
+                        removed_source_entities=(
+                            self._refresh_stale_source_entities
+                        ),
+                    )
+                )
+                await _async_save_options_flow_config(self, final_config)
+                return self.async_create_entry(title="", data=final_config)
             if bool(getattr(self, "_assignment_update_existing", False)):
                 return self.async_create_entry(title="", data=final_config)
             return self.async_create_entry(title="", data=final_config)
@@ -3800,6 +3953,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 groups,
                 remove_assignments,
             )
+            if self._reload_after_assignment:
+                await _async_save_options_flow_config(self, final_config)
             return self.async_create_entry(title="", data=final_config)
 
         selected = str(user_input.get(FIELD_SELECTED_ASSIGNMENT) or "")
@@ -4236,6 +4391,35 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         return self.async_show_form(
             step_id="sources",
             data_schema=_options_schema(self._config_entry, source_entity_ids),
+            errors=errors or {},
+        )
+
+    def _show_refresh_mains_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        source_input = self._refresh_source_input or {}
+        stale_mains = set(source_input.get(CONF_MAINS_SOURCE_ENTITIES, ())) - set(
+            self._refresh_available_source_entities
+        )
+        pending_config = self._pending_config or {}
+        selected_mains = [
+            entity_id
+            for entity_id in pending_config.get(CONF_MAINS_SOURCE_ENTITIES, ())
+            if entity_id not in stale_mains
+        ]
+        return self.async_show_form(
+            step_id="refresh_mains",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_MAINS_SOURCE_ENTITIES,
+                        default=selected_mains,
+                    ): _energy_entity_list_selector(
+                        self._refresh_available_source_entities
+                    )
+                }
+            ),
             errors=errors or {},
         )
 
@@ -5738,12 +5922,16 @@ def _nonnegative_float_from_input(value: Any, *, default: float) -> float:
 async def _async_source_selection_with_device_entities(
     hass: Any,
     user_input: Mapping[str, Any],
+    *,
+    require_device_entities: bool = False,
 ) -> dict[str, Any]:
     """Return source selection with selected devices expanded to source entities."""
     source_devices = _strict_string_list(
         user_input.get(CONF_SOURCE_DEVICES, []),
         invalid_error_key="invalid_source_devices",
     )
+    if require_device_entities and not source_devices:
+        raise SetupValidationError(ERROR_NO_SOURCE_DEVICES)
     extra_source_entities = _strict_string_list(
         user_input.get(CONF_EXTRA_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
@@ -5752,6 +5940,8 @@ async def _async_source_selection_with_device_entities(
         hass,
         source_devices,
     )
+    if require_device_entities and not device_source_entities:
+        raise SetupValidationError(ERROR_NO_SOURCE_DEVICE_ENTITIES)
     merged = list(
         dict.fromkeys(
             [
