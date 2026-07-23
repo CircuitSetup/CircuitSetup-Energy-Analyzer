@@ -129,6 +129,26 @@ async function toHaveNoViolations(page) {
 
 test("home energy card omits Active now and separates contribution", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+      await route.fulfill({
+        json: [
+          [
+            { entity_id: "sensor.oven_energy", state: "5.0", last_changed: hoursAgo(24) },
+            { state: "6.0", last_changed: hoursAgo(8) },
+            { state: "0.2", last_changed: hoursAgo(2) },
+            { state: "0.7", last_changed: hoursAgo(0) },
+          ],
+          [
+            { entity_id: "sensor.oven_cost", state: "1.00", last_changed: hoursAgo(24) },
+            { state: "1.20", last_changed: hoursAgo(8) },
+            { state: "0.04", last_changed: hoursAgo(2) },
+            { state: "0.14", last_changed: hoursAgo(0) },
+          ],
+        ],
+      });
+      return true;
+    }
     if (!url.pathname.endsWith("/appliance_insights")) return false;
     await route.fulfill({
       json: {
@@ -166,8 +186,8 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     "sensor.washer_health": { state: "Normal", attributes: {} },
     "binary_sensor.oven_running": { state: "off", attributes: {} },
     "sensor.oven_power": { state: "50", attributes: { unit_of_measurement: "W" } },
-    "sensor.oven_energy": { state: "3.1", attributes: { unit_of_measurement: "kWh" } },
-    "sensor.oven_cost": { state: "0.7", attributes: { unit_of_measurement: "USD" } },
+    "sensor.oven_energy": { state: "0.7", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.oven_cost": { state: "0.14", attributes: { unit_of_measurement: "USD" } },
     "sensor.oven_health": { state: "Needs attention", attributes: {} },
   };
   const appliances = ["fridge", "washer", "oven"].map((id) => ({
@@ -210,8 +230,9 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.getByRole("button", { name: "7 days" })).toBeVisible();
   await expect(card.getByRole("button", { name: "30 days" })).toBeVisible();
   await expect(card).toContainText("Unavailable");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("1.7 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.70");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.34");
   await card.getByRole("button", { name: "7 days" }).click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
   await toHaveNoViolations(page);

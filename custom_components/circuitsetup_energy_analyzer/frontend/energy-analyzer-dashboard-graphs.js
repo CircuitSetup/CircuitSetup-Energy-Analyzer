@@ -199,6 +199,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._contributionMode = "energy";
       this._contributionWindow = "24h";
       this._contributionInsights = [];
+      this._rollingContributionTotals = {};
       this._contributionLoadRequested = false;
     }
 
@@ -333,7 +334,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const days = this._contributionWindow === "30d"
         ? 30
         : this._contributionWindow === "7d" ? 7 : 0;
-      if (!days) return appliances;
+      if (!days) {
+        return appliances.map((appliance) => ({
+          ...appliance,
+          energy: this._rollingContributionTotals[appliance.energy_today_entity] ?? null,
+          cost: this._rollingContributionTotals[appliance.cost_today_entity] ?? null,
+        }));
+      }
       return appliances.map((appliance) => {
         const insight = this._contributionInsights.find((item) => (
           (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
@@ -362,18 +369,50 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadContributionInsights() {
-      try {
-        const payload = await this._hass.callApi(
-          "GET",
-          this._dashboardConfig.api_path,
-        );
-        this._contributionInsights = Array.isArray(payload && payload.items)
-          ? payload.items
-          : [];
-      } catch (_error) {
-        this._contributionInsights = [];
-      }
+      const entityIds = [...new Set((this._dashboardConfig.appliances || [])
+        .flatMap((item) => [item.energy_today_entity, item.cost_today_entity])
+        .filter(Boolean))];
+      const start = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const historyPath = `history/period/${start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&minimal_response=1&no_attributes=1`;
+      const [insightsResult, historyResult] = await Promise.allSettled([
+        this._hass.callApi("GET", this._dashboardConfig.api_path),
+        entityIds.length ? this._hass.callApi("GET", historyPath) : Promise.resolve([]),
+      ]);
+      const payload = insightsResult.status === "fulfilled" ? insightsResult.value : null;
+      this._contributionInsights = Array.isArray(payload && payload.items)
+        ? payload.items
+        : [];
+      this._rollingContributionTotals = historyResult.status === "fulfilled"
+        ? this._rollingTotals(historyResult.value)
+        : {};
       this._render();
+    }
+
+    _rollingTotals(payload) {
+      if (!Array.isArray(payload)) return {};
+      const totals = {};
+      for (const group of payload) {
+        const rows = Array.isArray(group) ? group : [group];
+        let entityId = "";
+        let previous = null;
+        let total = 0;
+        for (const row of rows.filter(Boolean)) {
+          entityId = row.entity_id || entityId;
+          const value = Number(row.state);
+          if (!Number.isFinite(value) || value < 0) {
+            previous = null;
+            continue;
+          }
+          if (previous !== null) {
+            total += value >= previous ? value - previous : value;
+          }
+          previous = value;
+        }
+        if (entityId && previous !== null) {
+          totals[entityId] = total;
+        }
+      }
+      return totals;
     }
 
   }
