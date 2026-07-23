@@ -816,37 +816,40 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     cards = _dashboard_cards(dashboard)
     card_types = [card.get("type") for card in cards]
 
-    assert card_types.count("entities") <= 10
+    assert card_types.count("entities") == 1
     assert "button" in card_types
-    assert "gauge" in card_types
-    assert "glance" in card_types
-    assert "statistics-graph" in card_types
-    assert "tile" in card_types
-    assert any(card.get("title") == "Appliance Status" for card in cards)
-    statistics_cards = [
-        card for card in cards if card.get("type") == "statistics-graph"
-    ]
-    assert statistics_cards
-    assert all(card.get("days_to_show") == 7 for card in statistics_cards)
-    assert all(card.get("period") == "day" for card in statistics_cards)
+    assert "history-graph" in card_types
+    assert {
+        "custom:circuitsetup-energy-analyzer-house-flow",
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+        "custom:circuitsetup-energy-analyzer-energy-cost",
+        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
+    } <= set(card_types)
+    assert "gauge" not in card_types
+    assert "glance" not in card_types
+    assert "statistics-graph" not in card_types
 
 
 def test_dashboard_example_graphs_daily_energy_totals_with_max_stat() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    statistics_cards = [
+    energy_cards = [
         card
         for card in _dashboard_cards(dashboard)
-        if card.get("type") == "statistics-graph"
-        and any(
-            str(
-                entity.get("entity", "") if isinstance(entity, dict) else entity
-            ).endswith("_daily_energy_usage")
-            for entity in card.get("entities", [])
-        )
+        if card.get("type")
+        == "custom:circuitsetup-energy-analyzer-energy-cost"
     ]
 
-    assert statistics_cards
-    assert all(card.get("stat_types") == ["max"] for card in statistics_cards)
+    assert len(energy_cards) == 1
+    assert energy_cards[0]["api_path"].endswith("/appliance_insights")
+    assert energy_cards[0]["primary_mains"]["daily_energy_usage_entity"].endswith(
+        "_daily_energy_usage"
+    )
+    assert all(
+        appliance["cost_today_entity"].endswith("_cost_today")
+        and appliance["average_kwh_entity"].endswith("_average_kwh_per_day")
+        and appliance["average_cost_entity"].endswith("_average_cost_per_day")
+        for appliance in energy_cards[0]["appliances"]
+    )
 
 
 def test_dashboard_example_omits_hidden_default_entities() -> None:
@@ -860,16 +863,17 @@ def test_dashboard_example_omits_hidden_default_entities() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     refs = set(_dashboard_entity_refs(dashboard_text))
     intentional_feature_panel_refs = {
-        "sensor.mains_nilm_balance_power",
-        "sensor.mains_nilm_monitored_coverage",
-        "sensor.mains_nilm_monitored_power",
-        "sensor.mains_nilm_nilm_signature_count",
-        "sensor.mains_nilm_nilm_unknown_loads",
-        "sensor.mains_nilm_solar_flow_status",
-        "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_status",
-        "sensor.water_heater_water_flow_correlation",
-        "sensor.washer_water_flow_correlation",
+        "sensor.mains_balance_power",
+        "sensor.mains_monitored_coverage",
+        "sensor.mains_monitored_power",
+        "sensor.mains_nilm_signature_count",
+        "sensor.mains_nilm_unknown_loads",
+        "sensor.mains_solar_flow_status",
+        "sensor.mains_solar_surplus_power",
+        "sensor.mains_utility_comparison_status",
+        "sensor.mains_billing_cycle_usage",
+        "sensor.mains_cost_cycle",
+        "sensor.mains_cost_cycle_forecast",
     }
     hidden_sensor_keys = {
         description.key
@@ -904,83 +908,20 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         encoding="utf-8"
     )
     dashboard = yaml.safe_load(dashboard_text)
-    section_titles = {
-        section.get("title") for section in _dashboard_sections(dashboard)
-    }
-
-    assert {
-        "Appliance Status",
-        "Mains, Solar, and NILM",
-        "Energy Tracking",
-        "HVAC Weather Context",
-        "Diagnostics and Evidence",
-    } <= section_titles
-    assert section_titles.isdisjoint(
-        {
-            "Needs attention",
-            "Appliance overview",
-            "Energy tracking",
-            "Power quality detail",
-            "Alert evidence",
-            "NILM Unknown Loads",
-            "Settings And Exports",
-            "Power Quality Detail",
-            "Alert Philosophy",
-        }
-    )
-    assert [section.get("title") for section in _dashboard_sections(dashboard)][:2] == [
-        "Appliance Status",
-        "Mains, Solar, and NILM",
+    assert [view.get("path") for view in _dashboard_views(dashboard)] == [
+        "overview",
+        "appliances",
+        "energy-costs",
+        "mains-nilm",
+        "insights",
     ]
-    assert "Waiting For Energy Change" in dashboard_text
-    assert "sensor.hvac_activity_summary" in dashboard_text
-    assert "sensor.hvac_electrical_health" in dashboard_text
-    assert "sensor.hvac_energy_summary" in dashboard_text
-    assert "sensor.washer_activity_summary" in dashboard_text
-    assert "sensor.dryer_activity_summary" in dashboard_text
+    assert "binary_sensor.hvac_running" in dashboard_text
+    assert "binary_sensor.refrigerator_running" in dashboard_text
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
-    assert "sensor.water_heater_energy_summary" in dashboard_text
-    assert "sensor.mains_nilm_activity_summary" in dashboard_text
-
-    appliance_overview = yaml.safe_dump(
-        _dashboard_section(dashboard, "Appliance Status")
-    )
-    for appliance in (
-        "Refrigerator",
-        "HVAC",
-        "Water heater",
-        "Pool pump",
-        "Washer",
-        "Dryer",
-        "Car charger",
-    ):
-        assert appliance in appliance_overview
-    for circuit in (
-        "refrigerator",
-        "hvac",
-        "water_heater",
-        "pool_pump",
-        "washer",
-        "dryer",
-        "car_charger",
-    ):
-        assert f"sensor.{circuit}_activity_summary" in appliance_overview
-        assert f"sensor.{circuit}_electrical_health" in appliance_overview
-        assert f"sensor.{circuit}_energy_summary" in appliance_overview
-        assert f"sensor.{circuit}_daily_energy_usage" in appliance_overview
-        assert f"sensor.{circuit}_health_summary" not in appliance_overview
-        assert (
-            f"/circuitsetup-energy-analyzer-evidence?circuit_id={circuit}"
-            not in appliance_overview
-        )
-    assert "Open Refrigerator Evidence" not in appliance_overview
-    assert "Analyzer evidence links" in yaml.safe_dump(
-        _dashboard_section(dashboard, "Diagnostics and Evidence")
-    )
-
-    energy_tracking = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
-    assert "Appliance activity" not in energy_tracking
-    assert "Electrical health rollups" not in energy_tracking
+    assert "sensor.refrigerator_cost_today" in dashboard_text
+    assert "sensor.mains_cost_cycle" in dashboard_text
+    assert "sensor.hvac_activity_summary" not in dashboard_text
+    assert "sensor.refrigerator_electrical_health" not in dashboard_text
 
 
 def test_dashboard_example_removes_static_alert_evidence_view() -> None:
@@ -989,8 +930,13 @@ def test_dashboard_example_removes_static_alert_evidence_view() -> None:
     views = _dashboard_views(dashboard)
     refs = set(_dashboard_entity_refs(dashboard_text))
 
-    assert len(views) == 1
-    assert views[0].get("path") == "overview"
+    assert [view.get("path") for view in views] == [
+        "overview",
+        "appliances",
+        "energy-costs",
+        "mains-nilm",
+        "insights",
+    ]
     assert all(view.get("path") != "alert-evidence" for view in views)
     assert "title: Alert Evidence" not in dashboard_text
     assert "path: alert-evidence" not in dashboard_text
@@ -1015,9 +961,6 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
         "sensor.mains_anomaly_score",
         "sensor.mains_alert_evidence",
         "sensor.mains_recent_activity",
-        "sensor.mains_balance_power",
-        "sensor.mains_monitored_power",
-        "sensor.mains_monitored_coverage",
         "sensor.mains_balance_status",
         "sensor.mains_demand_peak_status",
         "sensor.mains_readiness",
@@ -1028,10 +971,11 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
     }
 
     assert stale_entities.isdisjoint(set(_dashboard_entity_refs(dashboard_text)))
-    assert "sensor.mains_nilm_activity_summary" in dashboard_text
-    assert "sensor.mains_nilm_electrical_health" in dashboard_text
-    assert "sensor.mains_nilm_nilm_unknown_loads" in dashboard_text
-    assert "Open NILM Graph & Review" in dashboard_text
+    assert "sensor.mains_monitored_power" in dashboard_text
+    assert "sensor.mains_balance_power" in dashboard_text
+    assert "sensor.mains_monitored_coverage" in dashboard_text
+    assert "sensor.mains_nilm_unknown_loads" in dashboard_text
+    assert "Review NILM Assignments" in dashboard_text
     assert (
         "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
         in dashboard_text
@@ -1040,83 +984,62 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
 
 def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    cards = _dashboard_cards(dashboard)
-    mains_section = yaml.safe_dump(
-        _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view.get("path") == "mains-nilm"
     )
-    coverage_gauges = [
+    flow_cards = [
         card
-        for card in cards
-        if card.get("type") == "gauge"
-        and card.get("entity") == "sensor.mains_nilm_monitored_coverage"
-    ]
-    load_match_cards = [
-        card for card in cards if card.get("title") == "Mains Load Match"
+        for card in _dashboard_cards(mains_view)
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-house-flow"
     ]
 
-    assert len(coverage_gauges) == 1
-    assert coverage_gauges[0]["name"] == "Known Load Share"
-    assert len(load_match_cards) == 1
-    assert load_match_cards[0]["type"] == "entities"
-    assert {row["entity"]: row["name"] for row in load_match_cards[0]["entities"]} == {
-        "sensor.mains_nilm_monitored_power": "Known Appliance Load",
-        "sensor.mains_nilm_balance_power": "Unassigned Mains Load",
-        "sensor.mains_nilm_monitored_coverage": "Known Load Share",
-    }
-    assert "Mains Load Match" in mains_section
-    assert "Known Load Share" in mains_section
-    assert "how much of current mains power is explained" in mains_section
-    assert "sensor.mains_nilm_nilm_unmatched_load_percentage" not in mains_section
+    assert len(flow_cards) == 1
+    assert flow_cards[0]["mode"] == "mains"
+    assert flow_cards[0]["primary_mains"]["monitored_power_entity"] == (
+        "sensor.mains_monitored_power"
+    )
+    assert flow_cards[0]["primary_mains"]["balance_power_entity"] == (
+        "sensor.mains_balance_power"
+    )
+    assert flow_cards[0]["primary_mains"]["monitored_coverage_entity"] == (
+        "sensor.mains_monitored_coverage"
+    )
 
 
 def test_dashboard_example_places_detail_panels_under_related_sections() -> None:
     dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
     dashboard = yaml.safe_load(dashboard_text)
 
-    section_titles = [
-        section.get("title") for section in _dashboard_sections(dashboard)
+    assert [view.get("title") for view in _dashboard_views(dashboard)] == [
+        "Home",
+        "Appliances",
+        "Energy & Costs",
+        "Mains & NILM",
+        "Insights",
     ]
-    assert section_titles == [
-        "Appliance Status",
-        "Mains, Solar, and NILM",
-        "Energy Tracking",
-        "HVAC Weather Context",
-        "Diagnostics and Evidence",
-    ]
-
-    mains_section = yaml.safe_dump(
-        _dashboard_section(dashboard, "Mains, Solar, and NILM")
-    )
-    energy_section = yaml.safe_dump(_dashboard_section(dashboard, "Energy Tracking"))
-    weather_section = yaml.safe_dump(
-        _dashboard_section(dashboard, "HVAC Weather Context")
-    )
-
-    assert "Unknown Load Inventory" in mains_section
-    assert "Unknown load signals" in mains_section
-    assert "Settings and exports" in energy_section
-    assert "Electrical health rollups" not in energy_section
-    assert "Notifications and repairs" in weather_section
-    assert "title: NILM Unknown Loads" not in dashboard_text
-    assert "title: Settings And Exports" not in dashboard_text
-    assert "title: Power Quality Detail" not in dashboard_text
+    assert "title: Billing Cycle" in dashboard_text
+    assert dashboard_text.count("Review NILM Assignments") == 1
+    assert "title: Alert Evidence" not in dashboard_text
 
 
 def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
-    hvac_cards = _dashboard_cards(hvac_section)
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view.get("path") == "insights"
+    )
     graph_cards = [
         card
-        for card in hvac_cards
-        if card.get("type") == "statistics-graph"
-        and card.get("title") == "HVAC daily energy and outdoor temperature"
+        for card in _dashboard_cards(insights)
+        if card.get("type") == "history-graph"
+        and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
     assert graph_cards
     assert graph_cards[0]["entities"] == [
-        {"entity": "sensor.hvac_daily_energy_usage", "name": "Daily Energy Usage"},
-        {"entity": "sensor.outdoor_temperature", "name": "Outdoor Temperature"},
+        {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
+        {"entity": "sensor.hvac_power", "name": "HVAC power"},
+        {"entity": "binary_sensor.hvac_running", "name": "HVAC running"},
+        {"entity": "sensor.hvac_daily_energy_usage", "name": "HVAC energy today"},
     ]
 
 
@@ -1125,84 +1048,73 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     refs = set(_dashboard_entity_refs(dashboard_text))
 
     expected_entities = {
-        "sensor.refrigerator_activity_summary",
-        "sensor.refrigerator_electrical_health",
-        "sensor.refrigerator_energy_summary",
+        "binary_sensor.refrigerator_running",
+        "sensor.refrigerator_health_summary",
         "sensor.refrigerator_daily_energy_usage",
-        "sensor.hvac_activity_summary",
-        "sensor.hvac_electrical_health",
-        "sensor.hvac_energy_summary",
+        "sensor.refrigerator_cost_today",
+        "binary_sensor.hvac_running",
+        "sensor.hvac_health_summary",
         "sensor.hvac_daily_energy_usage",
-        "sensor.hvac_weather_context",
+        "sensor.hvac_cost_today",
         "sensor.outdoor_temperature",
-        "sensor.water_heater_activity_summary",
-        "sensor.water_heater_electrical_health",
-        "sensor.water_heater_energy_summary",
-        "sensor.water_heater_daily_energy_usage",
-        "sensor.pool_pump_activity_summary",
-        "sensor.pool_pump_electrical_health",
-        "sensor.pool_pump_energy_summary",
-        "sensor.pool_pump_daily_energy_usage",
-        "sensor.washer_activity_summary",
-        "sensor.washer_electrical_health",
-        "sensor.washer_energy_summary",
-        "sensor.washer_daily_energy_usage",
-        "sensor.dryer_activity_summary",
-        "sensor.dryer_electrical_health",
-        "sensor.dryer_energy_summary",
-        "sensor.dryer_daily_energy_usage",
-        "sensor.car_charger_activity_summary",
-        "sensor.car_charger_electrical_health",
-        "sensor.car_charger_energy_summary",
-        "sensor.car_charger_daily_energy_usage",
-        "sensor.mains_nilm_activity_summary",
-        "sensor.mains_nilm_electrical_health",
-        "sensor.mains_nilm_energy_summary",
-        "sensor.mains_nilm_daily_energy_usage",
-        "sensor.mains_nilm_balance_power",
-        "sensor.mains_nilm_monitored_coverage",
-        "sensor.mains_nilm_monitored_power",
-        "sensor.mains_nilm_nilm_unknown_loads",
-        "sensor.mains_nilm_nilm_signature_count",
-        "sensor.mains_nilm_solar_flow_status",
-        "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_status",
-        "sensor.water_heater_water_flow_correlation",
-        "sensor.washer_water_flow_correlation",
+        "sensor.mains_daily_energy_usage",
+        "sensor.mains_cost_today",
+        "sensor.mains_balance_power",
+        "sensor.mains_monitored_coverage",
+        "sensor.mains_monitored_power",
+        "sensor.mains_nilm_unknown_loads",
+        "sensor.mains_nilm_signature_count",
+        "sensor.mains_solar_flow_status",
+        "sensor.mains_solar_surplus_power",
+        "sensor.mains_utility_comparison_status",
     }
     assert expected_entities <= refs
     assert "sensor.hvac_outdoor_temperature" not in refs
-    assert "sensor.hvac_run_cycle_runtime" not in refs
-    assert "sensor.hvac_run_cycle_duty_cycle" not in refs
-    assert not any(ref.endswith("_health_summary") for ref in refs)
-    assert not any(ref.startswith("binary_sensor.") for ref in refs)
-    assert "circuitsetup_energy_analyzer.export_history_csv" in dashboard_text
-    assert "Alert Philosophy" in dashboard_text
-    assert "Notifications and repairs" in dashboard_text
+    assert "sensor.hvac_activity_summary" not in refs
+    assert "sensor.refrigerator_electrical_health" not in refs
+    assert "circuitsetup_energy_analyzer.export_history_csv" not in dashboard_text
 
 
 def test_dashboard_example_keeps_safety_notice_near_alert_philosophy() -> None:
-    dashboard_text = (ROOT / "docs" / "dashboard-example.yaml").read_text()
-    normalized_text = " ".join(dashboard_text.split())
+    readme_text = (ROOT / "README.md").read_text()
+    normalized_text = " ".join(readme_text.split())
 
-    assert "Demand and capacity findings are" in normalized_text
-    assert "operational evidence from energy measurements" in normalized_text
-    assert "not electrical safety verification" in normalized_text
+    assert "Capacity diagnostics are operational evidence only" in normalized_text
+    assert "do not verify breaker, wire, plug, appliance, or code suitability" in (
+        normalized_text
+    )
 
 
 def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    refs = _dashboard_entity_refs_with_conditional_context(dashboard)
+    refs = set(
+        _dashboard_entity_refs(
+            (ROOT / "docs" / "dashboard-example.yaml").read_text()
+        )
+    )
     optional_entities = {
-        "sensor.hvac_weather_context",
         "sensor.outdoor_temperature",
-        "sensor.mains_nilm_solar_flow_status",
-        "sensor.mains_nilm_solar_surplus_power",
-        "sensor.mains_nilm_utility_comparison_status",
+        "sensor.mains_solar_flow_status",
+        "sensor.mains_solar_surplus_power",
+        "sensor.mains_utility_comparison_status",
     }
 
-    assert optional_entities <= set(refs)
-    assert all(refs[entity] for entity in optional_entities)
+    assert optional_entities <= refs
+    leaf_cards = [
+        card
+        for card in _dashboard_cards(dashboard)
+        if card.get("type") not in {"sections", "grid"}
+    ]
+    for entity in optional_entities:
+        owners = [card for card in leaf_cards if entity in yaml.safe_dump(card)]
+        assert 1 <= len(owners) <= 2
+        assert all(
+            owner.get("type", "").startswith(
+                "custom:circuitsetup-energy-analyzer-"
+            )
+            or owner.get("type") == "history-graph"
+            for owner in owners
+        )
 
 
 def test_readme_describes_summary_first_diagnostic_workflow() -> None:
@@ -3945,6 +3857,40 @@ assert.equal(pointY("Energy", "2.3"), 18);
 assert.equal(pointY("Energy", "1.9"), 278);
 assert.equal(pointY("Cost", "0.41"), 18);
 assert.equal(pointY("Cost", "0.34"), 278);
+"""
+    )
+
+
+def test_bar_series_start_at_zero_on_both_axes() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const start = Date.parse("2026-06-24T18:00:00Z");
+const end = Date.parse("2026-06-24T19:00:00Z");
+const html = panel._chartSvg(
+  [
+    { name: "Energy", kind: "bar", unit: "kWh", points: [
+      { time: start, value: 5 },
+      { time: end, value: 10 },
+    ] },
+    { name: "Cost", kind: "bar", unit: "USD", axis: "right", points: [
+      { time: start, value: 0.5 },
+      { time: end, value: 1 },
+    ] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const barHeight = (name, value) => Number(
+  Array.from(html.matchAll(/<rect[^>]+data-energy-bar="1"[^>]+>/g)).find((bar) => (
+    bar[0].includes(`data-chart-name="${name}"`)
+      && bar[0].includes(`data-chart-value="${value}"`)
+  ))[0].match(/height="([^"]+)"/)[1],
+);
+assert.equal(barHeight("Energy", "5"), 130);
+assert.equal(barHeight("Energy", "10"), 260);
+assert.equal(barHeight("Cost", "0.5"), 130);
+assert.equal(barHeight("Cost", "1"), 260);
 """
     )
 
@@ -6973,26 +6919,22 @@ def test_readme_explains_generated_dashboard_controls() -> None:
         readme_text
     )
     assert "renamed analyzer entities are respected" in readme_text
-    assert "visual appliance story" in readme_text
-    assert "Household Overview" in readme_text
-    assert "Today's Energy" in readme_text
-    assert "Appliance Run Timeline" in readme_text
-    assert "NILM Review" in readme_text
-    assert "Diagnostics and Evidence" in readme_text
-    assert "NILM review lanes" in readme_text
-    assert "Needs Review, Assigned, Published, and Ignored / Expected" in readme_text
-    assert "instead of service-control cards" in readme_text
-    assert "expert evidence links and NILM buttons" in readme_text
-    assert "Missing, disabled, or unavailable entities" in readme_text
+    assert "Home, Appliances, Energy & Costs, Mains & NILM, Insights" in readme_text
+    assert "Expert-only Diagnostics" in readme_text
+    assert "live-sorts appliance tiles" in readme_text
+    assert "Running binary sensor rather than its text summary" in readme_text
+    assert "current-day and billing-cycle meanings separate" in readme_text
+    assert "recorded, estimated, or unavailable cost status" in readme_text
+    assert "first configured mains circuit is the primary whole-house source" in (
+        readme_text
+    )
+    assert "require no third-party Lovelace dependency" in readme_text
     assert "Create Or Update Dashboard" in readme_text
     assert "Match Entity Detail Level To Layout" in readme_text
     assert "Remove Existing Dashboard" in readme_text
     assert "dashboard action still runs from Configure" in readme_text
-    assert "**Standard**: Simple plus feature-level mains" in readme_text
-    assert "appliance evidence navigation" in readme_text
-    assert "**Expert**: Standard plus the diagnostics/evidence section" in (readme_text)
-    assert "does not add diagnostic/detail entity cards automatically" in readme_text
-    assert "graph/detail cards for the Expert groups you selected" not in readme_text
+    assert "**Standard**: Simple plus Mains & NILM" in readme_text
+    assert "**Expert**: Standard plus a separate Diagnostics view" in readme_text
     assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text
     assert "adds small action cards" not in readme_text
 
@@ -7063,8 +7005,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
 
     for expected in (
         "NILM workspace can also pair compatible on/off edges",
-        "Open NILM Graph & Review",
-        "Mains, Solar, and NILM",
+        "Review NILM Assignments",
+        "Mains & NILM",
         "drag across the graph to select one or more appliance intervals",
         "Label appliance interval",
         "highlights the active graph selection and matching time fields",

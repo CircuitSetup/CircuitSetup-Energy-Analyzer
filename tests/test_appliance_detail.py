@@ -288,6 +288,7 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
 
     assert payload["detail"]["cost_today"] == 0.48
+    assert payload["detail"]["cost_today_status"] == "estimated"
     assert payload["detail"]["average_cost_per_day"] == 0.3
     assert payload["detail"]["average_kwh_per_day"] == 1.5
     assert len(payload["daily_totals"]) == 30
@@ -296,6 +297,7 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
         "date": "2026-07-21",
         "energy_kwh": 2.0,
         "cost": 0.4,
+        "cost_source": "estimated",
     }
     assert all(item["date"] < "2026-07-22" for item in payload["daily_totals"])
 
@@ -322,9 +324,15 @@ def test_appliance_daily_totals_follow_refreshed_effective_rate() -> None:
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
 
     assert payload["detail"]["cost_today"] == 0.72
+    assert payload["detail"]["cost_today_status"] == "recorded"
     assert payload["detail"]["average_cost_per_day"] == 0.38
     assert payload["daily_totals"] == [
-        {"date": "2026-07-21", "energy_kwh": 2.0, "cost": 0.62}
+        {
+            "date": "2026-07-21",
+            "energy_kwh": 2.0,
+            "cost": 0.62,
+            "cost_source": "recorded",
+        }
     ]
 
     coordinator.state.effective_electricity_rate_by_circuit["fridge"] = None
@@ -335,6 +343,7 @@ def test_appliance_daily_totals_follow_refreshed_effective_rate() -> None:
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
 
     assert payload["detail"]["cost_today"] is None
+    assert payload["detail"]["cost_today_status"] == "unavailable"
     assert payload["detail"]["average_cost_per_day"] is None
     assert payload["daily_totals"][0]["cost"] == 0.62
 

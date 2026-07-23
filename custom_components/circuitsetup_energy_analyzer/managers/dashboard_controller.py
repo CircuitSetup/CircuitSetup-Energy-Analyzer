@@ -9,9 +9,9 @@ from typing import Any
 from ..const import CONF_DASHBOARD_LAYOUT, CONF_OUTDOOR_TEMPERATURE_ENTITY, DOMAIN
 from ..context_sources import configured_context_entity
 from ..dashboard import (
+    DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_TITLE,
     DASHBOARD_URL_PATH,
-    NILM_DASHBOARD_GRAPHS_CARD,
     dashboard_graph_module_resource,
     dashboard_includes_nilm_graph_card,
     dashboard_storage_payload,
@@ -347,10 +347,8 @@ async def _async_save_lovelace_dashboard_config(
         lovelace_data,
         save_config,
     ):
-        save_config = _lovelace_config_without_card_type(
-            save_config,
-            NILM_DASHBOARD_GRAPHS_CARD,
-        )
+        for card_type in DASHBOARD_CUSTOM_CARD_TYPES:
+            save_config = _lovelace_config_without_card_type(save_config, card_type)
     await _async_lovelace_method_result(save(save_config))
     _register_lovelace_dashboard_panel(hass, item, update=update)
     return True

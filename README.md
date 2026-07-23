@@ -333,9 +333,9 @@ The fastest path is to let the integration create a starter dashboard:
 
 Choose one layout:
 
-1. **Simple**: compact appliance status, mains rollup, and energy tracking sections built from summary entities.
-2. **Standard**: Simple plus feature-level mains, HVAC, solar, utility, weather, water, billing, and cost cards when matching Standard entities exist.
-3. **Expert**: Standard plus the diagnostics/evidence section for appliance evidence navigation. It does not add diagnostic/detail entity cards automatically.
+1. **Simple**: Home, Appliances, and Energy & Costs views with live visual summaries.
+2. **Standard**: Simple plus Mains & NILM and contextual Insights views when matching data exists.
+3. **Expert**: Standard plus a separate Diagnostics view for evidence navigation and advanced inspection.
 
 The dashboard form has three setup paths:
 
@@ -345,16 +345,24 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. Its visual appliance story defaults to four columns and presents Household Overview, Today's Energy, Energy Tracking, and Appliance Run Timeline near the top, followed by Appliance Status, Mains/Solar/NILM, NILM Review, and optional weather or Diagnostics and Evidence sections when data exists. Appliance cost and projected-cost rows are included when those entities are available. It uses registry-resolved summary and graph entities plus expert evidence links and NILM buttons instead of service-control cards. NILM review lanes use tabs to summarize Needs Review, Assigned, Published, and Ignored / Expected work; selecting a review card opens its focused inspector without repeating controls, and each decision is committed with a single **Apply** action. The dynamic dashboard NILM card can show the same lane counts when it is available. When the registry is available, absent analyzer entities are notes instead of guessed IDs. Missing, disabled, or unavailable entities are shown as dashboard notes instead of broken cards. Existing starter dashboards are matched before update so the integration does not create duplicate dashboard entries when Home Assistant returns storage items in a different shape.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, but the dashboard is split into focused Home, Appliances, Energy & Costs, Mains & NILM, Insights, and Expert-only Diagnostics views. Empty optional views are omitted.
 
-For manual dashboards, start with one simple card per important appliance:
+Home live-sorts appliance tiles by attention state, Running state, current power, and name. Appliance rankings exclude mains, show the top five plus Other, and switch between daily kWh and Cost Today. The Appliances view provides live filters, search, detail navigation, and a selected 24-hour timeline built from each appliance's Running binary sensor rather than its text summary.
+
+Energy & Costs keeps current-day and billing-cycle meanings separate. Today uses `cost_today`; Today versus normal uses the backend's average daily energy and cost; the Billing Cycle card owns usage, current cost, and forecast entities. Completed-day charts use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Currency comes from entity or Home Assistant metadata.
+
+When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in Mains & NILM. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; Energy & Costs starts with a selected appliance instead. Insights includes every applicable HVAC circuit alongside the configured outdoor-temperature source and shows water-flow context only when matching entities exist.
+
+The custom cards are first-party integration resources and require no third-party Lovelace dependency. Existing Appliance Detail, NILM workspace, evidence URLs, and dashboard storage matching remain unchanged. When the entity registry is available, missing or disabled analyzer entities are omitted instead of guessed.
+
+For manual dashboards, start with the same summary contract:
 
 1. Activity Summary
 2. Electrical Health
 3. Energy Summary
 4. Energy Usage Today
 
-Add the Running binary sensor where you want automations, such as washer finished, dryer finished, pump running, or microwave activity.
+Add Cost Today and average daily energy or cost where useful. Use the Running binary sensor for timelines and automations such as washer finished, dryer finished, pump running, or microwave activity.
 
 For YAML reference, an example dashboard is still included:
 
@@ -362,15 +370,15 @@ For YAML reference, an example dashboard is still included:
 docs/dashboard-example.yaml
 ```
 
-![Appliance-first Energy Analyzer dashboard with appliance status rollups and mains analysis cards](docs/images/readme/demo-dashboard.png)
+![Generated Energy Analyzer Home view with live household KPIs, power balance, appliance state, and daily contribution](docs/images/readme/demo-dashboard.png)
 
 A good dashboard order is:
 
-1. **Appliance status**: Activity Summary, Electrical Health, Energy Summary, Energy Usage Today.
-2. **Automations**: Running binary sensors for appliance-complete notifications.
-3. **Energy tracking**: Energy Usage Today and Energy Summary.
-4. **Electrical review**: Electrical Health, plus detailed diagnostics only when needed.
-5. **Setup/data quality**: Repairs, notifications, and entity attributes.
+1. **Home**: current household power, Running and issue counts, power balance, and live appliance contribution.
+2. **Appliances**: compact tiles, selected Running history, and Appliance Detail navigation.
+3. **Energy & Costs**: today versus normal, completed-day energy and cost, and a separate Billing Cycle card.
+4. **Mains & NILM / Insights**: load coverage, assignment review, and contextual HVAC or water evidence when configured.
+5. **Diagnostics**: raw evidence and advanced routes only when Expert layout is selected.
 
 ### Appliance Drilldown Pattern
 
@@ -721,7 +729,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges, show known-load overlays, and turn graph interval selections directly into appliance assignments for review.
 
-On generated Standard and Expert dashboards, use **Open NILM Graph & Review** in the **Mains, Solar, and NILM** section to open the mains NILM workspace. The compact summary shows the circuit, needs-review count, and review progress without repeating the lane inventory. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
+On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** view to open the mains NILM workspace. The dashboard shows the household balance and one graph/review entry point without repeating the lane inventory. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
 ![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
 

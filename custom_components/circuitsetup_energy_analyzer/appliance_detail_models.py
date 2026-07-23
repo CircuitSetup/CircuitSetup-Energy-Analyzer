@@ -114,6 +114,7 @@ class ApplianceDetail:
     runtime_today_seconds: float | None
     run_count_today: int | None
     cost_today: float | None
+    cost_today_status: str
     average_kwh_per_day: float | None
     average_cost_per_day: float | None
     today_vs_normal: tuple[MetricComparison, ...]

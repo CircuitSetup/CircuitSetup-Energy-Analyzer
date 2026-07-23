@@ -56,6 +56,10 @@ class ApplianceInsight:
     activity_state: str
     current_power_w: float | None
     daily_energy_kwh: float | None
+    cost_today: float | None
+    cost_today_status: str
+    average_kwh_per_day: float | None
+    average_cost_per_day: float | None
     today_vs_normal_percent: float | None
     source_quality: dict[str, Any]
     learning_readiness: dict[str, Any]
@@ -272,6 +276,16 @@ def _append_insight(
             current_power_w=_number_or_none(getattr(detail, "current_power_w", None)),
             daily_energy_kwh=_number_or_none(
                 getattr(detail, "daily_energy_kwh", None)
+            ),
+            cost_today=_number_or_none(getattr(detail, "cost_today", None)),
+            cost_today_status=str(
+                getattr(detail, "cost_today_status", "unavailable")
+            ),
+            average_kwh_per_day=_number_or_none(
+                getattr(detail, "average_kwh_per_day", None)
+            ),
+            average_cost_per_day=_number_or_none(
+                getattr(detail, "average_cost_per_day", None)
             ),
             today_vs_normal_percent=(
                 explanation.total_change_percent if explanation else None

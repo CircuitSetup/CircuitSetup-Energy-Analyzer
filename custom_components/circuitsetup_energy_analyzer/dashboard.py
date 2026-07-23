@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -28,7 +29,74 @@ DASHBOARD_URL_PATH = "circuitsetup-energy-analyzer"
 DASHBOARD_ICON = "mdi:home-lightning-bolt-outline"
 DASHBOARD_COLUMNS = 4
 NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+HOUSE_FLOW_CARD = "custom:circuitsetup-energy-analyzer-house-flow"
+APPLIANCE_GRID_CARD = "custom:circuitsetup-energy-analyzer-appliance-grid"
+ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
+DASHBOARD_CUSTOM_CARD_TYPES = (
+    HOUSE_FLOW_CARD,
+    APPLIANCE_GRID_CARD,
+    ENERGY_COST_CARD,
+    NILM_DASHBOARD_GRAPHS_CARD,
+)
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
+
+_DASHBOARD_ENTITY_DOMAINS = {
+    "activity_summary": "sensor",
+    "average_cost_per_day": "sensor",
+    "average_kwh_per_day": "sensor",
+    "balance_power": "sensor",
+    "billing_cycle_usage": "sensor",
+    "cost_cycle": "sensor",
+    "cost_cycle_forecast": "sensor",
+    "cost_today": "sensor",
+    "daily_energy_usage": "sensor",
+    "electrical_health": "sensor",
+    "energy_summary": "sensor",
+    "health_summary": "sensor",
+    "monitored_coverage": "sensor",
+    "monitored_power": "sensor",
+    "nilm_signature_count": "sensor",
+    "nilm_unknown_loads": "sensor",
+    "running": "binary_sensor",
+    "solar_flow_status": "sensor",
+    "solar_surplus_power": "sensor",
+    "utility_comparison_status": "sensor",
+    "water_flow_correlation": "sensor",
+    "weather_context": "sensor",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardCircuit:
+    """Registry-resolved circuit data used by every generated view."""
+
+    circuit_id: str
+    name: str
+    profile: str
+    area: str | None
+    is_mains: bool
+    is_hvac: bool
+    detail_path: str
+    power_entities: tuple[str, ...]
+    entities: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardContext:
+    """One semantic model for the generated dashboard."""
+
+    circuits: tuple[DashboardCircuit, ...]
+    appliances: tuple[DashboardCircuit, ...]
+    mains: tuple[DashboardCircuit, ...]
+    hvac: tuple[DashboardCircuit, ...]
+    primary_mains: DashboardCircuit | None
+    setup_health_entity: str | None
+    registry_lookup: Mapping[str, Any] | None
+    entry_id: str | None
+    outdoor_temperature_entity: str | None
+    layout: str
+    has_weather: bool
+    has_water: bool
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
     ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
@@ -137,106 +205,515 @@ def build_recommended_dashboard(
     outdoor_temperature_entity: str | None = None,
 ) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
-    normalized_layout = normalize_dashboard_layout(layout)
-    include_feature_cards = _layout_includes_feature_cards(normalized_layout)
-    include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
-    circuit_list = [circuit for circuit in circuits if _circuit_id(circuit)]
-    registry_lookup = _registry_entity_lookup(hass, entry_id)
-    appliance_circuits = [
-        circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
-    ]
-    mains_circuits = [circuit for circuit in circuit_list if _is_mains_circuit(circuit)]
-    hvac_circuits = [
-        circuit for circuit in appliance_circuits if _is_hvac_circuit(circuit)
-    ]
-
-    sections = [
-        _household_overview_section(
-            appliance_circuits,
-            mains_circuits=mains_circuits,
-            include_feature_cards=include_feature_cards,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        ),
-        _todays_energy_section(
-            appliance_circuits,
-            mains_circuits=mains_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        ),
-        _energy_tracking_section(
-            appliance_circuits,
-            include_feature_cards=include_feature_cards,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        ),
-        _appliance_run_timeline_section(
-            appliance_circuits,
-            registry_lookup=registry_lookup,
-            hass=hass,
-            entry_id=entry_id,
-        ),
-    ]
-    if appliance_circuits:
-        sections.append(
-            _appliance_status_section(
-                appliance_circuits,
-                registry_lookup=registry_lookup,
-                hass=hass,
-                entry_id=entry_id,
-            )
-        )
-    if mains_circuits:
-        sections.append(
-            _mains_section(
-                mains_circuits[0],
-                include_feature_cards=include_feature_cards,
-                include_dashboard_graph_cards=include_expert_links,
-                registry_lookup=registry_lookup,
-                hass=hass,
-                entry_id=entry_id,
-            )
-        )
-    if include_feature_cards and mains_circuits:
-        sections.append(
-            _nilm_review_section(
-                mains_circuits[0],
-                registry_lookup=registry_lookup,
-                hass=hass,
-                entry_id=entry_id,
-            )
-        )
-    if include_feature_cards and hvac_circuits:
-        sections.append(
-            _hvac_weather_section(
-                hvac_circuits[0],
-                registry_lookup=registry_lookup,
-                hass=hass,
-                entry_id=entry_id,
-                outdoor_temperature_entity=outdoor_temperature_entity,
-            )
-        )
-    if include_expert_links:
-        sections.append(_expert_evidence_section(circuit_list))
-    _balance_last_section_row(sections)
-
+    context = _dashboard_context(
+        circuits,
+        layout,
+        hass=hass,
+        entry_id=entry_id,
+        outdoor_temperature_entity=outdoor_temperature_entity,
+    )
+    views = [_build_home_view(context)]
+    if context.appliances:
+        views.append(_build_appliances_view(context))
+    if context.appliances or context.primary_mains is not None:
+        views.append(_build_energy_costs_view(context))
+    if (
+        context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
+        and context.mains
+    ):
+        views.append(_build_mains_nilm_view(context))
+    if (
+        context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
+        and (context.has_weather or context.has_water)
+    ):
+        views.append(_build_insights_view(context))
+    if context.layout == DASHBOARD_LAYOUT_EXPERT and context.circuits:
+        views.append(_build_diagnostics_view(context))
     return {
         "title": DASHBOARD_TITLE,
-        "views": [
+        "views": views,
+    }
+
+
+def _dashboard_context(
+    circuits: Iterable[Any],
+    layout: Any,
+    *,
+    hass: Any | None,
+    entry_id: str | None,
+    outdoor_temperature_entity: str | None,
+) -> DashboardContext:
+    registry_lookup = _registry_entity_lookup(hass, entry_id)
+    resolved = tuple(
+        _dashboard_circuit(
+            circuit,
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        for circuit in circuits
+        if _circuit_id(circuit)
+    )
+    appliances = tuple(circuit for circuit in resolved if not circuit.is_mains)
+    mains = tuple(circuit for circuit in resolved if circuit.is_mains)
+    hvac = tuple(circuit for circuit in appliances if circuit.is_hvac)
+    outdoor_entity = str(outdoor_temperature_entity or "").strip() or None
+    has_registry = registry_lookup is not None
+    has_weather = bool(outdoor_entity) or (
+        has_registry
+        and any(circuit.entities.get("weather_context") for circuit in hvac)
+    )
+    water_profiles = {_normalized_value(profile) for profile in WATER_FLOW_PROFILES}
+    has_water = any(
+        circuit.profile in water_profiles
+        and (
+            circuit.entities.get("water_flow_correlation")
+            if has_registry
+            else False
+        )
+        for circuit in appliances
+    )
+    return DashboardContext(
+        circuits=resolved,
+        appliances=appliances,
+        mains=mains,
+        hvac=hvac,
+        primary_mains=mains[0] if mains else None,
+        setup_health_entity=_resolved_setup_health_entity_id(
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        ),
+        registry_lookup=registry_lookup,
+        entry_id=entry_id,
+        outdoor_temperature_entity=outdoor_entity,
+        layout=normalize_dashboard_layout(layout),
+        has_weather=has_weather,
+        has_water=has_water,
+    )
+
+
+def _dashboard_circuit(
+    circuit: Any,
+    *,
+    registry_lookup: Mapping[str, Any] | None,
+    hass: Any | None,
+    entry_id: str | None,
+) -> DashboardCircuit:
+    circuit_id = _circuit_id(circuit)
+    entities = {}
+    for entity_key, entity_domain in _DASHBOARD_ENTITY_DOMAINS.items():
+        entity_id = _resolved_entity_id(
+            circuit_id,
+            (entity_domain, entity_key, entity_key),
+            registry_lookup=registry_lookup,
+            hass=hass,
+            entry_id=entry_id,
+        )
+        if entity_id:
+            entities[entity_key] = entity_id
+    return DashboardCircuit(
+        circuit_id=circuit_id,
+        name=_circuit_name(circuit),
+        profile=_circuit_profile(circuit),
+        area=str(_circuit_value(circuit, "area") or "").strip() or None,
+        is_mains=_is_mains_circuit(circuit),
+        is_hvac=_is_hvac_circuit(circuit),
+        detail_path=(
+            f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
+            f"{urlencode({'circuit_id': circuit_id, 'appliance_detail': '1'})}"
+        ),
+        power_entities=_source_entities_for_role(circuit, "real_power"),
+        entities=entities,
+    )
+
+
+def _source_entities_for_role(circuit: Any, role: str) -> tuple[str, ...]:
+    sensors = _circuit_value(circuit, "sensors") or ()
+    entity_ids = []
+    for sensor in sensors:
+        sensor_role = _entry_value(sensor, "role")
+        if _normalized_value(sensor_role) != role:
+            continue
+        entity_id = str(_entry_value(sensor, "entity_id") or "").strip()
+        if entity_id:
+            entity_ids.append(entity_id)
+    return _dedupe(entity_ids)
+
+
+def _build_home_view(context: DashboardContext) -> dict[str, Any]:
+    card = {
+        "type": HOUSE_FLOW_CARD,
+        "title": _dashboard_text("cards", "home_summary"),
+        "entry_id": context.entry_id,
+        "setup_health_entity": context.setup_health_entity,
+        "setup_health_path": _setup_health_panel_path(context.entry_id),
+        "primary_mains": _dashboard_circuit_payload(
+            context.primary_mains,
+            (
+                "daily_energy_usage",
+                "cost_today",
+                "monitored_power",
+                "balance_power",
+                "monitored_coverage",
+                "nilm_unknown_loads",
+                "solar_flow_status",
+                "solar_surplus_power",
+            ),
+        ),
+        "appliances": [
+            _appliance_card_payload(circuit) for circuit in context.appliances
+        ],
+        "labels": dict(translation_section("dashboard", "live_cards")),
+    }
+    return _dashboard_view(
+        title=_dashboard_text("views", "home"),
+        path="overview",
+        icon=DASHBOARD_ICON,
+        cards=[card],
+    )
+
+
+def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
+    return _dashboard_view(
+        title=_dashboard_text("views", "appliances"),
+        path="appliances",
+        icon="mdi:devices",
+        cards=[
             {
-                "title": _dashboard_text("views", "overview"),
-                "path": "overview",
-                "icon": DASHBOARD_ICON,
-                "type": "sections",
-                "max_columns": DASHBOARD_COLUMNS,
-                "dense_section_placement": True,
-                "sections": sections,
+                "type": APPLIANCE_GRID_CARD,
+                "title": _dashboard_text("cards", "appliances"),
+                "appliances": [
+                    _appliance_card_payload(circuit)
+                    for circuit in context.appliances
+                ],
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
+        ],
+    )
+
+
+def _build_energy_costs_view(context: DashboardContext) -> dict[str, Any]:
+    cards: list[dict[str, Any]] = [
+        {
+            "type": ENERGY_COST_CARD,
+            "title": _dashboard_text("cards", "energy_and_costs"),
+            "entry_id": context.entry_id,
+            "api_path": f"{DOMAIN}/appliance_insights",
+            "text": dict(translation_section("panel")),
+            "primary_mains": _dashboard_circuit_payload(
+                context.primary_mains,
+                (
+                    "daily_energy_usage",
+                    "cost_today",
+                    "average_kwh_per_day",
+                    "average_cost_per_day",
+                ),
+            ),
+            "appliances": [
+                _energy_cost_payload(circuit) for circuit in context.appliances
+            ],
+            "labels": dict(translation_section("dashboard", "live_cards")),
+        }
+    ]
+    billing_rows = _billing_cycle_rows(context)
+    if billing_rows:
+        cards.append(
+            _entities_card(
+                _dashboard_text("cards", "billing_cycle"),
+                billing_rows,
+            )
+        )
+    return _dashboard_view(
+        title=_dashboard_text("views", "energy_costs"),
+        path="energy-costs",
+        icon="mdi:chart-bar",
+        cards=cards,
+    )
+
+
+def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
+    primary = context.primary_mains
+    if primary is None:
+        raise ValueError("Mains view requires a primary mains circuit")
+    cards: list[dict[str, Any]] = [
+        {
+            "type": HOUSE_FLOW_CARD,
+            "mode": "mains",
+            "title": _dashboard_text("cards", "mains_and_nilm"),
+            "primary_mains": _dashboard_circuit_payload(
+                primary,
+                (
+                    "monitored_power",
+                    "balance_power",
+                    "monitored_coverage",
+                    "nilm_unknown_loads",
+                    "nilm_signature_count",
+                    "solar_flow_status",
+                    "solar_surplus_power",
+                    "utility_comparison_status",
+                ),
+            ),
+            "secondary_mains": [
+                {
+                    "circuit_id": circuit.circuit_id,
+                    "name": circuit.name,
+                    "power_entities": list(circuit.power_entities),
+                }
+                for circuit in context.mains[1:]
+            ],
+            "labels": dict(translation_section("dashboard", "live_cards")),
+        }
+    ]
+    appliance_power_rows = _published_nilm_power_rows(
+        context.registry_lookup,
+        context.entry_id,
+    )
+    cards.append(
+        _nilm_dashboard_graphs_card(
+            circuit_id=primary.circuit_id,
+            entry_id=context.entry_id,
+            appliance_power_rows=appliance_power_rows,
+        )
+    )
+    cards.append(
+        {
+            "type": "button",
+            "name": _dashboard_text("cards", "review_nilm_assignments"),
+            "icon": "mdi:playlist-check",
+            "tap_action": {
+                "action": "navigate",
+                "navigation_path": (
+                    f"{DEFAULT_ALERT_EVIDENCE_PATH}?nilm_workspace=1&"
+                    f"circuit_id={quote(primary.circuit_id, safe='')}"
+                ),
+            },
+        }
+    )
+    return _dashboard_view(
+        title=_dashboard_text("views", "mains_nilm"),
+        path="mains-nilm",
+        icon="mdi:transmission-tower",
+        cards=cards,
+    )
+
+
+def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
+    cards: list[dict[str, Any]] = []
+    history_rows: list[dict[str, str]] = []
+    if context.outdoor_temperature_entity:
+        history_rows.append(
+            {
+                "entity": context.outdoor_temperature_entity,
+                "name": _dashboard_text("entity_labels", "outdoor_temperature"),
+            }
+        )
+    weather_rows: list[dict[str, str]] = []
+    for circuit in context.hvac:
+        for entity_id in circuit.power_entities:
+            history_rows.append(
+                {"entity": entity_id, "name": f"{circuit.name} power"}
+            )
+        for key, suffix in (
+            ("running", "running"),
+            ("daily_energy_usage", "energy today"),
+        ):
+            if entity_id := circuit.entities.get(key):
+                history_rows.append(
+                    {"entity": entity_id, "name": f"{circuit.name} {suffix}"}
+                )
+        if entity_id := circuit.entities.get("weather_context"):
+            weather_rows.append({"entity": entity_id, "name": circuit.name})
+    if history_rows:
+        cards.append(
+            {
+                "type": "history-graph",
+                "title": _dashboard_text("cards", "hvac_weather_correlation"),
+                "hours_to_show": 168,
+                "entities": list(_dedupe_entity_rows(history_rows)),
+            }
+        )
+    if weather_rows:
+        cards.append(
+            _entities_card(
+                _dashboard_text("cards", "hvac_weather_status"),
+                weather_rows,
+            )
+        )
+    water_rows = [
+        {"entity": entity_id, "name": circuit.name}
+        for circuit in context.appliances
+        if (entity_id := circuit.entities.get("water_flow_correlation"))
+        and circuit.profile in WATER_FLOW_PROFILES
+    ]
+    if water_rows:
+        cards.append(
+            {
+                "type": "history-graph",
+                "title": _dashboard_text("cards", "water_flow_context"),
+                "hours_to_show": 168,
+                "entities": water_rows,
+            }
+        )
+    return _dashboard_view(
+        title=_dashboard_text("views", "insights"),
+        path="insights",
+        icon="mdi:lightbulb-on-outline",
+        cards=cards,
+    )
+
+
+def _build_diagnostics_view(context: DashboardContext) -> dict[str, Any]:
+    return _dashboard_view(
+        title=_dashboard_text("views", "diagnostics"),
+        path="diagnostics",
+        icon="mdi:tools",
+        cards=[
+            _markdown_card(
+                _expert_evidence_markdown(
+                    [
+                        {
+                            "circuit_id": circuit.circuit_id,
+                            "name": circuit.name,
+                        }
+                        for circuit in context.circuits
+                    ]
+                )
+            )
+        ],
+    )
+
+
+def _dashboard_view(
+    *,
+    title: str,
+    path: str,
+    icon: str,
+    cards: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "title": title,
+        "path": path,
+        "icon": icon,
+        "type": "sections",
+        "max_columns": DASHBOARD_COLUMNS,
+        "dense_section_placement": True,
+        "sections": [
+            {
+                "type": "grid",
+                "column_span": DASHBOARD_COLUMNS,
+                "cards": list(cards),
             }
         ],
     }
+
+
+def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
+    return {
+        "circuit_id": circuit.circuit_id,
+        "name": circuit.name,
+        "profile": circuit.profile,
+        "area": circuit.area,
+        "detail_path": circuit.detail_path,
+        "power_entities": list(circuit.power_entities),
+        **_named_entities(
+            circuit,
+            {
+                "running": "running_entity",
+                "daily_energy_usage": "energy_today_entity",
+                "cost_today": "cost_today_entity",
+                "health_summary": "health_entity",
+            },
+        ),
+    }
+
+
+def _energy_cost_payload(circuit: DashboardCircuit) -> dict[str, Any]:
+    return {
+        "circuit_id": circuit.circuit_id,
+        "name": circuit.name,
+        **_named_entities(
+            circuit,
+            {
+                "daily_energy_usage": "energy_today_entity",
+                "cost_today": "cost_today_entity",
+                "average_kwh_per_day": "average_kwh_entity",
+                "average_cost_per_day": "average_cost_entity",
+            },
+        ),
+    }
+
+
+def _dashboard_circuit_payload(
+    circuit: DashboardCircuit | None,
+    keys: Sequence[str],
+) -> dict[str, Any] | None:
+    if circuit is None:
+        return None
+    return {
+        "circuit_id": circuit.circuit_id,
+        "name": circuit.name,
+        "power_entities": list(circuit.power_entities),
+        **_named_entities(circuit, {key: f"{key}_entity" for key in keys}),
+    }
+
+
+def _named_entities(
+    circuit: DashboardCircuit,
+    names: Mapping[str, str],
+) -> dict[str, str]:
+    return {
+        output_name: entity_id
+        for entity_key, output_name in names.items()
+        if (entity_id := circuit.entities.get(entity_key))
+    }
+
+
+def _billing_cycle_rows(context: DashboardContext) -> list[dict[str, str]]:
+    circuits = (
+        (context.primary_mains,)
+        if context.primary_mains is not None
+        else context.appliances
+    )
+    rows = []
+    for circuit in circuits:
+        if circuit is None:
+            continue
+        for key, label in (
+            ("billing_cycle_usage", _dashboard_text("entity_labels", "billing_usage")),
+            ("cost_cycle", _dashboard_text("entity_labels", "cost_so_far")),
+            ("cost_cycle_forecast", _dashboard_text("entity_labels", "projected_cost")),
+        ):
+            if entity_id := circuit.entities.get(key):
+                rows.append(
+                    {
+                        "entity": entity_id,
+                        "name": f"{circuit.name} {label}",
+                    }
+                )
+    return rows
+
+
+def _dashboard_cost_status(
+    hass: Any | None,
+    entry_id: str | None,
+    context: DashboardContext,
+) -> str:
+    domain_data = getattr(hass, "data", {}).get(DOMAIN, {}) if hass is not None else {}
+    coordinator = (
+        domain_data.get(entry_id)
+        if entry_id and isinstance(domain_data, Mapping)
+        else None
+    )
+    state = getattr(coordinator, "state", None)
+    statuses = getattr(state, "cost_today_status_by_circuit", {}) or {}
+    estimates = getattr(state, "estimated_cost_today_by_circuit", {}) or {}
+    circuit_ids = {circuit.circuit_id for circuit in context.circuits}
+    if any(statuses.get(circuit_id) == "actual" for circuit_id in circuit_ids):
+        return "recorded"
+    if any(estimates.get(circuit_id) is not None for circuit_id in circuit_ids):
+        return "estimated"
+    return "unavailable"
 
 
 def dashboard_preflight_summary(
@@ -247,35 +724,35 @@ def dashboard_preflight_summary(
     entry_id: str | None = None,
     outdoor_temperature_entity: str | None = None,
 ) -> dict[str, Any]:
-    """Return the sections and data classes the generated dashboard will use."""
-    normalized_layout = normalize_dashboard_layout(layout)
-    include_feature_cards = _layout_includes_feature_cards(normalized_layout)
-    include_expert_links = normalized_layout == DASHBOARD_LAYOUT_EXPERT
-    circuit_list = [circuit for circuit in circuits if _circuit_id(circuit)]
-    appliance_circuits = [
-        circuit for circuit in circuit_list if not _is_mains_circuit(circuit)
-    ]
-    mains_circuits = [circuit for circuit in circuit_list if _is_mains_circuit(circuit)]
-    hvac_circuits = [
-        circuit for circuit in appliance_circuits if _is_hvac_circuit(circuit)
-    ]
-    will_include = _dashboard_section_titles(
-        appliance_circuits=appliance_circuits,
-        mains_circuits=mains_circuits,
-        hvac_circuits=hvac_circuits,
-        include_feature_cards=include_feature_cards,
-        include_expert_links=include_expert_links,
+    """Return the views and data capabilities the generated dashboard will use."""
+    circuit_list = tuple(circuits)
+    context = _dashboard_context(
+        circuit_list,
+        layout,
+        hass=hass,
+        entry_id=entry_id,
+        outdoor_temperature_entity=outdoor_temperature_entity,
     )
-    all_sections = [
-        _section_title("household_overview"),
-        _section_title("todays_energy"),
-        _section_title("appliance_status"),
-        _section_title("mains_solar_nilm"),
-        _section_title("energy_tracking"),
-        _section_title("appliance_run_timeline"),
-        _section_title("nilm_review"),
-        _section_title("hvac_weather_context"),
-        _section_title("diagnostics_and_evidence"),
+    dashboard = build_recommended_dashboard(
+        circuit_list,
+        layout,
+        hass=hass,
+        entry_id=entry_id,
+        outdoor_temperature_entity=outdoor_temperature_entity,
+    )
+    views = [str(view.get("title") or "") for view in dashboard["views"]]
+    paths = [str(view.get("path") or "") for view in dashboard["views"]]
+    valid_circuits = [circuit for circuit in circuit_list if _circuit_id(circuit)]
+    appliance_circuits = [
+        circuit for circuit in valid_circuits if not _is_mains_circuit(circuit)
+    ]
+    all_views = [
+        _dashboard_text("views", "home"),
+        _dashboard_text("views", "appliances"),
+        _dashboard_text("views", "energy_costs"),
+        _dashboard_text("views", "mains_nilm"),
+        _dashboard_text("views", "insights"),
+        _dashboard_text("views", "diagnostics"),
     ]
     registry_lookup = _registry_entity_lookup(hass, entry_id)
     missing_source_data, disabled_entities = _dashboard_preflight_entity_gaps(
@@ -285,19 +762,49 @@ def dashboard_preflight_summary(
         entry_id=entry_id,
     )
     return {
-        "layout": normalized_layout,
-        "will_include": will_include,
-        "will_skip": [
-            section for section in all_sections if section not in will_include
+        "layout": context.layout,
+        "views": views,
+        "view_paths": paths,
+        "capabilities": {
+            "house_flow": True,
+            "appliance_grid": bool(context.appliances),
+            "energy_cost": bool(context.appliances or context.primary_mains),
+            "running_timeline": any(
+                circuit.entities.get("running") for circuit in context.appliances
+            ),
+            "mains_nilm": bool(context.mains),
+            "weather": context.has_weather,
+            "water": context.has_water,
+        },
+        "costs": _dashboard_cost_status(hass, entry_id, context),
+        "missing_power_inputs": [
+            circuit.name for circuit in context.circuits if not circuit.power_entities
         ],
+        "missing_energy_inputs": [
+            circuit.name
+            for circuit in context.circuits
+            if "daily_energy_usage" not in circuit.entities
+        ],
+        "missing_cost_inputs": [
+            circuit.name
+            for circuit in context.circuits
+            if "cost_today" not in circuit.entities
+        ],
+        "missing_weather_inputs": bool(context.hvac) and not context.has_weather,
+        "missing_nilm_inputs": not context.mains,
+        "will_include": views,
+        "will_skip": [view for view in all_views if view and view not in views],
         "missing_source_data": missing_source_data,
         "disabled_entities": disabled_entities,
-        "nilm_enabled": bool(mains_circuits),
-        "nilm_sections_enabled": include_feature_cards and bool(mains_circuits),
+        "nilm_enabled": bool(context.mains),
+        "nilm_sections_enabled": (
+            context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
+            and bool(context.mains)
+        ),
         "estimated_appliance_count": len(
             _published_nilm_power_rows(registry_lookup, entry_id)
         ),
-        "outdoor_temperature_entity": outdoor_temperature_entity or None,
+        "outdoor_temperature_entity": context.outdoor_temperature_entity,
     }
 
 
@@ -1604,8 +2111,11 @@ def _dashboard_contains_card_type(cards: object, card_type: str) -> bool:
 
 
 def dashboard_includes_nilm_graph_card(config: object) -> bool:
-    """Return whether a dashboard config uses the custom NILM graph card."""
-    return _dashboard_contains_card_type(config, NILM_DASHBOARD_GRAPHS_CARD)
+    """Return whether a dashboard config needs the first-party card module."""
+    return any(
+        _dashboard_contains_card_type(config, card_type)
+        for card_type in DASHBOARD_CUSTOM_CARD_TYPES
+    )
 
 
 def dashboard_graph_module_resource() -> dict[str, str]:
