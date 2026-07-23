@@ -343,7 +343,7 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     [
         (
             DASHBOARD_LAYOUT_SIMPLE,
-            ["overview", "energy-costs", "insights"],
+            ["overview", "energy-costs"],
         ),
         (
             DASHBOARD_LAYOUT_STANDARD,

@@ -250,14 +250,15 @@ def build_recommended_dashboard(
         insight_cards.extend(
             _build_diagnostics_view(context)["sections"][0]["cards"]
         )
-    billing_rows = _billing_cycle_rows(context)
-    if billing_rows:
-        insight_cards.append(
-            _entities_card(
-                _dashboard_text("cards", "billing_cycle"),
-                billing_rows,
+    if context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}:
+        billing_rows = _billing_cycle_rows(context)
+        if billing_rows:
+            insight_cards.append(
+                _entities_card(
+                    _dashboard_text("cards", "billing_cycle"),
+                    billing_rows,
+                )
             )
-        )
     if insight_cards:
         views.append(
             _dashboard_view(
