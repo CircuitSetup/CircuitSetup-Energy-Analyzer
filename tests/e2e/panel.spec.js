@@ -134,8 +134,9 @@ test("home energy card omits Active now and separates contribution", async ({ pa
       await route.fulfill({
         json: [
           [
-            { entity_id: "sensor.oven_power", state: "100", last_changed: hoursAgo(24) },
-            { state: "100", last_changed: hoursAgo(0) },
+            { entity_id: "sensor.oven_power", state: "0", last_changed: hoursAgo(24) },
+            { state: "1000", last_changed: hoursAgo(1) },
+            { state: "0", last_changed: hoursAgo(0) },
           ],
           [
             { entity_id: "sensor.oven_cost", state: "1.00", last_changed: hoursAgo(24) },
@@ -228,7 +229,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.getByRole("button", { name: "7 days" })).toBeVisible();
   await expect(card.getByRole("button", { name: "30 days" })).toBeVisible();
   await expect(card).toContainText("Unavailable");
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("2.4 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("1 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.34");
   await card.getByRole("button", { name: "7 days" }).click();
@@ -309,6 +310,7 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await search.pressSequentially("fridge");
   await expect(search).toHaveValue("fridge");
   await expect(search).toBeFocused();
+  await expect(card.locator("[data-appliance-id]:visible")).toHaveCount(1);
   await page.evaluate(() => {
     window.__setDashboardState("sensor.fridge_power", {
       state: "150",
@@ -318,7 +320,7 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await expect(search).toHaveValue("fridge");
   await expect(search).toBeFocused();
   await search.press("Tab");
-  await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
+  await expect(card.locator("[data-appliance-id]:visible")).toHaveCount(1);
   await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("$0.28");
   await search.fill("");
   await search.press("Tab");

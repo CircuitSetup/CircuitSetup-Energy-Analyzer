@@ -468,7 +468,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const value = point.value;
         sawValue = true;
         if (previous && time > previous.time) {
-          energy += (previous.value + value) / 2 * (time - previous.time) / 3_600_000 / 1_000;
+          energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
         }
         previous = { time, value };
       }
@@ -514,12 +514,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const appliances = (this._dashboardConfig.appliances || []).map((item) => this._applianceState(item));
-      const search = this._search.toLowerCase();
       const visible = appliances.filter((item) => (
-        (!search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search))
-        && (this._filter === "all"
+        this._filter === "all"
           || this._filter === "running" && item.running
-          || this._filter === "attention" && item.issue)
+          || this._filter === "attention" && item.issue
       )).sort((left, right) => (
         Number(right.issue) - Number(left.issue)
           || Number(right.running) - Number(left.running)
@@ -542,7 +540,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid">
-              ${visible.map((item) => this._tile(item)).join("")}
+              ${visible.map((item) => this._tile(item, !this._matchesSearch(item))).join("")}
             </div>
             <section class="timeline">
               <div class="controls">
@@ -575,9 +573,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       this.shadowRoot.querySelector("[data-appliance-search]").addEventListener("input", (event) => {
         this._search = event.target.value;
-      });
-      this.shadowRoot.querySelector("[data-appliance-search]").addEventListener("change", () => {
-        this._render();
+        for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
+          const item = appliances.find((candidate) => candidate.circuit_id === tile.dataset.applianceId);
+          tile.hidden = !item || !this._matchesSearch(item);
+        }
       });
       for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
         tile.addEventListener("click", () => {
@@ -588,9 +587,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._ensureTimeline(appliances);
     }
 
-    _tile(item) {
+    _matchesSearch(item) {
+      const search = this._search.toLowerCase();
+      return !search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search);
+    }
+
+    _tile(item, hidden = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
-      return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}">
+      return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
         <strong>${this._escape(item.name)}</strong>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
