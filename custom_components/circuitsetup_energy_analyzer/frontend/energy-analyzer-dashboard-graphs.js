@@ -133,10 +133,73 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             font-weight: 600;
             margin-top: 8px;
           }
+          .chart-frame {
+            font-family: Roboto, Noto, sans-serif;
+            overflow: visible;
+            position: relative;
+          }
           .chart {
+            display: block;
             height: auto;
             max-width: 100%;
+            min-height: 200px;
             width: 100%;
+          }
+          .chart [data-chart-point] {
+            cursor: crosshair;
+            opacity: 0.35;
+            transition: opacity 120ms ease, r 120ms ease;
+          }
+          .chart [data-chart-point][data-selected="true"] {
+            opacity: 1;
+            r: 5px;
+            stroke: var(--card-background-color, #fff);
+            stroke-width: 2;
+          }
+          .chart-crosshair {
+            display: none;
+            pointer-events: none;
+            stroke: var(--info-color, var(--primary-color, #03a9f4));
+            stroke-width: 1;
+          }
+          .chart-crosshair[data-visible="true"] {
+            display: block;
+          }
+          .chart-tooltip {
+            background: var(--card-background-color, #fff);
+            border: 1px solid var(--divider-color, #d8dee6);
+            border-radius: var(--ha-border-radius-sm, 4px);
+            box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.16));
+            box-sizing: border-box;
+            color: var(--primary-text-color, #111827);
+            font-size: 12px;
+            max-width: calc(100% - 16px);
+            padding: 8px 10px;
+            pointer-events: none;
+            position: absolute;
+            z-index: 2;
+          }
+          .chart-tooltip[aria-hidden="true"] {
+            display: none;
+          }
+          .chart-tooltip-heading {
+            display: block;
+            white-space: nowrap;
+          }
+          .chart-tooltip-row {
+            align-items: center;
+            display: grid;
+            gap: 6px;
+            grid-template-columns: 10px minmax(0, 1fr) auto;
+            margin-top: 4px;
+          }
+          .chart-tooltip-row > span:nth-child(2) {
+            overflow-wrap: anywhere;
+          }
+          .chart-tooltip-marker {
+            border-radius: 50%;
+            height: 10px;
+            width: 10px;
           }
           .axis,
           .grid {
@@ -144,20 +207,22 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           }
           .axis-label,
           .chart text {
-            fill: var(--secondary-text-color, #6b7280);
+            fill: var(--primary-text-color, #111827);
             font-size: 12px;
           }
           .legend {
+            align-items: center;
             display: flex;
             flex-wrap: wrap;
+            font-size: 12px;
             gap: 8px;
+            justify-content: center;
             margin-top: 8px;
           }
           .legend-item {
             align-items: center;
             display: inline-flex;
             gap: 6px;
-            font-size: 12px;
           }
           .swatch {
             border-radius: 50%;
@@ -202,6 +267,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       </ha-card>
     `;
 
+    this._attachChartInspectors();
     for (const link of this.shadowRoot.querySelectorAll("[data-dashboard-alert-detail]")) {
       link.addEventListener("click", (event) => {
         event.preventDefault();

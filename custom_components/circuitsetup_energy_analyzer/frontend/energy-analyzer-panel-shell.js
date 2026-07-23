@@ -368,39 +368,80 @@ export class PanelShellMethods {
         .safety-notice p {
           margin-top: 8px;
         }
+        .chart-frame {
+          font-family: Roboto, Noto, sans-serif;
+          overflow: visible;
+          position: relative;
+        }
         .chart {
+          display: block;
+          height: auto;
+          min-height: 200px;
           width: 100%;
-          min-height: 340px;
         }
         .chart[data-nilm-chart-select] {
           cursor: crosshair;
           touch-action: none;
         }
         .chart text {
-          fill: var(--secondary-text-color, #5f6b7a);
+          fill: var(--primary-text-color, #1f2933);
           font-size: 12px;
         }
         .chart [data-chart-point] {
           cursor: crosshair;
+          opacity: 0.35;
+          transition: opacity 120ms ease, r 120ms ease;
+        }
+        .chart [data-chart-point][data-selected="true"] {
+          opacity: 1;
+          r: 5px;
+          stroke: var(--card-background-color, #fff);
+          stroke-width: 2;
         }
         .chart-crosshair {
           display: none;
           pointer-events: none;
-          stroke: var(--primary-text-color, #1f2933);
-          stroke-dasharray: 3 3;
+          stroke: var(--info-color, var(--primary-color, #03a9f4));
           stroke-width: 1;
         }
         .chart-crosshair[data-visible="true"] {
           display: block;
         }
-        .chart-readout {
+        .chart-tooltip {
+          background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: var(--ha-border-radius-sm, 4px);
+          box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0, 0, 0, 0.16));
+          box-sizing: border-box;
           color: var(--primary-text-color, #1f2933);
-          font-size: 13px;
-          min-height: 20px;
-          padding-top: 4px;
+          font-size: 12px;
+          max-width: calc(100% - 16px);
+          padding: 8px 10px;
+          pointer-events: none;
+          position: absolute;
+          z-index: 2;
         }
-        .chart-readout[aria-hidden="true"] {
-          visibility: hidden;
+        .chart-tooltip[aria-hidden="true"] {
+          display: none;
+        }
+        .chart-tooltip-heading {
+          display: block;
+          white-space: nowrap;
+        }
+        .chart-tooltip-row {
+          align-items: center;
+          display: grid;
+          gap: 6px;
+          grid-template-columns: 10px minmax(0, 1fr) auto;
+          margin-top: 4px;
+        }
+        .chart-tooltip-row > span:nth-child(2) {
+          overflow-wrap: anywhere;
+        }
+        .chart-tooltip-marker {
+          border-radius: 50%;
+          height: 10px;
+          width: 10px;
         }
         .axis, .grid {
           stroke: var(--divider-color, #d8dde6);
@@ -441,14 +482,18 @@ export class PanelShellMethods {
           stroke-width: 3px;
         }
         .legend {
-          display: grid;
-          gap: 6px;
-          margin-top: 12px;
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          font-size: 12px;
+          gap: 8px;
+          justify-content: center;
+          margin-top: 8px;
         }
         .legend-item {
           align-items: center;
-          display: flex;
-          gap: 8px;
+          display: inline-flex;
+          gap: 6px;
           min-width: 0;
         }
         .swatch {

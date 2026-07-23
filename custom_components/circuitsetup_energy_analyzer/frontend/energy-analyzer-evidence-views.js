@@ -495,13 +495,13 @@ export function createEvidenceViewMethods({
       const axis = rightAxis && item.axis === "right" ? "right" : "left";
       const itemUnit = rightAxis ? (item.unit || unitLabel) : unitLabel;
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value, axis).toFixed(1)}`).join(" ");
-      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="3" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}"></circle>`).join("");
+      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}"></circle>`).join("");
       const dash = axis === "right" ? ' stroke-dasharray="6 4"' : "";
-      return `<polyline fill="none" stroke="${color}" stroke-width="2.5"${dash} points="${points}"></polyline>${circles}`;
+      return `<polyline fill="none" stroke="${color}" stroke-width="1.5"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
-      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><strong>${this._escape(item.name)}</strong></div>`;
+      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><span>${this._escape(item.name)}</span></div>`;
     }).join("");
     const minLabel = this._formatNumber(minValue);
     const maxLabel = this._formatNumber(maxValue);
@@ -574,24 +574,26 @@ export function createEvidenceViewMethods({
     })}` : "");
 
     return `
-      <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${selectAttrs}>
-        <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
-        <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
-        ${rightAxis ? `<line class="axis" x1="${width - padRight}" y1="${padTop}" x2="${width - padRight}" y2="${height - padBottom}"></line>` : ""}
-        <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
-        ${timeGridLines}
-        ${yAxisLabel}
-        ${rightAxisLabel}
-        ${sessionBands}
-        <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
-        <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
-        ${rightAxis ? `<text x="${width - 8}" y="${padTop + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMaxValue))}</text><text x="${width - 8}" y="${height - padBottom + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMinValue))}</text>` : ""}
-        ${timeTickLabels}
-        ${edgeMarkers}
-        ${lines}
-        <line class="chart-crosshair" data-chart-crosshair x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
-      </svg>
-      <div class="chart-readout" data-chart-readout aria-live="polite" aria-hidden="true"></div>
+      <div class="chart-frame" data-chart-frame>
+        <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${selectAttrs}>
+          <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
+          <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
+          ${rightAxis ? `<line class="axis" x1="${width - padRight}" y1="${padTop}" x2="${width - padRight}" y2="${height - padBottom}"></line>` : ""}
+          <line class="grid" x1="${padLeft}" y1="${padTop}" x2="${width - padRight}" y2="${padTop}"></line>
+          ${timeGridLines}
+          ${yAxisLabel}
+          ${rightAxisLabel}
+          ${sessionBands}
+          <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
+          <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
+          ${rightAxis ? `<text x="${width - 8}" y="${padTop + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMaxValue))}</text><text x="${width - 8}" y="${height - padBottom + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMinValue))}</text>` : ""}
+          ${timeTickLabels}
+          ${edgeMarkers}
+          ${lines}
+          <line class="chart-crosshair" data-chart-crosshair x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
+        </svg>
+        <div class="chart-tooltip" data-chart-tooltip role="status" aria-live="polite" aria-hidden="true"></div>
+      </div>
       <div class="legend">${legend}</div>
       <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
     `;
@@ -601,22 +603,69 @@ export function createEvidenceViewMethods({
     for (const svg of this.shadowRoot.querySelectorAll("svg.chart")) {
       const points = Array.from(svg.querySelectorAll("[data-chart-point]"));
       const crosshair = svg.querySelector("[data-chart-crosshair]");
-      const readout = svg.nextElementSibling;
-      if (!points.length || !crosshair || !readout || !readout.matches("[data-chart-readout]")) {
+      const frame = svg.closest("[data-chart-frame]");
+      const tooltip = frame && frame.querySelector("[data-chart-tooltip]");
+      if (!points.length || !crosshair || !frame || !tooltip) {
         continue;
       }
-      const showPoint = (point) => {
+      const hidePoint = () => {
+        delete crosshair.dataset.visible;
+        points.forEach((candidate) => delete candidate.dataset.selected);
+        tooltip.setAttribute("aria-hidden", "true");
+      };
+      const showPoint = (point, clientX, clientY) => {
         const time = point.dataset.chartTime;
         const matching = points.filter((candidate) => candidate.dataset.chartTime === time);
+        points.forEach((candidate) => {
+          if (matching.includes(candidate)) {
+            candidate.dataset.selected = "true";
+          } else {
+            delete candidate.dataset.selected;
+          }
+        });
         crosshair.setAttribute("x1", point.getAttribute("cx"));
         crosshair.setAttribute("x2", point.getAttribute("cx"));
         crosshair.dataset.visible = "true";
-        const values = matching.map((candidate) => {
+
+        const heading = document.createElement("strong");
+        heading.className = "chart-tooltip-heading";
+        heading.textContent = this._formatDateTime(new Date(Number(time)));
+        tooltip.replaceChildren(heading);
+        matching.forEach((candidate) => {
+          const row = document.createElement("div");
+          row.className = "chart-tooltip-row";
+          const marker = document.createElement("span");
+          marker.className = "chart-tooltip-marker";
+          marker.style.background = candidate.getAttribute("fill");
+          const label = document.createElement("span");
+          label.textContent = candidate.dataset.chartName;
+          const value = document.createElement("strong");
           const unit = candidate.dataset.chartUnit ? ` ${candidate.dataset.chartUnit}` : "";
-          return `${candidate.dataset.chartName}: ${candidate.dataset.chartValue}${unit}`;
+          value.textContent = `${candidate.dataset.chartValue}${unit}`;
+          row.append(marker, label, value);
+          tooltip.append(row);
         });
-        readout.textContent = `${this._formatDateTime(new Date(Number(time)))} | ${values.join(" | ")}`;
-        readout.setAttribute("aria-hidden", "false");
+        tooltip.setAttribute("aria-hidden", "false");
+
+        const frameRect = frame.getBoundingClientRect();
+        const viewWidth = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : 900;
+        const viewHeight = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.height : 320;
+        const pointX = Number.isFinite(clientX)
+          ? clientX - frameRect.left
+          : (Number(point.getAttribute("cx")) / viewWidth) * frameRect.width;
+        const pointY = Number.isFinite(clientY)
+          ? clientY - frameRect.top
+          : (Number(point.getAttribute("cy")) / viewHeight) * frameRect.height;
+        const left = Math.min(
+          Math.max(pointX + 12, 8),
+          Math.max(8, frameRect.width - tooltip.offsetWidth - 8),
+        );
+        const top = Math.min(
+          Math.max(pointY - tooltip.offsetHeight / 2, 8),
+          Math.max(8, frameRect.height - tooltip.offsetHeight - 8),
+        );
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
       };
       svg.addEventListener("pointermove", (event) => {
         const rect = svg.getBoundingClientRect();
@@ -626,14 +675,12 @@ export function createEvidenceViewMethods({
           Math.abs(Number(point.getAttribute("cx")) - pointerX)
             < Math.abs(Number(best.getAttribute("cx")) - pointerX) ? point : best
         ));
-        showPoint(closest);
+        showPoint(closest, event.clientX, event.clientY);
       });
-      svg.addEventListener("pointerleave", () => {
-        delete crosshair.dataset.visible;
-        readout.setAttribute("aria-hidden", "true");
-      });
+      svg.addEventListener("pointerleave", hidePoint);
       for (const point of points) {
         point.addEventListener("focus", () => showPoint(point));
+        point.addEventListener("blur", hidePoint);
       }
     }
   }

@@ -177,6 +177,39 @@ test("matched alert graph ends at evidence and keeps comparison compact", async 
   expect(layout.markersOverlap).toBe(false);
 });
 
+test("chart mouseover shows a clamped Home Assistant-style tooltip", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?alert_id=alert-kitchen-energy");
+  const chart = panel.locator("svg.chart");
+  const tooltip = panel.locator("[data-chart-tooltip]");
+
+  await panel.locator("[data-chart-point]").last().hover({ force: true });
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("Kitchen Power");
+  await expect(tooltip).toContainText("610 W");
+  await expect(panel.locator('[data-chart-point][data-selected="true"]')).toHaveCount(1);
+  await expect(panel.locator('[data-chart-crosshair][data-visible="true"]')).toHaveCount(1);
+
+  const bounds = await panel.locator("[data-chart-frame]").evaluate((frame) => {
+    const frameRect = frame.getBoundingClientRect();
+    const tooltipRect = frame.querySelector("[data-chart-tooltip]").getBoundingClientRect();
+    return {
+      left: tooltipRect.left - frameRect.left,
+      right: frameRect.right - tooltipRect.right,
+      top: tooltipRect.top - frameRect.top,
+      bottom: frameRect.bottom - tooltipRect.bottom,
+    };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeGreaterThanOrEqual(0);
+  expect(bounds.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.bottom).toBeGreaterThanOrEqual(0);
+
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toBeHidden();
+  await expect(chart.locator('[data-chart-point][data-selected="true"]')).toHaveCount(0);
+});
+
 test("matched low-side alert keeps comparison markers apart", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/alert_evidence")) return false;
@@ -215,6 +248,8 @@ test("dashboard chart keeps detail link without chart data disclosure", async ({
   await expect(dashboard.locator(".chart-data-fallback")).toHaveCount(0);
   await expect(dashboard.locator(".chart-data-summary")).toHaveCount(0);
   await expect(dashboard.getByText("View chart data")).toHaveCount(0);
+  await dashboard.locator("[data-chart-point]").last().hover({ force: true });
+  await expect(dashboard.locator("[data-chart-tooltip]")).toContainText("610 W");
 
   const layout = await dashboard.evaluate((host) => {
     const chart = host.shadowRoot.querySelector("svg.chart").getBoundingClientRect();
