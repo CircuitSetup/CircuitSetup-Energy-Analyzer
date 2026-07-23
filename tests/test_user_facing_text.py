@@ -823,7 +823,6 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
-        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
     } <= set(card_types)
     assert "gauge" not in card_types
     assert "glance" not in card_types

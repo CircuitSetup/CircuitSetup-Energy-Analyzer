@@ -459,18 +459,7 @@ def _build_energy_costs_view(
     *,
     contextual_graphs: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
-    cards: list[dict[str, Any]] = []
-    if context.primary_mains is not None:
-        cards.append(
-            _nilm_dashboard_graphs_card(
-                circuit_id=context.primary_mains.circuit_id,
-                entry_id=context.entry_id,
-                appliance_power_rows=_published_nilm_power_rows(
-                    context.registry_lookup,
-                    context.entry_id,
-                ),
-            )
-        )
+    cards = list(contextual_graphs[:1])
     cards.append(
         {
             "type": ENERGY_COST_CARD,
@@ -493,7 +482,19 @@ def _build_energy_costs_view(
             "labels": dict(translation_section("dashboard", "live_cards")),
         }
     )
-    cards.extend(contextual_graphs)
+    cards.extend(contextual_graphs[1:])
+    appliance_power_rows = _published_nilm_power_rows(
+        context.registry_lookup,
+        context.entry_id,
+    )
+    if context.primary_mains is not None and appliance_power_rows:
+        cards.append(
+            _nilm_dashboard_graphs_card(
+                circuit_id=context.primary_mains.circuit_id,
+                entry_id=context.entry_id,
+                appliance_power_rows=appliance_power_rows,
+            )
+        )
     return _dashboard_view(
         title=_dashboard_text("views", "energy_costs"),
         path="energy-costs",

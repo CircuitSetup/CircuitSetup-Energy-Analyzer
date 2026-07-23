@@ -397,7 +397,6 @@ def test_dashboard_groups_related_cards_into_three_views() -> None:
         "custom:circuitsetup-energy-analyzer-appliance-grid",
     } <= cards_by_view["overview"]
     assert {
-        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
         "custom:circuitsetup-energy-analyzer-energy-cost",
         "history-graph",
     } <= cards_by_view["energy-costs"]
@@ -456,12 +455,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         energy_view,
         "custom:circuitsetup-energy-analyzer-energy-cost",
     )
-    nilm_graph = _card_of_type(
-        energy_view,
-        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
-    )
-    assert energy_view["sections"][0]["cards"] == [nilm_graph, energy_card]
-    assert nilm_graph["grid_options"]["columns"] == 24
+    assert energy_view["sections"][0]["cards"] == [energy_card]
     assert energy_card["grid_options"]["columns"] == 24
 
     assert {
@@ -988,7 +982,7 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     }
 
 
-def test_dashboard_adds_nilm_graph_to_graph_tab_without_appliances() -> None:
+def test_dashboard_omits_empty_nilm_graph_from_graph_tab() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -1004,7 +998,7 @@ def test_dashboard_adds_nilm_graph_to_graph_tab_without_appliances() -> None:
         )
     )
 
-    assert [
+    assert not [
         card
         for card in cards
         if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
@@ -1012,41 +1006,34 @@ def test_dashboard_adds_nilm_graph_to_graph_tab_without_appliances() -> None:
     assert "resources" not in dashboard
 
 
-def test_expert_dashboard_adds_nilm_review_card_without_defined_appliances() -> None:
+def test_expert_dashboard_keeps_nilm_review_without_empty_graph() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_EXPERT,
         hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
         entry_id="entry-1",
     )
-    graph_view = next(
-        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    insights_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
     )
-    cards = _dashboard_cards(graph_view)
+    cards = _dashboard_cards(insights_view)
 
-    custom_graph = next(
-        card
-        for card in cards
-        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+    graph_cards = _dashboard_cards(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "energy-costs"
+        )
     )
-
-    custom_graph_without_text = dict(custom_graph)
-    text = custom_graph_without_text.pop("text")
-    assert text["headers"]["nilm_workspace"] == "NILM Workspace"
-    assert custom_graph_without_text == {
-        "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
-        "title": "NILM mains power",
-        "entry_id": "entry-1",
-        "circuit_id": "mains",
-        "detail_path": (
-            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
-        ),
-        "appliance_power_entities": [],
-        "grid_options": {"columns": 24},
-    }
     assert not [
-        card for card in cards if card.get("title") == "Defined NILM appliance power"
+        card
+        for card in graph_cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
     ]
+    assert any(
+        card.get("name") == "Review NILM Assignments"
+        for card in cards
+    )
     assert "resources" not in dashboard
 
 
@@ -1221,8 +1208,13 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
         graphs,
         "HVAC activity and outdoor temperature",
     )
+    graph_cards = graphs["sections"][0]["cards"]
     refs = _entity_refs(history_graph)
 
+    assert graph_cards[0] == history_graph
+    assert graph_cards[1]["type"] == (
+        "custom:circuitsetup-energy-analyzer-energy-cost"
+    )
     assert "sensor.compressor_w" in refs
     assert "sensor.compressor_va" not in refs
     assert "sensor.compressor_var" not in refs
