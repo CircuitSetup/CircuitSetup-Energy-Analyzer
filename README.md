@@ -333,9 +333,9 @@ The fastest path is to let the integration create a starter dashboard:
 
 Choose one layout:
 
-1. **Simple**: Home, Appliances, and Energy & Costs views with live visual summaries.
-2. **Standard**: Simple plus Mains & NILM and contextual Insights views when matching data exists.
-3. **Expert**: Standard plus a separate Diagnostics view for evidence navigation and advanced inspection.
+1. **Simple**: Home and Energy & Costs views with live visual summaries.
+2. **Standard**: Simple plus one Insights view for mains, NILM, and contextual evidence when matching data exists.
+3. **Expert**: Standard plus diagnostic navigation inside the Insights view.
 
 The dashboard form has three setup paths:
 
@@ -345,13 +345,13 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, but the dashboard is split into focused Home, Appliances, Energy & Costs, Mains & NILM, Insights, and Expert-only Diagnostics views. Empty optional views are omitted.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Home includes the appliance grid; Energy & Costs arranges all graphs in half-width rows, beginning with the HVAC graph on the left beside daily energy and cost history when HVAC context is available. Insights keeps non-graph mains status, contextual summaries, billing-cycle totals, and Expert-only diagnostics. Empty optional views and empty NILM graph placeholders are omitted.
 
-Home live-sorts appliance tiles by attention state, Running state, current power, and name. Appliance rankings exclude mains, show the top five plus Other, and switch between daily kWh and Cost Today. The Appliances view provides live filters, search, detail navigation, and a selected 24-hour timeline built from each appliance's Running binary sensor rather than its text summary.
+Home live-sorts appliance tiles by attention state, Running state, current power, and name without repeating a separate Active Now list. Appliance rankings exclude mains, show the top five plus Other, and provide Energy/Cost plus 24 hours/7 days/30 days controls beneath the Appliance Energy/Cost heading. The 24-hour energy ranking integrates recorder real-power history, and its cost ranking follows recorded cost changes across daily resets; the longer windows use completed-day totals. The appliance grid keeps the All, Running, and Needs attention filters alongside search and detail navigation. Its selected 24-hour timeline is built from each appliance's Running binary sensor rather than its text summary and shows segmented Running intervals against a labeled 24-hour scale. Live state refresh pauses while a search or selector has focus.
 
-Energy & Costs keeps current-day and billing-cycle meanings separate. Today uses `cost_today`; Today versus normal uses the backend's average daily energy and cost; the Billing Cycle card owns usage, current cost, and forecast entities. Completed-day charts use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Currency comes from entity or Home Assistant metadata.
+Energy & Costs uses two equal-width columns for every graph: HVAC activity on the left beside current-day plus completed-day energy and cost, followed by water history and a NILM mains graph when those series are available. The appliance contribution ranking appears only on Home, not a second time on this graph tab. HVAC and appliance displays use real power in watts and exclude apparent and reactive power (`VA` and `var`) sources. Today uses `cost_today`, and Today versus normal puts the backend's average daily energy and cost on their own line. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. Completed-day charts use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Monetary sensors and cards use Home Assistant's configured currency.
 
-When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in Mains & NILM. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; Energy & Costs starts with a selected appliance instead. Insights includes every applicable HVAC circuit alongside the configured outdoor-temperature source and shows water-flow context only when matching entities exist.
+When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in the Mains & NILM card inside Insights. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; Energy & Costs starts with a selected appliance instead. HVAC and water graphs include every applicable circuit and move to Energy & Costs, while their compact status summaries remain in Insights.
 
 The custom cards are first-party integration resources and require no third-party Lovelace dependency. Existing Appliance Detail, NILM workspace, evidence URLs, and dashboard storage matching remain unchanged. When the entity registry is available, missing or disabled analyzer entities are omitted instead of guessed.
 
@@ -374,11 +374,9 @@ docs/dashboard-example.yaml
 
 A good dashboard order is:
 
-1. **Home**: current household power, Running and issue counts, power balance, and live appliance contribution.
-2. **Appliances**: compact tiles, selected Running history, and Appliance Detail navigation.
-3. **Energy & Costs**: today versus normal, completed-day energy and cost, and a separate Billing Cycle card.
-4. **Mains & NILM / Insights**: load coverage, assignment review, and contextual HVAC or water evidence when configured.
-5. **Diagnostics**: raw evidence and advanced routes only when Expert layout is selected.
+1. **Home**: current household power, Running and issue counts, power balance, live appliance contribution, compact appliance tiles, and selected Running history.
+2. **Energy & Costs**: half-width graph rows for NILM mains power, today versus normal, completed-day energy and cost, HVAC activity, and water context.
+3. **Insights**: load coverage, NILM assignment review, contextual HVAC or water status, Billing Cycle, and Expert-only diagnostic routes.
 
 ### Appliance Drilldown Pattern
 
@@ -729,7 +727,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges, show known-load overlays, and turn graph interval selections directly into appliance assignments for review.
 
-On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** view to open the mains NILM workspace. The dashboard shows the household balance and one graph/review entry point without repeating the lane inventory. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
+On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
 ![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
 

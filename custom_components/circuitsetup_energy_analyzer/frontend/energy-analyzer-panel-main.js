@@ -901,15 +901,27 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!Number.isFinite(cost)) {
       return this._panelText("common.unknown");
     }
-    const currency = this._hass && this._hass.config && this._hass.config.currency
-      ? String(this._hass.config.currency)
-      : "USD";
     return new Intl.NumberFormat(undefined, {
       style: "currency",
-      currency,
+      currency: this._currencyCode(),
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(cost);
+  }
+
+  _currencyCode() {
+    return this._hass && this._hass.config && this._hass.config.currency
+      ? String(this._hass.config.currency)
+      : "USD";
+  }
+
+  _currencySymbol() {
+    const part = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: this._currencyCode(),
+      currencyDisplay: "narrowSymbol",
+    }).formatToParts(0).find((item) => item.type === "currency");
+    return part ? part.value : this._currencyCode();
   }
 
   _formatDuration(value) {

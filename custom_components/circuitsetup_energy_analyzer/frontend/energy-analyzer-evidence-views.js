@@ -472,6 +472,12 @@ export function createEvidenceViewMethods({
     const maxTime = Number.isFinite(graphEnd) && graphEnd > minTime ? graphEnd : sampleMaxTime;
     const leftPoints = series.filter((item) => !rightAxis || item.axis !== "right").flatMap((item) => item.points);
     const rightPoints = rightAxis ? series.filter((item) => item.axis === "right").flatMap((item) => item.points) : [];
+    const leftSeries = series.filter((item) => !rightAxis || item.axis !== "right");
+    const rightSeries = rightAxis ? series.filter((item) => item.axis === "right") : [];
+    const leftAxisCurrency = leftSeries.length > 0
+      && leftSeries.every((item) => item.unit === "currency");
+    const rightAxisCurrency = rightSeries.length > 0
+      && rightSeries.every((item) => item.unit === "currency");
     const leftHasBars = series.some((item) => item.kind === "bar" && (!rightAxis || item.axis !== "right"));
     const rightHasBars = rightAxis && series.some((item) => item.kind === "bar" && item.axis === "right");
     const minValue = Math.min(...leftPoints.map((point) => point.value), leftHasBars ? 0 : Infinity);
@@ -497,7 +503,9 @@ export function createEvidenceViewMethods({
     const lines = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
       const axis = rightAxis && item.axis === "right" ? "right" : "left";
-      const itemUnit = rightAxis ? (item.unit || unitLabel) : unitLabel;
+      const itemUnit = rightAxis
+        ? (item.unit || unitLabel)
+        : item.unit === "currency" ? "currency" : unitLabel;
       if (item.kind === "bar") {
         return item.points.map((point) => {
           const pointX = x(point.time);
@@ -505,11 +513,17 @@ export function createEvidenceViewMethods({
           const baselineY = y(0, axis);
           const barY = Math.min(pointY, baselineY);
           const heightValue = Math.max(Math.abs(baselineY - pointY), 1);
-          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
+          const pointValue = itemUnit === "currency" ? this._formatCost(point.value) : this._formatNumber(point.value);
+          const pointUnit = itemUnit === "currency" ? "" : itemUnit;
+          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
         }).join("");
       }
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value, axis).toFixed(1)}`).join(" ");
-      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`).join("");
+      const circles = item.points.map((point) => {
+        const pointValue = itemUnit === "currency" ? this._formatCost(point.value) : this._formatNumber(point.value);
+        const pointUnit = itemUnit === "currency" ? "" : itemUnit;
+        return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`;
+      }).join("");
       const dash = axis === "right" ? ' stroke-dasharray="6 4"' : "";
       return `<polyline fill="none" stroke="${color}" stroke-width="1.5"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
@@ -517,8 +531,10 @@ export function createEvidenceViewMethods({
       const color = CHART_COLORS[index % CHART_COLORS.length];
       return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><span>${this._escape(item.name)}</span></div>`;
     }).join("");
-    const minLabel = this._formatNumber(minValue);
-    const maxLabel = this._formatNumber(maxValue);
+    const minLabel = leftAxisCurrency ? this._formatCost(minValue) : this._formatNumber(minValue);
+    const maxLabel = leftAxisCurrency ? this._formatCost(maxValue) : this._formatNumber(maxValue);
+    const rightMinLabel = rightAxisCurrency ? this._formatCost(rightMinValue) : this._formatNumber(rightMinValue);
+    const rightMaxLabel = rightAxisCurrency ? this._formatCost(rightMaxValue) : this._formatNumber(rightMaxValue);
     const timeTicks = this._chartTimeTicks(minTime, maxTime, x);
     const timeGridLines = timeTicks.slice(1, -1).map((tick) => `<line class="grid time-grid" x1="${tick.x}" y1="${padTop}" x2="${tick.x}" y2="${height - padBottom}"></line>`).join("");
     const timeTickLabels = timeTicks.map((tick) => `<text x="${tick.x}" y="${height - 12}" text-anchor="${tick.anchor}">${this._escape(tick.label)}</text>`).join("");
@@ -582,8 +598,8 @@ export function createEvidenceViewMethods({
       start: this._formatDateTime(new Date(minTime)),
       end: this._formatDateTime(new Date(maxTime)),
     }) + (rightAxis ? ` ${this._panelTextFormat("chart.accessible_right_axis", {
-      min: this._formatNumber(rightMinValue),
-      max: this._formatNumber(rightMaxValue),
+      min: rightMinLabel,
+      max: rightMaxLabel,
       unit: ` ${alert.right_y_axis_label}`,
     })}` : "");
     if (!ariaLabel.trim()) {
@@ -603,7 +619,7 @@ export function createEvidenceViewMethods({
           ${sessionBands}
           <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
           <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
-          ${rightAxis ? `<text x="${width - 8}" y="${padTop + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMaxValue))}</text><text x="${width - 8}" y="${height - padBottom + 4}" text-anchor="end">${this._escape(this._formatNumber(rightMinValue))}</text>` : ""}
+          ${rightAxis ? `<text x="${width - 8}" y="${padTop + 4}" text-anchor="end">${this._escape(rightMaxLabel)}</text><text x="${width - 8}" y="${height - padBottom + 4}" text-anchor="end">${this._escape(rightMinLabel)}</text>` : ""}
           ${timeTickLabels}
           ${edgeMarkers}
           ${lines}

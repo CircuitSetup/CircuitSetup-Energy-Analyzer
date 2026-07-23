@@ -823,7 +823,6 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
-        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
     } <= set(card_types)
     assert "gauge" not in card_types
     assert "glance" not in card_types
@@ -910,9 +909,7 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
     dashboard = yaml.safe_load(dashboard_text)
     assert [view.get("path") for view in _dashboard_views(dashboard)] == [
         "overview",
-        "appliances",
         "energy-costs",
-        "mains-nilm",
         "insights",
     ]
     assert "binary_sensor.hvac_running" in dashboard_text
@@ -932,9 +929,7 @@ def test_dashboard_example_removes_static_alert_evidence_view() -> None:
 
     assert [view.get("path") for view in views] == [
         "overview",
-        "appliances",
         "energy-costs",
-        "mains-nilm",
         "insights",
     ]
     assert all(view.get("path") != "alert-evidence" for view in views)
@@ -985,7 +980,7 @@ def test_dashboard_example_uses_current_mains_nilm_entity_ids() -> None:
 def test_dashboard_example_explains_known_load_share_as_primary_mains_gauge() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     mains_view = next(
-        view for view in _dashboard_views(dashboard) if view.get("path") == "mains-nilm"
+        view for view in _dashboard_views(dashboard) if view.get("path") == "insights"
     )
     flow_cards = [
         card
@@ -1012,9 +1007,7 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
 
     assert [view.get("title") for view in _dashboard_views(dashboard)] == [
         "Home",
-        "Appliances",
         "Energy & Costs",
-        "Mains & NILM",
         "Insights",
     ]
     assert "title: Billing Cycle" in dashboard_text
@@ -1024,17 +1017,20 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
 
 def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    insights = next(
-        view for view in _dashboard_views(dashboard) if view.get("path") == "insights"
+    graphs = next(
+        view
+        for view in _dashboard_views(dashboard)
+        if view.get("path") == "energy-costs"
     )
     graph_cards = [
         card
-        for card in _dashboard_cards(insights)
+        for card in _dashboard_cards(graphs)
         if card.get("type") == "history-graph"
         and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
     assert graph_cards
+    assert graph_cards[0]["grid_options"]["columns"] == 24
     assert graph_cards[0]["entities"] == [
         {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
         {"entity": "sensor.hvac_power", "name": "HVAC power"},
@@ -1667,7 +1663,8 @@ if (html.includes("$")) {
 }
 assert.equal((html.match(/>Cost Today</g) || []).length, 1);
 assert.equal((html.match(/class="chart"/g) || []).length, 1);
-assert.ok(html.includes('data-chart-right-axis="EUR"'));
+assert.ok(html.includes('data-chart-right-axis="€"'));
+assert.ok(html.includes('>€0.55</text>'));
 assert.equal((html.match(/stroke-dasharray="6 4"/g) || []).length, 1);
 assert.ok(!html.includes("What To Check First"));
 """
@@ -6919,11 +6916,14 @@ def test_readme_explains_generated_dashboard_controls() -> None:
         readme_text
     )
     assert "renamed analyzer entities are respected" in readme_text
-    assert "Home, Appliances, Energy & Costs, Mains & NILM, Insights" in readme_text
-    assert "Expert-only Diagnostics" in readme_text
+    assert "Home, Energy & Costs, and Insights" in readme_text
+    assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
     assert "Running binary sensor rather than its text summary" in readme_text
-    assert "current-day and billing-cycle meanings separate" in readme_text
+    assert "arranges all graphs in half-width rows" in readme_text
+    assert "without repeating a separate Active Now list" in readme_text
+    assert "segmented Running intervals against a labeled 24-hour scale" in readme_text
+    assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text
     assert "first configured mains circuit is the primary whole-house source" in (
         readme_text
@@ -6933,8 +6933,8 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Match Entity Detail Level To Layout" in readme_text
     assert "Remove Existing Dashboard" in readme_text
     assert "dashboard action still runs from Configure" in readme_text
-    assert "**Standard**: Simple plus Mains & NILM" in readme_text
-    assert "**Expert**: Standard plus a separate Diagnostics view" in readme_text
+    assert "**Standard**: Simple plus one Insights view" in readme_text
+    assert "**Expert**: Standard plus diagnostic navigation" in readme_text
     assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text
     assert "adds small action cards" not in readme_text
 

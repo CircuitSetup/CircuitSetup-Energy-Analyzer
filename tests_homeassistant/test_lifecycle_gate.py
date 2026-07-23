@@ -447,9 +447,7 @@ def _assert_appliance_workflow_payloads(
     }
     assert set(views) == {
         "overview",
-        "appliances",
         "energy-costs",
-        "mains-nilm",
         "insights",
     }
     card_types = {
@@ -463,8 +461,8 @@ def _assert_appliance_workflow_payloads(
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
-        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
     } <= card_types
+    assert "custom:circuitsetup-energy-analyzer-dashboard-graphs" not in card_types
 
 
 async def _assert_appliance_workflow_panel_views(

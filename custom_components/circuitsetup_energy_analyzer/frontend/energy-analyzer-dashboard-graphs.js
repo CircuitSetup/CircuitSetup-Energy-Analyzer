@@ -4,6 +4,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       super();
       this._dashboardConfig = {};
       this._hass = null;
+      this._deferredHassRender = false;
+      this._deferredRenderControl = null;
     }
 
     setConfig(config) {
@@ -16,6 +18,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     set hass(value) {
       this._hass = value;
+      const active = this.shadowRoot && this.shadowRoot.activeElement;
+      if (active && active.matches("input, select, textarea")) {
+        this._deferredHassRender = true;
+        this._resumeAfterControlBlur(active);
+        return;
+      }
+      this._deferredHassRender = false;
       this._render();
     }
 
@@ -25,6 +34,26 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     getCardSize() {
       return 6;
+    }
+
+    _resumeAfterControlBlur(control) {
+      if (this._deferredRenderControl === control) return;
+      this._deferredRenderControl = control;
+      control.addEventListener("blur", () => {
+        if (this._deferredRenderControl === control) {
+          this._deferredRenderControl = null;
+        }
+        queueMicrotask(() => {
+          if (!this._deferredHassRender) return;
+          const active = this.shadowRoot && this.shadowRoot.activeElement;
+          if (active && active.matches("input, select, textarea")) {
+            this._resumeAfterControlBlur(active);
+            return;
+          }
+          this._deferredHassRender = false;
+          this._render();
+        });
+      }, { once: true });
     }
 
     _label(key, fallback) {
@@ -59,6 +88,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _formatValue(value, unit = "") {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
+      }
+      if (unit === "currency") {
+        return this._formatCost(value);
       }
       const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
       const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value);
@@ -103,6 +135,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .metric { background: var(--secondary-background-color, #f4f6f8); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; padding: 10px; }
         .metric span { color: var(--secondary-text-color, #5b6470); display: block; font-size: 12px; margin-bottom: 4px; }
         .metric strong { font-size: 16px; overflow-wrap: anywhere; }
+        .metric small { display: block; margin-top: 4px; }
         .banner { align-items: center; border: 1px solid var(--warning-color, #b7791f); border-radius: 6px; display: flex; justify-content: space-between; padding: 10px; }
         .banner.ready { border-color: var(--success-color, #2e7d32); }
         .flow { display: grid; gap: 8px; }
@@ -115,6 +148,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         button.appliance-tile:focus-visible, button.control:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 2px; }
         .appliance-meta { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 13px; gap: 3px; margin-top: 6px; }
         .issue { color: var(--warning-color, #a15c00); font-weight: 600; }
+        .contribution { display: grid; gap: 8px; margin-top: 12px; }
         .controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
         button.control, select, input { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #aeb7c2); border-radius: 4px; color: var(--primary-text-color, #111827); min-height: 36px; padding: 6px 10px; }
         button.control { cursor: pointer; }
@@ -128,6 +162,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .timeline-lane { display: grid; gap: 4px; grid-template-columns: minmax(90px, 1fr) minmax(160px, 4fr); }
         .timeline-track { background: var(--secondary-background-color, #e5e7eb); border-radius: 3px; height: 24px; overflow: hidden; position: relative; }
         .running-band { background: var(--success-color, #2e7d32); height: 100%; position: absolute; }
+        .timeline-scale { display: grid; gap: 4px; grid-template-columns: minmax(90px, 1fr) minmax(160px, 4fr); }
+        .timeline-axis { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 11px; grid-template-columns: repeat(5, 1fr); }
+        .timeline-axis span { text-align: center; }
+        .timeline-axis span:first-child { text-align: left; }
+        .timeline-axis span:last-child { text-align: right; }
         .chart-frame { font-family: Roboto, Noto, sans-serif; overflow: visible; position: relative; }
         .chart { display: block; height: auto; max-width: 100%; min-height: 200px; width: 100%; }
         .chart [data-chart-point] { cursor: crosshair; opacity: 0.55; }
@@ -147,6 +186,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           .bar-row { grid-template-columns: minmax(80px, 1fr) minmax(70px, 2fr); }
           .bar-row strong { grid-column: 1 / -1; }
           .timeline-lane { grid-template-columns: 1fr; }
+          .timeline-scale { grid-template-columns: 1fr; }
+          .timeline-scale > span:first-child { display: none; }
         }
       `;
     }
@@ -163,11 +204,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         });
       }
       const max = Math.max(...top.map((item) => item[key]), 1);
-      const unit = key === "energy" ? "kWh" : this._unit((values[0] || {}).cost_today_entity);
-      return `<section>
+      const unit = key === "energy" ? "kWh" : "currency";
+      return `<section class="contribution">
+        <h3>${this._escape(this._label("appliance_energy_cost", "Appliance Energy/Cost"))}</h3>
         <div class="controls">
-          <h3>${this._escape(this._label("today_by_appliance", "Today by appliance"))}</h3>
           ${["energy", "cost"].map((mode) => `<button type="button" class="control" data-contribution-mode="${mode}" aria-pressed="${mode === this._contributionMode}">${this._escape(this._label(mode, mode))}</button>`).join("")}
+          ${[
+            ["24h", this._label("twenty_four_hours", "24 hours")],
+            ["7d", this._label("seven_days", "7 days")],
+            ["30d", this._label("thirty_days", "30 days")],
+          ].map(([window, label]) => `<button type="button" class="control" data-contribution-window="${window}" aria-pressed="${window === this._contributionWindow}">${this._escape(label)}</button>`).join("")}
         </div>
         <div class="bars">${top.map((item) => `<div class="bar-row"><span>${this._escape(item.name)}</span><span class="bar-track"><span class="bar-fill" style="display:block;width:${Math.max(item[key] / max * 100, 2)}%"></span></span><strong>${this._escape(this._formatValue(item[key], unit))}</strong></div>`).join("")}</div>
       </section>`;
@@ -178,18 +224,26 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     constructor() {
       super();
       this._contributionMode = "energy";
+      this._contributionWindow = "24h";
+      this._contributionInsights = [];
+      this._rollingContributionByCircuit = {};
+      this._contributionLoadRequested = false;
     }
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
+      if (
+        config.mode !== "mains"
+        && config.api_path
+        && !this._contributionLoadRequested
+      ) {
+        this._contributionLoadRequested = true;
+        this._loadContributionInsights();
+      }
       const mains = config.primary_mains || {};
       const appliances = (config.appliances || []).map((item) => this._applianceState(item));
-      const active = appliances.filter((item) => item.issue || item.running || (item.power || 0) > 0)
-        .sort((left, right) => Number(right.issue) - Number(left.issue)
-          || Number(right.running) - Number(left.running)
-          || (right.power || 0) - (left.power || 0)
-          || String(left.name).localeCompare(String(right.name)));
+      const contributionAppliances = this._contributionAppliances(appliances);
       const knownPower = this._number(mains.monitored_power_entity)
         ?? appliances.reduce((total, item) => total + (item.power || 0), 0);
       const housePower = this._sum(mains.power_entities) ?? knownPower;
@@ -203,9 +257,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const costToday = config.primary_mains && mains.cost_today_entity
         ? this._number(mains.cost_today_entity)
         : null;
-      const costUnit = this._unit(
-        mains.cost_today_entity || (appliances.find((item) => item.cost_today_entity) || {}).cost_today_entity,
-      );
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -239,17 +290,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <div class="kpis">
           ${this._metricHtml(housePowerLabel, housePower, "W")}
           ${this._metricHtml(this._label("energy_today", "Energy today"), energyToday, "kWh")}
-          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, costUnit)}
+          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, "currency")}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
-        <section>
-          <h3>${this._escape(this._label("active_now", "Active now"))}</h3>
-          <div class="appliance-list">
-            ${active.length ? active.slice(0, 5).map((item) => this._applianceTile(item)).join("") : `<p class="muted">${this._escape(this._label("no_active_appliances", "No monitored appliances are active."))}</p>`}
-          </div>
-        </section>
-        ${this._contributionHtml(appliances)}
+        ${this._contributionHtml(contributionAppliances)}
       `;
       const nilm = config.mode === "mains" ? `
         <div class="kpis">
@@ -292,6 +337,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._render();
         });
       }
+      for (const button of this.shadowRoot.querySelectorAll("[data-contribution-window]")) {
+        button.addEventListener("click", () => {
+          this._contributionWindow = button.dataset.contributionWindow;
+          this._render();
+        });
+      }
     }
 
     _metricHtml(label, value, unit) {
@@ -306,14 +357,146 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`;
     }
 
-    _applianceTile(item) {
-      return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}">
-        <strong>${this._escape(item.name)}</strong>
-        <div class="appliance-meta">
-          <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))}</span>
-          <span>${this._escape(this._formatValue(item.power, this._unit((item.power_entities || [])[0], "W")))}</span>
-        </div>
-      </button>`;
+    _contributionAppliances(appliances) {
+      const days = this._contributionWindow === "30d"
+        ? 30
+        : this._contributionWindow === "7d" ? 7 : 0;
+      if (!days) {
+        return appliances.map((appliance) => {
+          const rolling = this._rollingContributionByCircuit[appliance.circuit_id] || {};
+          return {
+            ...appliance,
+            energy: rolling.energy ?? null,
+            cost: rolling.cost ?? null,
+          };
+        });
+      }
+      return appliances.map((appliance) => {
+        const insight = this._contributionInsights.find((item) => (
+          (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
+          && (item.circuit_id || item.appliance_key) === appliance.circuit_id
+        ));
+        const rows = Array.isArray(insight && insight.daily_totals)
+          ? insight.daily_totals.slice(-days)
+          : [];
+        const energyValues = rows.map((row) => Number(row.energy_kwh))
+          .filter(Number.isFinite);
+        const costValues = rows.map((row) => (
+          row.cost === null || row.cost === undefined
+            ? Number.NaN
+            : Number(row.cost)
+        ));
+        return {
+          ...appliance,
+          energy: energyValues.length
+            ? energyValues.reduce((total, value) => total + value, 0)
+            : null,
+          cost: rows.length && costValues.every(Number.isFinite)
+            ? costValues.reduce((total, value) => total + value, 0)
+            : null,
+        };
+      });
+    }
+
+    async _loadContributionInsights() {
+      const appliances = this._dashboardConfig.appliances || [];
+      const entityIds = [...new Set(appliances
+        .flatMap((item) => [...(item.power_entities || []), item.cost_today_entity])
+        .filter(Boolean))];
+      const end = Date.now();
+      const start = end - 24 * 60 * 60 * 1000;
+      const historyPath = `history/period/${new Date(start).toISOString()}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&minimal_response=1&no_attributes=1`;
+      const [insightsResult, historyResult] = await Promise.allSettled([
+        this._hass.callApi("GET", this._dashboardConfig.api_path),
+        entityIds.length ? this._hass.callApi("GET", historyPath) : Promise.resolve([]),
+      ]);
+      const payload = insightsResult.status === "fulfilled" ? insightsResult.value : null;
+      this._contributionInsights = Array.isArray(payload && payload.items)
+        ? payload.items
+        : [];
+      this._rollingContributionByCircuit = historyResult.status === "fulfilled"
+        ? this._rollingTotals(historyResult.value, appliances, start, end)
+        : {};
+      this._render();
+    }
+
+    _rollingTotals(payload, appliances, start, end) {
+      if (!Array.isArray(payload)) return {};
+      const history = {};
+      for (const group of payload) {
+        const rows = Array.isArray(group) ? group : [group];
+        let entityId = "";
+        for (const row of rows.filter(Boolean)) {
+          entityId = row.entity_id || entityId;
+          if (!entityId) continue;
+          (history[entityId] ||= []).push(row);
+        }
+      }
+      return Object.fromEntries(appliances.map((appliance) => {
+        const powerEntities = appliance.power_entities || [];
+        const energyValues = powerEntities.map((entityId) => (
+          this._integratedEnergy(history[entityId], start, end)
+        ));
+        const energy = powerEntities.length && energyValues.every(Number.isFinite)
+          ? energyValues.reduce((total, value) => total + value, 0)
+          : null;
+        const cost = appliance.cost_today_entity
+          ? this._counterIncrease(history[appliance.cost_today_entity])
+          : null;
+        return [appliance.circuit_id, { energy, cost }];
+      }));
+    }
+
+    _integratedEnergy(rows, start, end) {
+      const points = (rows || []).map((row) => ({
+        time: Date.parse(row.last_changed || row.last_updated || ""),
+        value: Number(row.state),
+      })).filter((point) => Number.isFinite(point.time) && point.time <= end)
+        .sort((left, right) => left.time - right.time);
+      let energy = 0;
+      let previous = null;
+      let sawValue = false;
+      for (const point of points) {
+        const time = Math.max(start, point.time);
+        if (!Number.isFinite(point.value) || point.value < 0) {
+          if (previous && time > previous.time) {
+            energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
+          }
+          previous = null;
+          continue;
+        }
+        const value = point.value;
+        sawValue = true;
+        if (previous && time > previous.time) {
+          energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
+        }
+        previous = { time, value };
+      }
+      if (previous && end > previous.time) {
+        energy += previous.value * (end - previous.time) / 3_600_000 / 1_000;
+      }
+      return sawValue ? energy : null;
+    }
+
+    _counterIncrease(rows) {
+      const values = (rows || []).map((row) => ({
+        time: Date.parse(row.last_changed || row.last_updated || ""),
+        value: Number(row.state),
+      })).filter((point) => Number.isFinite(point.time))
+        .sort((left, right) => left.time - right.time);
+      let previous = null;
+      let total = 0;
+      for (const point of values) {
+        if (!Number.isFinite(point.value) || point.value < 0) {
+          previous = null;
+          continue;
+        }
+        if (previous !== null) {
+          total += point.value >= previous ? point.value - previous : point.value;
+        }
+        previous = point.value;
+      }
+      return previous === null ? null : total;
     }
 
   }
@@ -331,28 +514,20 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const appliances = (this._dashboardConfig.appliances || []).map((item) => this._applianceState(item));
-      const search = this._search.toLowerCase();
       const visible = appliances.filter((item) => (
-        (!search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search))
-        && (this._filter === "all"
+        this._filter === "all"
           || this._filter === "running" && item.running
           || this._filter === "attention" && item.issue
-          || this._filter === "energy"
-          || this._filter === "cost")
       )).sort((left, right) => (
-        this._filter === "energy" ? (right.energy || 0) - (left.energy || 0)
-          : this._filter === "cost" ? (right.cost || 0) - (left.cost || 0)
-            : Number(right.issue) - Number(left.issue)
-              || Number(right.running) - Number(left.running)
-              || (right.power || 0) - (left.power || 0)
-              || String(left.name).localeCompare(String(right.name))
+        Number(right.issue) - Number(left.issue)
+          || Number(right.running) - Number(left.running)
+          || (right.power || 0) - (left.power || 0)
+          || String(left.name).localeCompare(String(right.name))
       ));
       const filters = [
         ["all", this._label("all", "All")],
         ["running", this._label("running", "Running")],
         ["attention", this._label("needs_attention", "Needs attention")],
-        ["energy", this._label("highest_energy", "Highest energy")],
-        ["cost", this._label("highest_cost", "Highest cost")],
       ];
       const areas = [...new Set(appliances.map((item) => item.area).filter(Boolean))].sort();
       this.shadowRoot.innerHTML = `
@@ -365,7 +540,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid">
-              ${visible.map((item) => this._tile(item)).join("")}
+              ${visible.map((item) => this._tile(item, !this._matchesSearch(item))).join("")}
             </div>
             <section class="timeline">
               <div class="controls">
@@ -398,7 +573,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       this.shadowRoot.querySelector("[data-appliance-search]").addEventListener("input", (event) => {
         this._search = event.target.value;
-        this._render();
+        for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
+          const item = appliances.find((candidate) => candidate.circuit_id === tile.dataset.applianceId);
+          tile.hidden = !item || !this._matchesSearch(item);
+        }
       });
       for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
         tile.addEventListener("click", () => {
@@ -409,15 +587,19 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._ensureTimeline(appliances);
     }
 
-    _tile(item) {
+    _matchesSearch(item) {
+      const search = this._search.toLowerCase();
+      return !search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search);
+    }
+
+    _tile(item, hidden = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
-      const costUnit = this._unit(item.cost_today_entity);
-      return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}">
+      return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
         <strong>${this._escape(item.name)}</strong>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
           <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>
-          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, costUnit))}</span>
+          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
           <span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>
         </div>
       </button>`;
@@ -439,37 +621,56 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!key || key === this._timelineKey) return;
       this._timelineKey = key;
       const start = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(key)}&minimal_response&no_attributes`;
+      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(key)}&minimal_response=1&no_attributes=1`;
       try {
         const rows = await this._hass.callApi("GET", path);
-        this._timelineRows = Array.isArray(rows) ? rows.flat().filter(Boolean) : [];
+        this._timelineRows = this._normalizeTimelineRows(rows);
       } catch (_error) {
         this._timelineRows = [];
       }
       this._render();
     }
 
+    _normalizeTimelineRows(payload) {
+      if (!Array.isArray(payload)) return [];
+      return payload.flatMap((group) => {
+        const rows = Array.isArray(group) ? group : [group];
+        let entityId = "";
+        return rows.filter(Boolean).map((row) => {
+          entityId = row.entity_id || entityId;
+          return { ...row, entity_id: row.entity_id || entityId };
+        });
+      });
+    }
+
     _timelineHtml(appliances) {
       const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.running_entity);
+      const end = Date.now();
+      const start = end - 24 * 60 * 60 * 1000;
       const lanes = selected.map((item) => {
         const points = this._timelineRows.filter((row) => row.entity_id === item.running_entity)
-          .map((row) => ({ time: Date.parse(row.last_changed), state: row.state }))
+          .map((row) => ({
+            time: Date.parse(row.last_changed || row.last_updated || ""),
+            state: row.state,
+          }))
           .filter((row) => Number.isFinite(row.time))
           .sort((left, right) => left.time - right.time);
         if (!points.length) return "";
-        const start = points[0].time;
-        const end = Math.max(
-          Date.now(),
-          points[points.length - 1].time,
-          start + 60 * 60 * 1000,
-        );
-        const bands = points.map((point, index) => ({
+        const stateAtStart = points.filter((point) => point.time <= start).at(-1);
+        const windowPoints = [
+          ...(stateAtStart ? [{ ...stateAtStart, time: start }] : []),
+          ...points.filter((point) => point.time > start && point.time <= end),
+        ];
+        const bands = windowPoints.map((point, index) => ({
           ...point,
-          end: points[index + 1] ? points[index + 1].time : end,
+          end: windowPoints[index + 1] ? windowPoints[index + 1].time : end,
         })).filter((point) => point.state === "on" && point.end > point.time);
         return `<div class="timeline-lane"><span>${this._escape(item.name)}</span><span class="timeline-track">${bands.map((band) => `<span class="running-band" data-running-band style="left:${(band.time - start) / (end - start) * 100}%;width:${(band.end - band.time) / (end - start) * 100}%"></span>`).join("")}</span></div>`;
       }).filter(Boolean);
-      return lanes.length ? lanes.join("") : `<p class="muted">${this._escape(this._label("no_history", "No running history is available for this period."))}</p>`;
+      const scale = `<div class="timeline-scale"><span></span><div class="timeline-axis" aria-label="${this._escape(this._label("past_24_hours", "Past 24 hours"))}">
+        ${["24h ago", "18h ago", "12h ago", "6h ago", "Now"].map((label) => `<span data-timeline-tick>${this._escape(label)}</span>`).join("")}
+      </div></div>`;
+      return lanes.length ? `${lanes.join("")}${scale}` : `<p class="muted">${this._escape(this._label("no_history", "No running history is available for this period."))}</p>`;
     }
   }
 
@@ -481,7 +682,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._insights = null;
       this._wholeHouse = [];
       this._loadRequested = false;
-      this._contributionMode = "energy";
     }
 
     _render() {
@@ -507,17 +707,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         value: row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost),
         cost_source: row.cost_source,
       })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
-      const currency = this._costUnit();
+      const currency = this._currencySymbol();
       const series = [
         energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", points: energyPoints },
-        costPoints.length && { name: this._label("cost", "Cost"), unit: currency, axis: energyPoints.length ? "right" : "left", points: costPoints },
+        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: energyPoints.length ? "right" : "left", points: costPoints },
       ].filter(Boolean);
       const chart = series.length ? this._chartSvg(series, {
         y_axis_label: energyPoints.length ? "kWh" : currency,
         ...(energyPoints.length && costPoints.length ? { right_y_axis_label: currency } : {}),
       }) : `<p class="muted">${this._escape(this._label("no_history", "No completed-day history is available."))}</p>`;
       const unavailable = rows.some((row) => row.cost === null || row.cost === undefined);
-      const appliances = (this._dashboardConfig.appliances || []).map((item) => this._applianceState(item));
       const selectedOptions = [
         ...(this._dashboardConfig.primary_mains
           ? [`<option value="whole">${this._escape(this._label("whole_house", "Whole house"))}</option>`]
@@ -533,7 +732,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <h3>${this._escape(this._label("today_vs_normal", "Today versus normal"))}</h3>
               <div class="kpis">
                 ${this._metricHtml(this._label("energy_today", "Energy today"), metrics.energyToday, "kWh", metrics.averageEnergy)}
-                ${this._metricHtml(this._label("cost_today", "Cost today"), metrics.costToday, currency, metrics.averageCost)}
+                ${this._metricHtml(this._label("cost_today", "Cost today"), metrics.costToday, "currency", metrics.averageCost)}
               </div>
             </section>
             <section>
@@ -545,7 +744,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${chart}
               ${unavailable ? `<p class="muted">${this._escape(this._label("unavailable", "Unavailable"))}</p>` : ""}
             </section>
-            ${this._contributionHtml(appliances)}
           </div>
         </ha-card>
       `;
@@ -558,12 +756,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       for (const button of this.shadowRoot.querySelectorAll("[data-history-days]")) {
         button.addEventListener("click", () => {
           this._historyDays = Number(button.dataset.historyDays);
-          this._render();
-        });
-      }
-      for (const button of this.shadowRoot.querySelectorAll("[data-contribution-mode]")) {
-        button.addEventListener("click", () => {
-          this._contributionMode = button.dataset.contributionMode;
           this._render();
         });
       }
@@ -636,12 +828,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : Number.NaN;
     }
 
-    _costUnit() {
-      const appliances = this._dashboardConfig.appliances || [];
-      const entityId = (this._dashboardConfig.primary_mains || {}).cost_today_entity
-        || (appliances.find((item) => item.cost_today_entity) || {}).cost_today_entity;
-      return this._unit(entityId, (this._hass.config || {}).currency || "");
-    }
   }
 
   class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyzerPanel {
