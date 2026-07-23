@@ -472,10 +472,12 @@ export function createEvidenceViewMethods({
     const maxTime = Number.isFinite(graphEnd) && graphEnd > minTime ? graphEnd : sampleMaxTime;
     const leftPoints = series.filter((item) => !rightAxis || item.axis !== "right").flatMap((item) => item.points);
     const rightPoints = rightAxis ? series.filter((item) => item.axis === "right").flatMap((item) => item.points) : [];
-    const minValue = Math.min(...leftPoints.map((point) => point.value));
-    const maxValue = Math.max(...leftPoints.map((point) => point.value));
-    const rightMinValue = rightPoints.length ? Math.min(...rightPoints.map((point) => point.value)) : minValue;
-    const rightMaxValue = rightPoints.length ? Math.max(...rightPoints.map((point) => point.value)) : maxValue;
+    const leftHasBars = series.some((item) => item.kind === "bar" && (!rightAxis || item.axis !== "right"));
+    const rightHasBars = rightAxis && series.some((item) => item.kind === "bar" && item.axis === "right");
+    const minValue = Math.min(...leftPoints.map((point) => point.value), leftHasBars ? 0 : Infinity);
+    const maxValue = Math.max(...leftPoints.map((point) => point.value), leftHasBars ? 0 : -Infinity);
+    const rightMinValue = rightPoints.length ? Math.min(...rightPoints.map((point) => point.value), rightHasBars ? 0 : Infinity) : minValue;
+    const rightMaxValue = rightPoints.length ? Math.max(...rightPoints.map((point) => point.value), rightHasBars ? 0 : -Infinity) : maxValue;
     const timeRange = Math.max(maxTime - minTime, 1);
     const leftValueDiff = maxValue - minValue;
     const rightValueDiff = rightMaxValue - rightMinValue;
@@ -500,8 +502,10 @@ export function createEvidenceViewMethods({
         return item.points.map((point) => {
           const pointX = x(point.time);
           const pointY = y(point.value, axis);
-          const heightValue = Math.max(height - padBottom - pointY, 1);
-          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${pointY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
+          const baselineY = y(0, axis);
+          const barY = Math.min(pointY, baselineY);
+          const heightValue = Math.max(Math.abs(baselineY - pointY), 1);
+          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
         }).join("");
       }
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value, axis).toFixed(1)}`).join(" ");

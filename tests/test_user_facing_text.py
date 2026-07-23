@@ -3861,6 +3861,40 @@ assert.equal(pointY("Cost", "0.34"), 278);
     )
 
 
+def test_bar_series_start_at_zero_on_both_axes() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const start = Date.parse("2026-06-24T18:00:00Z");
+const end = Date.parse("2026-06-24T19:00:00Z");
+const html = panel._chartSvg(
+  [
+    { name: "Energy", kind: "bar", unit: "kWh", points: [
+      { time: start, value: 5 },
+      { time: end, value: 10 },
+    ] },
+    { name: "Cost", kind: "bar", unit: "USD", axis: "right", points: [
+      { time: start, value: 0.5 },
+      { time: end, value: 1 },
+    ] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const barHeight = (name, value) => Number(
+  Array.from(html.matchAll(/<rect[^>]+data-energy-bar="1"[^>]+>/g)).find((bar) => (
+    bar[0].includes(`data-chart-name="${name}"`)
+      && bar[0].includes(`data-chart-value="${value}"`)
+  ))[0].match(/height="([^"]+)"/)[1],
+);
+assert.equal(barHeight("Energy", "5"), 130);
+assert.equal(barHeight("Energy", "10"), 260);
+assert.equal(barHeight("Cost", "0.5"), 130);
+assert.equal(barHeight("Cost", "1"), 260);
+"""
+    )
+
+
 def test_dual_axis_preserves_tiny_positive_ranges() -> None:
     _run_panel_node_script(
         """
