@@ -345,11 +345,11 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Cards expand evenly across the available four-column grid instead of leaving unused columns. Home includes the appliance grid; Insights combines mains, NILM, contextual evidence, and Expert-only diagnostics. Empty optional views are omitted.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Cards expand evenly across the available four-column grid instead of leaving unused columns. Home includes the appliance grid; Insights combines mains, NILM, contextual evidence, billing-cycle totals, and Expert-only diagnostics. Empty optional views are omitted.
 
 Home live-sorts appliance tiles by attention state, Running state, current power, and name. Appliance rankings exclude mains, show the top five plus Other, and switch between daily kWh and Cost Today. The appliance grid provides live filters, search, detail navigation, and a selected 24-hour timeline built from each appliance's Running binary sensor rather than its text summary. Live state refresh pauses while a search or selector has focus.
 
-Energy & Costs keeps current-day and billing-cycle meanings separate. Today uses `cost_today`; Today versus normal puts the backend's average daily energy and cost on their own line; the Billing Cycle card owns usage, current cost, and forecast entities. Completed-day charts use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Monetary sensors and cards use Home Assistant's configured currency.
+Energy & Costs uses the full graph tab width for current-day and completed-day energy and cost. Today uses `cost_today`, and Today versus normal puts the backend's average daily energy and cost on their own line. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. Completed-day charts use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Monetary sensors and cards use Home Assistant's configured currency.
 
 When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in the Mains & NILM card inside Insights. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; Energy & Costs starts with a selected appliance instead. Insights includes every applicable HVAC circuit alongside the configured outdoor-temperature source and shows water-flow context only when matching entities exist.
 
@@ -375,8 +375,8 @@ docs/dashboard-example.yaml
 A good dashboard order is:
 
 1. **Home**: current household power, Running and issue counts, power balance, live appliance contribution, compact appliance tiles, and selected Running history.
-2. **Energy & Costs**: today versus normal, completed-day energy and cost, and a separate Billing Cycle card.
-3. **Insights**: load coverage, NILM assignment review, contextual HVAC or water evidence, and Expert-only diagnostic routes.
+2. **Energy & Costs**: a full-width graph card for today versus normal and completed-day energy and cost.
+3. **Insights**: load coverage, NILM assignment review, contextual HVAC or water evidence, Billing Cycle, and Expert-only diagnostic routes.
 
 ### Appliance Drilldown Pattern
 

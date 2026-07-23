@@ -6918,7 +6918,8 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
     assert "Running binary sensor rather than its text summary" in readme_text
-    assert "current-day and billing-cycle meanings separate" in readme_text
+    assert "full graph tab width" in readme_text
+    assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text
     assert "first configured mains circuit is the primary whole-house source" in (
         readme_text

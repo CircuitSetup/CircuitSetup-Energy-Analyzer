@@ -343,7 +343,7 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     [
         (
             DASHBOARD_LAYOUT_SIMPLE,
-            ["overview", "energy-costs"],
+            ["overview", "energy-costs", "insights"],
         ),
         (
             DASHBOARD_LAYOUT_STANDARD,
@@ -455,6 +455,8 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         energy_view,
         "custom:circuitsetup-energy-analyzer-energy-cost",
     )
+    assert energy_view["sections"][0]["cards"] == [energy_card]
+    assert energy_card["grid_options"]["columns"] == 48
 
     assert {
         appliance["cost_today_entity"]
@@ -474,7 +476,11 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         "sensor.fridge_average_kwh_per_day",
         "sensor.hvac_average_kwh_per_day",
     }
-    billing_card = _card_with_title(energy_view, "Billing Cycle")
+    insights_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    billing_card = _card_with_title(insights_view, "Billing Cycle")
+    assert insights_view["sections"][0]["cards"][-1] == billing_card
     billing_entities = {
         row["entity"] for row in billing_card["entities"] if isinstance(row, dict)
     }
@@ -719,10 +725,10 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     assert "select.fridge_alert_sensitivity" not in refs
     assert "button.fridge_relearn_baseline" not in refs
 
-    energy_view = next(
-        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    insights_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
     )
-    assert _card_with_title(energy_view, "Billing Cycle")["entities"] == [
+    assert _card_with_title(insights_view, "Billing Cycle")["entities"] == [
         {
             "entity": "sensor.mains_billing_cycle_usage",
             "name": "Mains NILM Billing cycle usage",
@@ -1182,9 +1188,10 @@ def test_dashboard_omits_hvac_outdoor_temperature_mirror_without_source_entity()
 
     assert "sensor.compressor_weather_context" not in refs
     assert "sensor.compressor_outdoor_temperature" not in refs
-    assert "insights" not in {
-        view["path"] for view in _dashboard_views(dashboard)
-    }
+    insights_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    assert _card_with_title(insights_view, "Billing Cycle")
 
 
 def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() -> None:

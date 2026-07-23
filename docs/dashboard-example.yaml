@@ -86,7 +86,7 @@ views:
         cards:
           - type: custom:circuitsetup-energy-analyzer-energy-cost
             grid_options:
-              columns: 24
+              columns: 48
             title: Energy and costs
             api_path: circuitsetup_energy_analyzer/appliance_insights
             primary_mains:
@@ -109,18 +109,6 @@ views:
                 cost_today_entity: sensor.hvac_cost_today
                 average_kwh_entity: sensor.hvac_average_kwh_per_day
                 average_cost_entity: sensor.hvac_average_cost_per_day
-          - type: entities
-            grid_options:
-              columns: 24
-            title: Billing Cycle
-            entities:
-              - entity: sensor.mains_billing_cycle_usage
-                name: Usage
-              - entity: sensor.mains_cost_cycle
-                name: Cost so far
-              - entity: sensor.mains_cost_cycle_forecast
-                name: Projected cost
-
   - type: sections
     title: Insights
     path: insights
@@ -175,3 +163,14 @@ views:
                 name: HVAC running
               - entity: sensor.hvac_daily_energy_usage
                 name: HVAC energy today
+          - type: entities
+            grid_options:
+              columns: 12
+            title: Billing Cycle
+            entities:
+              - entity: sensor.mains_billing_cycle_usage
+                name: Usage
+              - entity: sensor.mains_cost_cycle
+                name: Cost so far
+              - entity: sensor.mains_cost_cycle_forecast
+                name: Projected cost

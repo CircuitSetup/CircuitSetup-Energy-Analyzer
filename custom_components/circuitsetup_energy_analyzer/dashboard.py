@@ -237,6 +237,14 @@ def build_recommended_dashboard(
         insight_cards.extend(
             _build_diagnostics_view(context)["sections"][0]["cards"]
         )
+    billing_rows = _billing_cycle_rows(context)
+    if billing_rows:
+        insight_cards.append(
+            _entities_card(
+                _dashboard_text("cards", "billing_cycle"),
+                billing_rows,
+            )
+        )
     if insight_cards:
         views.append(
             _dashboard_view(
@@ -419,41 +427,31 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
 
 
 def _build_energy_costs_view(context: DashboardContext) -> dict[str, Any]:
-    cards: list[dict[str, Any]] = [
-        {
-            "type": ENERGY_COST_CARD,
-            "title": _dashboard_text("cards", "energy_and_costs"),
-            "entry_id": context.entry_id,
-            "api_path": f"{DOMAIN}/appliance_insights",
-            "text": dict(translation_section("panel")),
-            "primary_mains": _dashboard_circuit_payload(
-                context.primary_mains,
-                (
-                    "daily_energy_usage",
-                    "cost_today",
-                    "average_kwh_per_day",
-                    "average_cost_per_day",
-                ),
+    card = {
+        "type": ENERGY_COST_CARD,
+        "title": _dashboard_text("cards", "energy_and_costs"),
+        "entry_id": context.entry_id,
+        "api_path": f"{DOMAIN}/appliance_insights",
+        "text": dict(translation_section("panel")),
+        "primary_mains": _dashboard_circuit_payload(
+            context.primary_mains,
+            (
+                "daily_energy_usage",
+                "cost_today",
+                "average_kwh_per_day",
+                "average_cost_per_day",
             ),
-            "appliances": [
-                _energy_cost_payload(circuit) for circuit in context.appliances
-            ],
-            "labels": dict(translation_section("dashboard", "live_cards")),
-        }
-    ]
-    billing_rows = _billing_cycle_rows(context)
-    if billing_rows:
-        cards.append(
-            _entities_card(
-                _dashboard_text("cards", "billing_cycle"),
-                billing_rows,
-            )
-        )
+        ),
+        "appliances": [
+            _energy_cost_payload(circuit) for circuit in context.appliances
+        ],
+        "labels": dict(translation_section("dashboard", "live_cards")),
+    }
     return _dashboard_view(
         title=_dashboard_text("views", "energy_costs"),
         path="energy-costs",
         icon="mdi:chart-bar",
-        cards=cards,
+        cards=[card],
     )
 
 

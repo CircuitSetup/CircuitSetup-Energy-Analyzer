@@ -1944,7 +1944,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Cost Cycle Forecast",
         value_fn=cost_cycle_forecast_value,
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
