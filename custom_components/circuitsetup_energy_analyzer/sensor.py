@@ -2270,6 +2270,7 @@ def sensor_description_applies(
         return has_energy_data and (
             _configured_positive(tariff, "default_rate_per_kwh")
             or _configured_positive(tariff, "tou_rate_per_kwh")
+            or _has_utility_cost_rate(coordinator)
         )
     if key in _STANDBY_SENSOR_KEYS:
         return (
@@ -2394,6 +2395,38 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
         return False
     settings = settings_by_circuit.get(_circuit_id(circuit), {})
     return isinstance(settings, Mapping) and bool(settings)
+
+
+def _has_utility_cost_rate(coordinator: Any) -> bool:
+    state = getattr(coordinator, "data", None)
+    if (
+        effective_electricity_rate(
+            getattr(state, "utility_cost_rate_by_circuit", {}),
+        )
+        > 0.0
+    ):
+        return True
+
+    store_data = getattr(coordinator, "store_data", None)
+    stored = getattr(store_data, "utility_comparison_settings_by_circuit", {})
+    configured = _coordinator_config_value(
+        coordinator,
+        CONF_UTILITY_COMPARISON_SETTINGS,
+    )
+    for settings_by_circuit in (stored, configured):
+        if not isinstance(settings_by_circuit, Mapping):
+            continue
+        for settings in settings_by_circuit.values():
+            if not isinstance(settings, Mapping):
+                continue
+            has_cost = bool(str(settings.get("utility_cost_entity") or "").strip())
+            has_energy = any(
+                bool(str(settings.get(key) or "").strip())
+                for key in ("utility_energy_entity", "utility_statistic_id")
+            )
+            if has_cost and has_energy:
+                return True
+    return False
 
 
 def _has_temperature_source(coordinator: Any) -> bool:

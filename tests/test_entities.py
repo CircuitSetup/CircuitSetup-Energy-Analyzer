@@ -4441,7 +4441,9 @@ async def test_sensor_setup_entry_uses_entry_data_for_solar_flow_applicability()
 
 
 @pytest.mark.asyncio
-async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
+async def test_sensor_setup_entry_uses_config_for_utility_comparison_and_costs() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.sensor import async_setup_entry
 
     circuit = CircuitConfig(
@@ -4461,7 +4463,10 @@ async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
             store_data=FeatureStoreData(),
             options={
                 CONF_UTILITY_COMPARISON_SETTINGS: {
-                    "mains": {"utility_energy_entity": "sensor.utility_kwh"}
+                    "mains": {
+                        "utility_energy_entity": "sensor.utility_kwh",
+                        "utility_cost_entity": "sensor.utility_cost",
+                    }
                 }
             },
         ),
@@ -4476,6 +4481,8 @@ async def test_sensor_setup_entry_uses_config_for_utility_comparison() -> None:
 
     unique_ids = {entity.unique_id for entity in added_entities}
     assert "entry-1_mains_utility_comparison_status" in unique_ids
+    assert "entry-1_mains_cost_today" in unique_ids
+    assert "entry-1_mains_average_cost_per_day" in unique_ids
     assert "entry-1_mains_utility_comparison_difference" not in unique_ids
 
 
