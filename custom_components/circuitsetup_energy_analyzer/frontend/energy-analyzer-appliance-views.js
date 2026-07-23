@@ -618,12 +618,10 @@ export function createApplianceViewMethods({
     })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
     const energy = series("energy_kwh");
     const cost = series("cost");
-    const currency = this._hass && this._hass.config && this._hass.config.currency
-      ? String(this._hass.config.currency)
-      : "USD";
+    const currency = this._currencySymbol();
     const dailySeries = [
       energy.length && { name: this._panelText("appliance_detail.kwh_per_day"), unit: "kWh", points: energy },
-      cost.length && { name: this._panelText("appliance_detail.cost_per_day"), unit: currency, axis: energy.length ? "right" : "left", points: cost },
+      cost.length && { name: this._panelText("appliance_detail.cost_per_day"), unit: "currency", axis: energy.length ? "right" : "left", points: cost },
     ].filter(Boolean);
     const charts = dailySeries.length ? this._chartSvg(dailySeries, {
       y_axis_label: energy.length ? "kWh" : currency,

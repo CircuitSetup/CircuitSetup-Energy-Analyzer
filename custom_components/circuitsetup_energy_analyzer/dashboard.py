@@ -212,23 +212,40 @@ def build_recommended_dashboard(
         entry_id=entry_id,
         outdoor_temperature_entity=outdoor_temperature_entity,
     )
-    views = [_build_home_view(context)]
+    home_view = _build_home_view(context)
     if context.appliances:
-        views.append(_build_appliances_view(context))
+        home_view["sections"][0]["cards"].extend(
+            _build_appliances_view(context)["sections"][0]["cards"]
+        )
+    views = [home_view]
     if context.appliances or context.primary_mains is not None:
         views.append(_build_energy_costs_view(context))
+    insight_cards: list[dict[str, Any]] = []
     if (
         context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
         and context.mains
     ):
-        views.append(_build_mains_nilm_view(context))
+        insight_cards.extend(
+            _build_mains_nilm_view(context)["sections"][0]["cards"]
+        )
     if (
         context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
         and (context.has_weather or context.has_water)
     ):
-        views.append(_build_insights_view(context))
+        insight_cards.extend(_build_insights_view(context)["sections"][0]["cards"])
     if context.layout == DASHBOARD_LAYOUT_EXPERT and context.circuits:
-        views.append(_build_diagnostics_view(context))
+        insight_cards.extend(
+            _build_diagnostics_view(context)["sections"][0]["cards"]
+        )
+    if insight_cards:
+        views.append(
+            _dashboard_view(
+                title=_dashboard_text("views", "insights"),
+                path="insights",
+                icon="mdi:lightbulb-on-outline",
+                cards=insight_cards,
+            )
+        )
     return {
         "title": DASHBOARD_TITLE,
         "views": views,
@@ -602,7 +619,16 @@ def _dashboard_view(
             {
                 "type": "grid",
                 "column_span": DASHBOARD_COLUMNS,
-                "cards": list(cards),
+                "cards": [
+                    {
+                        **card,
+                        "grid_options": {
+                            **card.get("grid_options", {}),
+                            "columns": 12,
+                        },
+                    }
+                    for card in cards
+                ],
             }
         ],
     }
@@ -748,11 +774,8 @@ def dashboard_preflight_summary(
     ]
     all_views = [
         _dashboard_text("views", "home"),
-        _dashboard_text("views", "appliances"),
         _dashboard_text("views", "energy_costs"),
-        _dashboard_text("views", "mains_nilm"),
         _dashboard_text("views", "insights"),
-        _dashboard_text("views", "diagnostics"),
     ]
     registry_lookup = _registry_entity_lookup(hass, entry_id)
     missing_source_data, disabled_entities = _dashboard_preflight_entity_gaps(

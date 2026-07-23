@@ -184,6 +184,8 @@ test("home energy card live-sorts issues and running appliances", async ({ page 
   await expect(card.locator("[data-appliance-id]")).toHaveCount(3);
   await expect(card.locator("[data-appliance-id]").first()).toHaveAttribute("data-appliance-id", "oven");
   await expect(card).toContainText("Unavailable");
+  await card.locator('[data-contribution-mode="cost"]').click();
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.70");
   await page.evaluate(() => {
     window.__setDashboardState("sensor.fridge_health", { state: "Needs attention", attributes: {} });
     window.__setDashboardState("sensor.fridge_power", { state: "1500", attributes: { unit_of_measurement: "W" } });
@@ -247,9 +249,35 @@ test("appliance grid filters live state and loads Running history", async ({ pag
     states,
   );
 
+  const search = card.locator("[data-appliance-search]");
+  await search.pressSequentially("fridge");
+  await expect(search).toHaveValue("fridge");
+  await expect(search).toBeFocused();
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_power", {
+      state: "150",
+      attributes: { unit_of_measurement: "W" },
+    });
+  });
+  await expect(search).toHaveValue("fridge");
+  await expect(search).toBeFocused();
+  await search.press("Tab");
+  await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
+  await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("$0.28");
+  await search.fill("");
+  await search.press("Tab");
   await card.getByRole("tab", { name: "Running", exact: true }).click();
   await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
-  await card.locator("[data-timeline-selection]").selectOption("fridge");
+  const timeline = card.locator("[data-timeline-selection]");
+  await timeline.focus();
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.oven_power", {
+      state: "25",
+      attributes: { unit_of_measurement: "W" },
+    });
+  });
+  await expect(timeline).toBeFocused();
+  await timeline.selectOption("fridge");
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("binary_sensor.fridge_running"))
   ))).toBe(true);
@@ -331,9 +359,13 @@ test("energy and cost card switches completed-day windows and preserves cost sou
   );
 
   await expect(card.locator("svg.chart")).toBeVisible();
+  await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("strong")).toHaveText("$2.42");
+  await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toContainText("Average: $2.16");
+  await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toHaveCSS("display", "block");
   await expect(card.locator("[data-energy-bar]")).toHaveCount(7);
-  await card.locator("[data-energy-bar]").first().focus();
+  await card.locator('[data-cost-source="recorded"]').first().focus();
   await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
+  await expect(card.locator("[data-chart-tooltip]")).toContainText("$0.80");
   await card.getByRole("button", { name: "30 days", exact: true }).click();
   await expect(card.locator("[data-energy-bar]")).toHaveCount(10);
   await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(5);
@@ -542,7 +574,7 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
   await expect(dailyCost).toBeVisible();
   await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
-  await expect(dailyCost.locator('[data-chart-right-axis="USD"]')).toBeVisible();
+  await expect(dailyCost.locator('[data-chart-right-axis="$"]')).toBeVisible();
   await expect(dailyCost.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(1);
   await expect(dailyCost).toContainText("Cost Today");
   await expect(dailyCost).toContainText("Average Cost per Day");

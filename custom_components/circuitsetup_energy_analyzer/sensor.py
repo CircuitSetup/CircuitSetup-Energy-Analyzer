@@ -97,7 +97,11 @@ from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
 
 try:
-    from homeassistant.components.sensor import SensorEntity, SensorStateClass
+    from homeassistant.components.sensor import (
+        SensorDeviceClass,
+        SensorEntity,
+        SensorStateClass,
+    )
     from homeassistant.const import (
         PERCENTAGE,
         UnitOfEnergy,
@@ -134,6 +138,11 @@ except ModuleNotFoundError:
         """Fallback sensor state class constants."""
 
         MEASUREMENT = "measurement"
+
+    class SensorDeviceClass:
+        """Fallback sensor device class constants."""
+
+        MONETARY = "monetary"
 
 try:
     from homeassistant.helpers.event import async_track_time_interval
@@ -1701,12 +1710,14 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="cost_today",
         name_suffix="Cost Today",
         value_fn=estimated_cost_today_value,
+        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="average_cost_per_day",
         name_suffix="Average Cost Per Day",
         value_fn=average_cost_per_day_value,
+        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
@@ -1924,6 +1935,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="cost_cycle",
         name_suffix="Cost Cycle",
         value_fn=cost_cycle_value,
+        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
@@ -1931,6 +1943,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="cost_cycle_forecast",
         name_suffix="Cost Cycle Forecast",
         value_fn=cost_cycle_forecast_value,
+        device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
@@ -2687,6 +2700,10 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     @property
     def native_unit_of_measurement(self) -> str | None:
         """Return the sensor's native unit."""
+        if self.entity_description.device_class == SensorDeviceClass.MONETARY:
+            hass = getattr(self.coordinator, "hass", None)
+            currency = getattr(getattr(hass, "config", None), "currency", None)
+            return str(currency) if currency else None
         return self._attr_native_unit_of_measurement
 
     @property

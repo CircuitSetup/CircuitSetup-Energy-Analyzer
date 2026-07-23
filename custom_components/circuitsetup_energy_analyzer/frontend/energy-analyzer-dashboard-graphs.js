@@ -16,6 +16,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     set hass(value) {
       this._hass = value;
+      const active = this.shadowRoot && this.shadowRoot.activeElement;
+      if (active && active.matches("input, select, textarea")) return;
       this._render();
     }
 
@@ -60,6 +62,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
       }
+      if (unit === "currency") {
+        return this._formatCost(value);
+      }
       const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2;
       const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value);
       return unit ? `${number} ${unit}` : number;
@@ -103,6 +108,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .metric { background: var(--secondary-background-color, #f4f6f8); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; padding: 10px; }
         .metric span { color: var(--secondary-text-color, #5b6470); display: block; font-size: 12px; margin-bottom: 4px; }
         .metric strong { font-size: 16px; overflow-wrap: anywhere; }
+        .metric small { display: block; margin-top: 4px; }
         .banner { align-items: center; border: 1px solid var(--warning-color, #b7791f); border-radius: 6px; display: flex; justify-content: space-between; padding: 10px; }
         .banner.ready { border-color: var(--success-color, #2e7d32); }
         .flow { display: grid; gap: 8px; }
@@ -163,7 +169,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         });
       }
       const max = Math.max(...top.map((item) => item[key]), 1);
-      const unit = key === "energy" ? "kWh" : this._unit((values[0] || {}).cost_today_entity);
+      const unit = key === "energy" ? "kWh" : "currency";
       return `<section>
         <div class="controls">
           <h3>${this._escape(this._label("today_by_appliance", "Today by appliance"))}</h3>
@@ -203,9 +209,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const costToday = config.primary_mains && mains.cost_today_entity
         ? this._number(mains.cost_today_entity)
         : null;
-      const costUnit = this._unit(
-        mains.cost_today_entity || (appliances.find((item) => item.cost_today_entity) || {}).cost_today_entity,
-      );
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -239,7 +242,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <div class="kpis">
           ${this._metricHtml(housePowerLabel, housePower, "W")}
           ${this._metricHtml(this._label("energy_today", "Energy today"), energyToday, "kWh")}
-          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, costUnit)}
+          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, "currency")}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
@@ -398,6 +401,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       this.shadowRoot.querySelector("[data-appliance-search]").addEventListener("input", (event) => {
         this._search = event.target.value;
+      });
+      this.shadowRoot.querySelector("[data-appliance-search]").addEventListener("change", () => {
         this._render();
       });
       for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
@@ -411,13 +416,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _tile(item) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
-      const costUnit = this._unit(item.cost_today_entity);
       return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}">
         <strong>${this._escape(item.name)}</strong>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
           <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>
-          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, costUnit))}</span>
+          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
           <span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>
         </div>
       </button>`;
@@ -507,10 +511,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         value: row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost),
         cost_source: row.cost_source,
       })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
-      const currency = this._costUnit();
+      const currency = this._currencySymbol();
       const series = [
         energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", points: energyPoints },
-        costPoints.length && { name: this._label("cost", "Cost"), unit: currency, axis: energyPoints.length ? "right" : "left", points: costPoints },
+        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: energyPoints.length ? "right" : "left", points: costPoints },
       ].filter(Boolean);
       const chart = series.length ? this._chartSvg(series, {
         y_axis_label: energyPoints.length ? "kWh" : currency,
@@ -533,7 +537,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <h3>${this._escape(this._label("today_vs_normal", "Today versus normal"))}</h3>
               <div class="kpis">
                 ${this._metricHtml(this._label("energy_today", "Energy today"), metrics.energyToday, "kWh", metrics.averageEnergy)}
-                ${this._metricHtml(this._label("cost_today", "Cost today"), metrics.costToday, currency, metrics.averageCost)}
+                ${this._metricHtml(this._label("cost_today", "Cost today"), metrics.costToday, "currency", metrics.averageCost)}
               </div>
             </section>
             <section>
@@ -636,12 +640,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : Number.NaN;
     }
 
-    _costUnit() {
-      const appliances = this._dashboardConfig.appliances || [];
-      const entityId = (this._dashboardConfig.primary_mains || {}).cost_today_entity
-        || (appliances.find((item) => item.cost_today_entity) || {}).cost_today_entity;
-      return this._unit(entityId, (this._hass.config || {}).currency || "");
-    }
   }
 
   class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyzerPanel {

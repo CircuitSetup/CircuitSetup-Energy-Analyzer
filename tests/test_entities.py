@@ -2699,9 +2699,21 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.56
     state.cost_today_status_by_circuit["fridge"] = "unavailable"
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.48
+    assert descriptions["cost_today"].device_class == "monetary"
+    assert descriptions["average_cost_per_day"].device_class == "monetary"
     assert descriptions["average_cost_per_day"].value_fn(state, "fridge") == 0.3
     assert descriptions["average_kwh_per_day"].value_fn(state, "fridge") == 1.5
     assert descriptions["average_kwh_per_day"].native_unit_of_measurement == "kWh"
+    cost_entity = CircuitAnalyzerSensor(
+        SimpleNamespace(
+            data=state,
+            hass=SimpleNamespace(config=SimpleNamespace(currency="EUR")),
+        ),
+        entry_id="entry-1",
+        circuit=circuit,
+        description=descriptions["cost_today"],
+    )
+    assert cost_entity.native_unit_of_measurement == "EUR"
     assert CircuitAnalyzerSensor(
         SimpleNamespace(data=state),
         entry_id="entry-1",

@@ -10,6 +10,8 @@ views:
         column_span: 4
         cards:
           - type: custom:circuitsetup-energy-analyzer-house-flow
+            grid_options:
+              columns: 12
             title: Home energy summary
             setup_health_entity: sensor.circuitsetup_energy_analyzer_setup_health
             setup_health_path: /circuitsetup-energy-analyzer-evidence?setup_health=1
@@ -48,16 +50,9 @@ views:
                 cost_today_entity: sensor.hvac_cost_today
                 health_entity: sensor.hvac_health_summary
 
-  - type: sections
-    title: Appliances
-    path: appliances
-    icon: mdi:devices
-    max_columns: 4
-    sections:
-      - type: grid
-        column_span: 4
-        cards:
           - type: custom:circuitsetup-energy-analyzer-appliance-grid
+            grid_options:
+              columns: 12
             title: Appliances
             appliances:
               - circuit_id: refrigerator
@@ -90,6 +85,8 @@ views:
         column_span: 4
         cards:
           - type: custom:circuitsetup-energy-analyzer-energy-cost
+            grid_options:
+              columns: 12
             title: Energy and costs
             api_path: circuitsetup_energy_analyzer/appliance_insights
             primary_mains:
@@ -113,6 +110,8 @@ views:
                 average_kwh_entity: sensor.hvac_average_kwh_per_day
                 average_cost_entity: sensor.hvac_average_cost_per_day
           - type: entities
+            grid_options:
+              columns: 12
             title: Billing Cycle
             entities:
               - entity: sensor.mains_billing_cycle_usage
@@ -123,15 +122,17 @@ views:
                 name: Projected cost
 
   - type: sections
-    title: Mains & NILM
-    path: mains-nilm
-    icon: mdi:transmission-tower
+    title: Insights
+    path: insights
+    icon: mdi:lightbulb-on-outline
     max_columns: 4
     sections:
       - type: grid
         column_span: 4
         cards:
           - type: custom:circuitsetup-energy-analyzer-house-flow
+            grid_options:
+              columns: 12
             mode: mains
             title: Mains and NILM
             primary_mains:
@@ -146,26 +147,23 @@ views:
               nilm_signature_count_entity: sensor.mains_nilm_signature_count
               solar_surplus_power_entity: sensor.mains_solar_surplus_power
           - type: custom:circuitsetup-energy-analyzer-dashboard-graphs
+            grid_options:
+              columns: 12
             title: Defined NILM appliance power
             circuit_id: mains
             detail_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
           - type: button
+            grid_options:
+              columns: 12
             name: Review NILM Assignments
             icon: mdi:playlist-check
             tap_action:
               action: navigate
               navigation_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
 
-  - type: sections
-    title: Insights
-    path: insights
-    icon: mdi:lightbulb-on-outline
-    max_columns: 4
-    sections:
-      - type: grid
-        column_span: 4
-        cards:
           - type: history-graph
+            grid_options:
+              columns: 12
             title: HVAC activity and outdoor temperature
             hours_to_show: 168
             entities:

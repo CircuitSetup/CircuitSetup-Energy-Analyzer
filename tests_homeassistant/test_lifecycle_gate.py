@@ -447,9 +447,7 @@ def _assert_appliance_workflow_payloads(
     }
     assert set(views) == {
         "overview",
-        "appliances",
         "energy-costs",
-        "mains-nilm",
         "insights",
     }
     card_types = {
