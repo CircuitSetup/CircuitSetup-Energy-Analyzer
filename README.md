@@ -138,7 +138,7 @@ questions instead of raw diagnostic entity lists:
   alerts, first checks, and actions for one appliance or circuit. Empty evidence
   and check sections stay hidden, the activity facts and deduplicated history
   share a two-column layout, and the history graph moves between 24 hours, 7
-  days, and 30 days with point inspection in the chart readout.
+  days, and 30 days with point inspection in a Home Assistant-style hover tooltip.
 - **Appliance Status** keeps activity, electrical health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
@@ -377,7 +377,7 @@ A good dashboard order is:
 When a single appliance needs review, use this pattern:
 
 1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Energy Usage Today.
-2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover a point for its value and timestamp, and use the graph controls to zoom or pan.
+2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, and use the graph controls to zoom or pan.
 3. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
 4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
 5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.

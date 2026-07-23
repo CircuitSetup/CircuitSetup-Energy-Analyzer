@@ -2196,7 +2196,7 @@ for (const expected of [
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
   'data-chart-point="1"',
-  'data-chart-readout',
+  'data-chart-tooltip',
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
@@ -3847,7 +3847,7 @@ for (const expected of [
     )
 
 
-def test_chart_points_use_an_in_graph_readout_instead_of_tooltips() -> None:
+def test_chart_points_render_home_assistant_style_tooltip_markup() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
@@ -3872,15 +3872,18 @@ const html = panel._chartSvg(
   },
 );
 for (const expected of [
+  'data-chart-frame',
   'data-chart-point="1"',
   'data-chart-name="Kitchen Fridge"',
   'data-chart-value="123.46"',
   'data-chart-unit="W"',
-  'data-chart-readout',
+  'data-chart-tooltip',
   'data-chart-crosshair',
+  'stroke-width="1.5"',
 ]) {
   assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }
+assert.ok(!html.includes("data-chart-readout"), "fixed chart readout must be removed");
 assert.ok(!html.includes("<title>Kitchen Fridge"), "point tooltips must not be rendered");
 assert.ok(!html.includes("data-chart-right-axis"), "default charts must keep a single axis");
 """
