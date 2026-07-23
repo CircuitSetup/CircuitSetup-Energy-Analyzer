@@ -110,6 +110,7 @@ class _SettingsCoordinator:
         self.dirty_count = 0
         self.refreshed_recommendations: list[datetime] = []
         self.refreshed_circuits: list[tuple[str, datetime]] = []
+        self.refreshed_cost_estimates = 0
         self.updated: list[object] = []
         self.saved: list[datetime] = []
         self.notified = 0
@@ -187,6 +188,9 @@ class _SettingsCoordinator:
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated.append(state)
+
+    def refresh_cost_estimates(self) -> None:
+        self.refreshed_cost_estimates += 1
 
     async def _record_store_save(self, now: datetime) -> None:
         self.saved.append(now)
@@ -973,6 +977,7 @@ async def test_removing_utility_rate_sources_clears_the_last_known_rate() -> Non
     )
 
     assert "mains" not in coordinator.state.utility_cost_rate_by_circuit
+    assert coordinator.refreshed_cost_estimates == 1
 
 
 @pytest.mark.asyncio

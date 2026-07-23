@@ -1314,6 +1314,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._mark_store_dirty()
         return applied.events, applied.active_alerts
 
+    def refresh_cost_estimates(self: Self) -> None:
+        """Synchronize rate-derived cost views without recording a sample."""
+        self.state_reducer.apply_updates(
+            self.state,
+            self._cost_processor.estimate_state_updates(
+                self.circuit_configs,
+                self.state,
+            ),
+        )
+
     async def _async_save_store(
         self: Self,
         now: datetime,

@@ -1526,6 +1526,7 @@ class SettingsController:
             settings["measured_energy_entities"] = list(measured_entities)
         if not utility_entity or not utility_cost:
             coordinator.state.utility_cost_rate_by_circuit.pop(circuit_id, None)
+            coordinator.refresh_cost_estimates()
         await self._async_save_circuit_settings(
             circuit_id,
             coordinator.store_data.utility_comparison_settings_by_circuit,

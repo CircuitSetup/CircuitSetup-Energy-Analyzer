@@ -300,6 +300,39 @@ def test_appliance_detail_payload_includes_completed_daily_totals() -> None:
     assert all(item["date"] < "2026-07-22" for item in payload["daily_totals"])
 
 
+def test_appliance_daily_totals_follow_refreshed_effective_rate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.current_time = lambda: datetime(2026, 7, 22, 12, tzinfo=UTC)
+    coordinator.store_data.energy_usage_by_circuit["fridge"] = {
+        "days": [{"date": "2026-07-21", "usage_kwh": 2.0, "complete": True}]
+    }
+    coordinator.state.effective_electricity_rate_by_circuit["fridge"] = 0.25
+    coordinator.state.estimated_cost_today_by_circuit["fridge"] = 0.6
+    coordinator.state.average_cost_per_day_by_circuit["fridge"] = 0.38
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    assert payload["detail"]["cost_today"] == 0.6
+    assert payload["detail"]["average_cost_per_day"] == 0.38
+    assert payload["daily_totals"] == [
+        {"date": "2026-07-21", "energy_kwh": 2.0, "cost": 0.5}
+    ]
+
+    coordinator.state.effective_electricity_rate_by_circuit["fridge"] = None
+    coordinator.state.estimated_cost_today_by_circuit["fridge"] = None
+    coordinator.state.average_cost_per_day_by_circuit["fridge"] = None
+
+    payload = appliance_detail_payload([coordinator], circuit_id="fridge")
+
+    assert payload["detail"]["cost_today"] is None
+    assert payload["detail"]["average_cost_per_day"] is None
+    assert payload["daily_totals"][0]["cost"] is None
+
+
 def test_appliance_detail_payload_includes_energy_change_explanation() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from typing import Any
 
@@ -59,15 +59,12 @@ class CostProcessor:
         circuit_id = circuit_config.circuit_id
         settings = self._settings_for_config(circuit_config, circuit_id)
         utility_rate = self._utility_rate_for_circuit(circuit_id)
-        estimate_rate = (
-            float(utility_rate)
-            if utility_rate is not None and utility_rate > 0.0
-            else _positive_float_or_none(settings.default_rate_per_kwh)
+        estimate_updates = self._estimate_state_updates(
+            circuit_config,
+            context.state,
+            settings,
+            utility_rate,
         )
-        daily_kwh = context.state.daily_energy_usage_by_circuit.get(circuit_id)
-        average_kwh = context.state.average_kwh_per_day_by_circuit.get(circuit_id)
-        estimated_cost_today = _estimated_cost(daily_kwh, estimate_rate)
-        average_cost_per_day = _estimated_cost(average_kwh, estimate_rate)
         if utility_rate is not None and utility_rate > 0.0:
             settings = replace(
                 settings,
@@ -116,21 +113,57 @@ class CostProcessor:
                     ("cost_evidence_by_circuit", circuit_id),
                     cost_evidence_payload(result, contextual_comparison),
                 ),
-                StateUpdate(
-                    ("effective_electricity_rate_by_circuit", circuit_id),
-                    estimate_rate,
-                ),
-                StateUpdate(
-                    ("estimated_cost_today_by_circuit", circuit_id),
-                    estimated_cost_today,
-                ),
-                StateUpdate(
-                    ("average_cost_per_day_by_circuit", circuit_id),
-                    average_cost_per_day,
-                ),
+                *estimate_updates,
             ],
             store_dirty=True,
         )
+
+    def estimate_state_updates(
+        self,
+        circuit_configs: Iterable[CircuitConfig],
+        state: Any,
+    ) -> list[StateUpdate]:
+        """Refresh cost estimates without recording another energy sample."""
+        return [
+            update
+            for config in circuit_configs
+            for update in self._estimate_state_updates(
+                config,
+                state,
+                self._settings_for_config(config, config.circuit_id),
+                self._utility_rate_for_circuit(config.circuit_id),
+            )
+        ]
+
+    def _estimate_state_updates(
+        self,
+        circuit_config: CircuitConfig,
+        state: Any,
+        settings: CostSettings,
+        utility_rate: float | None,
+    ) -> list[StateUpdate]:
+        circuit_id = circuit_config.circuit_id
+        estimate_rate = _estimate_rate(settings, utility_rate)
+        return [
+            StateUpdate(
+                ("effective_electricity_rate_by_circuit", circuit_id),
+                estimate_rate,
+            ),
+            StateUpdate(
+                ("estimated_cost_today_by_circuit", circuit_id),
+                _estimated_cost(
+                    state.daily_energy_usage_by_circuit.get(circuit_id),
+                    estimate_rate,
+                ),
+            ),
+            StateUpdate(
+                ("average_cost_per_day_by_circuit", circuit_id),
+                _estimated_cost(
+                    state.average_kwh_per_day_by_circuit.get(circuit_id),
+                    estimate_rate,
+                ),
+            ),
+        ]
 
 
 def _estimated_cost(energy_kwh: Any, rate: float | None) -> float | None:
@@ -138,6 +171,12 @@ def _estimated_cost(energy_kwh: Any, rate: float | None) -> float | None:
     if value is None or rate is None:
         return None
     return round(max(value, 0.0) * rate, 2)
+
+
+def _estimate_rate(settings: CostSettings, utility_rate: float | None) -> float | None:
+    if utility_rate is not None and utility_rate > 0.0:
+        return float(utility_rate)
+    return _positive_float_or_none(settings.default_rate_per_kwh)
 
 
 def cost_evidence_payload(
