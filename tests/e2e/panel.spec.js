@@ -295,6 +295,17 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   );
 
   const search = card.locator("[data-appliance-search]");
+  await search.focus();
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_power", {
+      state: "150",
+      attributes: { unit_of_measurement: "W" },
+    });
+  });
+  await expect(search).toBeFocused();
+  await search.press("Tab");
+  await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("150 W");
+
   await search.pressSequentially("fridge");
   await expect(search).toHaveValue("fridge");
   await expect(search).toBeFocused();

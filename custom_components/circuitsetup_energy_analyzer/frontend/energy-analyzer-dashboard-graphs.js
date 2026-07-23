@@ -4,6 +4,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       super();
       this._dashboardConfig = {};
       this._hass = null;
+      this._deferredHassRender = false;
+      this._deferredRenderControl = null;
     }
 
     setConfig(config) {
@@ -17,7 +19,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     set hass(value) {
       this._hass = value;
       const active = this.shadowRoot && this.shadowRoot.activeElement;
-      if (active && active.matches("input, select, textarea")) return;
+      if (active && active.matches("input, select, textarea")) {
+        this._deferredHassRender = true;
+        this._resumeAfterControlBlur(active);
+        return;
+      }
+      this._deferredHassRender = false;
       this._render();
     }
 
@@ -27,6 +34,26 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     getCardSize() {
       return 6;
+    }
+
+    _resumeAfterControlBlur(control) {
+      if (this._deferredRenderControl === control) return;
+      this._deferredRenderControl = control;
+      control.addEventListener("blur", () => {
+        if (this._deferredRenderControl === control) {
+          this._deferredRenderControl = null;
+        }
+        queueMicrotask(() => {
+          if (!this._deferredHassRender) return;
+          const active = this.shadowRoot && this.shadowRoot.activeElement;
+          if (active && active.matches("input, select, textarea")) {
+            this._resumeAfterControlBlur(active);
+            return;
+          }
+          this._deferredHassRender = false;
+          this._render();
+        });
+      }, { once: true });
     }
 
     _label(key, fallback) {
