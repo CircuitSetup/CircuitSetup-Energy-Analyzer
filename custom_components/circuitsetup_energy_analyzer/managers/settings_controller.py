@@ -1059,6 +1059,7 @@ class SettingsController:
                 4,
             )
             coordinator.refresh_ux_state_for_circuit(config.circuit_id, now)
+        coordinator.refresh_cost_estimates()
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
