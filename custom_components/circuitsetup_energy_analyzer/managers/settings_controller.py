@@ -1525,7 +1525,12 @@ class SettingsController:
             settings["utility_statistic_period"] = statistic_period
         if measured_entities:
             settings["measured_energy_entities"] = list(measured_entities)
-        if not utility_entity or not utility_cost:
+        if (
+            not utility_entity
+            or not utility_cost
+            or utility_entity != current.utility_energy_entity
+            or utility_cost != current.utility_cost_entity
+        ):
             coordinator.state.utility_cost_rate_by_circuit.pop(circuit_id, None)
             coordinator.refresh_cost_estimates()
         await self._async_save_circuit_settings(

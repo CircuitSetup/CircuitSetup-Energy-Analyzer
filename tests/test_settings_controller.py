@@ -980,6 +980,33 @@ async def test_removing_utility_rate_sources_clears_the_last_known_rate() -> Non
     assert coordinator.refreshed_cost_estimates == 1
 
 
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"utility_energy_entity": "sensor.opower_replacement_usage"},
+        {"utility_cost_entity": "sensor.opower_replacement_cost"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_replacing_utility_rate_source_clears_the_last_known_rate(
+    replacement: dict[str, str],
+) -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    controller = settings_controller.SettingsController(coordinator)
+    await controller.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="sensor.opower_current_bill_usage",
+        utility_cost_entity="sensor.opower_current_bill_cost",
+    )
+    coordinator.refreshed_cost_estimates = 0
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.25
+
+    await controller.async_set_utility_comparison_settings("mains", **replacement)
+
+    assert "mains" not in coordinator.state.utility_cost_rate_by_circuit
+    assert coordinator.refreshed_cost_estimates == 1
+
+
 @pytest.mark.asyncio
 async def test_settings_controller_sets_goal_and_activity_settings() -> None:
     recommendation = _recommendation()
