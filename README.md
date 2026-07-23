@@ -163,7 +163,9 @@ questions instead of raw diagnostic entity lists:
   **Needs Attention** view shows only actionable setup/data problems, direct
   appliance findings, and NILM validation work. Findings are ranked, limited
   to three per appliance, and semantically deduplicated so repeated energy
-  wording does not crowd out electrical or data-quality issues.
+  wording does not crowd out electrical or data-quality issues. Setup actions
+  open the integration options page because Home Assistant does not provide a
+  stable URL for an individual options-flow setting.
 - **Advanced setting suggestions** show current value, default value, suggested
   value with units, what the setting controls, why the suggestion exists,
   expected effect, and reset/apply/dismiss actions. **Review Evidence** opens a
