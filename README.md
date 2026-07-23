@@ -609,7 +609,7 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 ### Billing, cost, and Time-of-Use
 
-Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Without a valid rate, cost is unavailable. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
+Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Whole-day appliance estimates use the fallback only when Time-of-Use is not configured. With Time-of-Use and no valid Opower-derived rate, whole-day cost estimates stay unavailable because daily totals do not preserve a tariff-period breakdown. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
 Configure per-circuit billing settings from:
 
@@ -1013,7 +1013,7 @@ Start with these on dashboards.
 
 Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
 
-The appliance detail view graphs daily energy and cost for up to 30 completed days. Cost values use the integration's effective main-analyzer rate; with Time-of-Use configured, these daily estimates use the configured default/base rate rather than the currently active TOU period, so they are not historical tariff reconstruction.
+The appliance detail view graphs daily energy and cost for up to 30 completed days. Cost values use the integration's effective main-analyzer rate. With Time-of-Use and no valid Opower-derived rate, the cost series and whole-day cost metrics remain unavailable because the retained daily energy total cannot reconstruct each tariff period.
 
 ### Running Vs Observations Vs Alerts
 

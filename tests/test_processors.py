@@ -2613,6 +2613,17 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert no_rate_updates[("estimated_cost_today_by_circuit", "fridge")] is None
     assert no_rate_updates[("average_cost_per_day_by_circuit", "fridge")] is None
 
+    tou_result = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            default_rate_per_kwh=0.20,
+            tou_rate_per_kwh=0.35,
+        ),
+    ).process(_energy_sample(115.0), config, context)
+    tou_updates = {update.path: update.value for update in tou_result.state_updates}
+    assert tou_updates[("effective_electricity_rate_by_circuit", "fridge")] is None
+    assert tou_updates[("estimated_cost_today_by_circuit", "fridge")] is None
+    assert tou_updates[("average_cost_per_day_by_circuit", "fridge")] is None
+
 
 def test_cost_processor_refreshes_estimates_when_the_utility_rate_changes() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -2798,6 +2809,7 @@ def test_cost_processor_prefers_the_derived_utility_rate() -> None:
     processor = CostProcessor(
         settings_for_config=lambda _config, _circuit_id: CostSettings(
             default_rate_per_kwh=0.20,
+            tou_rate_per_kwh=0.42,
         ),
         utility_rate_for_circuit=lambda _circuit_id: 0.31,
     )
@@ -2806,6 +2818,7 @@ def test_cost_processor_prefers_the_derived_utility_rate() -> None:
 
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.31
+    assert updates[("effective_electricity_rate_by_circuit", "fridge")] == 0.31
 
 
 def test_demand_processor_updates_state_and_returns_limit_alert() -> None:

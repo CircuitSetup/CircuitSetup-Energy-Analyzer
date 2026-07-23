@@ -176,6 +176,8 @@ def _estimated_cost(energy_kwh: Any, rate: float | None) -> float | None:
 def _estimate_rate(settings: CostSettings, utility_rate: float | None) -> float | None:
     if utility_rate is not None and utility_rate > 0.0:
         return float(utility_rate)
+    if _positive_float_or_none(settings.tou_rate_per_kwh) is not None:
+        return None
     return _positive_float_or_none(settings.default_rate_per_kwh)
 
 

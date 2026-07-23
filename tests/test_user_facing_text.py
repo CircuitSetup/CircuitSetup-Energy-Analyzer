@@ -6953,6 +6953,7 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     assert "effective main-analyzer rate" in readme_text
     assert "configured default/base rate" in readme_text
     assert "last known valid Opower-derived rate" in readme_text
+    assert "whole-day cost estimates stay unavailable" in readme_text
     assert "up to seven completed days" in readme_text
     assert "up to 30 completed days" in readme_text
     assert "Energy Usage Today can show 0 kWh for two different reasons" in readme_text
