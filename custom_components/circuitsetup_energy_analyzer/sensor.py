@@ -138,6 +138,7 @@ except ModuleNotFoundError:
         """Fallback sensor state class constants."""
 
         MEASUREMENT = "measurement"
+        TOTAL = "total"
 
     class SensorDeviceClass:
         """Fallback sensor device class constants."""
@@ -1711,14 +1712,13 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Cost Today",
         value_fn=estimated_cost_today_value,
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
     ),
     DiagnosticSensorDescription(
         key="average_cost_per_day",
         name_suffix="Average Cost Per Day",
         value_fn=average_cost_per_day_value,
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="average_kwh_per_day",
@@ -1936,7 +1936,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Cost Cycle",
         value_fn=cost_cycle_value,
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
@@ -1944,7 +1944,7 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Cost Cycle Forecast",
         value_fn=cost_cycle_forecast_value,
         device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
