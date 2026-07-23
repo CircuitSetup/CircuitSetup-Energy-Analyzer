@@ -199,7 +199,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._contributionMode = "energy";
       this._contributionWindow = "24h";
       this._contributionInsights = [];
-      this._rollingContributionTotals = {};
+      this._rollingContributionByCircuit = {};
       this._contributionLoadRequested = false;
     }
 
@@ -335,11 +335,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ? 30
         : this._contributionWindow === "7d" ? 7 : 0;
       if (!days) {
-        return appliances.map((appliance) => ({
-          ...appliance,
-          energy: this._rollingContributionTotals[appliance.energy_today_entity] ?? null,
-          cost: this._rollingContributionTotals[appliance.cost_today_entity] ?? null,
-        }));
+        return appliances.map((appliance) => {
+          const rolling = this._rollingContributionByCircuit[appliance.circuit_id] || {};
+          return {
+            ...appliance,
+            energy: rolling.energy ?? null,
+            cost: rolling.cost ?? null,
+          };
+        });
       }
       return appliances.map((appliance) => {
         const insight = this._contributionInsights.find((item) => (
@@ -369,11 +372,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadContributionInsights() {
-      const entityIds = [...new Set((this._dashboardConfig.appliances || [])
-        .flatMap((item) => [item.energy_today_entity, item.cost_today_entity])
+      const appliances = this._dashboardConfig.appliances || [];
+      const entityIds = [...new Set(appliances
+        .flatMap((item) => [...(item.power_entities || []), item.cost_today_entity])
         .filter(Boolean))];
-      const start = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const historyPath = `history/period/${start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&minimal_response=1&no_attributes=1`;
+      const end = Date.now();
+      const start = end - 24 * 60 * 60 * 1000;
+      const historyPath = `history/period/${new Date(start).toISOString()}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&minimal_response=1&no_attributes=1`;
       const [insightsResult, historyResult] = await Promise.allSettled([
         this._hass.callApi("GET", this._dashboardConfig.api_path),
         entityIds.length ? this._hass.callApi("GET", historyPath) : Promise.resolve([]),
@@ -382,37 +387,89 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._contributionInsights = Array.isArray(payload && payload.items)
         ? payload.items
         : [];
-      this._rollingContributionTotals = historyResult.status === "fulfilled"
-        ? this._rollingTotals(historyResult.value)
+      this._rollingContributionByCircuit = historyResult.status === "fulfilled"
+        ? this._rollingTotals(historyResult.value, appliances, start, end)
         : {};
       this._render();
     }
 
-    _rollingTotals(payload) {
+    _rollingTotals(payload, appliances, start, end) {
       if (!Array.isArray(payload)) return {};
-      const totals = {};
+      const history = {};
       for (const group of payload) {
         const rows = Array.isArray(group) ? group : [group];
         let entityId = "";
-        let previous = null;
-        let total = 0;
         for (const row of rows.filter(Boolean)) {
           entityId = row.entity_id || entityId;
-          const value = Number(row.state);
-          if (!Number.isFinite(value) || value < 0) {
-            previous = null;
-            continue;
-          }
-          if (previous !== null) {
-            total += value >= previous ? value - previous : value;
-          }
-          previous = value;
-        }
-        if (entityId && previous !== null) {
-          totals[entityId] = total;
+          if (!entityId) continue;
+          (history[entityId] ||= []).push(row);
         }
       }
-      return totals;
+      return Object.fromEntries(appliances.map((appliance) => {
+        const powerEntities = appliance.power_entities || [];
+        const energyValues = powerEntities.map((entityId) => (
+          this._integratedEnergy(history[entityId], start, end)
+        ));
+        const energy = powerEntities.length && energyValues.every(Number.isFinite)
+          ? energyValues.reduce((total, value) => total + value, 0)
+          : null;
+        const cost = appliance.cost_today_entity
+          ? this._counterIncrease(history[appliance.cost_today_entity])
+          : null;
+        return [appliance.circuit_id, { energy, cost }];
+      }));
+    }
+
+    _integratedEnergy(rows, start, end) {
+      const points = (rows || []).map((row) => ({
+        time: Date.parse(row.last_changed || row.last_updated || ""),
+        value: Number(row.state),
+      })).filter((point) => Number.isFinite(point.time) && point.time <= end)
+        .sort((left, right) => left.time - right.time);
+      let energy = 0;
+      let previous = null;
+      let sawValue = false;
+      for (const point of points) {
+        const time = Math.max(start, point.time);
+        if (!Number.isFinite(point.value) || point.value < 0) {
+          if (previous && time > previous.time) {
+            energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
+          }
+          previous = null;
+          continue;
+        }
+        const value = point.value;
+        sawValue = true;
+        if (previous && time > previous.time) {
+          energy += (previous.value + value) / 2 * (time - previous.time) / 3_600_000 / 1_000;
+        }
+        previous = { time, value };
+      }
+      if (previous && end > previous.time) {
+        energy += previous.value * (end - previous.time) / 3_600_000 / 1_000;
+      }
+      return sawValue ? energy : null;
+    }
+
+    _counterIncrease(rows) {
+      const values = (rows || []).map((row) => ({
+        time: Date.parse(row.last_changed || row.last_updated || ""),
+        value: Number(row.state),
+      })).filter((point) => Number.isFinite(point.time))
+        .sort((left, right) => left.time - right.time);
+      let previous = null;
+      let total = 0;
+      for (const point of values) {
+        if (!Number.isFinite(point.value) || point.value < 0) {
+          previous = null;
+          continue;
+        }
+        if (previous !== null) {
+          total += point.value >= previous ? point.value - previous : point.value;
+        }
+        previous = point.value;
+      }
+      return previous === null ? null : total;
     }
 
   }

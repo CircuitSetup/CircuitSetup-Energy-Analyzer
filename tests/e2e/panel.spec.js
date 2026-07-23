@@ -134,10 +134,8 @@ test("home energy card omits Active now and separates contribution", async ({ pa
       await route.fulfill({
         json: [
           [
-            { entity_id: "sensor.oven_energy", state: "5.0", last_changed: hoursAgo(24) },
-            { state: "6.0", last_changed: hoursAgo(8) },
-            { state: "0.2", last_changed: hoursAgo(2) },
-            { state: "0.7", last_changed: hoursAgo(0) },
+            { entity_id: "sensor.oven_power", state: "100", last_changed: hoursAgo(24) },
+            { state: "100", last_changed: hoursAgo(0) },
           ],
           [
             { entity_id: "sensor.oven_cost", state: "1.00", last_changed: hoursAgo(24) },
@@ -185,7 +183,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     "sensor.washer_cost": { state: "0.5", attributes: { unit_of_measurement: "USD" } },
     "sensor.washer_health": { state: "Normal", attributes: {} },
     "binary_sensor.oven_running": { state: "off", attributes: {} },
-    "sensor.oven_power": { state: "50", attributes: { unit_of_measurement: "W" } },
+    "sensor.oven_power": { state: "100", attributes: { unit_of_measurement: "W" } },
     "sensor.oven_energy": { state: "0.7", attributes: { unit_of_measurement: "kWh" } },
     "sensor.oven_cost": { state: "0.14", attributes: { unit_of_measurement: "USD" } },
     "sensor.oven_health": { state: "Needs attention", attributes: {} },
@@ -230,7 +228,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.getByRole("button", { name: "7 days" })).toBeVisible();
   await expect(card.getByRole("button", { name: "30 days" })).toBeVisible();
   await expect(card).toContainText("Unavailable");
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("1.7 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("2.4 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.34");
   await card.getByRole("button", { name: "7 days" }).click();
