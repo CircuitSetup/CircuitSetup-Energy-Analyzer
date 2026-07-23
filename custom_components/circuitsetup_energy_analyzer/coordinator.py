@@ -1321,6 +1321,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._cost_processor.estimate_state_updates(
                 self.circuit_configs,
                 self.state,
+                self.store_data.cost_by_circuit,
             ),
         )
 

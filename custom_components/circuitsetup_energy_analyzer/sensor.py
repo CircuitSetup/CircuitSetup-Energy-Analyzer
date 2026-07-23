@@ -686,7 +686,14 @@ def cost_cycle_forecast_value(state: Any, circuit_id: str) -> float:
 
 
 def estimated_cost_today_value(state: Any, circuit_id: str) -> float | None:
-    """Return today's estimated electricity cost when available."""
+    """Return today's actual or estimated electricity cost when available."""
+    if (
+        getattr(state, "cost_today_status_by_circuit", {}).get(circuit_id)
+        == "actual"
+    ):
+        actual = getattr(state, "cost_today_by_circuit", {}).get(circuit_id)
+        if actual is not None:
+            return actual
     return getattr(state, "estimated_cost_today_by_circuit", {}).get(circuit_id)
 
 

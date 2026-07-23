@@ -609,7 +609,7 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 ### Billing, cost, and Time-of-Use
 
-Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Whole-day appliance estimates use the fallback only when Time-of-Use is not configured. With Time-of-Use and no valid Opower-derived rate, whole-day cost estimates stay unavailable because daily totals do not preserve a tariff-period breakdown. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
+Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Whole-day appliance estimates use the fallback only when Time-of-Use is not configured. With Time-of-Use, exact analyzer-recorded costs are used for today and completed days when interval coverage is complete; otherwise ambiguous whole-day cost estimates stay unavailable because daily energy totals do not preserve a tariff-period breakdown. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
 Configure per-circuit billing settings from:
 
@@ -1006,14 +1006,14 @@ Start with these on dashboards.
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
 | Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
-| Cost Today | `sensor.<circuit>_cost_today` | Today's estimated cost at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average daily cost from the completed-day energy average at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Cost Today | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
 | Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data is available. | `kWh` |
 | Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Core/default visible for appliance circuits with active-power sensors. | `on`, `off` |
 
 Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
 
-The appliance detail view graphs daily energy and cost for up to 30 completed days. Cost values use the integration's effective main-analyzer rate. With Time-of-Use and no valid Opower-derived rate, the cost series and whole-day cost metrics remain unavailable because the retained daily energy total cannot reconstruct each tariff period.
+The appliance detail view graphs daily energy and cost for up to 30 completed days. Each cost point uses the analyzer-recorded daily cost when complete, then the effective main-analyzer rate when a flat or Opower-derived rate can price that day's energy. With Time-of-Use and no valid Opower-derived rate, days without complete recorded costs remain unavailable because a daily energy total cannot reconstruct each tariff period.
 
 ### Running Vs Observations Vs Alerts
 
@@ -1058,8 +1058,8 @@ These require cumulative energy inputs. Use Home Assistant's Energy Dashboard fo
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
-| **Cost Today** | `sensor.<circuit>_cost_today` | Today's estimated cost at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| **Average Cost per Day** | `sensor.<circuit>_average_cost_per_day` | Average daily cost from the completed-day energy average at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Cost Today** | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Average Cost per Day** | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
 | **Average kWh per Day** | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data exists. | `kWh` |
 | **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Expert Energy Detail group. | Percentage values |
 | **Energy Usage Status** | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. Use this to tell true zero usage from "waiting for first kWh increase." | Expert Energy Detail group. | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |

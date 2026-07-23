@@ -1891,9 +1891,20 @@ def _state_int_value(value: Any) -> int | None:
 
 
 def _estimated_cost_today(state: Any, circuit_id: str) -> float | None:
+    status = _mapping_status(
+        state,
+        "cost_today_status_by_circuit",
+        circuit_id,
+    )
+    if status == "actual":
+        actual = _state_number(state, "cost_today_by_circuit", circuit_id)
+        if actual is not None:
+            return actual
     estimated = _state_number(state, "estimated_cost_today_by_circuit", circuit_id)
     if estimated is not None:
         return estimated
+    if status == "unavailable":
+        return None
     evidence = _mapping_for_circuit(
         state,
         "cost_evidence_by_circuit",

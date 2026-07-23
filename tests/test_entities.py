@@ -2684,6 +2684,8 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
     state = AnalyzerState(
         estimated_cost_today_by_circuit={"fridge": 0.48},
+        cost_today_by_circuit={"fridge": 0.56},
+        cost_today_status_by_circuit={"fridge": "actual"},
         average_cost_per_day_by_circuit={"fridge": 0.3},
         average_kwh_per_day_by_circuit={"fridge": 1.5},
     )
@@ -2694,6 +2696,8 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
     )
 
     assert descriptions["daily_energy_usage"].name_suffix == "Energy Usage Today"
+    assert descriptions["cost_today"].value_fn(state, "fridge") == 0.56
+    state.cost_today_status_by_circuit["fridge"] = "unavailable"
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.48
     assert descriptions["average_cost_per_day"].value_fn(state, "fridge") == 0.3
     assert descriptions["average_kwh_per_day"].value_fn(state, "fridge") == 1.5

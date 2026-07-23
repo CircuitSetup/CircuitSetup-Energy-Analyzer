@@ -310,27 +310,33 @@ def test_appliance_daily_totals_follow_refreshed_effective_rate() -> None:
     coordinator.store_data.energy_usage_by_circuit["fridge"] = {
         "days": [{"date": "2026-07-21", "usage_kwh": 2.0, "complete": True}]
     }
+    coordinator.store_data.cost_by_circuit["fridge"] = {
+        "days": [{"date": "2026-07-21", "cost": 0.62, "complete": True}]
+    }
     coordinator.state.effective_electricity_rate_by_circuit["fridge"] = 0.25
     coordinator.state.estimated_cost_today_by_circuit["fridge"] = 0.6
+    coordinator.state.cost_today_by_circuit["fridge"] = 0.72
+    coordinator.state.cost_today_status_by_circuit["fridge"] = "actual"
     coordinator.state.average_cost_per_day_by_circuit["fridge"] = 0.38
 
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
 
-    assert payload["detail"]["cost_today"] == 0.6
+    assert payload["detail"]["cost_today"] == 0.72
     assert payload["detail"]["average_cost_per_day"] == 0.38
     assert payload["daily_totals"] == [
-        {"date": "2026-07-21", "energy_kwh": 2.0, "cost": 0.5}
+        {"date": "2026-07-21", "energy_kwh": 2.0, "cost": 0.62}
     ]
 
     coordinator.state.effective_electricity_rate_by_circuit["fridge"] = None
     coordinator.state.estimated_cost_today_by_circuit["fridge"] = None
+    coordinator.state.cost_today_status_by_circuit["fridge"] = "unavailable"
     coordinator.state.average_cost_per_day_by_circuit["fridge"] = None
 
     payload = appliance_detail_payload([coordinator], circuit_id="fridge")
 
     assert payload["detail"]["cost_today"] is None
     assert payload["detail"]["average_cost_per_day"] is None
-    assert payload["daily_totals"][0]["cost"] is None
+    assert payload["daily_totals"][0]["cost"] == 0.62
 
 
 def test_appliance_detail_payload_includes_energy_change_explanation() -> None:

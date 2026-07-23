@@ -755,6 +755,25 @@ def _appliance_daily_totals(
         rate = float(rate)
     except (TypeError, ValueError):
         rate = None
+    cost_histories = getattr(coordinator.store_data, "cost_by_circuit", {})
+    cost_history = (
+        cost_histories.get(detail.circuit_id, {})
+        if isinstance(cost_histories, Mapping)
+        else {}
+    )
+    cost_by_date: dict[str, float] = {}
+    for cost_day in (
+        cost_history.get("days", []) if isinstance(cost_history, Mapping) else []
+    ):
+        if not isinstance(cost_day, Mapping) or cost_day.get("complete") is not True:
+            continue
+        try:
+            cost_by_date[str(cost_day.get("date") or "")] = round(
+                max(float(cost_day["cost"]), 0.0),
+                2,
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
     complete = []
     for day in days:
         if (
@@ -777,9 +796,15 @@ def _appliance_daily_totals(
             {
                 "date": date_text,
                 "energy_kwh": energy_kwh,
-                "cost": round(energy_kwh * rate, 2)
-                if rate is not None and rate > 0
-                else None,
+                "cost": (
+                    cost_by_date[date_text]
+                    if date_text in cost_by_date
+                    else (
+                        round(energy_kwh * rate, 2)
+                        if rate is not None and rate > 0
+                        else None
+                    )
+                ),
             }
         )
     return sorted(complete, key=lambda item: item["date"])[-30:]

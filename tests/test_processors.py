@@ -2613,6 +2613,14 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert no_rate_updates[("estimated_cost_today_by_circuit", "fridge")] is None
     assert no_rate_updates[("average_cost_per_day_by_circuit", "fridge")] is None
 
+    store_data.cost_by_circuit["fridge"]["days"] = [
+        {
+            "date": f"2026-06-{day:02d}",
+            "cost": day / 10,
+            "complete": True,
+        }
+        for day in range(1, 9)
+    ]
     tou_result = CostProcessor(
         settings_for_config=lambda _config, _circuit_id: CostSettings(
             default_rate_per_kwh=0.20,
@@ -2622,7 +2630,7 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     tou_updates = {update.path: update.value for update in tou_result.state_updates}
     assert tou_updates[("effective_electricity_rate_by_circuit", "fridge")] is None
     assert tou_updates[("estimated_cost_today_by_circuit", "fridge")] is None
-    assert tou_updates[("average_cost_per_day_by_circuit", "fridge")] is None
+    assert tou_updates[("average_cost_per_day_by_circuit", "fridge")] == 0.5
 
 
 def test_cost_processor_refreshes_estimates_when_the_utility_rate_changes() -> None:

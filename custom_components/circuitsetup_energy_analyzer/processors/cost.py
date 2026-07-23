@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -59,20 +59,16 @@ class CostProcessor:
         circuit_id = circuit_config.circuit_id
         settings = self._settings_for_config(circuit_config, circuit_id)
         utility_rate = self._utility_rate_for_circuit(circuit_id)
-        estimate_updates = self._estimate_state_updates(
-            circuit_config,
-            context.state,
-            settings,
-            utility_rate,
-        )
+        estimate_settings = settings
         if utility_rate is not None and utility_rate > 0.0:
             settings = replace(
                 settings,
                 default_rate_per_kwh=utility_rate,
                 tou_rate_per_kwh=None,
             )
+        history = context.store_data.cost_by_circuit.setdefault(circuit_id, {})
         result = record_cost_sample(
-            context.store_data.cost_by_circuit.setdefault(circuit_id, {}),
+            history,
             circuit_id=circuit_id,
             timestamp=context.now,
             energy_kwh=sample.energy,
@@ -81,6 +77,13 @@ class CostProcessor:
         )
         if result is None:
             return FeatureResult()
+        estimate_updates = self._estimate_state_updates(
+            circuit_config,
+            context.state,
+            estimate_settings,
+            utility_rate,
+            history,
+        )
         contextual_comparison = _contextual_cost_comparison(
             result,
             circuit_config,
@@ -122,6 +125,7 @@ class CostProcessor:
         self,
         circuit_configs: Iterable[CircuitConfig],
         state: Any,
+        cost_history_by_circuit: Mapping[str, Any] | None = None,
     ) -> list[StateUpdate]:
         """Refresh cost estimates without recording another energy sample."""
         return [
@@ -132,6 +136,11 @@ class CostProcessor:
                 state,
                 self._settings_for_config(config, config.circuit_id),
                 self._utility_rate_for_circuit(config.circuit_id),
+                (
+                    cost_history_by_circuit.get(config.circuit_id, {})
+                    if cost_history_by_circuit is not None
+                    else {}
+                ),
             )
         ]
 
@@ -141,9 +150,16 @@ class CostProcessor:
         state: Any,
         settings: CostSettings,
         utility_rate: float | None,
+        history: Mapping[str, Any],
     ) -> list[StateUpdate]:
         circuit_id = circuit_config.circuit_id
         estimate_rate = _estimate_rate(settings, utility_rate)
+        average_cost = _average_completed_cost(history)
+        if average_cost is None:
+            average_cost = _estimated_cost(
+                state.average_kwh_per_day_by_circuit.get(circuit_id),
+                estimate_rate,
+            )
         return [
             StateUpdate(
                 ("effective_electricity_rate_by_circuit", circuit_id),
@@ -158,10 +174,7 @@ class CostProcessor:
             ),
             StateUpdate(
                 ("average_cost_per_day_by_circuit", circuit_id),
-                _estimated_cost(
-                    state.average_kwh_per_day_by_circuit.get(circuit_id),
-                    estimate_rate,
-                ),
+                average_cost,
             ),
         ]
 
@@ -171,6 +184,21 @@ def _estimated_cost(energy_kwh: Any, rate: float | None) -> float | None:
     if value is None or rate is None:
         return None
     return round(max(value, 0.0) * rate, 2)
+
+
+def _average_completed_cost(history: Mapping[str, Any]) -> float | None:
+    days = history.get("days")
+    if not isinstance(days, list):
+        return None
+    completed = []
+    for day in days:
+        if not isinstance(day, Mapping) or day.get("complete") is not True:
+            continue
+        value = _float_or_none(day.get("cost"))
+        if value is not None and value >= 0.0:
+            completed.append((str(day.get("date") or ""), value))
+    values = [value for _date, value in sorted(completed)[-7:]]
+    return round(sum(values) / len(values), 2) if values else None
 
 
 def _estimate_rate(settings: CostSettings, utility_rate: float | None) -> float | None:
