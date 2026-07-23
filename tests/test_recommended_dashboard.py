@@ -763,11 +763,11 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
     assert all(
         section["column_span"] == 4 for section in _dashboard_sections(dashboard)
     )
-    assert all(
-        card["grid_options"]["columns"] == 12
-        for section in _dashboard_sections(dashboard)
-        for card in section["cards"]
-    )
+    for section in _dashboard_sections(dashboard):
+        expected_columns = 48 // min(4, len(section["cards"]))
+        assert {
+            card["grid_options"]["columns"] for card in section["cards"]
+        } == {expected_columns}
     assert _card_of_type(
         dashboard,
         "custom:circuitsetup-energy-analyzer-appliance-grid",

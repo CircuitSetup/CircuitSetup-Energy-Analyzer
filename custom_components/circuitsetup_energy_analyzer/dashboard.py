@@ -246,6 +246,14 @@ def build_recommended_dashboard(
                 cards=insight_cards,
             )
         )
+    for view in views:
+        cards = view["sections"][0]["cards"]
+        card_columns = (DASHBOARD_COLUMNS * 12) // min(
+            DASHBOARD_COLUMNS,
+            max(1, len(cards)),
+        )
+        for card in cards:
+            card["grid_options"]["columns"] = card_columns
     return {
         "title": DASHBOARD_TITLE,
         "views": views,

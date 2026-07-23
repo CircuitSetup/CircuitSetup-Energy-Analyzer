@@ -345,7 +345,7 @@ The dashboard form has three setup paths:
 
 You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
 
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Home includes the appliance grid; Insights combines mains, NILM, contextual evidence, and Expert-only diagnostics. Empty optional views are omitted.
+The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Cards expand evenly across the available four-column grid instead of leaving unused columns. Home includes the appliance grid; Insights combines mains, NILM, contextual evidence, and Expert-only diagnostics. Empty optional views are omitted.
 
 Home live-sorts appliance tiles by attention state, Running state, current power, and name. Appliance rankings exclude mains, show the top five plus Other, and switch between daily kWh and Cost Today. The appliance grid provides live filters, search, detail navigation, and a selected 24-hour timeline built from each appliance's Running binary sensor rather than its text summary. Live state refresh pauses while a search or selector has focus.
 
