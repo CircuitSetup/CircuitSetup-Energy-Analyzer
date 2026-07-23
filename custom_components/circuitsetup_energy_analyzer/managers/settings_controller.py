@@ -1059,6 +1059,7 @@ class SettingsController:
                 4,
             )
             coordinator.refresh_ux_state_for_circuit(config.circuit_id, now)
+        coordinator.refresh_cost_estimates()
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -1524,6 +1525,14 @@ class SettingsController:
             settings["utility_statistic_period"] = statistic_period
         if measured_entities:
             settings["measured_energy_entities"] = list(measured_entities)
+        if (
+            not utility_entity
+            or not utility_cost
+            or utility_entity != current.utility_energy_entity
+            or utility_cost != current.utility_cost_entity
+        ):
+            coordinator.state.utility_cost_rate_by_circuit.pop(circuit_id, None)
+            coordinator.refresh_cost_estimates()
         await self._async_save_circuit_settings(
             circuit_id,
             coordinator.store_data.utility_comparison_settings_by_circuit,

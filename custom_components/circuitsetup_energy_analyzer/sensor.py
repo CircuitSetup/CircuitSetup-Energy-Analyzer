@@ -685,6 +685,28 @@ def cost_cycle_forecast_value(state: Any, circuit_id: str) -> float:
     )
 
 
+def estimated_cost_today_value(state: Any, circuit_id: str) -> float | None:
+    """Return today's actual or estimated electricity cost when available."""
+    if (
+        getattr(state, "cost_today_status_by_circuit", {}).get(circuit_id)
+        == "actual"
+    ):
+        actual = getattr(state, "cost_today_by_circuit", {}).get(circuit_id)
+        if actual is not None:
+            return actual
+    return getattr(state, "estimated_cost_today_by_circuit", {}).get(circuit_id)
+
+
+def average_cost_per_day_value(state: Any, circuit_id: str) -> float | None:
+    """Return the daily cost average when available."""
+    return getattr(state, "average_cost_per_day_by_circuit", {}).get(circuit_id)
+
+
+def average_kwh_per_day_value(state: Any, circuit_id: str) -> float | None:
+    """Return the daily energy average when available."""
+    return getattr(state, "average_kwh_per_day_by_circuit", {}).get(circuit_id)
+
+
 def cost_status_value(state: Any, circuit_id: str) -> str:
     """Return the cost tracker status."""
     return str(
@@ -1493,6 +1515,9 @@ SENSOR_ICONS: Mapping[str, str] = {
     "water_flow_correlation": "mdi:water-sync",
     "water_flow_mismatch_minutes": "mdi:pipe-leak",
     "daily_energy_usage": "mdi:counter",
+    "cost_today": "mdi:cash",
+    "average_cost_per_day": "mdi:cash-clock",
+    "average_kwh_per_day": "mdi:chart-line",
     "energy_usage_share": "mdi:chart-pie",
     "energy_usage_status": "mdi:lightning-bolt-outline",
     "energy_goal_usage": "mdi:target",
@@ -1666,11 +1691,30 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
-        name_suffix="Daily Energy Usage",
+        name_suffix="Energy Usage Today",
         value_fn=daily_energy_usage_value,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
+    ),
+    DiagnosticSensorDescription(
+        key="cost_today",
+        name_suffix="Cost Today",
+        value_fn=estimated_cost_today_value,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="average_cost_per_day",
+        name_suffix="Average Cost Per Day",
+        value_fn=average_cost_per_day_value,
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    DiagnosticSensorDescription(
+        key="average_kwh_per_day",
+        name_suffix="Average kWh Per Day",
+        value_fn=average_kwh_per_day_value,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="energy_usage_share",
@@ -1920,6 +1964,9 @@ _SUMMARY_SENSOR_KEYS = {
     "electrical_health",
     "energy_summary",
     "daily_energy_usage",
+    "cost_today",
+    "average_cost_per_day",
+    "average_kwh_per_day",
     "nilm_signature_count",
     "nilm_unknown_loads",
 }
@@ -2016,6 +2063,7 @@ _CORE_SENSOR_KEYS = {
 }
 _ENERGY_USAGE_SENSOR_KEYS = {
     "daily_energy_usage",
+    "average_kwh_per_day",
     "energy_usage_share",
     "energy_usage_status",
 }
@@ -2061,6 +2109,8 @@ _BILLING_SENSOR_KEYS = {
     "billing_cycle_forecast",
 }
 _COST_SENSOR_KEYS = {
+    "cost_today",
+    "average_cost_per_day",
     "cost_cycle",
     "cost_cycle_forecast",
 }
@@ -2227,6 +2277,7 @@ def sensor_description_applies(
         return has_energy_data and (
             _configured_positive(tariff, "default_rate_per_kwh")
             or _configured_positive(tariff, "tou_rate_per_kwh")
+            or _has_utility_cost_rate(coordinator)
         )
     if key in _STANDBY_SENSOR_KEYS:
         return (
@@ -2351,6 +2402,38 @@ def _stored_settings(coordinator: Any, field_name: str, circuit: Any) -> bool:
         return False
     settings = settings_by_circuit.get(_circuit_id(circuit), {})
     return isinstance(settings, Mapping) and bool(settings)
+
+
+def _has_utility_cost_rate(coordinator: Any) -> bool:
+    state = getattr(coordinator, "data", None)
+    if (
+        effective_electricity_rate(
+            getattr(state, "utility_cost_rate_by_circuit", {}),
+        )
+        > 0.0
+    ):
+        return True
+
+    store_data = getattr(coordinator, "store_data", None)
+    stored = getattr(store_data, "utility_comparison_settings_by_circuit", {})
+    configured = _coordinator_config_value(
+        coordinator,
+        CONF_UTILITY_COMPARISON_SETTINGS,
+    )
+    for settings_by_circuit in (stored, configured):
+        if not isinstance(settings_by_circuit, Mapping):
+            continue
+        for settings in settings_by_circuit.values():
+            if not isinstance(settings, Mapping):
+                continue
+            has_cost = bool(str(settings.get("utility_cost_entity") or "").strip())
+            has_energy = any(
+                bool(str(settings.get(key) or "").strip())
+                for key in ("utility_energy_entity", "utility_statistic_id")
+            )
+            if has_cost and has_energy:
+                return True
+    return False
 
 
 def _has_temperature_source(coordinator: Any) -> bool:

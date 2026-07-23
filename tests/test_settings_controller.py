@@ -58,6 +58,7 @@ class _SettingsCoordinator:
     def __init__(self, recommendation: SettingRecommendation) -> None:
         self.state = SimpleNamespace(
             cost_current_rate_by_circuit={},
+            utility_cost_rate_by_circuit={},
             leg_imbalance_evidence_by_circuit={},
             metric_consistency_evidence_by_circuit={},
             balance_evidence_by_circuit={},
@@ -109,6 +110,7 @@ class _SettingsCoordinator:
         self.dirty_count = 0
         self.refreshed_recommendations: list[datetime] = []
         self.refreshed_circuits: list[tuple[str, datetime]] = []
+        self.refreshed_cost_estimates = 0
         self.updated: list[object] = []
         self.saved: list[datetime] = []
         self.notified = 0
@@ -186,6 +188,9 @@ class _SettingsCoordinator:
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated.append(state)
+
+    def refresh_cost_estimates(self) -> None:
+        self.refreshed_cost_estimates += 1
 
     async def _record_store_save(self, now: datetime) -> None:
         self.saved.append(now)
@@ -960,6 +965,49 @@ async def test_settings_controller_sets_billing_cost_and_utility_settings() -> N
 
 
 @pytest.mark.asyncio
+async def test_removing_utility_rate_sources_clears_the_last_known_rate() -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.25
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="",
+        utility_cost_entity="",
+    )
+
+    assert "mains" not in coordinator.state.utility_cost_rate_by_circuit
+    assert coordinator.refreshed_cost_estimates == 1
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"utility_energy_entity": "sensor.opower_replacement_usage"},
+        {"utility_cost_entity": "sensor.opower_replacement_cost"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_replacing_utility_rate_source_clears_the_last_known_rate(
+    replacement: dict[str, str],
+) -> None:
+    coordinator = _SettingsCoordinator(_recommendation())
+    controller = settings_controller.SettingsController(coordinator)
+    await controller.async_set_utility_comparison_settings(
+        "mains",
+        utility_energy_entity="sensor.opower_current_bill_usage",
+        utility_cost_entity="sensor.opower_current_bill_cost",
+    )
+    coordinator.refreshed_cost_estimates = 0
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.25
+
+    await controller.async_set_utility_comparison_settings("mains", **replacement)
+
+    assert "mains" not in coordinator.state.utility_cost_rate_by_circuit
+    assert coordinator.refreshed_cost_estimates == 1
+
+
+@pytest.mark.asyncio
 async def test_settings_controller_sets_goal_and_activity_settings() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
@@ -1192,6 +1240,94 @@ def test_global_cost_settings_are_used_for_each_circuit() -> None:
     assert cost.tou_end == "21:00"
     assert cost.tou_weekdays == (0, 1, 2, 3, 4)
     assert cost.tou_name == "Peak"
+
+
+@pytest.mark.asyncio
+async def test_global_cost_rate_refreshes_estimates_without_a_utility_rate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    coordinator = _SettingsCoordinator(_recommendation())
+    coordinator.state = AnalyzerState()
+    coordinator.state.daily_energy_usage_by_circuit["fridge"] = 2.0
+    coordinator.state.average_kwh_per_day_by_circuit["fridge"] = 1.2
+    controller = settings_controller.SettingsController(coordinator)
+    processor = CostProcessor(
+        settings_for_config=controller.cost_settings_for_config,
+        utility_rate_for_circuit=lambda _circuit_id: None,
+    )
+
+    def refresh_cost_estimates() -> None:
+        coordinator.refreshed_cost_estimates += 1
+        StateReducer().apply_updates(
+            coordinator.state,
+            processor.estimate_state_updates(
+                coordinator.circuit_configs,
+                coordinator.state,
+            ),
+        )
+
+    coordinator.refresh_cost_estimates = refresh_cost_estimates
+
+    await controller.async_set_global_cost_rate(0.25)
+
+    assert coordinator.state.effective_electricity_rate_by_circuit["fridge"] == 0.25
+    assert coordinator.state.estimated_cost_today_by_circuit["fridge"] == 0.5
+    assert coordinator.state.average_cost_per_day_by_circuit["fridge"] == 0.3
+
+    await controller.async_set_global_cost_rate(0.31)
+
+    assert coordinator.state.effective_electricity_rate_by_circuit["fridge"] == 0.31
+    assert coordinator.state.estimated_cost_today_by_circuit["fridge"] == 0.62
+    assert coordinator.state.average_cost_per_day_by_circuit["fridge"] == 0.37
+
+
+@pytest.mark.asyncio
+async def test_global_cost_rate_keeps_retained_utility_rate_precedence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    coordinator = _SettingsCoordinator(_recommendation())
+    coordinator.state = AnalyzerState()
+    coordinator.state.daily_energy_usage_by_circuit["fridge"] = 2.0
+    coordinator.state.average_kwh_per_day_by_circuit["fridge"] = 1.2
+    coordinator.state.utility_cost_rate_by_circuit["mains"] = 0.4
+    controller = settings_controller.SettingsController(coordinator)
+    processor = CostProcessor(
+        settings_for_config=controller.cost_settings_for_config,
+        utility_rate_for_circuit=lambda _circuit_id: (
+            coordinator.state.utility_cost_rate_by_circuit.get("mains")
+        ),
+    )
+
+    def refresh_cost_estimates() -> None:
+        coordinator.refreshed_cost_estimates += 1
+        StateReducer().apply_updates(
+            coordinator.state,
+            processor.estimate_state_updates(
+                coordinator.circuit_configs,
+                coordinator.state,
+            ),
+        )
+
+    coordinator.refresh_cost_estimates = refresh_cost_estimates
+
+    await controller.async_set_global_cost_rate(0.25)
+
+    assert coordinator.state.cost_current_rate_by_circuit["fridge"] == 0.25
+    assert coordinator.state.effective_electricity_rate_by_circuit["fridge"] == 0.4
+    assert coordinator.state.estimated_cost_today_by_circuit["fridge"] == 0.8
+    assert coordinator.state.average_cost_per_day_by_circuit["fridge"] == 0.48
 
 
 

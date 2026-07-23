@@ -138,6 +138,68 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert "workspace_call_api_path" not in payload["nilm"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action_name",
+    (
+        "async_acknowledge_alert",
+        "async_mark_alert_expected",
+        "async_mark_alert_unhelpful",
+    ),
+)
+async def test_alert_evidence_payload_hides_retired_action_cache(
+    action_name: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers import evidence_actions
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(feature="runtime")
+    alert_id = notification_id_for_alert(alert)
+    coordinator = _coordinator(alert)
+    coordinator.state.active_alerts_by_circuit = {"hvac": [alert]}
+    coordinator.state.anomaly_score_by_circuit = {"hvac": 2.1}
+    coordinator.state.alert_evidence_by_circuit = {
+        "hvac": {
+            "alert_id": alert_id,
+            "feature": "runtime",
+            "message": "Possible issue",
+        }
+    }
+    coordinator.store_data.alert_feedback = {}
+    coordinator.current_time = lambda: datetime(2026, 6, 6, tzinfo=UTC)
+    coordinator.refresh_all_ux_state = lambda now: None
+    coordinator.async_set_updated_data = lambda state: None
+    coordinator.apply_nilm_alert_feedback = lambda alert, action, now: None
+    coordinator.circuit_registry = SimpleNamespace(config_for_circuit=lambda _: None)
+
+    async def save_if_dirty(now: datetime) -> None:
+        del now
+
+    async def dismiss_alert(alert_id: str) -> None:
+        del alert_id
+
+    coordinator.store_persistence = SimpleNamespace(
+        mark_dirty=lambda: None,
+        async_save_if_dirty=save_if_dirty,
+    )
+    coordinator.notification_controller = SimpleNamespace(
+        async_dismiss_alert_notification=dismiss_alert,
+    )
+
+    assert await getattr(
+        evidence_actions.EvidenceActionController(coordinator),
+        action_name,
+    )(alert_id)
+
+    assert alert_evidence_payload(
+        [coordinator],
+        alert_id=alert_id,
+        circuit_id="hvac",
+    )["alert"] is None
+
+
 def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

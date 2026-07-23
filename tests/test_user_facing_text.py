@@ -707,6 +707,13 @@ def test_runtime_english_translation_is_the_single_source() -> None:
     assert translated_init["menu_options"]
 
 
+def test_daily_energy_sensor_uses_today_label() -> None:
+    label = _translations()["entity"]["sensor"]["daily_energy_usage"]["name"]
+
+    assert label == "Energy usage today"
+    assert label != "Daily energy usage"
+
+
 def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions() -> (
     None
 ):
@@ -1457,6 +1464,10 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "_renderApplianceDetailBody",
         '_panelText("headers.appliance_detail")',
         '_panelText("appliance_detail.today_vs_normal")',
+        "data-appliance-daily-cost",
+        "payload.daily_totals",
+        "average_cost_per_day",
+        "average_kwh_per_day",
         "detail.recent_timeline",
         "_renderApplianceTimeline",
         '_panelText("appliance_detail.behavior_expectations")',
@@ -1698,6 +1709,8 @@ panel._applianceDetail = {
     runtime_today_seconds: 7200,
     run_count_today: 3,
     cost_today: 0.6,
+    average_cost_per_day: 0.5,
+    average_kwh_per_day: 2.1,
     recent_timeline: { items: [] },
     today_vs_normal: [{
       metric_id: "cost_today",
@@ -1715,11 +1728,19 @@ panel._applianceDetail = {
     what_to_check_first: [],
     active_alerts: []
   },
+  daily_totals: [
+    { date: "2026-07-10", energy_kwh: 2, cost: 0.5 },
+    { date: "2026-07-11", energy_kwh: 2.2, cost: 0.55 },
+  ],
   actions: {}
 };
 const html = panel._renderApplianceDetailBody();
 for (const expected of [
+  'data-appliance-daily-cost',
   "Cost Today",
+  "Average Cost per Day",
+  "kWh Today",
+  "Average kWh per Day",
   "€0.60",
   "Cost today",
   "Normal",
@@ -1732,6 +1753,41 @@ for (const expected of [
 if (html.includes("$")) {
   throw new Error(`cost display hardcoded dollars: ${html}`);
 }
+assert.equal((html.match(/>Cost Today</g) || []).length, 1);
+assert.equal((html.match(/class="chart"/g) || []).length, 1);
+assert.ok(html.includes('data-chart-right-axis="EUR"'));
+assert.equal((html.match(/stroke-dasharray="6 4"/g) || []).length, 1);
+assert.ok(!html.includes("What To Check First"));
+"""
+    )
+
+
+def test_appliance_daily_cost_chart_omits_absent_costs_and_keeps_home_assistant_dates() -> (
+    None
+):
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { currency: "USD", time_zone: "America/New_York" } };
+const noRateHtml = panel._renderApplianceDailyCost({ daily_totals: [
+  { date: "2026-01-01", energy_kwh: 2.0, cost: null },
+  { date: "2026-01-02", energy_kwh: 2.1, cost: undefined },
+  { date: "2026-01-03", energy_kwh: 2.2, cost: Number.NaN },
+] }, {});
+assert.equal((noRateHtml.match(/class="chart"/g) || []).length, 1);
+assert.ok(!noRateHtml.includes("data-chart-right-axis"));
+assert.ok(!noRateHtml.includes('stroke-dasharray="6 4"'));
+
+const browserParse = context.Date.parse;
+context.Date.parse = (value) => browserParse(String(value).endsWith("T12:00:00") ? `${value}+09:00` : value);
+const timezoneHtml = panel._renderApplianceDailyCost({ daily_totals: [
+  { date: "2026-01-01", energy_kwh: 2.0, cost: null },
+] }, {});
+const time = Number(timezoneHtml.match(/data-chart-time="(\\d+)"/)[1]);
+const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+}).formatToParts(new Date(time)).map((part) => [part.type, part.value]));
+assert.equal(`${parts.year}-${parts.month}-${parts.day}`, "2026-01-01");
 """
     )
 
@@ -3800,6 +3856,7 @@ const html = panel._chartSvg(
   [
     {
       name: "Kitchen Fridge",
+      unit: "kWh",
       points: [
         {
           time: Date.parse("2026-06-24T18:12:00Z"),
@@ -3825,6 +3882,108 @@ for (const expected of [
   assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }
 assert.ok(!html.includes("<title>Kitchen Fridge"), "point tooltips must not be rendered");
+assert.ok(!html.includes("data-chart-right-axis"), "default charts must keep a single axis");
+"""
+    )
+
+
+def test_chart_supports_opt_in_dual_axes_with_series_units() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "kWh per Day", unit: "kWh", points: [{ time: Date.parse("2026-06-24T18:12:00Z"), value: 2.5 }] },
+    { name: "Cost per Day", unit: "EUR", axis: "right", points: [{ time: Date.parse("2026-06-24T18:12:00Z"), value: 0.6 }] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "EUR" },
+);
+for (const expected of [
+  'data-chart-right-axis="EUR"',
+  'data-chart-unit="kWh"',
+  'data-chart-unit="EUR"',
+  'stroke-dasharray="6 4"',
+  '>kWh<',
+  '>EUR<',
+]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
+}
+assert.match(html, /Values range from 2[.]5 kWh to 2[.]5 kWh.*Right axis ranges from 0[.]6 EUR to 0[.]6 EUR/);
+"""
+    )
+
+
+def test_dual_axis_series_scale_to_their_own_min_and_max() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg(
+  [
+    { name: "Energy", unit: "kWh", points: [
+      { time: Date.parse("2026-06-24T18:00:00Z"), value: 1.9 },
+      { time: Date.parse("2026-06-24T19:00:00Z"), value: 2.3 },
+    ] },
+    { name: "Cost", unit: "USD", axis: "right", points: [
+      { time: Date.parse("2026-06-24T18:00:00Z"), value: 0.34 },
+      { time: Date.parse("2026-06-24T19:00:00Z"), value: 0.41 },
+    ] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const pointY = (name, value) => Number(
+  Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => (
+    circle[0].includes(`data-chart-name="${name}"`)
+      && circle[0].includes(`data-chart-value="${value}"`)
+  ))[0].match(/cy="([^"]+)"/)[1],
+);
+assert.equal(pointY("Energy", "2.3"), 18);
+assert.equal(pointY("Energy", "1.9"), 278);
+assert.equal(pointY("Cost", "0.41"), 18);
+assert.equal(pointY("Cost", "0.34"), 278);
+"""
+    )
+
+
+def test_dual_axis_preserves_tiny_positive_ranges() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const start = Date.parse("2026-06-24T18:00:00Z");
+const end = Date.parse("2026-06-24T19:00:00Z");
+const html = panel._chartSvg(
+  [
+    { name: "Energy", unit: "kWh", points: [{ time: start, value: 0 }, { time: end, value: 1e-17 }] },
+    { name: "Cost", unit: "USD", axis: "right", points: [{ time: start, value: 0 }, { time: end, value: 1e-18 }] },
+  ],
+  { y_axis_label: "kWh", right_y_axis_label: "USD" },
+);
+const pointY = (name, time) => Number(
+  Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => (
+    circle[0].includes(`data-chart-name="${name}"`)
+      && circle[0].includes(`data-chart-time="${time}"`)
+  ))[0].match(/cy="([^"]+)"/)[1],
+);
+assert.equal(pointY("Energy", end), 18);
+assert.equal(pointY("Cost", end), 18);
+"""
+    )
+
+
+def test_default_chart_keeps_legacy_minimum_range() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const html = panel._chartSvg([{ name: "Cost", points: [
+  { time: Date.parse("2026-06-24T18:00:00Z"), value: 0.34 },
+  { time: Date.parse("2026-06-24T19:00:00Z"), value: 0.41 },
+] }], { y_axis_label: "USD" });
+const maxPoint = Array.from(html.matchAll(/<circle[^>]+>/g)).find((circle) => circle[0].includes('data-chart-value="0.41"'))[0];
+assert.equal(maxPoint.match(/cy="([^"]+)"/)[1], "259.8");
+assert.ok(!html.includes("data-chart-right-axis"));
 """
     )
 
@@ -6786,7 +6945,18 @@ def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "Core Appliance Status Sensors" in readme_text
-    assert "Daily Energy Usage can show 0 kWh for two different reasons" in readme_text
+    assert "Energy Usage Today" in readme_text
+    assert "Daily Energy Usage" not in readme_text
+    assert "sensor.<circuit>_daily_energy_usage" in readme_text
+    assert "Average kWh per Day" in readme_text
+    assert "Average Cost per Day" in readme_text
+    assert "effective main-analyzer rate" in readme_text
+    assert "configured default/base rate" in readme_text
+    assert "last known valid Opower-derived rate" in readme_text
+    assert "whole-day cost estimates stay unavailable" in readme_text
+    assert "up to seven completed days" in readme_text
+    assert "up to 30 completed days" in readme_text
+    assert "Energy Usage Today can show 0 kWh for two different reasons" in readme_text
     assert "Waiting For Energy Change" in readme_text
     assert "waiting_for_delta" in readme_text
     assert "true zero usage" in readme_text

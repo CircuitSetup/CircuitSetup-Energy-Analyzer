@@ -120,7 +120,7 @@ Use the integration in this order:
 - **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
 - **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
 - **Classify circuits deliberately**: choose the appliance type and source sensors, then review the automatically derived circuit mode and power-flow mode before trusting appliance evidence.
-- **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage, and the Running binary sensor.
+- **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Energy Usage Today, and the Running binary sensor.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
 - **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
 - **When an alert appears**: read the notification, open the evidence view, compare observed and expected values, and verify source data before treating it as an appliance problem.
@@ -295,7 +295,7 @@ Most users should build dashboards from the summary entities first. Detailed dia
 
 The integration has an **Entity Detail Level** option under **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure**:
 
-- **Simple**: default for most homes. Enables the main summary entities, Daily Energy Usage when usable, and appliance Running sensors.
+- **Simple**: default for most homes. Enables the main summary entities, Energy Usage Today when usable, and appliance Running sensors.
 - **Standard**: also enables configured feature-status entities, such as energy goals, billing/cost, weather context, water-flow context, and other features you turned on.
 - **Expert**: creates only the diagnostic or graph groups you select under **Expert Entity Groups**, useful for troubleshooting and custom diagnostic dashboards.
 
@@ -312,7 +312,7 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | **Activity Summary** | `sensor.<circuit>_activity_summary` | What the appliance appears to be doing now: running, idle, standby, on, off, or no recent activity. |
 | **Electrical Health** | `sensor.<circuit>_electrical_health` | Combined electrical condition, including power-quality, metric-consistency, and leg-balance evidence when available. |
 | **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goal, billing, cost, and high-usage evidence. |
-| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh when a cumulative energy source is available. |
+| **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh when a cumulative energy source is available. |
 | **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available from the Expert Developer Diagnostics group or by enabling the entity. |
 
@@ -352,7 +352,7 @@ For manual dashboards, start with one simple card per important appliance:
 1. Activity Summary
 2. Electrical Health
 3. Energy Summary
-4. Daily Energy Usage
+4. Energy Usage Today
 
 Add the Running binary sensor where you want automations, such as washer finished, dryer finished, pump running, or microwave activity.
 
@@ -366,9 +366,9 @@ docs/dashboard-example.yaml
 
 A good dashboard order is:
 
-1. **Appliance status**: Activity Summary, Electrical Health, Energy Summary, Daily Energy Usage.
+1. **Appliance status**: Activity Summary, Electrical Health, Energy Summary, Energy Usage Today.
 2. **Automations**: Running binary sensors for appliance-complete notifications.
-3. **Energy tracking**: Daily Energy Usage and Energy Summary.
+3. **Energy tracking**: Energy Usage Today and Energy Summary.
 4. **Electrical review**: Electrical Health, plus detailed diagnostics only when needed.
 5. **Setup/data quality**: Repairs, notifications, and entity attributes.
 
@@ -376,10 +376,10 @@ A good dashboard order is:
 
 When a single appliance needs review, use this pattern:
 
-1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Daily Energy Usage.
+1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Energy Usage Today.
 2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover a point for its value and timestamp, and use the graph controls to zoom or pan.
 3. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
-4. **Energy tracking**: Daily Energy Usage, Energy Usage Status, goals, billing, and cost where those features are enabled.
+4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
 5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
 6. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
 
@@ -609,7 +609,7 @@ Configure global flow sensors during setup or later from **Configure**. Use **Ad
 
 ### Billing, cost, and Time-of-Use
 
-Billing and cost features estimate usage and cost from analyzer-retained data. When matching Opower or utility current-bill usage and cost sensors are configured, the analyzer divides cost by kWh and uses that shared rate for every appliance. The read-only global **Electricity Rate** sensor shows the active rate. Without matching Opower data, it shows the value from the editable global **Fallback Electricity Rate** number on the CircuitSetup Energy Analyzer device. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
+Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Whole-day appliance estimates use the fallback only when Time-of-Use is not configured. With Time-of-Use, exact analyzer-recorded costs are used for today and completed days when interval coverage is complete; otherwise ambiguous whole-day cost estimates stay unavailable because daily energy totals do not preserve a tariff-period breakdown. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
 
 Configure per-circuit billing settings from:
 
@@ -911,7 +911,7 @@ When calling actions manually or from an automation, set `circuit_id` to the con
 | `Possible issue` | Repeated evidence crossed a configured or learned threshold. Review evidence before making a diagnosis. |
 | Negative watts on a load | Usually export power or reversed CT orientation. Check power-flow mode and CT direction. |
 
-Daily Energy Usage can show `0 kWh` for two different reasons:
+Energy Usage Today can show `0 kWh` for two different reasons:
 
 1. The circuit truly has not used energy today.
 2. The analyzer is still waiting to observe the first positive cumulative-energy increase or to derive one from consecutive power samples.
@@ -975,7 +975,7 @@ Use **Entity Detail Level** for normal entity creation: Simple keeps the core su
 The analyzer uses a compact entity model so Home Assistant gets appliance-focused
 entities instead of every intermediate calculation as a standalone entity.
 
-- **Simple** creates summary entities, Running, Daily Energy Usage when available,
+- **Simple** creates summary entities, Running, Energy Usage Today when available,
   and the small daily control set.
 - **Standard** adds canonical status and graph entities for features you configured.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
@@ -1005,10 +1005,15 @@ Start with these on dashboards.
 | Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
 | Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
-| Daily Energy Usage | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
+| Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
+| Cost Today | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data is available. | `kWh` |
 | Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Core/default visible for appliance circuits with active-power sensors. | `on`, `off` |
 
-Daily Energy Usage can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
+Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
+
+The appliance detail view graphs daily energy and cost for up to 30 completed days. Each cost point uses the analyzer-recorded daily cost when complete, then the effective main-analyzer rate when a flat or Opower-derived rate can price that day's energy. With Time-of-Use and no valid Opower-derived rate, days without complete recorded costs remain unavailable because a daily energy total cannot reconstruct each tariff period.
 
 ### Running Vs Observations Vs Alerts
 
@@ -1052,7 +1057,10 @@ These require cumulative energy inputs. Use Home Assistant's Energy Dashboard fo
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
-| **Daily Energy Usage** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
+| **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
+| **Cost Today** | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Average Cost per Day** | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
+| **Average kWh per Day** | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data exists. | `kWh` |
 | **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Expert Energy Detail group. | Percentage values |
 | **Energy Usage Status** | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. Use this to tell true zero usage from "waiting for first kWh increase." | Expert Energy Detail group. | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |
 | **Energy Goal Usage** | `sensor.<circuit>_energy_goal_usage` | Today's usage as a percent of the configured daily goal. | Expert Energy Detail group. | Percentage values |

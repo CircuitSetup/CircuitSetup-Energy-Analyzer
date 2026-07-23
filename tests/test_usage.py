@@ -97,6 +97,29 @@ def test_record_energy_usage_ignores_incomplete_baseline_days() -> None:
     assert result.spike is None
 
 
+def test_energy_usage_average_uses_latest_seven_completed_days() -> None:
+    history = {
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-07-21T23:55:00+00:00",
+        "days": [
+            {"date": f"2026-07-{day:02d}", "usage_kwh": float(day), "complete": True}
+            for day in range(11, 21)
+        ]
+        + [{"date": "2026-07-21", "usage_kwh": 99.0}],
+    }
+
+    result = record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 21, 23, 56, tzinfo=UTC),
+        energy_kwh=100.0,
+        settings=EnergyUsageSettings(),
+    )
+
+    assert result is not None
+    assert result.average_kwh_per_day == 17.0
+
+
 def test_record_energy_usage_marks_first_sample_waiting_for_delta() -> None:
     result = record_energy_usage(
         {},

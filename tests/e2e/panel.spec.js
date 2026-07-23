@@ -255,12 +255,26 @@ test("Appliance Insights filters attention and NILM appliances", async ({ page, 
 });
 
 test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile }) => {
-  test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
 
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.getByText("Projected end of day")).toBeVisible();
+  const dailyCost = panel.locator("[data-appliance-daily-cost]");
+  await expect(dailyCost).toBeVisible();
+  await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
+  await expect(dailyCost.locator('[data-chart-right-axis="USD"]')).toBeVisible();
+  await expect(dailyCost.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(1);
+  await expect(dailyCost).toContainText("Cost Today");
+  await expect(dailyCost).toContainText("Average Cost per Day");
+  await expect(dailyCost).toContainText("kWh Today");
+  await expect(dailyCost).toContainText("Average kWh per Day");
+  await expect(panel.getByRole("heading", { name: "What To Check First" })).toHaveCount(0);
+  await expect(panel.getByText("Cost Today", { exact: true })).toHaveCount(1);
+  const horizontalOverflow = await panel.evaluate((host) => (
+    host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth
+  ));
+  expect(horizontalOverflow).toBe(false);
 
   await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
   await expect.poll(() => page.evaluate(() => {
@@ -279,6 +293,26 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   const period = panel.locator("[data-appliance-history-period]");
   await period.selectOption("24");
   await expect(period).toHaveValue("24");
+});
+
+test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_detail")) return false;
+    const payload = apiPayload(url.pathname);
+    await route.fulfill({
+      json: {
+        ...payload,
+        daily_totals: payload.daily_totals.map((row) => ({ ...row, cost: null })),
+      },
+    });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  const dailyCost = panel.locator("[data-appliance-daily-cost]");
+
+  await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
+  await expect(dailyCost.locator("[data-chart-right-axis]")).toHaveCount(0);
+  await expect(dailyCost.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(0);
 });
 
 test("Review Evidence keeps recommendation data, graph, and actions in order", async ({ page, isMobile }) => {

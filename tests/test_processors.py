@@ -320,11 +320,28 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
             del args, kwargs
             return self.result
 
+    class _AsyncProcessor(_Processor):
+        async def process(self, *args: object, **kwargs: object) -> FeatureResult:
+            return super().process(*args, **kwargs)
+
+    async def sync_setup_health_repairs(circuit_id: str) -> None:
+        del circuit_id
+
     class _Coordinator:
         state = SimpleNamespace()
-        store_data = SimpleNamespace(utility_comparison_settings_by_circuit={})
-        circuit_registry = SimpleNamespace(config_for_circuit=lambda circuit_id: None)
+        store_data = SimpleNamespace(
+            utility_comparison_settings_by_circuit={"mains": {}}
+        )
+        circuit_registry = SimpleNamespace(
+            config_for_circuit=lambda circuit_id: object()
+        )
         state_reducer = SimpleNamespace(apply_updates=lambda state, updates: None)
+
+        def __init__(self) -> None:
+            self.cost_estimate_refreshes = 0
+
+        def refresh_cost_estimates(self) -> None:
+            self.cost_estimate_refreshes += 1
 
         async def async_apply_feature_result(
             self,
@@ -333,7 +350,8 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
             applied.append(result)
             return result.events, result.alerts
 
-    pipeline = processing_pipeline.ProcessingPipeline(_Coordinator())
+    coordinator = _Coordinator()
+    pipeline = processing_pipeline.ProcessingPipeline(coordinator)
     pipeline.configure_processors(
         event_processor=_Processor(),
         power_quality_processor=_Processor(),
@@ -350,16 +368,27 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
         standby_processor=_Processor(),
         mains_balance_processor=_Processor(balance_result),
         solar_flow_processor=_Processor(solar_result),
-        utility_comparison_processor=_Processor(),
+        utility_comparison_processor=_AsyncProcessor(
+            FeatureResult(
+                state_updates=[
+                    StateUpdate(("utility_cost_rate_by_circuit", "mains"), 0.25)
+                ]
+            )
+        ),
         clear_power_quality_state=lambda circuit_id: None,
         clear_standby_state=lambda circuit_id: None,
-        sync_setup_health_repairs=lambda circuit_id: None,
+        sync_setup_health_repairs=sync_setup_health_repairs,
     )
 
     alerts = await pipeline.async_process_cross_circuit([], SimpleNamespace())
 
     assert alerts == []
-    assert applied == [balance_result, solar_result]
+    assert applied == [
+        balance_result,
+        solar_result,
+        pipeline._utility_comparison_processor.result,
+    ]
+    assert coordinator.cost_estimate_refreshes == 1
     assert any(result.store_dirty for result in applied)
 
 
@@ -786,7 +815,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
 
     assert result.store_dirty is True
     assert result.events == []
-    assert len(result.state_updates) == 3
+    assert len(result.state_updates) == 4
     assert len(result.alerts) == 1
     assert result.notifications == result.alerts
     assert policy.observations[0].feature == "daily_energy_usage_spike"
@@ -796,6 +825,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
 
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("daily_energy_usage_by_circuit", "fridge")] == 12.9
+    assert updates[("average_kwh_per_day_by_circuit", "fridge")] == 10.0
     assert updates[("energy_usage_share_by_circuit", "fridge")] == 25.8
     evidence = updates[("energy_usage_evidence_by_circuit", "fridge")]
     assert evidence["status"] == "over_threshold"
@@ -2518,10 +2548,13 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
             }
         }
     )
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.average_kwh_per_day_by_circuit["fridge"] = 1.5
     context = ProcessingContext(
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
-        state=AnalyzerState(),
+        state=state,
         store_data=store_data,
         options={},
         entry_data={},
@@ -2546,9 +2579,12 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert result.store_dirty is True
     assert result.alerts == []
     assert result.notifications == []
-    assert len(result.state_updates) == 8
+    assert len(result.state_updates) == 11
 
     updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("estimated_cost_today_by_circuit", "fridge")] == 0.48
+    assert updates[("average_cost_per_day_by_circuit", "fridge")] == 0.3
+    assert updates[("effective_electricity_rate_by_circuit", "fridge")] == 0.2
     assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.2
     assert updates[("cost_today_by_circuit", "fridge")] is None
     assert updates[("cost_today_status_by_circuit", "fridge")] == "unavailable"
@@ -2565,6 +2601,96 @@ def test_cost_processor_updates_state_from_flat_rate_delta() -> None:
     assert evidence["projected_cycle_cost"] == 8.18
     assert evidence["status"] == "tracking"
     assert store_data.cost_by_circuit["fridge"]["last_energy_kwh"] == 115.0
+
+    no_rate_result = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            cycle_start_day=1,
+        ),
+    ).process(_energy_sample(115.0), config, context)
+    no_rate_updates = {
+        update.path: update.value for update in no_rate_result.state_updates
+    }
+    assert no_rate_updates[("estimated_cost_today_by_circuit", "fridge")] is None
+    assert no_rate_updates[("average_cost_per_day_by_circuit", "fridge")] is None
+
+    store_data.cost_by_circuit["fridge"]["days"] = [
+        {
+            "date": f"2026-06-{day:02d}",
+            "cost": day / 10,
+            "complete": True,
+        }
+        for day in range(1, 9)
+    ]
+    tou_result = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            default_rate_per_kwh=0.20,
+            tou_rate_per_kwh=0.35,
+        ),
+    ).process(_energy_sample(115.0), config, context)
+    tou_updates = {update.path: update.value for update in tou_result.state_updates}
+    assert tou_updates[("effective_electricity_rate_by_circuit", "fridge")] is None
+    assert tou_updates[("estimated_cost_today_by_circuit", "fridge")] is None
+    assert tou_updates[("average_cost_per_day_by_circuit", "fridge")] == 0.5
+
+
+def test_cost_processor_refreshes_estimates_when_the_utility_rate_changes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cost import (
+        CostProcessor,
+    )
+
+    state = AnalyzerState()
+    state.daily_energy_usage_by_circuit["fridge"] = 2.4
+    state.average_kwh_per_day_by_circuit["fridge"] = 1.5
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(
+            default_rate_per_kwh=0.2,
+        ),
+        utility_rate_for_circuit=(
+            lambda _circuit_id: state.utility_cost_rate_by_circuit.get("mains")
+        ),
+    )
+
+    state.utility_cost_rate_by_circuit["mains"] = 0.25
+    StateReducer().apply_updates(
+        state,
+        processor.estimate_state_updates((config,), state),
+    )
+
+    assert state.effective_electricity_rate_by_circuit["fridge"] == 0.25
+    assert state.estimated_cost_today_by_circuit["fridge"] == 0.6
+    assert state.average_cost_per_day_by_circuit["fridge"] == 0.38
+
+    state.utility_cost_rate_by_circuit.clear()
+    StateReducer().apply_updates(
+        state,
+        processor.estimate_state_updates((config,), state),
+    )
+
+    assert state.effective_electricity_rate_by_circuit["fridge"] == 0.2
+    assert state.estimated_cost_today_by_circuit["fridge"] == 0.48
+    assert state.average_cost_per_day_by_circuit["fridge"] == 0.3
+
+    no_fallback = CostProcessor(
+        settings_for_config=lambda _config, _circuit_id: CostSettings(),
+    )
+    StateReducer().apply_updates(
+        state,
+        no_fallback.estimate_state_updates((config,), state),
+    )
+
+    assert state.effective_electricity_rate_by_circuit["fridge"] is None
+    assert state.estimated_cost_today_by_circuit["fridge"] is None
+    assert state.average_cost_per_day_by_circuit["fridge"] is None
 
 
 def test_cost_processor_produces_same_time_comparison_evidence() -> None:
@@ -2691,6 +2817,7 @@ def test_cost_processor_prefers_the_derived_utility_rate() -> None:
     processor = CostProcessor(
         settings_for_config=lambda _config, _circuit_id: CostSettings(
             default_rate_per_kwh=0.20,
+            tou_rate_per_kwh=0.42,
         ),
         utility_rate_for_circuit=lambda _circuit_id: 0.31,
     )
@@ -2699,6 +2826,7 @@ def test_cost_processor_prefers_the_derived_utility_rate() -> None:
 
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("cost_current_rate_by_circuit", "fridge")] == 0.31
+    assert updates[("effective_electricity_rate_by_circuit", "fridge")] == 0.31
 
 
 def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
@@ -5223,3 +5351,31 @@ def test_utility_rate_uses_matching_entity_usage_not_comparison_statistic(
     values = {update.path: update.value for update in updates}
 
     assert values[("utility_cost_rate_by_circuit", "mains")] == 0.25
+
+
+def test_utility_comparison_does_not_overwrite_a_valid_rate_with_zero_cost() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        utility_comparison as utility_processor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
+        compare_utility_energy,
+    )
+
+    result = compare_utility_energy(
+        settings=UtilityComparisonSettings(),
+        utility_kwh=10.0,
+        measured_kwh=10.0,
+        measured_entity_ids=("sensor.panel_import_energy",),
+        comparison_source="explicit_entities",
+    )
+
+    updates = utility_processor.utility_comparison_state_updates(
+        "mains",
+        result,
+        utility_cost=0.0,
+        utility_rate_kwh=120.0,
+    )
+
+    assert ("utility_cost_rate_by_circuit", "mains") not in {
+        update.path for update in updates
+    }

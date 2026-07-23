@@ -121,6 +121,44 @@ def test_evidence_action_controller_owns_alert_lookup_and_retirement() -> None:
     assert coordinator.dirty_count == 1
 
 
+def test_evidence_action_controller_retirement_clears_only_matching_cache() -> None:
+    active = _alert("hvac", "runtime")
+    active_id = notification_id_for_alert(active)
+    coordinator = _ActionCoordinator()
+    coordinator.store_data.alerts = [active]
+    coordinator.state.active_alerts_by_circuit = {"hvac": [active]}
+    coordinator.state.anomaly_score_by_circuit = {"hvac": 0.25}
+    coordinator.state.alert_evidence_by_circuit = {
+        "hvac": {"alert_id": active_id, "feature": "runtime"},
+        "fridge": {"alert_id": "newer-alert", "feature": "daily_energy"},
+    }
+    controller = EvidenceActionController(coordinator)
+
+    controller.retire_alert_id(active_id)
+
+    assert coordinator.state.alert_evidence_by_circuit == {
+        "fridge": {"alert_id": "newer-alert", "feature": "daily_energy"},
+    }
+
+
+def test_evidence_action_controller_retirement_keeps_newer_cached_alert() -> None:
+    active = _alert("hvac", "runtime")
+    coordinator = _ActionCoordinator()
+    coordinator.store_data.alerts = [active]
+    coordinator.state.active_alerts_by_circuit = {"hvac": [active]}
+    coordinator.state.anomaly_score_by_circuit = {"hvac": 0.25}
+    coordinator.state.alert_evidence_by_circuit = {
+        "hvac": {"alert_id": "newer-alert", "feature": "runtime"},
+    }
+    controller = EvidenceActionController(coordinator)
+
+    controller.retire_alert_id(notification_id_for_alert(active))
+
+    assert coordinator.state.alert_evidence_by_circuit["hvac"]["alert_id"] == (
+        "newer-alert"
+    )
+
+
 @pytest.mark.asyncio
 async def test_evidence_action_controller_pauses_and_acknowledges_alerts() -> None:
     coordinator = _ActionCoordinator()

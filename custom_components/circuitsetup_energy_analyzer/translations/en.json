@@ -568,7 +568,16 @@
         "name": "Water flow mismatch minutes"
       },
       "daily_energy_usage": {
-        "name": "Daily energy usage"
+        "name": "Energy usage today"
+      },
+      "cost_today": {
+        "name": "Cost today"
+      },
+      "average_cost_per_day": {
+        "name": "Average cost per day"
+      },
+      "average_kwh_per_day": {
+        "name": "Average kWh per day"
       },
       "energy_usage_share": {
         "name": "Energy usage share"
@@ -1363,6 +1372,13 @@
         "runtime_today": "Runtime Today",
         "runs_today": "Runs Today",
         "cost_today": "Cost Today",
+        "daily_cost_and_energy": "Daily Cost and Energy",
+        "no_completed_days": "No completed days are available yet.",
+        "cost_per_day": "Cost per Day",
+        "kwh_per_day": "kWh per Day",
+        "average_cost_per_day": "Average Cost per Day",
+        "kwh_today": "kWh Today",
+        "average_kwh_per_day": "Average kWh per Day",
         "recent_timeline": "Appliance Activity History",
         "today_vs_normal": "Today vs Normal",
         "why_energy_changed": "Why Energy Changed",
@@ -1601,7 +1617,8 @@
         "sensor_count": "{count} {noun}"
       },
       "chart": {
-        "accessible_summary": "Alert evidence chart with {series_count} series and {point_count} points. Values range from {min}{unit} to {max}{unit}, from {start} to {end}.",
+          "accessible_summary": "Alert evidence chart with {series_count} series and {point_count} points. Values range from {min}{unit} to {max}{unit}, from {start} to {end}.",
+          "accessible_right_axis": "Right axis ranges from {min}{unit} to {max}{unit}.",
         "loading_history": "Loading history samples...",
         "no_history": "No history samples were available for this graph window.",
         "graph_times": "Graph times shown in {time_zone}.",

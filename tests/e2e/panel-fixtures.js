@@ -162,6 +162,8 @@ export const applianceDetail = {
     runtime_today_seconds: 5400,
     run_count_today: 3,
     cost_today: 0.42,
+    average_cost_per_day: 0.36,
+    average_kwh_per_day: 2.1,
     session_timeline: [
       {
         session_id: "direct-session-1",
@@ -223,6 +225,16 @@ export const applianceDetail = {
     default_hours: 168,
     period_hours: [24, 168, 720],
   },
+  daily_totals: [
+    { date: "2026-07-05", energy_kwh: 1.9, cost: 0.34 },
+    { date: "2026-07-06", energy_kwh: 2.0, cost: 0.36 },
+    { date: "2026-07-07", energy_kwh: 2.2, cost: 0.4 },
+    { date: "2026-07-08", energy_kwh: 2.1, cost: 0.38 },
+    { date: "2026-07-09", energy_kwh: 2.3, cost: 0.41 },
+    { date: "2026-07-10", energy_kwh: 2.0, cost: 0.36 },
+    { date: "2026-07-11", energy_kwh: 2.1, cost: 0.38 },
+    { date: "2026-07-12", energy_kwh: 2.2, cost: 0.4 },
+  ],
   actions: {
     relearn_baseline: {
       label: "Relearn Baseline",

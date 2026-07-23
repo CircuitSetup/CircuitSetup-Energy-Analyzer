@@ -549,6 +549,7 @@ export function createApplianceViewMethods({
     }
     return `
       ${this._renderApplianceDetailHistory(payload.history)}
+      ${this._renderApplianceDailyCost(payload, detail)}
       <div class="appliance-detail-overview">
         <div class="appliance-detail-facts">
           <section class="panel summary">
@@ -570,7 +571,6 @@ export function createApplianceViewMethods({
             ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
             ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
             ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-            ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
           </section>
         </div>
         <section class="panel appliance-detail-timeline">
@@ -587,15 +587,58 @@ export function createApplianceViewMethods({
         <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
       </section>
-      ${this._actionableApplianceChecks(detail.what_to_check_first).length ? `<section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.what_to_check_first"))}</h2>
-        ${this._renderSimpleList(this._actionableApplianceChecks(detail.what_to_check_first), "")}
-      </section>` : ""}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
     `;
+  }
+
+  _renderApplianceDailyCost(payload, detail) {
+    const rows = Array.isArray(payload.daily_totals) ? payload.daily_totals : [];
+    const dailyDateTimestamp = (value) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+      if (!match) return Number.NaN;
+      const [year, month, day] = match.slice(1).map(Number);
+      const utcNoon = Date.UTC(year, month - 1, day, 12);
+      const utcDate = new Date(utcNoon);
+      if (utcDate.getUTCFullYear() !== year || utcDate.getUTCMonth() !== month - 1 || utcDate.getUTCDate() !== day) return Number.NaN;
+      try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+          timeZone: this._timeZone(), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+        }).formatToParts(utcDate).map((part) => [part.type, part.value]));
+        return utcNoon - (Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute)) - utcNoon);
+      } catch (_error) {
+        return utcNoon;
+      }
+    };
+    const series = (key) => rows.map((row) => ({
+      time: dailyDateTimestamp(row.date),
+      value: row[key] === null || row[key] === undefined ? Number.NaN : Number(row[key]),
+    })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
+    const energy = series("energy_kwh");
+    const cost = series("cost");
+    const currency = this._hass && this._hass.config && this._hass.config.currency
+      ? String(this._hass.config.currency)
+      : "USD";
+    const dailySeries = [
+      energy.length && { name: this._panelText("appliance_detail.kwh_per_day"), unit: "kWh", points: energy },
+      cost.length && { name: this._panelText("appliance_detail.cost_per_day"), unit: currency, axis: energy.length ? "right" : "left", points: cost },
+    ].filter(Boolean);
+    const charts = dailySeries.length ? this._chartSvg(dailySeries, {
+      y_axis_label: energy.length ? "kWh" : currency,
+      ...(energy.length && cost.length ? { right_y_axis_label: currency } : {}),
+    }) : "";
+    return `<section class="panel" data-appliance-daily-cost>
+      <h2>${this._escape(this._panelText("appliance_detail.daily_cost_and_energy"))}</h2>
+      ${charts || `<p class="muted">${this._escape(this._panelText("appliance_detail.no_completed_days"))}</p>`}
+      <div class="summary appliance-daily-metrics">
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
+        ${this._metric(this._panelText("appliance_detail.average_cost_per_day"), this._formatCost(detail.average_cost_per_day), "mdi:cash-multiple")}
+        ${this._metric(this._panelText("appliance_detail.kwh_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
+        ${this._metric(this._panelText("appliance_detail.average_kwh_per_day"), this._formatKwh(detail.average_kwh_per_day), "mdi:chart-line")}
+      </div>
+    </section>`;
   }
 
   _renderWhyEnergyChanged(energy_change_explanation) {

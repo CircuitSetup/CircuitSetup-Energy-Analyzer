@@ -225,6 +225,11 @@ class ProcessingPipeline:
                 context,
             )
             _, new_alerts = await self._async_apply_feature_result(result)
+            if any(
+                update.path[0] == "utility_cost_rate_by_circuit"
+                for update in result.state_updates
+            ):
+                coordinator.refresh_cost_estimates()
             await self._sync_setup_health_repairs(circuit_id)
             alerts.extend(new_alerts)
         return alerts

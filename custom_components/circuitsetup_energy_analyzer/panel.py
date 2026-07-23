@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -28,6 +28,7 @@ from .entities.setup_health import (
     setup_health_value,
 )
 from .expected_schedule import schedule_settings_from_dict
+from .local_time import local_date
 from .localized_text import translation_section
 from .models import (
     AlertEvidence,
@@ -699,6 +700,7 @@ def _appliance_detail_payload(
         "requested_assignment_id": requested_assignment_id,
         "requested_entry_id": requested_entry_id,
         "detail": detail_payload,
+        "daily_totals": _appliance_daily_totals(coordinator, detail),
         "history": _appliance_detail_history_payload(coordinator, detail),
         "notification_preferences": preferences_from_dict(
             raw_preferences,
@@ -718,6 +720,94 @@ def _appliance_detail_payload(
         },
         "actions": _appliance_detail_actions(coordinator, detail),
     }
+
+
+def _appliance_daily_totals(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> list[dict[str, Any]]:
+    if detail.source_type == "nilm_estimate":
+        return []
+    histories = getattr(coordinator.store_data, "energy_usage_by_circuit", {})
+    history = (
+        histories.get(detail.circuit_id, {}) if isinstance(histories, Mapping) else {}
+    )
+    days = history.get("days", []) if isinstance(history, Mapping) else []
+    clock = getattr(coordinator, "current_time", None)
+    now = clock() if callable(clock) else datetime.now(UTC)
+    time_zone = getattr(
+        getattr(coordinator, "context_builder", None),
+        "time_zone",
+        None,
+    )
+    time_zone = time_zone() if callable(time_zone) else None
+    today = (
+        local_date(now, time_zone)
+        if time_zone is not None and now.tzinfo is not None
+        else now.date()
+    )
+    rate = getattr(
+        coordinator.state,
+        "effective_electricity_rate_by_circuit",
+        {},
+    ).get(detail.circuit_id)
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        rate = None
+    cost_histories = getattr(coordinator.store_data, "cost_by_circuit", {})
+    cost_history = (
+        cost_histories.get(detail.circuit_id, {})
+        if isinstance(cost_histories, Mapping)
+        else {}
+    )
+    cost_by_date: dict[str, float] = {}
+    for cost_day in (
+        cost_history.get("days", []) if isinstance(cost_history, Mapping) else []
+    ):
+        if not isinstance(cost_day, Mapping) or cost_day.get("complete") is not True:
+            continue
+        try:
+            cost_by_date[str(cost_day.get("date") or "")] = round(
+                max(float(cost_day["cost"]), 0.0),
+                2,
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    complete = []
+    for day in days:
+        if (
+            not isinstance(day, Mapping)
+            or day.get("complete") is not True
+        ):
+            continue
+        date_text = str(day.get("date") or "")
+        try:
+            day_date = date.fromisoformat(date_text)
+        except ValueError:
+            continue
+        if day_date.isoformat() != date_text or day_date >= today:
+            continue
+        try:
+            energy_kwh = round(max(float(day["usage_kwh"]), 0.0), 3)
+        except (KeyError, TypeError, ValueError):
+            continue
+        complete.append(
+            {
+                "date": date_text,
+                "energy_kwh": energy_kwh,
+                "cost": (
+                    cost_by_date[date_text]
+                    if date_text in cost_by_date
+                    else (
+                        round(energy_kwh * rate, 2)
+                        if rate is not None and rate > 0
+                        else None
+                    )
+                ),
+            }
+        )
+    return sorted(complete, key=lambda item: item["date"])[-30:]
 
 
 def _schedule_entity_options(coordinator: Any) -> list[dict[str, str]]:

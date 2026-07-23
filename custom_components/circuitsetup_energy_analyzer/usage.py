@@ -42,6 +42,7 @@ class EnergyUsageResult:
     circuit_id: str
     date: str
     daily_usage_kwh: float
+    average_kwh_per_day: float | None
     baseline_total_kwh: float
     baseline_day_count: int
     window_days: int
@@ -108,6 +109,7 @@ def record_energy_usage(
         time_zone=time_zone,
     )
     prior_days = _prior_days(days, today, window_days)
+    average_days = _prior_days(days, today, DEFAULT_USAGE_WINDOW_DAYS)
 
     last_energy = _float_or_none(history.get("last_energy_kwh"))
     last_sample_at = _datetime_or_none(history.get("last_sample_at"))
@@ -127,6 +129,11 @@ def record_energy_usage(
     )
 
     today_usage = _round_kwh(_usage_for_date(days, today))
+    average_kwh_per_day = (
+        _round_kwh(sum(day["usage_kwh"] for day in average_days) / len(average_days))
+        if average_days
+        else None
+    )
     baseline_total = _round_kwh(sum(day["usage_kwh"] for day in prior_days))
     baseline_day_count = len(prior_days)
     threshold_kwh = _round_kwh(baseline_total * threshold_ratio)
@@ -156,6 +163,7 @@ def record_energy_usage(
         circuit_id=circuit_id,
         date=today,
         daily_usage_kwh=today_usage,
+        average_kwh_per_day=average_kwh_per_day,
         baseline_total_kwh=baseline_total,
         baseline_day_count=baseline_day_count,
         window_days=window_days,

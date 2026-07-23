@@ -106,6 +106,9 @@ export class PanelShellMethods {
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
           gap: 12px;
         }
+        .appliance-daily-metrics {
+          margin-top: 16px;
+        }
         .evidence-section {
           display: grid;
           gap: 12px;

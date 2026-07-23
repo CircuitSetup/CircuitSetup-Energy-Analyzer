@@ -15,6 +15,7 @@ from custom_components.circuitsetup_energy_analyzer.utility_comparison import (
 def test_utility_rate_uses_matching_opower_cost_and_usage() -> None:
     assert utility_rate_per_kwh(42.75, 171.0) == 0.25
     assert utility_rate_per_kwh(42.75, 0.0) is None
+    assert utility_rate_per_kwh(0.0, 171.0) is None
     assert utility_rate_per_kwh(None, 171.0) is None
 
 

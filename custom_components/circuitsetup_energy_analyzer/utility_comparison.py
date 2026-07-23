@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Any
 
 DEFAULT_UTILITY_COMPARISON_TOLERANCE_PERCENT = 10.0
@@ -164,11 +165,15 @@ def utility_rate_per_kwh(
     utility_kwh: float | None,
 ) -> float | None:
     """Return an Opower-derived rate when matching cost and usage are present."""
-    if utility_cost is None or utility_kwh is None or utility_kwh <= 0.0:
+    try:
+        cost = float(utility_cost)
+        kwh = float(utility_kwh)
+    except (TypeError, ValueError):
         return None
-    if utility_cost < 0.0:
+    if not isfinite(cost) or not isfinite(kwh) or cost <= 0.0 or kwh <= 0.0:
         return None
-    return round(float(utility_cost) / float(utility_kwh), 4)
+    rate = round(cost / kwh, 4)
+    return rate if rate > 0.0 else None
 
 
 def effective_electricity_rate(
@@ -192,7 +197,7 @@ def _positive_electricity_rate(value: Any) -> float:
         rate = float(value)
     except (TypeError, ValueError):
         return 0.0
-    return rate if rate > 0.0 else 0.0
+    return rate if isfinite(rate) and rate > 0.0 else 0.0
 
 
 def select_latest_statistics_energy(
