@@ -93,10 +93,254 @@ async function openDashboardGraphs(page) {
   return dashboard;
 }
 
+async function openDashboardCard(page, tagName, config, states = {}) {
+  await page.goto(HARNESS);
+  await page.waitForFunction(() => window.__panelReady === true);
+  await page.evaluate(({ tagName: tag, cardConfig, cardStates }) => {
+    const hass = window.__panel._hass;
+    const panelConfig = window.__panel._panel;
+    Object.assign(hass.states, cardStates);
+    window.__panel.remove();
+    const main = document.createElement("main");
+    const heading = document.createElement("h1");
+    heading.textContent = cardConfig.title || "Energy dashboard";
+    heading.style.cssText = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
+    main.append(heading);
+    const card = document.createElement(tag);
+    card.panel = panelConfig;
+    card.setConfig(cardConfig);
+    card.hass = hass;
+    main.append(card);
+    document.body.append(main);
+    window.__dashboardCard = card;
+    window.__dashboardHass = hass;
+    window.__setDashboardState = (entityId, state) => {
+      hass.states[entityId] = state;
+      card.hass = hass;
+    };
+  }, { tagName, cardConfig: config, cardStates: states });
+  return page.locator(tagName);
+}
+
 async function toHaveNoViolations(page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
+
+test("home energy card live-sorts issues and running appliances", async ({ page }) => {
+  await mockPanelApi(page);
+  const states = {
+    "sensor.mains_power": { state: "1820", attributes: { unit_of_measurement: "W" } },
+    "sensor.mains_energy_today": { state: "12.4", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.mains_cost_today": { state: "unavailable", attributes: {} },
+    "sensor.mains_known": { state: "1450", attributes: { unit_of_measurement: "W" } },
+    "sensor.mains_unassigned": { state: "370", attributes: { unit_of_measurement: "W" } },
+    "sensor.mains_coverage": { state: "79.7", attributes: { unit_of_measurement: "%" } },
+    "binary_sensor.fridge_running": { state: "on", attributes: {} },
+    "sensor.fridge_power": { state: "100", attributes: { unit_of_measurement: "W" } },
+    "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
+    "sensor.fridge_health": { state: "Normal", attributes: {} },
+    "binary_sensor.washer_running": { state: "on", attributes: {} },
+    "sensor.washer_power": { state: "1200", attributes: { unit_of_measurement: "W" } },
+    "sensor.washer_energy": { state: "2.2", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.washer_cost": { state: "0.5", attributes: { unit_of_measurement: "USD" } },
+    "sensor.washer_health": { state: "Normal", attributes: {} },
+    "binary_sensor.oven_running": { state: "off", attributes: {} },
+    "sensor.oven_power": { state: "50", attributes: { unit_of_measurement: "W" } },
+    "sensor.oven_energy": { state: "3.1", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.oven_cost": { state: "0.7", attributes: { unit_of_measurement: "USD" } },
+    "sensor.oven_health": { state: "Needs attention", attributes: {} },
+  };
+  const appliances = ["fridge", "washer", "oven"].map((id) => ({
+    circuit_id: id,
+    name: id[0].toUpperCase() + id.slice(1),
+    detail_path: `/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=${id}`,
+    running_entity: `binary_sensor.${id}_running`,
+    power_entities: [`sensor.${id}_power`],
+    energy_today_entity: `sensor.${id}_energy`,
+    cost_today_entity: `sensor.${id}_cost`,
+    health_entity: `sensor.${id}_health`,
+  }));
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      primary_mains: {
+        power_entities: ["sensor.mains_power"],
+        daily_energy_usage_entity: "sensor.mains_energy_today",
+        cost_today_entity: "sensor.mains_cost_today",
+        monitored_power_entity: "sensor.mains_known",
+        balance_power_entity: "sensor.mains_unassigned",
+        monitored_coverage_entity: "sensor.mains_coverage",
+      },
+      appliances,
+      labels: { unavailable: "Unavailable", active_now: "Active now" },
+    },
+    states,
+  );
+
+  await expect(card.locator("[data-appliance-id]")).toHaveCount(3);
+  await expect(card.locator("[data-appliance-id]").first()).toHaveAttribute("data-appliance-id", "oven");
+  await expect(card).toContainText("Unavailable");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_health", { state: "Needs attention", attributes: {} });
+    window.__setDashboardState("sensor.fridge_power", { state: "1500", attributes: { unit_of_measurement: "W" } });
+  });
+  await expect(card.locator("[data-appliance-id]").first()).toHaveAttribute("data-appliance-id", "fridge");
+  await toHaveNoViolations(page);
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--card-background-color", "#1f2937");
+    root.setProperty("--secondary-background-color", "#374151");
+    root.setProperty("--primary-text-color", "#f9fafb");
+    root.setProperty("--secondary-text-color", "#d1d5db");
+    root.setProperty("--divider-color", "#6b7280");
+    root.setProperty("--warning-color", "#fbbf24");
+  });
+  await toHaveNoViolations(page);
+});
+
+test("appliance grid filters live state and loads Running history", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[
+        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: "2026-07-22T12:00:00Z" },
+        { entity_id: "binary_sensor.fridge_running", state: "on", last_changed: "2026-07-22T16:00:00Z" },
+        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: "2026-07-22T17:00:00Z" },
+      ]],
+    });
+    return true;
+  });
+  const states = {
+    "binary_sensor.fridge_running": { state: "on", attributes: {} },
+    "sensor.fridge_power": { state: "140", attributes: { unit_of_measurement: "W" } },
+    "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
+    "sensor.fridge_health": { state: "Normal", attributes: {} },
+    "binary_sensor.oven_running": { state: "off", attributes: {} },
+    "sensor.oven_power": { state: "0", attributes: { unit_of_measurement: "W" } },
+    "sensor.oven_energy": { state: "3.1", attributes: { unit_of_measurement: "kWh" } },
+    "sensor.oven_cost": { state: "0.7", attributes: { unit_of_measurement: "USD" } },
+    "sensor.oven_health": { state: "Needs attention", attributes: {} },
+  };
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      appliances: ["fridge", "oven"].map((id) => ({
+        circuit_id: id,
+        name: id[0].toUpperCase() + id.slice(1),
+        area: id === "fridge" ? "Kitchen" : "Cooking",
+        detail_path: `/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=${id}`,
+        running_entity: `binary_sensor.${id}_running`,
+        power_entities: [`sensor.${id}_power`],
+        energy_today_entity: `sensor.${id}_energy`,
+        cost_today_entity: `sensor.${id}_cost`,
+        health_entity: `sensor.${id}_health`,
+      })),
+      labels: { all: "All", running: "Running", run_timeline: "Run timeline" },
+    },
+    states,
+  );
+
+  await card.getByRole("tab", { name: "Running", exact: true }).click();
+  await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
+  await card.locator("[data-timeline-selection]").selectOption("fridge");
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("binary_sensor.fridge_running"))
+  ))).toBe(true);
+  await expect(card.locator("[data-running-band]")).toHaveCount(1);
+  await card.getByRole("tab", { name: "All", exact: true }).click();
+  await card.locator('[data-appliance-id="fridge"]').click();
+  await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
+});
+
+test("energy and cost card switches completed-day windows and preserves cost source", async ({ page }) => {
+  const dailyTotals = Array.from({ length: 10 }, (_, index) => ({
+    date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+    energy_kwh: index + 1,
+    cost: index === 9 ? null : (index + 1) * 0.2,
+    cost_source: index < 5 ? "recorded" : index === 9 ? "unavailable" : "estimated",
+  }));
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "fridge",
+          appliance_key: "circuit:fridge",
+          display_name: "Fridge",
+          daily_totals: dailyTotals.slice(-2),
+        }],
+        whole_house: [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          display_name: "Whole home",
+          daily_totals: dailyTotals,
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-energy-cost",
+    {
+      title: "Energy and costs",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        circuit_id: "mains",
+        energy_today_entity: "sensor.mains_energy",
+        cost_today_entity: "sensor.mains_cost",
+        average_kwh_per_day_entity: "sensor.mains_average_energy",
+        average_cost_per_day_entity: "sensor.mains_average_cost",
+      },
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+        average_kwh_entity: "sensor.fridge_average_energy",
+        average_cost_entity: "sensor.fridge_average_cost",
+      }],
+      labels: {
+        seven_days: "7 days",
+        thirty_days: "30 days",
+        whole_house: "Whole house",
+        completed_history: "Completed-day history",
+        unavailable: "Unavailable",
+      },
+    },
+    {
+      "sensor.mains_energy": { state: "14.2", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.mains_cost": { state: "2.42", attributes: { unit_of_measurement: "USD" } },
+      "sensor.mains_average_energy": { state: "12.1", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.mains_average_cost": { state: "2.16", attributes: { unit_of_measurement: "USD" } },
+      "sensor.fridge_energy": { state: "2.4", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.42", attributes: { unit_of_measurement: "USD" } },
+      "sensor.fridge_average_energy": { state: "2.1", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_average_cost": { state: "0.36", attributes: { unit_of_measurement: "USD" } },
+    },
+  );
+
+  await expect(card.locator("svg.chart")).toBeVisible();
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(7);
+  await card.locator("[data-energy-bar]").first().focus();
+  await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
+  await card.getByRole("button", { name: "30 days", exact: true }).click();
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(10);
+  await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(5);
+  await expect(card.locator('[data-cost-source="estimated"]')).toHaveCount(4);
+  await expect(card).toContainText("Unavailable");
+  await toHaveNoViolations(page);
+});
 
 for (const route of [
   { name: "appliance insights", query: "?appliance_insights=1", heading: "Appliance Insights" },

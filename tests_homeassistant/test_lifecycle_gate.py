@@ -438,19 +438,33 @@ def _assert_appliance_workflow_payloads(
         "standard",
         hass=hass,
         entry_id=entry_id,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
     )
-    sections = {
-        section.get("title")
+    views = {
+        view.get("path"): view
         for view in dashboard.get("views", [])
+        if isinstance(view, dict)
+    }
+    assert set(views) == {
+        "overview",
+        "appliances",
+        "energy-costs",
+        "mains-nilm",
+        "insights",
+    }
+    card_types = {
+        card.get("type")
+        for view in views.values()
         for section in view.get("sections", [])
+        for card in section.get("cards", [])
+        if isinstance(card, dict)
     }
     assert {
-        "Household Overview",
-        "Today's Energy",
-        "Appliance Run Timeline",
-        "NILM Review",
-    } <= sections
-    assert "Behavior Watchlist" not in sections
+        "custom:circuitsetup-energy-analyzer-house-flow",
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+        "custom:circuitsetup-energy-analyzer-energy-cost",
+        "custom:circuitsetup-energy-analyzer-dashboard-graphs",
+    } <= card_types
 
 
 async def _assert_appliance_workflow_panel_views(

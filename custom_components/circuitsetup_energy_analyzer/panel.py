@@ -422,11 +422,54 @@ def appliance_insights_payload(
     coordinators: Iterable[Any],
 ) -> dict[str, Any]:
     """Return the integration-level appliance index payload."""
-    items = appliance_insights_for_coordinators(coordinators)
+    coordinator_list = tuple(coordinators)
+    items = appliance_insights_for_coordinators(coordinator_list)
+    coordinators_by_entry = {
+        str(getattr(coordinator, "entry_id", "") or ""): coordinator
+        for coordinator in coordinator_list
+    }
+    payload_items = []
+    for item in items:
+        payload_item = item.as_dict()
+        coordinator = coordinators_by_entry.get(item.entry_id)
+        detail = (
+            appliance_detail_for_assignment(coordinator, item.assignment_id)
+            if coordinator is not None and item.assignment_id
+            else (
+                appliance_detail_for_circuit(coordinator, item.circuit_id)
+                if coordinator is not None
+                else None
+            )
+        )
+        payload_item["daily_totals"] = (
+            _appliance_daily_totals(coordinator, detail)
+            if coordinator is not None and detail is not None
+            else []
+        )
+        payload_items.append(payload_item)
+    whole_house = []
+    for coordinator in coordinator_list:
+        for config in getattr(coordinator, "circuit_configs", ()) or ():
+            detail = appliance_detail_for_circuit(
+                coordinator,
+                str(getattr(config, "circuit_id", "") or ""),
+            )
+            if detail is None or detail.source_type != "mains":
+                continue
+            whole_house.append(
+                {
+                    "entry_id": str(getattr(coordinator, "entry_id", "") or ""),
+                    "circuit_id": detail.circuit_id,
+                    "display_name": detail.display_name,
+                    "daily_totals": _appliance_daily_totals(coordinator, detail),
+                }
+            )
+            break
     return {
         "status": "ok",
         "count": len(items),
-        "items": [item.as_dict() for item in items],
+        "items": payload_items,
+        "whole_house": whole_house,
     }
 
 
@@ -792,18 +835,27 @@ def _appliance_daily_totals(
             energy_kwh = round(max(float(day["usage_kwh"]), 0.0), 3)
         except (KeyError, TypeError, ValueError):
             continue
+        recorded_cost = cost_by_date.get(date_text)
+        estimated_cost = (
+            round(energy_kwh * rate, 2)
+            if recorded_cost is None and rate is not None and rate > 0
+            else None
+        )
         complete.append(
             {
                 "date": date_text,
                 "energy_kwh": energy_kwh,
                 "cost": (
-                    cost_by_date[date_text]
-                    if date_text in cost_by_date
-                    else (
-                        round(energy_kwh * rate, 2)
-                        if rate is not None and rate > 0
-                        else None
-                    )
+                    recorded_cost
+                    if recorded_cost is not None
+                    else estimated_cost
+                ),
+                "cost_source": (
+                    "recorded"
+                    if recorded_cost is not None
+                    else "estimated"
+                    if estimated_cost is not None
+                    else "unavailable"
                 ),
             }
         )

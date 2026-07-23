@@ -1,303 +1,179 @@
 title: Energy Analyzer
 views:
   - type: sections
-    title: Overview
+    title: Home
     path: overview
+    icon: mdi:home-lightning-bolt
     max_columns: 4
-    dense_section_placement: true
     sections:
       - type: grid
-        title: Appliance Status
+        column_span: 4
         cards:
-          - type: markdown
-            title: Appliance Status
-            content: >
-              These cards keep each appliance to Activity, Electrical Health,
-              Energy Summary, and Daily Energy Usage. Daily Energy Usage may show
-              Waiting For Energy Change until a cumulative kWh source increases.
-          - type: entities
-            title: Refrigerator
-            entities:
-              - entity: sensor.refrigerator_activity_summary
-                name: Activity
-              - entity: sensor.refrigerator_electrical_health
-                name: Electrical Health
-              - entity: sensor.refrigerator_energy_summary
-                name: Energy Summary
-              - entity: sensor.refrigerator_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: HVAC
-            entities:
-              - entity: sensor.hvac_activity_summary
-                name: Activity
-              - entity: sensor.hvac_electrical_health
-                name: Electrical Health
-              - entity: sensor.hvac_energy_summary
-                name: Energy Summary
-              - entity: sensor.hvac_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: Water heater
-            entities:
-              - entity: sensor.water_heater_activity_summary
-                name: Activity
-              - entity: sensor.water_heater_electrical_health
-                name: Electrical Health
-              - entity: sensor.water_heater_energy_summary
-                name: Energy Summary
-              - entity: sensor.water_heater_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: Pool pump
-            entities:
-              - entity: sensor.pool_pump_activity_summary
-                name: Activity
-              - entity: sensor.pool_pump_electrical_health
-                name: Electrical Health
-              - entity: sensor.pool_pump_energy_summary
-                name: Energy Summary
-              - entity: sensor.pool_pump_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: Washer
-            entities:
-              - entity: sensor.washer_activity_summary
-                name: Activity
-              - entity: sensor.washer_electrical_health
-                name: Electrical Health
-              - entity: sensor.washer_energy_summary
-                name: Energy Summary
-              - entity: sensor.washer_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: Dryer
-            entities:
-              - entity: sensor.dryer_activity_summary
-                name: Activity
-              - entity: sensor.dryer_electrical_health
-                name: Electrical Health
-              - entity: sensor.dryer_energy_summary
-                name: Energy Summary
-              - entity: sensor.dryer_daily_energy_usage
-                name: Daily Energy Usage
-          - type: entities
-            title: Car charger
-            entities:
-              - entity: sensor.car_charger_activity_summary
-                name: Activity
-              - entity: sensor.car_charger_electrical_health
-                name: Electrical Health
-              - entity: sensor.car_charger_energy_summary
-                name: Energy Summary
-              - entity: sensor.car_charger_daily_energy_usage
-                name: Daily Energy Usage
+          - type: custom:circuitsetup-energy-analyzer-house-flow
+            title: Home energy summary
+            setup_health_entity: sensor.circuitsetup_energy_analyzer_setup_health
+            setup_health_path: /circuitsetup-energy-analyzer-evidence?setup_health=1
+            primary_mains:
+              circuit_id: mains
+              name: Mains
+              power_entities:
+                - sensor.mains_power
+              daily_energy_usage_entity: sensor.mains_daily_energy_usage
+              cost_today_entity: sensor.mains_cost_today
+              monitored_power_entity: sensor.mains_monitored_power
+              balance_power_entity: sensor.mains_balance_power
+              monitored_coverage_entity: sensor.mains_monitored_coverage
+              nilm_unknown_loads_entity: sensor.mains_nilm_unknown_loads
+              solar_flow_status_entity: sensor.mains_solar_flow_status
+              solar_surplus_power_entity: sensor.mains_solar_surplus_power
+              utility_comparison_status_entity: sensor.mains_utility_comparison_status
+            appliances:
+              - circuit_id: refrigerator
+                name: Refrigerator
+                area: Kitchen
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
+                power_entities:
+                  - sensor.refrigerator_power
+                running_entity: binary_sensor.refrigerator_running
+                energy_today_entity: sensor.refrigerator_daily_energy_usage
+                cost_today_entity: sensor.refrigerator_cost_today
+                health_entity: sensor.refrigerator_health_summary
+              - circuit_id: hvac
+                name: HVAC
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
+                power_entities:
+                  - sensor.hvac_power
+                running_entity: binary_sensor.hvac_running
+                energy_today_entity: sensor.hvac_daily_energy_usage
+                cost_today_entity: sensor.hvac_cost_today
+                health_entity: sensor.hvac_health_summary
+
+  - type: sections
+    title: Appliances
+    path: appliances
+    icon: mdi:devices
+    max_columns: 4
+    sections:
       - type: grid
-        title: Mains, Solar, and NILM
+        column_span: 4
         cards:
-          - type: glance
-            title: Mains rollups
-            columns: 4
-            entities:
-              - entity: sensor.mains_nilm_activity_summary
-                name: Activity
-              - entity: sensor.mains_nilm_electrical_health
-                name: Electrical
-              - entity: sensor.mains_nilm_energy_summary
-                name: Energy
-          - type: gauge
-            entity: sensor.mains_nilm_monitored_coverage
-            name: Known Load Share
-            min: 0
-            max: 100
-            severity:
-              red: 0
-              yellow: 40
-              green: 70
+          - type: custom:circuitsetup-energy-analyzer-appliance-grid
+            title: Appliances
+            appliances:
+              - circuit_id: refrigerator
+                name: Refrigerator
+                area: Kitchen
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
+                power_entities:
+                  - sensor.refrigerator_power
+                running_entity: binary_sensor.refrigerator_running
+                energy_today_entity: sensor.refrigerator_daily_energy_usage
+                cost_today_entity: sensor.refrigerator_cost_today
+                health_entity: sensor.refrigerator_health_summary
+              - circuit_id: hvac
+                name: HVAC
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
+                power_entities:
+                  - sensor.hvac_power
+                running_entity: binary_sensor.hvac_running
+                energy_today_entity: sensor.hvac_daily_energy_usage
+                cost_today_entity: sensor.hvac_cost_today
+                health_entity: sensor.hvac_health_summary
+
+  - type: sections
+    title: Energy & Costs
+    path: energy-costs
+    icon: mdi:chart-bar
+    max_columns: 4
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: custom:circuitsetup-energy-analyzer-energy-cost
+            title: Energy and costs
+            api_path: circuitsetup_energy_analyzer/appliance_insights
+            primary_mains:
+              circuit_id: mains
+              name: Mains
+              daily_energy_usage_entity: sensor.mains_daily_energy_usage
+              cost_today_entity: sensor.mains_cost_today
+              average_kwh_per_day_entity: sensor.mains_average_kwh_per_day
+              average_cost_per_day_entity: sensor.mains_average_cost_per_day
+            appliances:
+              - circuit_id: refrigerator
+                name: Refrigerator
+                energy_today_entity: sensor.refrigerator_daily_energy_usage
+                cost_today_entity: sensor.refrigerator_cost_today
+                average_kwh_entity: sensor.refrigerator_average_kwh_per_day
+                average_cost_entity: sensor.refrigerator_average_cost_per_day
+              - circuit_id: hvac
+                name: HVAC
+                energy_today_entity: sensor.hvac_daily_energy_usage
+                cost_today_entity: sensor.hvac_cost_today
+                average_kwh_entity: sensor.hvac_average_kwh_per_day
+                average_cost_entity: sensor.hvac_average_cost_per_day
           - type: entities
-            title: Mains Load Match
+            title: Billing Cycle
             entities:
-              - entity: sensor.mains_nilm_monitored_power
-                name: Known Appliance Load
-              - entity: sensor.mains_nilm_balance_power
-                name: Unassigned Mains Load
-              - entity: sensor.mains_nilm_monitored_coverage
-                name: Known Load Share
-          - type: markdown
-            title: What Known Load Share Means
-            content: >
-              Known Load Share is how much of current mains power is explained
-              by the circuits you selected. Low values usually mean normal
-              unmonitored loads, not necessarily a problem.
-          - type: tile
-            entity: sensor.mains_nilm_nilm_unknown_loads
-            name: Unknown Load Inventory
-            vertical: false
-          - type: glance
-            title: Unknown load signals
-            columns: 4
-            entities:
-              - entity: sensor.mains_nilm_nilm_unknown_loads
-                name: Inventory
-              - entity: sensor.mains_nilm_nilm_signature_count
-                name: Signatures
-              - entity: sensor.mains_nilm_monitored_coverage
-                name: Known Load Share
+              - entity: sensor.mains_billing_cycle_usage
+                name: Usage
+              - entity: sensor.mains_cost_cycle
+                name: Cost so far
+              - entity: sensor.mains_cost_cycle_forecast
+                name: Projected cost
+
+  - type: sections
+    title: Mains & NILM
+    path: mains-nilm
+    icon: mdi:transmission-tower
+    max_columns: 4
+    sections:
+      - type: grid
+        column_span: 4
+        cards:
+          - type: custom:circuitsetup-energy-analyzer-house-flow
+            mode: mains
+            title: Mains and NILM
+            primary_mains:
+              circuit_id: mains
+              name: Mains
+              power_entities:
+                - sensor.mains_power
+              monitored_power_entity: sensor.mains_monitored_power
+              balance_power_entity: sensor.mains_balance_power
+              monitored_coverage_entity: sensor.mains_monitored_coverage
+              nilm_unknown_loads_entity: sensor.mains_nilm_unknown_loads
+              nilm_signature_count_entity: sensor.mains_nilm_signature_count
+              solar_surplus_power_entity: sensor.mains_solar_surplus_power
+          - type: custom:circuitsetup-energy-analyzer-dashboard-graphs
+            title: Defined NILM appliance power
+            circuit_id: mains
+            detail_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
           - type: button
-            name: Open NILM Graph & Review
-            icon: mdi:chart-line
+            name: Review NILM Assignments
+            icon: mdi:playlist-check
             tap_action:
               action: navigate
               navigation_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
-          - type: conditional
-            conditions:
-              - entity: sensor.mains_nilm_solar_flow_status
-                state_not: unavailable
-              - entity: sensor.mains_nilm_solar_flow_status
-                state_not: unknown
-            card:
-              type: entities
-              title: Solar flow
-              entities:
-                - entity: sensor.mains_nilm_solar_flow_status
-                  name: Solar Flow
-                - entity: sensor.mains_nilm_solar_surplus_power
-                  name: Solar Surplus
-          - type: conditional
-            conditions:
-              - entity: sensor.mains_nilm_utility_comparison_status
-                state_not: unavailable
-              - entity: sensor.mains_nilm_utility_comparison_status
-                state_not: unknown
-            card:
-              type: entities
-              title: Utility comparison
-              entities:
-                - entity: sensor.mains_nilm_utility_comparison_status
-                  name: Utility Status
-          - type: statistics-graph
-            title: Mains daily energy
-            days_to_show: 7
-            period: day
-            stat_types:
-              - max
-            entities:
-              - entity: sensor.mains_nilm_daily_energy_usage
 
+  - type: sections
+    title: Insights
+    path: insights
+    icon: mdi:lightbulb-on-outline
+    max_columns: 4
+    sections:
       - type: grid
-        title: Energy Tracking
+        column_span: 4
         cards:
-          - type: statistics-graph
-            title: Daily energy trend
-            days_to_show: 7
-            period: day
-            stat_types:
-              - max
+          - type: history-graph
+            title: HVAC activity and outdoor temperature
+            hours_to_show: 168
             entities:
-              - entity: sensor.refrigerator_daily_energy_usage
+              - entity: sensor.outdoor_temperature
+                name: Outdoor temperature
+              - entity: sensor.hvac_power
+                name: HVAC power
+              - entity: binary_sensor.hvac_running
+                name: HVAC running
               - entity: sensor.hvac_daily_energy_usage
-              - entity: sensor.water_heater_daily_energy_usage
-              - entity: sensor.pool_pump_daily_energy_usage
-              - entity: sensor.washer_daily_energy_usage
-              - entity: sensor.dryer_daily_energy_usage
-              - entity: sensor.car_charger_daily_energy_usage
-          - type: conditional
-            conditions:
-              - entity: sensor.water_heater_water_flow_correlation
-                state_not: unavailable
-              - entity: sensor.water_heater_water_flow_correlation
-                state_not: unknown
-              - entity: sensor.washer_water_flow_correlation
-                state_not: unavailable
-              - entity: sensor.washer_water_flow_correlation
-                state_not: unknown
-            card:
-              type: glance
-              title: Water flow context
-              columns: 4
-              entities:
-                - entity: sensor.water_heater_water_flow_correlation
-                  name: Water heater
-                - entity: sensor.washer_water_flow_correlation
-                  name: Washer
-          - type: horizontal-stack
-            title: Settings and exports
-            cards:
-              - type: button
-                name: Recalculate suggested settings
-                icon: mdi:tune-variant
-                tap_action:
-                  action: call-service
-                  service: button.press
-                  target:
-                    entity_id: button.circuitsetup_energy_analyzer_recalculate_suggestions
-              - type: button
-                name: Export refrigerator history CSV
-                icon: mdi:file-delimited-outline
-                tap_action:
-                  action: call-service
-                  service: circuitsetup_energy_analyzer.export_history_csv
-                  data:
-                    circuit_id: refrigerator
-
-      - type: grid
-        title: HVAC Weather Context
-        cards:
-          - type: conditional
-            conditions:
-              - entity: sensor.outdoor_temperature
-                state_not: unavailable
-              - entity: sensor.outdoor_temperature
-                state_not: unknown
-            card:
-              type: statistics-graph
-              title: HVAC daily energy and outdoor temperature
-              days_to_show: 7
-              period: day
-              stat_types:
-                - max
-              entities:
-                - entity: sensor.hvac_daily_energy_usage
-                  name: Daily Energy Usage
-                - entity: sensor.outdoor_temperature
-                  name: Outdoor Temperature
-          - type: conditional
-            conditions:
-              - entity: sensor.hvac_weather_context
-                state_not: unavailable
-              - entity: sensor.hvac_weather_context
-                state_not: unknown
-            card:
-              type: tile
-              entity: sensor.hvac_weather_context
-              name: Outdoor Weather Context
-              vertical: false
-          - type: markdown
-            title: Alert Philosophy
-            content: >
-                Notifications and repairs: appliance alerts use persistent
-                notifications with observed evidence. Repairs are reserved for
-                setup, configuration, missing sensors, stale data, or other
-                data-quality problems. Demand and capacity findings are
-                operational evidence from energy measurements, not electrical
-                safety verification, code compliance, or breaker sizing advice.
-
-      - type: grid
-        title: Diagnostics and Evidence
-        cards:
-          - type: markdown
-            title: Analyzer evidence links
-            content: >
-              **Analyzer evidence links**
-
-              Open these views when you want alert evidence, analyzer actions,
-              and troubleshooting context without adding more diagnostic rows
-              to every appliance card.
-
-              - [Refrigerator evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=refrigerator)
-              - [HVAC evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=hvac)
-              - [Water heater evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=water_heater)
-              - [Pool pump evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=pool_pump)
-              - [Washer evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=washer)
-              - [Dryer evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=dryer)
-              - [Car charger evidence](/circuitsetup-energy-analyzer-evidence?circuit_id=car_charger)
+                name: HVAC energy today

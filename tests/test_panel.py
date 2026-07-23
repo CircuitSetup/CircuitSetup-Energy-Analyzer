@@ -3238,6 +3238,34 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
 
     coordinator = _coordinator(config=_config("hvac"))
     coordinator.entry_id = "entry-hvac"
+    coordinator.current_time = lambda: datetime(2026, 7, 23, 12, tzinfo=UTC)
+    coordinator.store_data.energy_usage_by_circuit = {
+        "hvac": {
+            "days": [
+                {
+                    "date": "2026-07-22",
+                    "usage_kwh": 8.5,
+                    "complete": True,
+                }
+            ]
+        }
+    }
+    coordinator.store_data.cost_by_circuit = {
+        "hvac": {
+            "days": [
+                {
+                    "date": "2026-07-22",
+                    "cost": 1.7,
+                    "complete": True,
+                }
+            ]
+        }
+    }
+    coordinator.state.cost_today_by_circuit = {"hvac": 1.2}
+    coordinator.state.cost_today_status_by_circuit = {"hvac": "actual"}
+    coordinator.state.estimated_cost_today_by_circuit = {"hvac": 1.1}
+    coordinator.state.average_cost_per_day_by_circuit = {"hvac": 1.5}
+    coordinator.state.average_kwh_per_day_by_circuit = {"hvac": 7.5}
 
     payload = appliance_insights_payload([coordinator])
 
@@ -3250,6 +3278,85 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
     assert item["source_type"] == "direct_meter"
     assert item["detail_path"].endswith("appliance_detail=1&circuit_id=hvac")
     assert item["is_nilm"] is False
+    assert item["cost_today"] == 1.2
+    assert item["cost_today_status"] == "recorded"
+    assert item["average_cost_per_day"] == 1.5
+    assert item["average_kwh_per_day"] == 7.5
+    assert item["daily_totals"] == [
+        {
+            "date": "2026-07-22",
+            "energy_kwh": 8.5,
+            "cost": 1.7,
+            "cost_source": "recorded",
+        }
+    ]
+
+
+def test_appliance_insights_payload_exposes_primary_mains_daily_totals() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Whole home",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    hvac = _config("hvac")
+    coordinator = _coordinator(config=mains, configs=(mains, hvac))
+    coordinator.entry_id = "entry-home"
+    coordinator.current_time = lambda: datetime(2026, 7, 23, 12, tzinfo=UTC)
+    coordinator.store_data.energy_usage_by_circuit = {
+        "mains": {
+            "days": [
+                {
+                    "date": "2026-07-22",
+                    "usage_kwh": 24.0,
+                    "complete": True,
+                }
+            ]
+        },
+        "hvac": {
+            "days": [
+                {
+                    "date": "2026-07-22",
+                    "usage_kwh": 8.5,
+                    "complete": True,
+                }
+            ]
+        },
+    }
+    coordinator.store_data.cost_by_circuit = {
+        "mains": {
+            "days": [
+                {
+                    "date": "2026-07-22",
+                    "cost": 4.8,
+                    "complete": True,
+                }
+            ]
+        }
+    }
+
+    payload = appliance_insights_payload([coordinator])
+
+    assert payload["whole_house"] == [
+        {
+            "entry_id": "entry-home",
+            "circuit_id": "mains",
+            "display_name": "Whole home",
+            "daily_totals": [
+                {
+                    "date": "2026-07-22",
+                    "energy_kwh": 24.0,
+                    "cost": 4.8,
+                    "cost_source": "recorded",
+                }
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio

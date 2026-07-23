@@ -490,12 +490,22 @@ export function createEvidenceViewMethods({
     const unitLabel = alert.y_axis_label || "";
     const unit = unitLabel ? ` ${unitLabel}` : "";
 
+    const maxPointCount = Math.max(...series.map((item) => item.points.length), 1);
+    const barWidth = Math.max(4, Math.min(36, ((width - padLeft - padRight) / maxPointCount) * 0.6));
     const lines = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
       const axis = rightAxis && item.axis === "right" ? "right" : "left";
       const itemUnit = rightAxis ? (item.unit || unitLabel) : unitLabel;
+      if (item.kind === "bar") {
+        return item.points.map((point) => {
+          const pointX = x(point.time);
+          const pointY = y(point.value, axis);
+          const heightValue = Math.max(height - padBottom - pointY, 1);
+          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${pointY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
+        }).join("");
+      }
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value, axis).toFixed(1)}`).join(" ");
-      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}"></circle>`).join("");
+      const circles = item.points.map((point) => `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(this._formatNumber(point.value))}" data-chart-unit="${this._escape(itemUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`).join("");
       const dash = axis === "right" ? ' stroke-dasharray="6 4"' : "";
       return `<polyline fill="none" stroke="${color}" stroke-width="1.5"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
@@ -559,7 +569,7 @@ export function createEvidenceViewMethods({
     const selectAttrs = alert.nilm_select_interval
       ? ` tabindex="0" data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
       : "";
-    const ariaLabel = this._panelTextFormat("chart.accessible_summary", {
+    let ariaLabel = this._panelTextFormat("chart.accessible_summary", {
       series_count: series.length,
       point_count: allPoints.length,
       min: minLabel,
@@ -572,6 +582,9 @@ export function createEvidenceViewMethods({
       max: this._formatNumber(rightMaxValue),
       unit: ` ${alert.right_y_axis_label}`,
     })}` : "");
+    if (!ariaLabel.trim()) {
+      ariaLabel = `Chart with ${series.length} series and ${allPoints.length} points from ${this._formatDateTime(new Date(minTime))} to ${this._formatDateTime(new Date(maxTime))}.`;
+    }
 
     return `
       <div class="chart-frame" data-chart-frame>

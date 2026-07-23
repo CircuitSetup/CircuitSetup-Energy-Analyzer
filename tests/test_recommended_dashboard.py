@@ -121,17 +121,12 @@ def _entity_refs(config: dict[str, object]) -> set[str]:
     refs: set[str] = set()
 
     def walk(value: object) -> None:
-        if isinstance(value, dict):
-            entity_id = value.get("entity")
-            if isinstance(entity_id, str):
-                refs.add(entity_id)
-            entities = value.get("entities")
-            if isinstance(entities, list):
-                for item in entities:
-                    if isinstance(item, str):
-                        refs.add(item)
-                    else:
-                        walk(item)
+        if isinstance(value, str):
+            if value.startswith(
+                ("sensor.", "binary_sensor.", "button.", "select.", "number.")
+            ):
+                refs.add(value)
+        elif isinstance(value, dict):
             for nested in value.values():
                 walk(nested)
         elif isinstance(value, list):
@@ -156,6 +151,44 @@ def _dashboard_sections(config: dict[str, object]) -> list[dict[str, object]]:
                 section for section in view_sections if isinstance(section, dict)
             )
     return sections
+
+
+def _dashboard_views(config: dict[str, object]) -> list[dict[str, object]]:
+    views = config.get("views")
+    if not isinstance(views, list):
+        return []
+    return [view for view in views if isinstance(view, dict)]
+
+
+def _entity_ref_counts_by_view(
+    config: dict[str, object],
+) -> dict[str, dict[str, int]]:
+    counts_by_view: dict[str, dict[str, int]] = {}
+    for view in _dashboard_views(config):
+        counts: dict[str, int] = {}
+
+        def walk(value: object, target_counts: dict[str, int]) -> None:
+            if isinstance(value, str):
+                if value.startswith(
+                    ("sensor.", "binary_sensor.", "button.", "select.", "number.")
+                ):
+                    target_counts[value] = target_counts.get(value, 0) + 1
+            elif isinstance(value, dict):
+                for nested in value.values():
+                    walk(nested, target_counts)
+            elif isinstance(value, list):
+                for nested in value:
+                    walk(nested, target_counts)
+
+        walk(view, counts)
+        counts_by_view[str(view.get("path") or "")] = counts
+    return counts_by_view
+
+
+def _card_of_type(config: dict[str, object], card_type: str) -> dict[str, object]:
+    return next(
+        card for card in _dashboard_cards(config) if card.get("type") == card_type
+    )
 
 
 def _dashboard_section(config: dict[str, object], title: str) -> dict[str, object]:
@@ -188,19 +221,10 @@ def _entity_ref_count(config: dict[str, object], entity_id: str) -> int:
 
     def walk(value: object) -> None:
         nonlocal count
-        if isinstance(value, dict):
-            if value.get("entity") == entity_id:
-                count += 1
-            entities = value.get("entities")
-            if isinstance(entities, list):
-                for item in entities:
-                    if item == entity_id:
-                        count += 1
-                    else:
-                        walk(item)
-            for key, nested in value.items():
-                if key == "entities":
-                    continue
+        if value == entity_id:
+            count += 1
+        elif isinstance(value, dict):
+            for nested in value.values():
                 walk(nested)
         elif isinstance(value, list):
             for item in value:
@@ -313,24 +337,288 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     }
 
 
+@pytest.mark.parametrize(
+    ("layout", "expected_paths"),
+    [
+        (
+            DASHBOARD_LAYOUT_SIMPLE,
+            ["overview", "appliances", "energy-costs"],
+        ),
+        (
+            DASHBOARD_LAYOUT_STANDARD,
+            [
+                "overview",
+                "appliances",
+                "energy-costs",
+                "mains-nilm",
+                "insights",
+            ],
+        ),
+        (
+            DASHBOARD_LAYOUT_EXPERT,
+            [
+                "overview",
+                "appliances",
+                "energy-costs",
+                "mains-nilm",
+                "insights",
+                "diagnostics",
+            ],
+        ),
+    ],
+)
+def test_dashboard_uses_focused_conditional_views(
+    layout: str,
+    expected_paths: list[str],
+) -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        layout,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+
+    assert [view["path"] for view in _dashboard_views(dashboard)] == expected_paths
+    assert all(view.get("sections") for view in _dashboard_views(dashboard))
+
+
+def test_dashboard_does_not_repeat_entity_references_within_a_view() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+
+    duplicates = {
+        path: {
+            entity_id: count
+            for entity_id, count in counts.items()
+            if count > 1
+        }
+        for path, counts in _entity_ref_counts_by_view(dashboard).items()
+    }
+    assert duplicates == {path: {} for path in duplicates}
+
+
+def test_home_card_receives_every_appliance_for_live_sorting() -> None:
+    appliances = tuple(
+        CircuitConfig(
+            circuit_id=f"appliance_{index}",
+            name=f"Appliance {index}",
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef(
+                    f"sensor.appliance_{index}_power",
+                    SensorRole.REAL_POWER,
+                ),
+                SensorRef(
+                    f"sensor.appliance_{index}_energy",
+                    SensorRole.ENERGY,
+                ),
+            ),
+        )
+        for index in range(12)
+    )
+    dashboard = build_recommended_dashboard(
+        (*appliances, _circuits()[1]),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    home = _dashboard_views(dashboard)[0]
+    home_card = _card_of_type(
+        home,
+        "custom:circuitsetup-energy-analyzer-house-flow",
+    )
+    assert len(home_card["appliances"]) == 12
+    assert all(
+        appliance["circuit_id"] != "mains" for appliance in home_card["appliances"]
+    )
+
+
+def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    energy_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    )
+    energy_card = _card_of_type(
+        energy_view,
+        "custom:circuitsetup-energy-analyzer-energy-cost",
+    )
+
+    assert {
+        appliance["cost_today_entity"]
+        for appliance in energy_card["appliances"]
+    } == {"sensor.fridge_cost_today", "sensor.hvac_cost_today"}
+    assert {
+        appliance["average_cost_entity"]
+        for appliance in energy_card["appliances"]
+    } == {
+        "sensor.fridge_average_cost_per_day",
+        "sensor.hvac_average_cost_per_day",
+    }
+    assert {
+        appliance["average_kwh_entity"]
+        for appliance in energy_card["appliances"]
+    } == {
+        "sensor.fridge_average_kwh_per_day",
+        "sensor.hvac_average_kwh_per_day",
+    }
+    billing_card = _card_with_title(energy_view, "Billing Cycle")
+    billing_entities = {
+        row["entity"] for row in billing_card["entities"] if isinstance(row, dict)
+    }
+    assert "sensor.mains_cost_cycle" in billing_entities
+    assert "sensor.mains_cost_cycle_forecast" in billing_entities
+    assert all("cost_today" not in entity_id for entity_id in billing_entities)
+
+
+def test_appliance_timeline_uses_binary_running_entities() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    appliance_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "appliances"
+    )
+    appliance_card = _card_of_type(
+        appliance_view,
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+    )
+
+    assert {
+        appliance["running_entity"]
+        for appliance in appliance_card["appliances"]
+    } == {"binary_sensor.fridge_running", "binary_sensor.hvac_running"}
+    assert all(
+        "activity_summary" not in str(appliance)
+        for appliance in appliance_card["appliances"]
+    )
+
+
+def test_insights_include_every_hvac_circuit() -> None:
+    second_hvac = CircuitConfig(
+        circuit_id="heat_pump",
+        name="Heat pump",
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.heat_pump_power", SensorRole.REAL_POWER),),
+    )
+    dashboard = build_recommended_dashboard(
+        (*_example_circuits(), second_hvac),
+        DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    refs = _entity_refs(insights)
+
+    assert "binary_sensor.hvac_running" in refs
+    assert "binary_sensor.heat_pump_running" in refs
+    assert "sensor.outdoor_temperature" in refs
+
+
+def test_mains_view_identifies_primary_and_additional_mains_channels() -> None:
+    second_mains = CircuitConfig(
+        circuit_id="garage_mains",
+        name="Garage subpanel",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.garage_mains_power", SensorRole.REAL_POWER),
+        ),
+    )
+    dashboard = build_recommended_dashboard(
+        (*_example_circuits(), second_mains),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "mains-nilm"
+    )
+    flow_card = _card_of_type(
+        mains_view,
+        "custom:circuitsetup-energy-analyzer-house-flow",
+    )
+
+    assert flow_card["primary_mains"]["circuit_id"] == "mains"
+    assert flow_card["secondary_mains"] == [
+        {
+            "circuit_id": "garage_mains",
+            "name": "Garage subpanel",
+            "power_entities": ["sensor.garage_mains_power"],
+        }
+    ]
+
+
+@pytest.mark.parametrize("appliance_count", [0, 1, 10, 25])
+def test_dashboard_omits_empty_views_and_cards(appliance_count: int) -> None:
+    appliances = tuple(
+        CircuitConfig(
+            circuit_id=f"load_{index}",
+            name=f"Load {index}",
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef(f"sensor.load_{index}_power", SensorRole.REAL_POWER),
+            ),
+        )
+        for index in range(appliance_count)
+    )
+    dashboard = build_recommended_dashboard(
+        appliances,
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+
+    for view in _dashboard_views(dashboard):
+        assert view["sections"]
+        for section in view["sections"]:
+            assert section["cards"]
+            assert all(card for card in section["cards"])
+
+
+def test_dashboard_preflight_reports_views_and_visual_capabilities() -> None:
+    preflight = dashboard_preflight_summary(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+
+    assert preflight["views"] == [
+        "Home",
+        "Appliances",
+        "Energy & Costs",
+        "Mains & NILM",
+        "Insights",
+    ]
+    assert preflight["capabilities"] == {
+        "house_flow": True,
+        "appliance_grid": True,
+        "energy_cost": True,
+        "running_timeline": True,
+        "mains_nilm": True,
+        "weather": True,
+        "water": False,
+    }
+    assert preflight["costs"] in {"recorded", "estimated", "unavailable"}
+
+
 def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    assert [section.get("title") for section in _dashboard_sections(dashboard)] == [
-        "Household Overview",
-        "Today's Energy",
-        "Energy Tracking",
-        "Appliance Run Timeline",
-        "Appliance Status",
-        "Mains, Solar, and NILM",
-        "NILM Review",
-        "HVAC Weather Context",
+    assert [view["path"] for view in _dashboard_views(dashboard)] == [
+        "overview",
+        "appliances",
+        "energy-costs",
+        "mains-nilm",
     ]
     assert dashboard["views"][0]["type"] == "sections"
-    assert dashboard["views"][0]["title"] == "Overview"
+    assert dashboard["views"][0]["title"] == "Home"
     assert dashboard["views"][0]["path"] == "overview"
     assert dashboard["views"][0]["max_columns"] == 4
     assert dashboard["views"][0]["dense_section_placement"] is True
@@ -342,17 +630,11 @@ def test_generated_dashboard_matches_glance_columns_to_visible_entities() -> Non
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    assert {
-        card["title"]: card["columns"]
+    assert not [
+        card
         for card in _dashboard_cards(dashboard)
         if card.get("type") == "glance"
-    } == {
-        "Top appliances right now": 2,
-        "Top energy users today": 2,
-        "Mains rollups": 2,
-        "Unknown load signals": 2,
-        "NILM review": 2,
-    }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -415,32 +697,32 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     )
     refs = _entity_refs(dashboard)
 
-    assert _dashboard_section(dashboard, "Household Overview")
-    assert _dashboard_section(dashboard, "Today's Energy")
-    assert _dashboard_section(dashboard, "Appliance Run Timeline")
-    assert _dashboard_section(dashboard, "NILM Review")
+    assert {view["path"] for view in _dashboard_views(dashboard)} >= {
+        "overview",
+        "appliances",
+        "energy-costs",
+        "mains-nilm",
+    }
     assert "sensor.fridge_daily_energy_usage" in refs
-    assert "sensor.fridge_cost_cycle" in refs
-    assert "sensor.fridge_cost_cycle_forecast" in refs
-    assert "sensor.fridge_energy_summary" in refs
-    assert "sensor.fridge_activity_summary" in refs
+    assert "sensor.fridge_cost_today" in refs
+    assert "sensor.fridge_average_cost_per_day" in refs
+    assert "sensor.fridge_health_summary" in refs
+    assert "binary_sensor.fridge_running" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
+    assert "sensor.mains_cost_cycle" in refs
+    assert "sensor.mains_cost_cycle_forecast" in refs
+    assert "sensor.fridge_activity_summary" not in refs
     assert "select.fridge_alert_sensitivity" not in refs
     assert "button.fridge_relearn_baseline" not in refs
 
-    todays_energy = _dashboard_section(dashboard, "Today's Energy")
-    assert [card.get("title") for card in todays_energy["cards"][:2]] == [
-        "Today's appliance energy",
-        "Top energy users today",
-    ]
-    assert _card_with_title(todays_energy, "Cost estimate")["entities"] == [
-        {"entity": "sensor.fridge_cost_cycle", "name": "Refrigerator Cost so far"},
+    energy_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    )
+    assert _card_with_title(energy_view, "Billing Cycle")["entities"] == [
         {
-            "entity": "sensor.fridge_cost_cycle_forecast",
-            "name": "Refrigerator Projected cost",
+            "entity": "sensor.mains_billing_cycle_usage",
+            "name": "Mains NILM Billing cycle usage",
         },
-        {"entity": "sensor.hvac_cost_cycle", "name": "HVAC Cost so far"},
-        {"entity": "sensor.hvac_cost_cycle_forecast", "name": "HVAC Projected cost"},
         {"entity": "sensor.mains_cost_cycle", "name": "Mains NILM Cost so far"},
         {
             "entity": "sensor.mains_cost_cycle_forecast",
@@ -455,20 +737,17 @@ def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
         DASHBOARD_LAYOUT_STANDARD,
         entry_id="entry-1",
     )
-    household = _dashboard_section(dashboard, "Household Overview")
-    setup_health = next(
-        card
-        for card in _dashboard_cards(household)
-        if card.get("name") == "Setup Health"
+    home = _card_of_type(
+        dashboard,
+        "custom:circuitsetup-energy-analyzer-house-flow",
     )
 
-    assert setup_health["tap_action"] == {
-        "action": "navigate",
-        "navigation_path": (
-            "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
-        ),
-    }
-    assert setup_health["grid_options"] == {"columns": "full", "rows": 1}
+    assert home["setup_health_entity"] == (
+        "sensor.circuitsetup_energy_analyzer_setup_health"
+    )
+    assert home["setup_health_path"] == (
+        "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
+    )
 
 
 def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
@@ -477,18 +756,13 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    appliance_status = _dashboard_section(dashboard, "Appliance Status")
-    appliance = next(
-        card
-        for card in _dashboard_cards(appliance_status)
-        if card.get("type") == "entities"
-    )
-
-    assert appliance_status["column_span"] == 2
     assert all(
-        card.get("type") != "markdown" for card in _dashboard_cards(appliance_status)
+        section["column_span"] == 4 for section in _dashboard_sections(dashboard)
     )
-    assert appliance["grid_options"] == {"columns": "full", "rows": "auto"}
+    assert _card_of_type(
+        dashboard,
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+    )
 
 
 def test_dashboard_balancing_accounts_for_wide_appliance_status_section() -> None:
@@ -497,9 +771,10 @@ def test_dashboard_balancing_accounts_for_wide_appliance_status_section() -> Non
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    assert [
-        section.get("column_span", 1) for section in _dashboard_sections(dashboard)
-    ] == [1, 1, 1, 1, 2, 1, 1, 4]
+    assert {
+        section.get("column_span", 1)
+        for section in _dashboard_sections(dashboard)
+    } == {4}
 
 
 def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
@@ -518,11 +793,11 @@ def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    assert "Appliance Status" not in {
-        section.get("title") for section in _dashboard_sections(dashboard)
+    assert "appliances" not in {
+        view["path"] for view in _dashboard_views(dashboard)
     }
-    assert "Appliance Status" not in preflight["will_include"]
-    assert "Appliance Status" in preflight["will_skip"]
+    assert "Appliances" not in preflight["will_include"]
+    assert "Appliances" in preflight["will_skip"]
 
 
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
@@ -531,8 +806,8 @@ def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> 
         DASHBOARD_LAYOUT_STANDARD,
     )
 
-    assert "NILM Review" not in {
-        section.get("title") for section in _dashboard_sections(dashboard)
+    assert "mains-nilm" not in {
+        view["path"] for view in _dashboard_views(dashboard)
     }
 
 
@@ -544,20 +819,12 @@ def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
 
     assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
     assert preflight["will_include"] == [
-        "Household Overview",
-        "Today's Energy",
-        "Energy Tracking",
-        "Appliance Run Timeline",
-        "Appliance Status",
-        "Mains, Solar, and NILM",
-        "NILM Review",
-        "HVAC Weather Context",
+        "Home",
+        "Appliances",
+        "Energy & Costs",
+        "Mains & NILM",
     ]
-    assert "Diagnostics and Evidence" in preflight["will_skip"]
-    assert "Behavior Watchlist" not in {
-        *preflight["will_include"],
-        *preflight["will_skip"],
-    }
+    assert "Diagnostics" in preflight["will_skip"]
     assert preflight["nilm_enabled"] is True
     assert preflight["estimated_appliance_count"] == 0
 
@@ -596,19 +863,24 @@ def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
-    appliance_status = _dashboard_section(dashboard, "Appliance Status")
-    refrigerator = _card_with_title(appliance_status, "Refrigerator")
+    appliance_card = _card_of_type(
+        dashboard,
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+    )
+    refrigerator = next(
+        appliance
+        for appliance in appliance_card["appliances"]
+        if appliance["circuit_id"] == "fridge"
+    )
 
-    assert refrigerator["type"] == "entities"
-    assert refrigerator["entities"] == [
-        {"entity": "sensor.fridge_activity_summary", "name": "Activity"},
-        {"entity": "sensor.fridge_electrical_health", "name": "Electrical Health"},
-        {"entity": "sensor.fridge_energy_summary", "name": "Energy Summary"},
-        {"entity": "sensor.fridge_daily_energy_usage", "name": "Daily Energy Usage"},
-    ]
-    appliance_text = str(appliance_status)
-    assert "sensor.fridge_health_summary" not in appliance_text
-    assert "binary_sensor.fridge_running" not in appliance_text
+    assert refrigerator["health_entity"] == "sensor.fridge_health_summary"
+    assert refrigerator["running_entity"] == "binary_sensor.fridge_running"
+    assert refrigerator["energy_today_entity"] == (
+        "sensor.fridge_daily_energy_usage"
+    )
+    appliance_text = str(appliance_card)
+    assert "sensor.fridge_activity_summary" not in appliance_text
+    assert "sensor.fridge_electrical_health" not in appliance_text
     assert "sensor.fridge_energy_usage_status" not in appliance_text
     assert "sensor.fridge_alert_evidence" not in appliance_text
 
@@ -623,7 +895,7 @@ def test_dashboard_omits_appliance_detail_buttons_in_favor_of_evidence_links() -
     ]
 
     assert not [card for card in buttons if "Detail" in str(card.get("name", ""))]
-    assert "appliance_detail=1" not in str(dashboard)
+    assert "appliance_detail=1" in str(dashboard)
     assert "Analyzer evidence links" in str(dashboard)
     assert "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge" in str(dashboard)
     assert "Open Refrigerator Evidence" not in str(dashboard)
@@ -671,12 +943,14 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
-    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "mains-nilm"
+    )
 
     review_card = next(
         card
-        for card in _dashboard_cards(mains_section)
-        if card.get("name") == "Open NILM Graph & Review"
+        for card in _dashboard_cards(mains_view)
+        if card.get("name") == "Review NILM Assignments"
     )
 
     assert review_card["type"] == "button"
@@ -688,7 +962,7 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     }
 
 
-def test_dashboard_hides_nilm_graph_cards_without_defined_appliances() -> None:
+def test_dashboard_adds_nilm_graph_card_without_defined_appliances() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -696,14 +970,19 @@ def test_dashboard_hides_nilm_graph_cards_without_defined_appliances() -> None:
         entry_id="entry-1",
     )
 
-    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+    cards = _dashboard_cards(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "mains-nilm"
+        )
+    )
 
-    assert not [
+    assert [
         card
         for card in cards
         if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
     ]
-    assert not [card for card in cards if card.get("title") == "NILM mains power"]
     assert "resources" not in dashboard
 
 
@@ -714,8 +993,10 @@ def test_expert_dashboard_adds_nilm_review_card_without_defined_appliances() -> 
         hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
         entry_id="entry-1",
     )
-    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
-    cards = _dashboard_cards(mains_section)
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "mains-nilm"
+    )
+    cards = _dashboard_cards(mains_view)
 
     custom_graph = next(
         card
@@ -742,7 +1023,7 @@ def test_expert_dashboard_adds_nilm_review_card_without_defined_appliances() -> 
     assert "resources" not in dashboard
 
 
-def test_standard_dashboard_hides_nilm_graph_cards_for_defined_appliances() -> None:
+def test_standard_dashboard_adds_nilm_graph_card_for_defined_appliances() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -755,15 +1036,21 @@ def test_standard_dashboard_hides_nilm_graph_cards_for_defined_appliances() -> N
         ),
         entry_id="entry-1",
     )
-    cards = _dashboard_cards(_dashboard_section(dashboard, "Mains, Solar, and NILM"))
+    cards = _dashboard_cards(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "mains-nilm"
+        )
+    )
 
-    assert not [
+    custom_graph = next(
         card
         for card in cards
         if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
-    ]
-    assert not [
-        card for card in cards if card.get("title") == "Defined NILM appliance power"
+    )
+    assert custom_graph["appliance_power_entities"] == [
+        "sensor.pool_pump_estimated_power"
     ]
     assert "resources" not in dashboard
 
@@ -781,16 +1068,16 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
         ),
         entry_id="entry-1",
     )
-    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
-    cards = _dashboard_cards(mains_section)
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "mains-nilm"
+    )
+    cards = _dashboard_cards(mains_view)
 
     custom_graph = next(
         card
         for card in cards
         if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
     )
-    appliance_graph = _card_with_title(mains_section, "Defined NILM appliance power")
-
     custom_graph_without_text = dict(custom_graph)
     text = custom_graph_without_text.pop("text")
     assert text["dashboard_graphs"]["title"] == "NILM mains power"
@@ -804,35 +1091,31 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
         ),
         "appliance_power_entities": ["sensor.pool_pump_estimated_power"],
     }
-    assert appliance_graph == {
-        "type": "history-graph",
-        "title": "Defined NILM appliance power",
-        "hours_to_show": 24,
-        "entities": [
-            {"entity": "sensor.pool_pump_estimated_power", "name": "Pool Pump"}
-        ],
-    }
+    assert not [
+        card for card in cards if card.get("title") == "Defined NILM appliance power"
+    ]
     assert "resources" not in dashboard
 
 
-def test_standard_dashboard_omits_appliance_detail_controls() -> None:
+def test_standard_dashboard_uses_detail_navigation_without_control_entities() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
-    appliance_status = _dashboard_section(dashboard, "Appliance Status")
+    appliance_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "appliances"
+    )
+    refs = _entity_refs(appliance_view)
 
-    refs = _entity_refs(appliance_status)
-
-    assert "Open Refrigerator Detail" not in str(appliance_status)
-    assert "appliance_detail=1" not in str(appliance_status)
+    assert "Open Refrigerator Detail" not in str(appliance_view)
+    assert "appliance_detail=1" in str(appliance_view)
     assert "sensor.fridge_alert_evidence" not in refs
     assert not {
         entity_id
         for entity_id in refs
         if entity_id.startswith(("button.", "select.", "switch."))
     }
-    assert "Controls" not in str(appliance_status)
+    assert "Controls" not in str(appliance_view)
 
 
 def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
@@ -852,11 +1135,13 @@ def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
         DASHBOARD_LAYOUT_STANDARD,
         outdoor_temperature_entity="sensor.backyard_temperature",
     )
-    hvac_section = _dashboard_section(dashboard, "HVAC Weather Context")
-    refs = _entity_refs(hvac_section)
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    refs = _entity_refs(insights)
     dashboard_refs = _entity_refs(dashboard)
 
-    assert "sensor.compressor_activity_summary" in dashboard_refs
+    assert "binary_sensor.compressor_running" in dashboard_refs
     assert "sensor.compressor_weather_context" in refs
     assert "sensor.backyard_temperature" in refs
     assert "sensor.compressor_outdoor_temperature" not in refs
@@ -884,8 +1169,11 @@ def test_dashboard_omits_hvac_outdoor_temperature_mirror_without_source_entity()
     )
     refs = _entity_refs(dashboard)
 
-    assert "sensor.compressor_weather_context" in refs
+    assert "sensor.compressor_weather_context" not in refs
     assert "sensor.compressor_outdoor_temperature" not in refs
+    assert "insights" not in {
+        view["path"] for view in _dashboard_views(dashboard)
+    }
 
 
 def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() -> None:
@@ -895,14 +1183,15 @@ def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() ->
     assert dashboard["title"] == "CircuitSetup Energy Analyzer"
     assert dashboard["views"][0]["path"] == "overview"
     assert {
-        "sensor.fridge_activity_summary",
-        "sensor.fridge_electrical_health",
-        "sensor.fridge_energy_summary",
+        "sensor.fridge_health_summary",
         "sensor.fridge_daily_energy_usage",
+        "sensor.fridge_cost_today",
+        "binary_sensor.fridge_running",
     } <= refs
-    assert "sensor.mains_nilm_unknown_loads" not in refs
-    assert "sensor.fridge_health_summary" not in refs
-    assert "binary_sensor.fridge_running" not in refs
+    assert "mains-nilm" not in {
+        view["path"] for view in _dashboard_views(dashboard)
+    }
+    assert "sensor.fridge_activity_summary" not in refs
     assert "sensor.fridge_metric_consistency_status" not in refs
     assert "sensor.fridge_alert_evidence" not in refs
 
@@ -911,7 +1200,8 @@ def test_standard_dashboard_layout_keeps_appliance_cards_compact() -> None:
     dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
     refs = _entity_refs(dashboard)
 
-    assert "sensor.fridge_activity_summary" in refs
+    assert "sensor.fridge_health_summary" in refs
+    assert "binary_sensor.fridge_running" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
     assert "sensor.fridge_metric_consistency_status" not in refs
     assert "sensor.fridge_energy_usage_status" not in refs
@@ -941,8 +1231,10 @@ def test_standard_dashboard_layout_omits_missing_mains_gap_notes() -> None:
         hass=SimpleNamespace(entity_registry=SimpleNamespace(entities={})),
         entry_id="entry-1",
     )
-    mains_section = _dashboard_section(dashboard, "Mains, Solar, and NILM")
-    markdown = "\n".join(_markdown_contents(mains_section))
+    mains_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "mains-nilm"
+    )
+    markdown = "\n".join(_markdown_contents(mains_view))
 
     assert "Mains rollups note" not in markdown
     assert "Mains load match note" not in markdown
@@ -956,7 +1248,8 @@ def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> No
     refs = _entity_refs(dashboard)
     markdown = str(dashboard)
 
-    assert "sensor.fridge_activity_summary" in refs
+    assert "sensor.fridge_health_summary" in refs
+    assert "binary_sensor.fridge_running" in refs
     assert "sensor.fridge_alert_evidence" not in refs
     assert "sensor.fridge_power_quality_evidence" not in refs
     assert "sensor.fridge_energy_dashboard_status" not in refs
@@ -1006,10 +1299,9 @@ def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
     refs = _entity_refs(dashboard)
 
     assert {
-        "sensor.kitchen_fridge_activity",
-        "sensor.kitchen_fridge_electrical",
-        "sensor.kitchen_fridge_energy",
+        "sensor.kitchen_fridge_health",
         "sensor.kitchen_fridge_daily_kwh",
+        "binary_sensor.kitchen_fridge_running_now",
     } <= refs
     assert "sensor.fridge_health_summary" not in refs
     assert "sensor.fridge_activity_summary" not in refs
@@ -1027,7 +1319,7 @@ def test_dashboard_uses_registry_metadata_when_unique_id_scheme_changes() -> Non
                         "sensor.renamed_activity",
                         "future-scheme-2",
                         circuit_id="fridge",
-                        entity_key="activity_summary",
+                        entity_key="health_summary",
                     ),
                     "sensor.renamed_daily": _registry_entry(
                         "sensor.renamed_daily",
@@ -1051,7 +1343,7 @@ def test_dashboard_uses_registry_metadata_when_unique_id_scheme_changes() -> Non
     assert "binary_sensor.fridge_running" not in refs
 
 
-def test_dashboard_notes_ambiguous_summary_metadata_matches_without_guessing() -> None:
+def test_dashboard_omits_ambiguous_metadata_matches_without_guessing() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_SIMPLE,
@@ -1062,13 +1354,13 @@ def test_dashboard_notes_ambiguous_summary_metadata_matches_without_guessing() -
                         "sensor.first_activity",
                         "future-scheme-1",
                         circuit_id="fridge",
-                        entity_key="activity_summary",
+                        entity_key="health_summary",
                     ),
                     "sensor.second_activity": _registry_entry(
                         "sensor.second_activity",
                         "future-scheme-2",
                         circuit_id="fridge",
-                        entity_key="activity_summary",
+                        entity_key="health_summary",
                     ),
                 }
             )
@@ -1076,16 +1368,9 @@ def test_dashboard_notes_ambiguous_summary_metadata_matches_without_guessing() -
         entry_id="entry-1",
     )
     refs = _entity_refs(dashboard)
-    markdown = "\n".join(_markdown_contents(dashboard))
-
     assert "sensor.first_activity" not in refs
     assert "sensor.second_activity" not in refs
-    assert "sensor.fridge_activity_summary" not in refs
-    assert "Ambiguous entities: Activity" in markdown
-    assert (
-        "Next step: remove duplicate stale analyzer entities or reload the integration."
-        in markdown
-    )
+    assert "sensor.fridge_health_summary" not in refs
 
 
 def test_dashboard_does_not_suffix_match_nested_circuit_unique_ids() -> None:
@@ -1112,23 +1397,33 @@ def test_dashboard_does_not_suffix_match_nested_circuit_unique_ids() -> None:
                 entities={
                     "sensor.kitchen_fridge_activity": _registry_entry(
                         "sensor.kitchen_fridge_activity",
-                        "entry-1_kitchen_fridge_activity_summary",
+                        "entry-1_kitchen_fridge_health_summary",
                     ),
                 }
             )
         ),
         entry_id="entry-1",
     )
-    appliance_status = _dashboard_section(dashboard, "Appliance Status")
-    kitchen_fridge = _card_with_title(appliance_status, "Kitchen Fridge")
-    markdown = "\n".join(_markdown_contents(dashboard))
+    appliance_card = _card_of_type(
+        dashboard,
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+    )
+    kitchen_fridge = next(
+        appliance
+        for appliance in appliance_card["appliances"]
+        if appliance["circuit_id"] == "kitchen_fridge"
+    )
+    fridge = next(
+        appliance
+        for appliance in appliance_card["appliances"]
+        if appliance["circuit_id"] == "fridge"
+    )
 
-    assert _entity_ref_count(kitchen_fridge, "sensor.kitchen_fridge_activity") == 1
-    assert "Fridge dashboard note" in markdown
-    assert "Missing entities: Activity" in markdown
+    assert kitchen_fridge["health_entity"] == "sensor.kitchen_fridge_activity"
+    assert "health_entity" not in fridge
 
 
-def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> None:
+def test_dashboard_omits_missing_and_disabled_entities() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_SIMPLE,
@@ -1137,11 +1432,11 @@ def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> Non
                 entities={
                     "sensor.kitchen_fridge_energy": _registry_entry(
                         "sensor.kitchen_fridge_energy",
-                        "entry-1_fridge_energy_summary",
+                        "entry-1_fridge_daily_energy_usage",
                     ),
                     "sensor.kitchen_fridge_activity": _registry_entry(
                         "sensor.kitchen_fridge_activity",
-                        "entry-1_fridge_activity_summary",
+                        "entry-1_fridge_health_summary",
                         disabled_by="integration",
                     ),
                 }
@@ -1150,19 +1445,8 @@ def test_dashboard_adds_helpful_notes_for_missing_and_disabled_entities() -> Non
         entry_id="entry-1",
     )
     refs = _entity_refs(dashboard)
-    markdown = "\n".join(_markdown_contents(dashboard))
-
     assert "sensor.kitchen_fridge_energy" in refs
     assert "sensor.kitchen_fridge_activity" not in refs
-    assert "Refrigerator dashboard note" in markdown
-    assert "Disabled entities: Activity" in markdown
-    assert "Next step: enable these entities from Home Assistant entity settings." in (
-        markdown
-    )
-    assert "Missing entities: Electrical Health, Daily Energy Usage" in markdown
-    assert (
-        "Next step: reload the integration or review Entity Detail Level." in markdown
-    )
 
 
 def test_dashboard_does_not_guess_ids_when_registry_is_available_but_empty() -> None:
@@ -1173,18 +1457,8 @@ def test_dashboard_does_not_guess_ids_when_registry_is_available_but_empty() -> 
         entry_id="entry-1",
     )
     refs = _entity_refs(dashboard)
-    markdown = "\n".join(_markdown_contents(dashboard))
-
     assert "sensor.fridge_health_summary" not in refs
     assert "binary_sensor.fridge_running" not in refs
-    assert "Refrigerator dashboard note" in markdown
-    assert (
-        "Missing entities: Activity, Electrical Health, Energy Summary, "
-        "Daily Energy Usage"
-    ) in markdown
-    assert (
-        "Next step: reload the integration or review Entity Detail Level." in markdown
-    )
 
 
 def test_dashboard_uses_registry_ids_and_ignores_controls() -> None:
@@ -1196,15 +1470,15 @@ def test_dashboard_uses_registry_ids_and_ignores_controls() -> None:
                 entities={
                     "sensor.fridge_activity": _registry_entry(
                         "sensor.fridge_activity",
-                        "entry-1_fridge_activity_summary",
+                        "entry-1_fridge_health_summary",
                     ),
                     "sensor.fridge_electrical": _registry_entry(
                         "sensor.fridge_electrical",
-                        "entry-1_fridge_electrical_health",
+                        "entry-1_fridge_cost_today",
                     ),
                     "sensor.fridge_energy": _registry_entry(
                         "sensor.fridge_energy",
-                        "entry-1_fridge_energy_summary",
+                        "entry-1_fridge_average_kwh_per_day",
                     ),
                     "sensor.fridge_daily": _registry_entry(
                         "sensor.fridge_daily",
@@ -1303,7 +1577,7 @@ def test_dashboard_omits_control_entities_for_mains_only_dashboard() -> None:
     assert "button.mains_pause_alerts" not in refs
 
 
-def test_dashboard_notes_missing_disabled_and_unavailable_summaries() -> None:
+def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
     class FakeStates:
         def get(self, entity_id: str) -> SimpleNamespace | None:
             if entity_id == "sensor.fridge_daily":
@@ -1320,16 +1594,16 @@ def test_dashboard_notes_missing_disabled_and_unavailable_summaries() -> None:
                 entities={
                     "sensor.fridge_activity": _registry_entry(
                         "sensor.fridge_activity",
-                        "entry-1_fridge_activity_summary",
+                        "entry-1_fridge_health_summary",
                         disabled_by="integration",
                     ),
                     "sensor.fridge_electrical": _registry_entry(
                         "sensor.fridge_electrical",
-                        "entry-1_fridge_electrical_health",
+                        "entry-1_fridge_cost_today",
                     ),
                     "sensor.fridge_energy": _registry_entry(
                         "sensor.fridge_energy",
-                        "entry-1_fridge_energy_summary",
+                        "entry-1_fridge_average_kwh_per_day",
                     ),
                     "sensor.fridge_daily": _registry_entry(
                         "sensor.fridge_daily",
@@ -1341,17 +1615,12 @@ def test_dashboard_notes_missing_disabled_and_unavailable_summaries() -> None:
         ),
         entry_id="entry-1",
     )
-    markdown = "\n".join(_markdown_contents(dashboard))
+    refs = _entity_refs(dashboard)
 
-    assert "Refrigerator dashboard note" in markdown
-    assert "Disabled entities: Activity" in markdown
-    assert "Next step: enable these entities from Home Assistant entity settings." in (
-        markdown
-    )
-    assert "Unavailable entities: Electrical Health, Daily Energy Usage" in markdown
-    assert "Next step: open the entity details and follow its availability reason." in (
-        markdown
-    )
+    assert "sensor.fridge_activity" not in refs
+    assert "sensor.fridge_electrical" not in refs
+    assert "sensor.fridge_daily" not in refs
+    assert "sensor.fridge_energy" in refs
 
 
 class _FakeDashboardsCollection:
@@ -1574,8 +1843,8 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
     assert created["title"] == "CircuitSetup Energy Analyzer"
     assert "config" not in created
     saved_dashboard = str(dashboards[DASHBOARD_URL_PATH].saved[0])
-    assert "Appliance Status" in saved_dashboard
-    assert "sensor.fridge_activity_summary" in saved_dashboard
+    assert "'path': 'appliances'" in saved_dashboard
+    assert "sensor.fridge_health_summary" in saved_dashboard
     assert "sensor.outdoor_temperature" in saved_dashboard
     assert "sensor.hvac_outdoor_temperature" not in saved_dashboard
     assert "sensor.fridge_metric_consistency_status" not in saved_dashboard
@@ -1736,8 +2005,8 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     assert update["title"] == "CircuitSetup Energy Analyzer"
     assert "config" not in update
     saved_dashboard = str(dashboard_store.saved[0])
-    assert "Energy Tracking" in saved_dashboard
-    assert "sensor.fridge_activity_summary" in saved_dashboard
+    assert "'path': 'energy-costs'" in saved_dashboard
+    assert "sensor.fridge_health_summary" in saved_dashboard
     assert "sensor.fridge_alert_evidence" not in saved_dashboard
     assert coordinator.last_dashboard_create_request["action"] == "updated"
 
@@ -1885,8 +2154,8 @@ async def test_coordinator_creates_dashboard_from_current_lovelace_data(
     stored_dashboard = lovelace_data.dashboards[DASHBOARD_URL_PATH]
     assert stored_dashboard.saved
     saved_dashboard = str(stored_dashboard.saved[0])
-    assert "Appliance Status" in saved_dashboard
-    assert "sensor.fridge_activity_summary" in saved_dashboard
+    assert "'path': 'appliances'" in saved_dashboard
+    assert "sensor.fridge_health_summary" in saved_dashboard
     assert "sensor.fridge_metric_consistency_status" not in saved_dashboard
     assert coordinator.last_dashboard_create_request["action"] == "created"
 
