@@ -12,6 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     DASHBOARD_LAYOUT_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.dashboard import (
+    DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_URL_PATH,
     NILM_DASHBOARD_GRAPHS_CARD,
     build_recommended_dashboard,
@@ -1822,6 +1823,7 @@ async def test_coordinator_creates_recommended_dashboard_with_selected_layout() 
             "lovelace": {
                 "dashboards": dashboards,
                 "dashboards_collection": collection,
+                "resources": _FakeLovelaceResources(),
             }
         }
     )
@@ -1936,7 +1938,8 @@ async def test_lovelace_dashboard_save_updates_graph_card_resource_version() -> 
 
 
 @pytest.mark.asyncio
-async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() -> None:
+async def test_lovelace_dashboard_strips_custom_cards_without_writable_resource(
+) -> None:
     resources = _FakeReadOnlyLovelaceResources()
     dashboard_store = _FakeLovelaceStorage({"url_path": DASHBOARD_URL_PATH})
     lovelace_data = SimpleNamespace(
@@ -1949,7 +1952,10 @@ async def test_lovelace_dashboard_strips_graph_card_without_writable_resource() 
                 "sections": [
                     {
                         "cards": [
-                            {"type": NILM_DASHBOARD_GRAPHS_CARD},
+                            *[
+                                {"type": card_type}
+                                for card_type in DASHBOARD_CUSTOM_CARD_TYPES
+                            ],
                             {"type": "history-graph", "title": "Native graph"},
                         ],
                     },
@@ -1987,6 +1993,7 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
             "lovelace": {
                 "dashboards": {DASHBOARD_URL_PATH: dashboard_store},
                 "dashboards_collection": collection,
+                "resources": _FakeLovelaceResources(),
             }
         }
     )
@@ -2122,7 +2129,7 @@ async def test_coordinator_creates_dashboard_from_current_lovelace_data(
     collection = _FakeDashboardsCollection(existing=False)
     lovelace_data = SimpleNamespace(
         dashboards={},
-        resources=object(),
+        resources=_FakeLovelaceResources(),
         yaml_dashboards={},
     )
     collection.dashboard_stores = lovelace_data.dashboards
