@@ -84,9 +84,15 @@ views:
       - type: grid
         column_span: 4
         cards:
+          - type: custom:circuitsetup-energy-analyzer-dashboard-graphs
+            grid_options:
+              columns: 24
+            title: NILM mains power
+            circuit_id: mains
+            detail_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
           - type: custom:circuitsetup-energy-analyzer-energy-cost
             grid_options:
-              columns: 48
+              columns: 24
             title: Energy and costs
             api_path: circuitsetup_energy_analyzer/appliance_insights
             primary_mains:
@@ -109,6 +115,20 @@ views:
                 cost_today_entity: sensor.hvac_cost_today
                 average_kwh_entity: sensor.hvac_average_kwh_per_day
                 average_cost_entity: sensor.hvac_average_cost_per_day
+          - type: history-graph
+            grid_options:
+              columns: 24
+            title: HVAC activity and outdoor temperature
+            hours_to_show: 168
+            entities:
+              - entity: sensor.outdoor_temperature
+                name: Outdoor temperature
+              - entity: sensor.hvac_power
+                name: HVAC power
+              - entity: binary_sensor.hvac_running
+                name: HVAC running
+              - entity: sensor.hvac_daily_energy_usage
+                name: HVAC energy today
   - type: sections
     title: Insights
     path: insights
@@ -134,12 +154,6 @@ views:
               nilm_unknown_loads_entity: sensor.mains_nilm_unknown_loads
               nilm_signature_count_entity: sensor.mains_nilm_signature_count
               solar_surplus_power_entity: sensor.mains_solar_surplus_power
-          - type: custom:circuitsetup-energy-analyzer-dashboard-graphs
-            grid_options:
-              columns: 12
-            title: Defined NILM appliance power
-            circuit_id: mains
-            detail_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
           - type: button
             grid_options:
               columns: 12
@@ -148,21 +162,6 @@ views:
             tap_action:
               action: navigate
               navigation_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
-
-          - type: history-graph
-            grid_options:
-              columns: 12
-            title: HVAC activity and outdoor temperature
-            hours_to_show: 168
-            entities:
-              - entity: sensor.outdoor_temperature
-                name: Outdoor temperature
-              - entity: sensor.hvac_power
-                name: HVAC power
-              - entity: binary_sensor.hvac_running
-                name: HVAC running
-              - entity: sensor.hvac_daily_energy_usage
-                name: HVAC energy today
           - type: entities
             grid_options:
               columns: 12

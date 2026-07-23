@@ -1018,17 +1018,20 @@ def test_dashboard_example_places_detail_panels_under_related_sections() -> None
 
 def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
-    insights = next(
-        view for view in _dashboard_views(dashboard) if view.get("path") == "insights"
+    graphs = next(
+        view
+        for view in _dashboard_views(dashboard)
+        if view.get("path") == "energy-costs"
     )
     graph_cards = [
         card
-        for card in _dashboard_cards(insights)
+        for card in _dashboard_cards(graphs)
         if card.get("type") == "history-graph"
         and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
     assert graph_cards
+    assert graph_cards[0]["grid_options"]["columns"] == 24
     assert graph_cards[0]["entities"] == [
         {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
         {"entity": "sensor.hvac_power", "name": "HVAC power"},
@@ -6918,7 +6921,9 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
     assert "Running binary sensor rather than its text summary" in readme_text
-    assert "full graph tab width" in readme_text
+    assert "arranges all graphs in half-width rows" in readme_text
+    assert "without repeating a separate Active Now list" in readme_text
+    assert "segmented Running intervals against a labeled 24-hour scale" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text
     assert "first configured mains circuit is the primary whole-house source" in (

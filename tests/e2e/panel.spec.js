@@ -127,8 +127,26 @@ async function toHaveNoViolations(page) {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
-test("home energy card live-sorts issues and running appliances", async ({ page }) => {
-  await mockPanelApi(page);
+test("home energy card omits Active now and separates contribution", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: ["fridge", "washer", "oven"].map((id, index) => ({
+          entry_id: "entry-1",
+          circuit_id: id,
+          display_name: id,
+          daily_totals: Array.from({ length: 7 }, (_, day) => ({
+            date: `2026-07-${String(day + 1).padStart(2, "0")}`,
+            energy_kwh: index + 1,
+            cost: (index + 1) * 0.1,
+          })),
+        })),
+      },
+    });
+    return true;
+  });
   const states = {
     "sensor.mains_power": { state: "1820", attributes: { unit_of_measurement: "W" } },
     "sensor.mains_energy_today": { state: "12.4", attributes: { unit_of_measurement: "kWh" } },
@@ -167,6 +185,8 @@ test("home energy card live-sorts issues and running appliances", async ({ page 
     "circuitsetup-energy-analyzer-house-flow",
     {
       title: "Home energy summary",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
       primary_mains: {
         power_entities: ["sensor.mains_power"],
         daily_energy_usage_entity: "sensor.mains_energy_today",
@@ -176,21 +196,24 @@ test("home energy card live-sorts issues and running appliances", async ({ page 
         monitored_coverage_entity: "sensor.mains_coverage",
       },
       appliances,
-      labels: { unavailable: "Unavailable", active_now: "Active now" },
+      labels: { unavailable: "Unavailable" },
     },
     states,
   );
 
-  await expect(card.locator("[data-appliance-id]")).toHaveCount(3);
-  await expect(card.locator("[data-appliance-id]").first()).toHaveAttribute("data-appliance-id", "oven");
+  await expect(card).not.toContainText("Active now");
+  await expect(card.locator("[data-appliance-id]")).toHaveCount(0);
+  await expect(card.locator(".contribution")).toHaveCSS("margin-top", "12px");
+  await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
+  await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
+  await expect(card.getByRole("button", { name: "24 hours" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "7 days" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "30 days" })).toBeVisible();
   await expect(card).toContainText("Unavailable");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.70");
-  await page.evaluate(() => {
-    window.__setDashboardState("sensor.fridge_health", { state: "Needs attention", attributes: {} });
-    window.__setDashboardState("sensor.fridge_power", { state: "1500", attributes: { unit_of_measurement: "W" } });
-  });
-  await expect(card.locator("[data-appliance-id]").first()).toHaveAttribute("data-appliance-id", "fridge");
+  await card.getByRole("button", { name: "7 days" }).click();
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
   await toHaveNoViolations(page);
   await page.evaluate(() => {
     const root = document.documentElement.style;
@@ -207,11 +230,14 @@ test("home energy card live-sorts issues and running appliances", async ({ page 
 test("appliance grid filters live state and loads Running history", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
+    const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
     await route.fulfill({
       json: [[
-        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: "2026-07-22T12:00:00Z" },
-        { entity_id: "binary_sensor.fridge_running", state: "on", last_changed: "2026-07-22T16:00:00Z" },
-        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: "2026-07-22T17:00:00Z" },
+        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: hoursAgo(24) },
+        { state: "on", last_changed: hoursAgo(20) },
+        { state: "off", last_changed: hoursAgo(19) },
+        { state: "on", last_changed: hoursAgo(2) },
+        { state: "off", last_changed: hoursAgo(1) },
       ]],
     });
     return true;
@@ -266,6 +292,8 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("$0.28");
   await search.fill("");
   await search.press("Tab");
+  await expect(card.getByRole("tab", { name: "Highest energy" })).toHaveCount(0);
+  await expect(card.getByRole("tab", { name: "Highest cost" })).toHaveCount(0);
   await card.getByRole("tab", { name: "Running", exact: true }).click();
   await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
   const timeline = card.locator("[data-timeline-selection]");
@@ -281,7 +309,10 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("binary_sensor.fridge_running"))
   ))).toBe(true);
-  await expect(card.locator("[data-running-band]")).toHaveCount(1);
+  await expect(card.locator("[data-running-band]")).toHaveCount(2);
+  await expect(card.locator("[data-timeline-tick]")).toHaveCount(5);
+  await expect(card.locator("[data-timeline-tick]").first()).toHaveText("24h ago");
+  await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Now");
   await card.getByRole("tab", { name: "All", exact: true }).click();
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
@@ -363,6 +394,7 @@ test("energy and cost card switches completed-day windows and preserves cost sou
   await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toContainText("Average: $2.16");
   await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toHaveCSS("display", "block");
   await expect(card.locator("[data-energy-bar]")).toHaveCount(7);
+  await expect(card.locator(".contribution")).toHaveCount(0);
   await card.locator('[data-cost-source="recorded"]').first().focus();
   await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
   await expect(card.locator("[data-chart-tooltip]")).toContainText("$0.80");
