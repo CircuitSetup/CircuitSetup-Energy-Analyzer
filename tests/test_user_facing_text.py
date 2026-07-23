@@ -1030,7 +1030,7 @@ def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None
     ]
 
     assert graph_cards
-    assert graph_cards[0]["grid_options"]["columns"] == 24
+    assert graph_cards[0]["grid_options"]["columns"] == 6
     assert graph_cards[0]["entities"] == [
         {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
         {"entity": "sensor.hvac_power", "name": "HVAC power"},

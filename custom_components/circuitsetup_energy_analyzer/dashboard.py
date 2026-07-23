@@ -271,9 +271,9 @@ def build_recommended_dashboard(
     for view in views:
         cards = view["sections"][0]["cards"]
         card_columns = (
-            24
+            6
             if view["path"] == "energy-costs"
-            else (DASHBOARD_COLUMNS * 12)
+            else 12
             // min(
                 DASHBOARD_COLUMNS,
                 max(1, len(cards)),
