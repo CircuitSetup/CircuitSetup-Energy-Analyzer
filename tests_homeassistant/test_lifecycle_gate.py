@@ -29,7 +29,6 @@ PANEL_READY_VALUES = {PANEL_REGISTERED_VALUE, PANEL_SKIPPED_VALUE}
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
 EXPECTED_PLATFORM_DOMAINS = frozenset(
     {
-        "binary_sensor",
         "button",
         "number",
         "select",
@@ -41,7 +40,6 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
 )
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
     {
-        "binary_sensor",
         "button",
         "number",
         "select",

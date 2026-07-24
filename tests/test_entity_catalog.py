@@ -249,7 +249,6 @@ def test_desired_compact_rules_preview_uses_current_applicability() -> None:
         ("sensor", "activity_summary"),
         ("sensor", "billing_cycle_usage"),
         ("sensor", "run_cycle_runtime"),
-        ("binary_sensor", "running"),
         ("select", "alert_sensitivity"),
     }
 
@@ -271,7 +270,6 @@ def test_desired_compact_rules_preview_uses_current_applicability() -> None:
     assert {(rule.domain, rule.key) for rule in simple_rules} == {
         ("sensor", "health_summary"),
         ("sensor", "activity_summary"),
-        ("binary_sensor", "running"),
         ("select", "alert_sensitivity"),
     }
     assert {(rule.domain, rule.key) for rule in expert_rules} == current_entities
@@ -283,10 +281,10 @@ def test_desired_compact_rules_preview_uses_current_applicability() -> None:
         selected_groups=(),
     ) == {
         "sensor": 2,
-        "binary_sensor": 1,
+        "binary_sensor": 0,
         "button": 0,
         "select": 1,
         "number": 0,
         "switch": 0,
-        "total": 4,
+        "total": 3,
     }

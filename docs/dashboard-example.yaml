@@ -39,7 +39,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
                 power_entities:
                   - sensor.refrigerator_power
-                running_entity: binary_sensor.refrigerator_running
+                activity_entity: sensor.refrigerator_activity_summary
                 energy_today_entity: sensor.refrigerator_daily_energy_usage
                 cost_today_entity: sensor.refrigerator_cost_today
                 health_entity: sensor.refrigerator_health_summary
@@ -49,7 +49,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
                 power_entities:
                   - sensor.hvac_power
-                running_entity: binary_sensor.hvac_running
+                activity_entity: sensor.hvac_activity_summary
                 energy_today_entity: sensor.hvac_daily_energy_usage
                 cost_today_entity: sensor.hvac_cost_today
                 health_entity: sensor.hvac_health_summary
@@ -60,7 +60,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=washer
                 power_entities:
                   - sensor.washer_power
-                running_entity: binary_sensor.washer_running
+                activity_entity: sensor.washer_activity_summary
                 energy_today_entity: sensor.washer_daily_energy_usage
                 cost_today_entity: sensor.washer_cost_today
                 health_entity: sensor.washer_health_summary
@@ -77,7 +77,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
                 power_entities:
                   - sensor.refrigerator_power
-                running_entity: binary_sensor.refrigerator_running
+                activity_entity: sensor.refrigerator_activity_summary
                 energy_today_entity: sensor.refrigerator_daily_energy_usage
                 cost_today_entity: sensor.refrigerator_cost_today
                 health_entity: sensor.refrigerator_health_summary
@@ -87,7 +87,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
                 power_entities:
                   - sensor.hvac_power
-                running_entity: binary_sensor.hvac_running
+                activity_entity: sensor.hvac_activity_summary
                 energy_today_entity: sensor.hvac_daily_energy_usage
                 cost_today_entity: sensor.hvac_cost_today
                 health_entity: sensor.hvac_health_summary
@@ -98,7 +98,7 @@ views:
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=washer
                 power_entities:
                   - sensor.washer_power
-                running_entity: binary_sensor.washer_running
+                activity_entity: sensor.washer_activity_summary
                 energy_today_entity: sensor.washer_daily_energy_usage
                 cost_today_entity: sensor.washer_cost_today
                 health_entity: sensor.washer_health_summary

@@ -528,9 +528,6 @@
       "activity_summary": {
         "name": "Activity summary"
       },
-      "electrical_health": {
-        "name": "Electrical health"
-      },
       "energy_summary": {
         "name": "Energy summary"
       },
@@ -672,9 +669,6 @@
       "always_on_power": {
         "name": "Always On power"
       },
-      "standby_status": {
-        "name": "Standby status"
-      },
       "always_on_limit_usage": {
         "name": "Always On limit usage"
       }
@@ -688,9 +682,6 @@
       },
       "maintenance": {
         "name": "Alerts paused"
-      },
-      "running": {
-        "name": "Running"
       },
       "water_flow_mismatch": {
         "name": "Water flow mismatch"
@@ -975,11 +966,10 @@
         "diagnostics_and_evidence": "Diagnostics and Evidence"
       },
       "entity_labels": {
+        "health": "Health",
         "activity": "Activity",
-        "electrical_health": "Electrical Health",
         "energy_summary": "Energy Summary",
         "daily_energy_usage": "Daily Energy Usage",
-        "electrical": "Electrical",
         "energy": "Energy",
         "known_appliance_load": "Known Appliance Load",
         "unassigned_mains_load": "Unassigned Mains Load",
@@ -1076,7 +1066,7 @@
       "notes": {
         "household_overview_after_setup": "Household overview appears after setup.",
         "todays_energy_after_sources": "Today's energy appears after cumulative energy or consecutive power samples report.",
-        "appliance_status_summary": "These cards keep each appliance to Activity, Electrical Health, Energy Summary, and Daily Energy Usage. Daily Energy Usage may show Waiting For Energy Change until a native energy source increases or the automatic kWh helper receives consecutive power samples.",
+        "appliance_status_summary": "These cards keep each appliance to Health, Activity, Energy Summary, and Daily Energy Usage. Daily Energy Usage may show Waiting For Energy Change until a native energy source increases or the automatic kWh helper receives consecutive power samples.",
         "known_load_share": "Known Load Share is how much of current mains power is explained by the circuits you selected. Low values usually mean normal unmonitored loads, not necessarily a problem.",
         "energy_tracking_after_entities": "Energy tracking cards appear after analyzer summary entities are created and available.",
         "run_timeline_after_activity": "Run timeline appears after activity summaries.",
@@ -1417,7 +1407,6 @@
         "activity": "Activity",
         "power": "Power",
         "health": "Health",
-        "electrical": "Electrical",
         "energy": "Energy",
         "model": "Model",
         "mains_source": "Mains Source",

@@ -175,27 +175,30 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     "sensor.mains_known": { state: "1450", attributes: { unit_of_measurement: "W" } },
     "sensor.mains_unassigned": { state: "370", attributes: { unit_of_measurement: "W" } },
     "sensor.mains_coverage": { state: "79.7", attributes: { unit_of_measurement: "%" } },
-    "binary_sensor.fridge_running": { state: "on", attributes: {} },
+    "sensor.fridge_activity": { state: "Running", attributes: { is_running: true } },
     "sensor.fridge_power": { state: "100", attributes: { unit_of_measurement: "W" } },
     "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
     "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
     "sensor.fridge_health": { state: "Normal", attributes: {} },
-    "binary_sensor.washer_running": { state: "on", attributes: {} },
+    "sensor.washer_activity": { state: "Running", attributes: { is_running: true } },
     "sensor.washer_power": { state: "1200", attributes: { unit_of_measurement: "W" } },
     "sensor.washer_energy": { state: "2.2", attributes: { unit_of_measurement: "kWh" } },
     "sensor.washer_cost": { state: "0.5", attributes: { unit_of_measurement: "USD" } },
     "sensor.washer_health": { state: "Normal", attributes: {} },
-    "binary_sensor.oven_running": { state: "off", attributes: {} },
+    "sensor.oven_activity": { state: "Idle", attributes: { is_running: false } },
     "sensor.oven_power": { state: "100", attributes: { unit_of_measurement: "W" } },
     "sensor.oven_energy": { state: "0.7", attributes: { unit_of_measurement: "kWh" } },
     "sensor.oven_cost": { state: "0.14", attributes: { unit_of_measurement: "USD" } },
-    "sensor.oven_health": { state: "Needs attention", attributes: {} },
+    "sensor.oven_health": {
+      state: "Ready",
+      attributes: { electrical_summary: "Possible Imbalance" },
+    },
   };
   const appliances = ["fridge", "washer", "oven"].map((id) => ({
     circuit_id: id,
     name: id[0].toUpperCase() + id.slice(1),
     detail_path: `/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=${id}`,
-    running_entity: `binary_sensor.${id}_running`,
+    activity_entity: `sensor.${id}_activity`,
     power_entities: [`sensor.${id}_power`],
     energy_today_entity: `sensor.${id}_energy`,
     cost_today_entity: `sensor.${id}_cost`,
@@ -255,32 +258,35 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await toHaveNoViolations(page);
 });
 
-test("appliance grid filters live state and loads Running history", async ({ page }) => {
+test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
     const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
     await route.fulfill({
       json: [[
-        { entity_id: "binary_sensor.fridge_running", state: "off", last_changed: hoursAgo(24) },
-        { state: "on", last_changed: hoursAgo(20) },
-        { state: "off", last_changed: hoursAgo(19) },
-        { state: "on", last_changed: hoursAgo(2) },
-        { state: "off", last_changed: hoursAgo(1) },
+        { entity_id: "sensor.fridge_activity", state: "Idle", last_changed: hoursAgo(24) },
+        { state: "Running", last_changed: hoursAgo(20) },
+        { state: "Idle", last_changed: hoursAgo(19) },
+        { state: "Running", last_changed: hoursAgo(2) },
+        { state: "Idle", last_changed: hoursAgo(1) },
       ]],
     });
     return true;
   });
   const states = {
-    "binary_sensor.fridge_running": { state: "on", attributes: {} },
+    "sensor.fridge_activity": { state: "Running", attributes: { is_running: true } },
     "sensor.fridge_power": { state: "140", attributes: { unit_of_measurement: "W" } },
     "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
     "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
     "sensor.fridge_health": { state: "Normal", attributes: {} },
-    "binary_sensor.oven_running": { state: "off", attributes: {} },
+    "sensor.oven_activity": { state: "Idle", attributes: { is_running: false } },
     "sensor.oven_power": { state: "0", attributes: { unit_of_measurement: "W" } },
     "sensor.oven_energy": { state: "3.1", attributes: { unit_of_measurement: "kWh" } },
     "sensor.oven_cost": { state: "0.7", attributes: { unit_of_measurement: "USD" } },
-    "sensor.oven_health": { state: "Needs attention", attributes: {} },
+    "sensor.oven_health": {
+      state: "Ready",
+      attributes: { electrical_summary: "Possible Imbalance" },
+    },
   };
   const card = await openDashboardCard(
     page,
@@ -293,7 +299,7 @@ test("appliance grid filters live state and loads Running history", async ({ pag
         icon: id === "fridge" ? "mdi:fridge-outline" : "mdi:stove",
         area: id === "fridge" ? "Kitchen" : "Cooking",
         detail_path: `/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=${id}`,
-        running_entity: `binary_sensor.${id}_running`,
+        activity_entity: `sensor.${id}_activity`,
         power_entities: [`sensor.${id}_power`],
         energy_today_entity: `sensor.${id}_energy`,
         cost_today_entity: `sensor.${id}_cost`,
@@ -335,6 +341,11 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await search.press("Tab");
   await expect(card.getByRole("tab", { name: "Highest energy" })).toHaveCount(0);
   await expect(card.getByRole("tab", { name: "Highest cost" })).toHaveCount(0);
+  await card.getByRole("tab", { name: "Needs attention", exact: true }).click();
+  await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
+  await expect(card.locator('[data-appliance-id="oven"]')).toContainText(
+    "Possible Imbalance",
+  );
   await card.getByRole("tab", { name: "Running", exact: true }).click();
   await expect(card.locator("[data-appliance-id]")).toHaveCount(1);
   const timeline = card.locator("[data-timeline-selection]");
@@ -348,7 +359,7 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await expect(timeline).toBeFocused();
   await timeline.selectOption("fridge");
   await expect.poll(() => page.evaluate(() => (
-    window.__apiCalls.some(({ apiPath }) => apiPath.includes("binary_sensor.fridge_running"))
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("sensor.fridge_activity"))
   ))).toBe(true);
   await expect(card.locator("[data-running-band]")).toHaveCount(2);
   await expect(card.locator("[data-timeline-tick]")).toHaveCount(5);

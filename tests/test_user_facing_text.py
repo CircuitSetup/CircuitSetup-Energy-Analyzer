@@ -762,6 +762,25 @@ def test_alert_pause_switch_label_matches_pause_resume_alert_language() -> None:
     assert binary_label == "Alerts paused"
 
 
+def test_pause_alert_action_renders_its_icon() -> None:
+    _run_panel_node_script(
+        """
+const panel = makePanel({
+  _payload: {
+    actions: {
+      pause_alerts: {
+        label: "Pause Alerts",
+        icon: "mdi:bell-pause-outline",
+      },
+    },
+  },
+});
+const html = panel._actionButton("pause_alerts", "Pause Alerts");
+assert.match(html, /<ha-icon icon="mdi:bell-pause-outline"><\\/ha-icon>/);
+"""
+    )
+
+
 def test_readme_documents_normal_user_action_paths() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     normalized_text = " ".join(readme_text.split())
@@ -923,12 +942,12 @@ def test_dashboard_example_is_appliance_first_and_explains_energy_tracking() -> 
         "energy-costs",
         "insights",
     ]
-    assert "binary_sensor.hvac_running" in dashboard_text
-    assert "binary_sensor.refrigerator_running" in dashboard_text
+    assert "sensor.hvac_activity_summary" in dashboard_text
+    assert "sensor.refrigerator_activity_summary" in dashboard_text
     assert "sensor.hvac_daily_energy_usage" in dashboard_text
     assert "sensor.refrigerator_cost_today" in dashboard_text
     assert "sensor.mains_cost_cycle" in dashboard_text
-    assert "sensor.hvac_activity_summary" not in dashboard_text
+    assert "binary_sensor.hvac_running" not in dashboard_text
     assert "sensor.refrigerator_electrical_health" not in dashboard_text
 
 
@@ -1060,11 +1079,11 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     refs = set(_dashboard_entity_refs(dashboard_text))
 
     expected_entities = {
-        "binary_sensor.refrigerator_running",
+        "sensor.refrigerator_activity_summary",
         "sensor.refrigerator_health_summary",
         "sensor.refrigerator_daily_energy_usage",
         "sensor.refrigerator_cost_today",
-        "binary_sensor.hvac_running",
+        "sensor.hvac_activity_summary",
         "sensor.hvac_health_summary",
         "sensor.hvac_daily_energy_usage",
         "sensor.hvac_cost_today",
@@ -1082,7 +1101,7 @@ def test_dashboard_example_covers_configurable_analyzer_surfaces() -> None:
     }
     assert expected_entities <= refs
     assert "sensor.hvac_outdoor_temperature" not in refs
-    assert "sensor.hvac_activity_summary" not in refs
+    assert "binary_sensor.hvac_running" not in refs
     assert "sensor.refrigerator_electrical_health" not in refs
     assert "circuitsetup_energy_analyzer.export_history_csv" not in dashboard_text
 
@@ -1135,7 +1154,6 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
     assert "## Summary-First Diagnostics" in readme
     assert "Health Summary" in readme
     assert "Activity Summary" in readme
-    assert "Electrical Health" in readme
     assert "Energy Summary" in readme
     assert "advanced detail" in readme.lower()
     assert "power-quality, metric-consistency, and leg-balance evidence" in readme
@@ -1146,7 +1164,10 @@ def test_readme_describes_summary_first_diagnostic_workflow() -> None:
 def test_readme_explains_running_observation_and_alert_distinction() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "Running is the current operating state used for automations." in readme
+    assert (
+        "Activity Summary is the current operating state; use its state or "
+        "`is_running` attribute for automations."
+    ) in readme
     assert "Observation recorded means the analyzer noticed something unusual" in readme
     assert (
         "Possible issue means repeated evidence crossed the alert threshold." in readme
@@ -1256,7 +1277,7 @@ def test_alert_blueprint_uses_summary_sensor_explanations() -> None:
 
     assert render(
         {
-            "friendly_name": "Washer Electrical Health",
+            "friendly_name": "Washer Health Summary",
             "status_explanation": "Reported electrical measurements disagree.",
         }
     ) == "Reported electrical measurements disagree."
@@ -1306,7 +1327,10 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         "nilm_review",
     } <= options
 
-    state_template = Template(blueprint["variables"]["alert_state_normalized"])
+    alert_state_template = Template(blueprint["variables"]["alert_state"])
+    normalized_state_template = Template(
+        blueprint["variables"]["alert_state_normalized"]
+    )
     condition_template = Template(blueprint["variables"]["alert_is_actionable"])
 
     def condition_matches(
@@ -1316,6 +1340,7 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         power_quality_alert_confirmed: bool = False,
         learning: bool | None = False,
         alert_confirmed: bool | None = True,
+        electrical_summary: str | None = None,
     ) -> bool:
         attributes = {
             "power_quality_alert_confirmed": power_quality_alert_confirmed,
@@ -1324,13 +1349,18 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
             attributes["learning"] = learning
         if alert_confirmed is not None:
             attributes["alert_confirmed"] = alert_confirmed
+        if electrical_summary is not None:
+            attributes["electrical_summary"] = electrical_summary
         trigger = {
             "to_state": {
                 "state": state,
                 "attributes": attributes,
             }
         }
-        alert_state_normalized = state_template.render(trigger=trigger).strip()
+        alert_state = alert_state_template.render(trigger=trigger).strip()
+        alert_state_normalized = normalized_state_template.render(
+            alert_state=alert_state
+        ).strip()
         rendered = condition_template.render(
             trigger=trigger,
             alert_state_normalized=alert_state_normalized,
@@ -1358,6 +1388,12 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
     assert condition_matches(
         "Possible Power Quality Change",
         defaults,
+        power_quality_alert_confirmed=True,
+    )
+    assert condition_matches(
+        "Ready",
+        defaults,
+        electrical_summary="Possible Power Quality Change",
         power_quality_alert_confirmed=True,
     )
     assert not condition_matches("Needs data", defaults)
@@ -1626,7 +1662,6 @@ panel._applianceDetail = {
     learning_readiness: { status: "ready", label: "Ready" },
     confidence: null,
     health_state: "Ready",
-    electrical_state: "Normal",
     energy_state: "Normal",
     model_status: null,
     daily_energy_kwh: 2.4,
@@ -1879,7 +1914,6 @@ panel._applianceDetail = {
     learning_readiness: { status: "ready", label: "Ready" },
     confidence: 0.87,
     health_state: "Ready",
-    electrical_state: "Normal",
     energy_state: "Normal",
     model_status: "Measured",
     daily_energy_kwh: 2.4,
@@ -1916,7 +1950,6 @@ for (const expected of [
   'icon="mdi:database-check-outline"',
   'icon="mdi:school-outline"',
   'icon="mdi:heart-pulse"',
-  'icon="mdi:lightning-bolt"',
   'icon="mdi:chart-line"',
   'icon="mdi:cpu-64-bit"',
   'icon="mdi:calendar-today"',
@@ -1962,7 +1995,6 @@ panel._applianceDetail = {
     learning_readiness: { status: "learning", label: "Learning", days_complete: 3, days_required: 7 },
     confidence: null,
     health_state: "Ready",
-    electrical_state: "Normal",
     energy_state: "Normal",
     model_status: null,
     daily_energy_kwh: 0.2,
@@ -2083,7 +2115,6 @@ panel._applianceDetail = {
     source_type: "direct_meter",
     confidence: null,
     health_state: "Ready",
-    electrical_state: "Normal",
     energy_state: "Normal",
     model_status: null,
     daily_energy_kwh: 1.8,
@@ -6843,7 +6874,7 @@ def test_readme_includes_practical_usage_guide() -> None:
         "Advanced Circuit Settings",
         "Settings > Devices & services",
         "only shows settings that apply",
-        "Running binary sensor",
+        "Activity Summary state or its `is_running` attribute",
         "status_explanation",
     ):
         assert phrase in normalized_text
@@ -6937,7 +6968,7 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Home, Energy & Costs, and Insights" in readme_text
     assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
-    assert "Running binary sensor rather than its text summary" in readme_text
+    assert "built from each appliance's Activity Summary history" in readme_text
     assert "keeps graphs half-width on the left" in readme_text
     assert "HVAC overlays outdoor temperature on a second axis" in readme_text
     assert "Water flow context overlays correlated appliance power" in readme_text
@@ -7002,9 +7033,11 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
         "| Energy | `sensor.<appliance>_energy` |",
         "| Active Power | `sensor.<appliance>_active_power` "
         "or `sensor.<appliance>_watts` |",
-        "| Running | `binary_sensor.<circuit>_running` |",
+        "| Activity Summary | `sensor.<circuit>_activity_summary` |",
     ):
         assert row in readme_text
+    assert "`binary_sensor.<circuit>_running`" not in readme_text
+    assert "`sensor.<circuit>_electrical_health`" not in readme_text
     assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
     assert "- Health Summary:" not in readme_text
     assert "Known Load Share" in readme_text

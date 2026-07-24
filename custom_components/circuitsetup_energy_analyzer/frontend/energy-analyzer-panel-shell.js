@@ -542,6 +542,7 @@ export class PanelShellMethods {
           display: inline-flex;
           font: inherit;
           font-weight: 700;
+          gap: 8px;
           justify-content: center;
           line-height: 1.2;
           min-height: 44px;
