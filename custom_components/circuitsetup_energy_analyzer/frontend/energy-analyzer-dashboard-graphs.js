@@ -56,6 +56,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._comparisonHistory = null;
         this._timelineKey = "";
         this._contributionLoadKey = "";
+        this._rangeSummary = {};
+        this._rollingContributionByCircuit = {};
         this._chartZoomWindows && this._chartZoomWindows.clear();
         this._render();
       };
@@ -590,29 +592,39 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _downloadCsv(range) {
-      const byName = new Map();
+      const items = [];
+      const labelCounts = new Map();
+      const keyCounts = new Map();
       for (const series of dashboardSeries.values()) {
         for (const item of series) {
           if (item && item.name && Array.isArray(item.points) && item.points.length) {
-            byName.set(item.name, item);
+            const labelCount = (labelCounts.get(item.name) || 0) + 1;
+            const baseKey = item.series_id || item.entity_id || `series:${items.length}`;
+            const keyCount = (keyCounts.get(baseKey) || 0) + 1;
+            labelCounts.set(item.name, labelCount);
+            keyCounts.set(baseKey, keyCount);
+            items.push({
+              item,
+              key: `${baseKey}:${keyCount}`,
+              label: labelCount === 1 ? item.name : `${item.name} (${labelCount})`,
+            });
           }
         }
       }
-      const names = [...byName.keys()];
       const exportTime = (point) => point.source_time ?? point.time;
-      const times = [...new Set([...byName.values()].flatMap((item) => (
+      const times = [...new Set(items.flatMap(({ item }) => (
         item.points.map(exportTime)
       )))].sort((left, right) => left - right);
-      const values = new Map([...byName].map(([name, item]) => [
-        name,
+      const values = new Map(items.map(({ key, item }) => [
+        key,
         new Map(item.points.map((point) => [exportTime(point), point.value])),
       ]));
       const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
       const rows = [
-        ["Timestamp", ...names].map(csvValue).join(","),
+        ["Timestamp", ...items.map(({ label }) => label)].map(csvValue).join(","),
         ...times.map((time) => [
           new Date(time).toISOString(),
-          ...names.map((name) => values.get(name).get(time) ?? ""),
+          ...items.map(({ key }) => values.get(key).get(time) ?? ""),
         ].map(csvValue).join(",")),
       ];
       const url = URL.createObjectURL(new Blob([`${rows.join("\r\n")}\r\n`], {

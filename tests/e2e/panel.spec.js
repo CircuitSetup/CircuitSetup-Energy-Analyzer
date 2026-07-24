@@ -267,7 +267,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
   await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
-  await page.evaluate(() => {
+  const clearedTotals = await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
         start: "2026-07-10T00:00:00.000Z",
@@ -275,7 +275,12 @@ test("home energy card omits Active now and separates contribution", async ({ pa
         compare: false,
       },
     }));
+    return {
+      contributions: window.__dashboardCard._rollingContributionByCircuit,
+      summary: window.__dashboardCard._rangeSummary,
+    };
   });
+  expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("72 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$1.50");
@@ -765,6 +770,20 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
             ? "2026-07-09T23:00:00.000Z"
             : "2026-07-12T23:00:00.000Z",
         },
+      ], [
+        {
+          entity_id: "sensor.freezer_power",
+          state: previous ? "180" : "220",
+          last_changed: previous
+            ? "2026-07-07T00:00:00.000Z"
+            : "2026-07-10T00:00:00.000Z",
+        },
+        {
+          state: previous ? "200" : "260",
+          last_changed: previous
+            ? "2026-07-09T23:00:00.000Z"
+            : "2026-07-12T23:00:00.000Z",
+        },
       ]],
     });
     return true;
@@ -783,12 +802,21 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
           name: "Fridge",
           series_id: "circuit:fridge",
           axis: "left",
+        }, {
+          entity: "sensor.freezer_power",
+          name: "Fridge",
+          series_id: "circuit:freezer",
+          axis: "left",
         }],
       },
     },
   ], {
     "sensor.fridge_power": {
       state: "160",
+      attributes: { unit_of_measurement: "W" },
+    },
+    "sensor.freezer_power": {
+      state: "260",
       attributes: { unit_of_measurement: "W" },
     },
   });
@@ -809,7 +837,7 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
   const graph = page.locator("circuitsetup-energy-analyzer-context-graph");
 
   await expect(graph.locator(".legend")).toContainText("Fridge (previous)");
-  await expect(graph.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(1);
+  await expect(graph.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(2);
   const downloadPromise = page.waitForEvent("download");
   await selector.locator("[data-range-download]").click();
   const download = await downloadPromise;
@@ -819,7 +847,9 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
     return Buffer.concat(chunks).toString("utf8");
   });
   expect(csv).toContain("Fridge");
+  expect(csv).toContain("Fridge (2)");
   expect(csv).toContain("Fridge (previous)");
+  expect(csv).toContain("Fridge (previous) (2)");
   expect(csv).toContain("2026-07-07T00:00:00.000Z");
 });
 
