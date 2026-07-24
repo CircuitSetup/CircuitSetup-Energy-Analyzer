@@ -816,38 +816,49 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     cards = _dashboard_cards(dashboard)
     card_types = [card.get("type") for card in cards]
 
-    assert card_types.count("entities") == 1
+    assert card_types.count("entities") == 0
     assert "button" in card_types
-    assert "history-graph" in card_types
+    assert "history-graph" not in card_types
     assert {
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
+        "custom:circuitsetup-energy-analyzer-context-graph",
+        "custom:circuitsetup-energy-analyzer-summary",
     } <= set(card_types)
     assert "gauge" not in card_types
     assert "glance" not in card_types
     assert "statistics-graph" not in card_types
 
 
-def test_dashboard_example_graphs_daily_energy_totals_with_max_stat() -> None:
+def test_dashboard_example_keeps_completed_history_on_home() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
+    home = next(view for view in dashboard["views"] if view["path"] == "overview")
+    home_cards = _dashboard_cards(home)
     energy_cards = [
         card
-        for card in _dashboard_cards(dashboard)
+        for card in home_cards
         if card.get("type")
         == "custom:circuitsetup-energy-analyzer-energy-cost"
     ]
+    home_summary = next(
+        card
+        for card in home_cards
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-house-flow"
+    )
 
     assert len(energy_cards) == 1
     assert energy_cards[0]["api_path"].endswith("/appliance_insights")
-    assert energy_cards[0]["primary_mains"]["daily_energy_usage_entity"].endswith(
-        "_daily_energy_usage"
+    assert energy_cards[0]["primary_mains"] == {
+        "circuit_id": "mains",
+        "name": "Mains",
+    }
+    assert "appliances" not in energy_cards[0]
+    assert home_summary["primary_mains"]["average_kwh_per_day_entity"].endswith(
+        "_average_kwh_per_day"
     )
-    assert all(
-        appliance["cost_today_entity"].endswith("_cost_today")
-        and appliance["average_kwh_entity"].endswith("_average_kwh_per_day")
-        and appliance["average_cost_entity"].endswith("_average_cost_per_day")
-        for appliance in energy_cards[0]["appliances"]
+    assert home_summary["primary_mains"]["average_cost_per_day_entity"].endswith(
+        "_average_cost_per_day"
     )
 
 
@@ -1025,17 +1036,22 @@ def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None
     graph_cards = [
         card
         for card in _dashboard_cards(graphs)
-        if card.get("type") == "history-graph"
+        if card.get("type")
+        == "custom:circuitsetup-energy-analyzer-context-graph"
         and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
     assert graph_cards
     assert graph_cards[0]["grid_options"]["columns"] == 24
+    assert graph_cards[0]["default_hours"] == 24
+    assert graph_cards[0]["periods"] == [24, 168, 720]
     assert graph_cards[0]["entities"] == [
-        {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
-        {"entity": "sensor.hvac_power", "name": "HVAC power"},
-        {"entity": "binary_sensor.hvac_running", "name": "HVAC running"},
-        {"entity": "sensor.hvac_daily_energy_usage", "name": "HVAC energy today"},
+        {"entity": "sensor.hvac_power", "name": "HVAC power", "axis": "left"},
+        {
+            "entity": "sensor.outdoor_temperature",
+            "name": "Outdoor temperature",
+            "axis": "right",
+        },
     ]
 
 
@@ -6920,7 +6936,11 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
     assert "Running binary sensor rather than its text summary" in readme_text
-    assert "arranges all graphs in half-width rows" in readme_text
+    assert "keeps graphs half-width on the left" in readme_text
+    assert "HVAC overlays outdoor temperature on a second axis" in readme_text
+    assert "Water flow context overlays correlated appliance power" in readme_text
+    assert "daily averages on a second line without percentage comparisons" in readme_text
+    assert "completed-day Energy and costs card in the left column" in readme_text
     assert "without repeating a separate Active Now list" in readme_text
     assert "segmented Running intervals against a labeled 24-hour scale" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text

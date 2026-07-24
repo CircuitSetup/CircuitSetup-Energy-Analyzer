@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
+from .appliance_metadata import appliance_icon_for_profile
 from .const import (
     DASHBOARD_LAYOUT_EXPERT,
     DASHBOARD_LAYOUT_STANDARD,
@@ -32,10 +33,14 @@ NILM_DASHBOARD_GRAPHS_CARD = "custom:circuitsetup-energy-analyzer-dashboard-grap
 HOUSE_FLOW_CARD = "custom:circuitsetup-energy-analyzer-house-flow"
 APPLIANCE_GRID_CARD = "custom:circuitsetup-energy-analyzer-appliance-grid"
 ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
+CONTEXT_GRAPH_CARD = "custom:circuitsetup-energy-analyzer-context-graph"
+SUMMARY_CARD = "custom:circuitsetup-energy-analyzer-summary"
 DASHBOARD_CUSTOM_CARD_TYPES = (
     HOUSE_FLOW_CARD,
     APPLIANCE_GRID_CARD,
     ENERGY_COST_CARD,
+    CONTEXT_GRAPH_CARD,
+    SUMMARY_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
 )
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
@@ -217,6 +222,21 @@ def build_recommended_dashboard(
         home_view["sections"][0]["cards"].extend(
             _build_appliances_view(context)["sections"][0]["cards"]
         )
+    if context.appliances or context.primary_mains is not None:
+        home_view["sections"][0]["cards"].append(
+            {
+                "type": ENERGY_COST_CARD,
+                "title": _dashboard_text("cards", "energy_and_costs"),
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/appliance_insights",
+                "primary_mains": _dashboard_circuit_payload(
+                    context.primary_mains,
+                    (),
+                ),
+                "labels": dict(translation_section("dashboard", "live_cards")),
+                "grid_options": {"columns": 12},
+            }
+        )
     contextual_cards: list[dict[str, Any]] = []
     if (
         context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
@@ -224,19 +244,18 @@ def build_recommended_dashboard(
     ):
         contextual_cards = _build_insights_view(context)["sections"][0]["cards"]
     contextual_graphs = [
-        card for card in contextual_cards if card.get("type") == "history-graph"
+        card for card in contextual_cards if card.get("type") == CONTEXT_GRAPH_CARD
     ]
     contextual_insights = [
-        card for card in contextual_cards if card.get("type") != "history-graph"
+        card for card in contextual_cards if card.get("type") != CONTEXT_GRAPH_CARD
     ]
     views = [home_view]
-    if context.appliances or context.primary_mains is not None:
-        views.append(
-            _build_energy_costs_view(
-                context,
-                contextual_graphs=contextual_graphs,
-            )
-        )
+    energy_costs_view = _build_energy_costs_view(
+        context,
+        contextual_graphs=contextual_graphs,
+    )
+    if energy_costs_view["sections"][0]["cards"]:
+        views.append(energy_costs_view)
     insight_cards: list[dict[str, Any]] = []
     if (
         context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
@@ -254,9 +273,9 @@ def build_recommended_dashboard(
         billing_rows = _billing_cycle_rows(context)
         if billing_rows:
             insight_cards.append(
-                _entities_card(
+                _summary_card(
                     _dashboard_text("cards", "billing_cycle"),
-                    billing_rows,
+                    entities=billing_rows,
                 )
             )
     if insight_cards:
@@ -274,6 +293,7 @@ def build_recommended_dashboard(
         card_columns = (
             24
             if view["path"] == "energy-costs"
+            or (view["path"] == "overview" and len(cards) > 1)
             else (DASHBOARD_COLUMNS * 12)
             // min(
                 DASHBOARD_COLUMNS,
@@ -416,6 +436,8 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
             (
                 "daily_energy_usage",
                 "cost_today",
+                "average_kwh_per_day",
+                "average_cost_per_day",
                 "monitored_power",
                 "balance_power",
                 "monitored_coverage",
@@ -461,30 +483,7 @@ def _build_energy_costs_view(
     *,
     contextual_graphs: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
-    cards = list(contextual_graphs[:1])
-    cards.append(
-        {
-            "type": ENERGY_COST_CARD,
-            "title": _dashboard_text("cards", "energy_and_costs"),
-            "entry_id": context.entry_id,
-            "api_path": f"{DOMAIN}/appliance_insights",
-            "text": dict(translation_section("panel")),
-            "primary_mains": _dashboard_circuit_payload(
-                context.primary_mains,
-                (
-                    "daily_energy_usage",
-                    "cost_today",
-                    "average_kwh_per_day",
-                    "average_cost_per_day",
-                ),
-            ),
-            "appliances": [
-                _energy_cost_payload(circuit) for circuit in context.appliances
-            ],
-            "labels": dict(translation_section("dashboard", "live_cards")),
-        }
-    )
-    cards.extend(contextual_graphs[1:])
+    cards = list(contextual_graphs)
     appliance_power_rows = _published_nilm_power_rows(
         context.registry_lookup,
         context.entry_id,
@@ -563,58 +562,63 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
 def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
     cards: list[dict[str, Any]] = []
     history_rows: list[dict[str, str]] = []
+    weather_rows: list[dict[str, str]] = []
+    for circuit in context.hvac:
+        for entity_id in circuit.power_entities:
+            history_rows.append(
+                {
+                    "entity": entity_id,
+                    "name": f"{circuit.name} power",
+                    "axis": "left",
+                }
+            )
+        if entity_id := circuit.entities.get("weather_context"):
+            weather_rows.append({"entity": entity_id, "name": circuit.name})
     if context.outdoor_temperature_entity:
         history_rows.append(
             {
                 "entity": context.outdoor_temperature_entity,
                 "name": _dashboard_text("entity_labels", "outdoor_temperature"),
+                "axis": "right",
             }
         )
-    weather_rows: list[dict[str, str]] = []
-    for circuit in context.hvac:
-        for entity_id in circuit.power_entities:
-            history_rows.append(
-                {"entity": entity_id, "name": f"{circuit.name} power"}
-            )
-        for key, suffix in (
-            ("running", "running"),
-            ("daily_energy_usage", "energy today"),
-        ):
-            if entity_id := circuit.entities.get(key):
-                history_rows.append(
-                    {"entity": entity_id, "name": f"{circuit.name} {suffix}"}
-                )
-        if entity_id := circuit.entities.get("weather_context"):
-            weather_rows.append({"entity": entity_id, "name": circuit.name})
     if history_rows:
         cards.append(
             {
-                "type": "history-graph",
+                "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "hvac_weather_correlation"),
-                "hours_to_show": 168,
+                "default_hours": 24,
+                "periods": [24, 168, 720],
                 "entities": list(_dedupe_entity_rows(history_rows)),
+                "labels": dict(translation_section("dashboard", "live_cards")),
             }
         )
     if weather_rows:
         cards.append(
-            _entities_card(
+            _summary_card(
                 _dashboard_text("cards", "hvac_weather_status"),
-                weather_rows,
+                entities=weather_rows,
             )
         )
-    water_rows = [
-        {"entity": entity_id, "name": circuit.name}
+    water_contexts = [
+        {
+            "name": circuit.name,
+            "correlation_entity": entity_id,
+            "power_entities": list(circuit.power_entities),
+        }
         for circuit in context.appliances
-        if (entity_id := circuit.entities.get("water_flow_correlation"))
-        and circuit.profile in WATER_FLOW_PROFILES
+        if circuit.profile in WATER_FLOW_PROFILES
+        and (entity_id := circuit.entities.get("water_flow_correlation"))
     ]
-    if water_rows:
+    if water_contexts:
         cards.append(
             {
-                "type": "history-graph",
+                "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "water_flow_context"),
-                "hours_to_show": 168,
-                "entities": water_rows,
+                "default_hours": 24,
+                "periods": [24, 168, 720],
+                "water_contexts": water_contexts,
+                "labels": dict(translation_section("dashboard", "live_cards")),
             }
         )
     return _dashboard_view(
@@ -631,16 +635,21 @@ def _build_diagnostics_view(context: DashboardContext) -> dict[str, Any]:
         path="diagnostics",
         icon="mdi:tools",
         cards=[
-            _markdown_card(
-                _expert_evidence_markdown(
-                    [
-                        {
-                            "circuit_id": circuit.circuit_id,
-                            "name": circuit.name,
-                        }
-                        for circuit in context.circuits
-                    ]
-                )
+            _summary_card(
+                _dashboard_text("expert", "heading"),
+                description=_dashboard_text("expert", "description"),
+                links=[
+                    {
+                        "name": _dashboard_text("expert", "link_label").format(
+                            name=circuit.name
+                        ),
+                        "path": (
+                            f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
+                            f"{urlencode({'circuit_id': circuit.circuit_id})}"
+                        ),
+                    }
+                    for circuit in context.circuits
+                ],
             )
         ],
     )
@@ -684,6 +693,7 @@ def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
         "circuit_id": circuit.circuit_id,
         "name": circuit.name,
         "profile": circuit.profile,
+        "icon": appliance_icon_for_profile(circuit.profile) or "mdi:power-plug-outline",
         "area": circuit.area,
         "detail_path": circuit.detail_path,
         "power_entities": list(circuit.power_entities),
@@ -699,19 +709,19 @@ def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
     }
 
 
-def _energy_cost_payload(circuit: DashboardCircuit) -> dict[str, Any]:
+def _summary_card(
+    title: str,
+    *,
+    entities: Sequence[Mapping[str, str]] = (),
+    description: str | None = None,
+    links: Sequence[Mapping[str, str]] = (),
+) -> dict[str, Any]:
     return {
-        "circuit_id": circuit.circuit_id,
-        "name": circuit.name,
-        **_named_entities(
-            circuit,
-            {
-                "daily_energy_usage": "energy_today_entity",
-                "cost_today": "cost_today_entity",
-                "average_kwh_per_day": "average_kwh_entity",
-                "average_cost_per_day": "average_cost_entity",
-            },
-        ),
+        "type": SUMMARY_CARD,
+        "title": title,
+        "entities": [dict(row) for row in entities],
+        "description": description,
+        "links": [dict(link) for link in links],
     }
 
 
