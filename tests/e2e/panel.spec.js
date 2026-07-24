@@ -1453,6 +1453,16 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
 
+  await expect(panel.locator(".appliance-detail-facts")).toHaveCount(1);
+  await expect(panel.locator(".appliance-detail-facts .metric-heading")).toHaveText([
+    "Activity",
+    "Power",
+    "Confidence",
+    "Health",
+    "Energy",
+    "Runtime Today",
+    "Runs Today",
+  ]);
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.getByText("Projected end of day")).toBeVisible();
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
@@ -1464,6 +1474,12 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await expect(dailyCost).toContainText("Average Cost per Day");
   await expect(dailyCost).toContainText("kWh Today");
   await expect(dailyCost).toContainText("Average kWh per Day");
+  await expect(dailyCost.locator(".metric-heading")).toHaveText([
+    "kWh Today",
+    "Average kWh per Day",
+    "Cost Today",
+    "Average Cost per Day",
+  ]);
   await expect(panel.getByRole("heading", { name: "What To Check First" })).toHaveCount(0);
   await expect(panel.getByText("Cost Today", { exact: true })).toHaveCount(1);
   const horizontalOverflow = await panel.evaluate((host) => (

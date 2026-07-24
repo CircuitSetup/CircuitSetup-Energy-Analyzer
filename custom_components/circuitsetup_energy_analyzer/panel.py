@@ -97,6 +97,7 @@ from .services import (
     SERVICE_VALIDATE_NILM_SESSION,
 )
 from .settings_advisor import SETTING_LABELS
+from .state import circuit_is_learning
 from .ux import alert_evidence_detail, friendly_feature_name
 
 DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
@@ -1825,7 +1826,13 @@ def _feature_matches(value: Any, requested_feature: str | None) -> bool:
 def _coordinator_alerts(coordinator: Any) -> tuple[AlertEvidence, ...]:
     store_data = getattr(coordinator, "store_data", None)
     alerts = getattr(store_data, "alerts", ()) or ()
-    return tuple(alert for alert in alerts if isinstance(alert, AlertEvidence))
+    state = getattr(coordinator, "state", None)
+    return tuple(
+        alert
+        for alert in alerts
+        if isinstance(alert, AlertEvidence)
+        and not circuit_is_learning(state, alert.circuit_id)
+    )
 
 
 def _config_for_circuit(coordinator: Any, circuit_id: str) -> CircuitConfig | None:

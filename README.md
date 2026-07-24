@@ -133,12 +133,12 @@ You do not need to enable every diagnostic entity. For behavior alerts, let the 
 The generated dashboard and evidence panel are organized around appliance
 questions instead of raw diagnostic entity lists:
 
-- **Appliance Detail** combines current activity, health with electrical evidence,
-  energy state, Today vs Normal comparisons, behavior expectations, active
-  alerts, first checks, and actions for one appliance or circuit. Empty evidence
-  and check sections stay hidden, the activity facts and deduplicated history
-  share a two-column layout, and the history graph moves between 24 hours, 7
-  days, and 30 days with point inspection in a Home Assistant-style hover tooltip.
+- **Appliance Detail** combines current activity, health, energy state,
+  Today vs Normal comparisons, behavior expectations, and active alerts for one
+  appliance or circuit. The compact activity facts share one summary panel
+  beside the recent timeline, and the history graph moves between 24 hours,
+  7 days, and 30 days with point inspection in a Home Assistant-style hover
+  tooltip.
 - **Appliance Status** keeps activity, health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
