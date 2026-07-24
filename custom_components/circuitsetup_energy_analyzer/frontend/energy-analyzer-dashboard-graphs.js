@@ -327,10 +327,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const start = new Date(Date.now() - this._hours * 60 * 60 * 1000).toISOString();
       const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(entities.map((item) => item.entity).join(","))}&minimal_response=1&no_attributes=1`;
       this._hass.callApi("GET", path).then((history) => {
+        if (this._historyKey !== key) return;
         this._history = history;
         this._historyError = "";
         this._render();
       }).catch(() => {
+        if (this._historyKey !== key) return;
         this._history = [];
         this._historyError = this._label("no_history", "No history is available for this period.");
         this._render();

@@ -470,14 +470,21 @@ test("energy and cost card switches completed-day windows and preserves cost sou
 });
 
 test("HVAC context graph overlays outdoor temperature on a selectable right axis", async ({ page }) => {
+  let historyRequestCount = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
+    historyRequestCount += 1;
+    const requestNumber = historyRequestCount;
+    if (requestNumber === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
     const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const peakPower = requestNumber === 1 ? "2300" : "9900";
     await route.fulfill({
       json: [
         [
           { entity_id: "sensor.hvac_power", state: "0", last_changed: hoursAgo(24) },
-          { state: "2300", last_changed: hoursAgo(4) },
+          { state: peakPower, last_changed: hoursAgo(4) },
           { state: "800", last_changed: hoursAgo(0) },
         ],
         [
@@ -512,10 +519,13 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   await expect(card.locator("h2")).toHaveCSS("font-size", "18px");
   await expect(card.locator("[data-context-hours]")).toHaveValue("24");
   await expect(card.locator("[data-context-hours] option")).toHaveCount(3);
+  await card.locator("[data-context-hours]").selectOption("720");
   await expect(card.locator("svg.chart")).toHaveAttribute("data-chart-right-axis", "°F");
+  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9,900/);
   await expect(card.locator(".legend")).toContainText("HVAC power");
   await expect(card.locator(".legend")).toContainText("Outdoor temperature");
-  await card.locator("[data-context-hours]").selectOption("720");
+  await page.waitForTimeout(300);
+  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9,900/);
   await expect(card.locator("[data-context-hours]")).toHaveValue("720");
   await toHaveNoViolations(page);
 });
