@@ -12,9 +12,11 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     DASHBOARD_LAYOUT_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.dashboard import (
+    CONTEXT_GRAPH_CARD,
     DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_URL_PATH,
     NILM_DASHBOARD_GRAPHS_CARD,
+    SUMMARY_CARD,
     build_recommended_dashboard,
     dashboard_graph_module_resource,
     dashboard_preflight_summary,
@@ -398,11 +400,11 @@ def test_dashboard_groups_related_cards_into_three_views() -> None:
     } <= cards_by_view["overview"]
     assert {
         "custom:circuitsetup-energy-analyzer-energy-cost",
-        "history-graph",
+        CONTEXT_GRAPH_CARD,
     } <= cards_by_view["energy-costs"]
     assert {
         "custom:circuitsetup-energy-analyzer-house-flow",
-        "markdown",
+        SUMMARY_CARD,
     } <= cards_by_view["insights"]
     assert "history-graph" not in cards_by_view["insights"]
 
@@ -481,6 +483,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
     )
     billing_card = _card_with_title(insights_view, "Billing Cycle")
     assert insights_view["sections"][0]["cards"][-1] == billing_card
+    assert billing_card["type"] == SUMMARY_CARD
     billing_entities = {
         row["entity"] for row in billing_card["entities"] if isinstance(row, dict)
     }
@@ -506,6 +509,9 @@ def test_appliance_timeline_uses_binary_running_entities() -> None:
         appliance["running_entity"]
         for appliance in appliance_card["appliances"]
     } == {"binary_sensor.fridge_running", "binary_sensor.hvac_running"}
+    assert {
+        appliance["icon"] for appliance in appliance_card["appliances"]
+    } == {"mdi:fridge-outline", "mdi:hvac"}
     assert all(
         "activity_summary" not in str(appliance)
         for appliance in appliance_card["appliances"]
@@ -528,11 +534,23 @@ def test_insights_include_every_hvac_circuit() -> None:
     graphs = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
     )
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    graph = _card_with_title(graphs, "HVAC activity and outdoor temperature")
     refs = _entity_refs(graphs)
 
-    assert "binary_sensor.hvac_running" in refs
-    assert "binary_sensor.heat_pump_running" in refs
+    assert graph["type"] == CONTEXT_GRAPH_CARD
+    assert graph["default_hours"] == 24
+    assert graph["periods"] == [24, 168, 720]
+    assert graph["entities"][-1]["axis"] == "right"
+    assert "sensor.hvac_power" in refs
+    assert "sensor.heat_pump_power" in refs
+    assert "binary_sensor.hvac_running" not in refs
     assert "sensor.outdoor_temperature" in refs
+    assert CONTEXT_GRAPH_CARD not in {
+        card["type"] for card in insights["sections"][0]["cards"]
+    }
 
 
 def test_mains_view_identifies_primary_and_additional_mains_channels() -> None:
@@ -1159,9 +1177,10 @@ def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
     graph_refs = _entity_refs(graphs)
     insight_refs = _entity_refs(insights)
 
-    assert "binary_sensor.compressor_running" in graph_refs
+    assert "binary_sensor.compressor_running" not in graph_refs
     assert "sensor.backyard_temperature" in graph_refs
     assert "sensor.compressor_weather_context" in insight_refs
+    assert _card_with_title(insights, "HVAC weather context")["type"] == SUMMARY_CARD
     assert "sensor.compressor_outdoor_temperature" not in graph_refs
     assert "sensor.compressor_run_cycle_runtime" not in graph_refs
     assert "sensor.compressor_run_cycle_duty_cycle" not in graph_refs
@@ -1211,6 +1230,7 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     graph_cards = graphs["sections"][0]["cards"]
     refs = _entity_refs(history_graph)
 
+    assert history_graph["type"] == CONTEXT_GRAPH_CARD
     assert graph_cards[0] == history_graph
     assert graph_cards[1]["type"] == (
         "custom:circuitsetup-energy-analyzer-energy-cost"
@@ -1218,6 +1238,48 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     assert "sensor.compressor_w" in refs
     assert "sensor.compressor_va" not in refs
     assert "sensor.compressor_var" not in refs
+
+
+def test_water_context_uses_resolved_flow_sensor_attributes_under_energy_costs() -> (
+    None
+):
+    washer = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+    )
+    registry = {
+        "sensor.washer_water_context": _registry_entry(
+            "sensor.washer_water_context",
+            "entry-1_washer_water_flow_correlation",
+        )
+    }
+    dashboard = build_recommended_dashboard(
+        (washer,),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(entities=registry),
+            states=SimpleNamespace(get=lambda _entity_id: None),
+        ),
+        entry_id="entry-1",
+    )
+    energy_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    )
+    energy_card = _card_of_type(
+        energy_view,
+        "custom:circuitsetup-energy-analyzer-energy-cost",
+    )
+
+    assert energy_view["sections"][0]["cards"] == [energy_card]
+    assert energy_card["water_contexts"] == [
+        {
+            "name": "Washer",
+            "correlation_entity": "sensor.washer_water_context",
+        }
+    ]
 
 
 def test_dashboard_omits_hvac_outdoor_temperature_mirror_without_source_entity() -> (

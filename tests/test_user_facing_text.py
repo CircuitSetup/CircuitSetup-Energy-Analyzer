@@ -816,13 +816,15 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     cards = _dashboard_cards(dashboard)
     card_types = [card.get("type") for card in cards]
 
-    assert card_types.count("entities") == 1
+    assert card_types.count("entities") == 0
     assert "button" in card_types
-    assert "history-graph" in card_types
+    assert "history-graph" not in card_types
     assert {
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
+        "custom:circuitsetup-energy-analyzer-context-graph",
+        "custom:circuitsetup-energy-analyzer-summary",
     } <= set(card_types)
     assert "gauge" not in card_types
     assert "glance" not in card_types
@@ -1025,17 +1027,22 @@ def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None
     graph_cards = [
         card
         for card in _dashboard_cards(graphs)
-        if card.get("type") == "history-graph"
+        if card.get("type")
+        == "custom:circuitsetup-energy-analyzer-context-graph"
         and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
     assert graph_cards
     assert graph_cards[0]["grid_options"]["columns"] == 24
+    assert graph_cards[0]["default_hours"] == 24
+    assert graph_cards[0]["periods"] == [24, 168, 720]
     assert graph_cards[0]["entities"] == [
-        {"entity": "sensor.outdoor_temperature", "name": "Outdoor temperature"},
-        {"entity": "sensor.hvac_power", "name": "HVAC power"},
-        {"entity": "binary_sensor.hvac_running", "name": "HVAC running"},
-        {"entity": "sensor.hvac_daily_energy_usage", "name": "HVAC energy today"},
+        {"entity": "sensor.hvac_power", "name": "HVAC power", "axis": "left"},
+        {
+            "entity": "sensor.outdoor_temperature",
+            "name": "Outdoor temperature",
+            "axis": "right",
+        },
     ]
 
 
@@ -6920,7 +6927,11 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "Expert-only diagnostics" in readme_text
     assert "live-sorts appliance tiles" in readme_text
     assert "Running binary sensor rather than its text summary" in readme_text
-    assert "arranges all graphs in half-width rows" in readme_text
+    assert "keeps the HVAC graph half-width on the left" in readme_text
+    assert "overlays outdoor temperature on a second axis" in readme_text
+    assert "Correlated water-flow sensor history appears under Energy and costs" in (
+        readme_text
+    )
     assert "without repeating a separate Active Now list" in readme_text
     assert "segmented Running intervals against a labeled 24-hour scale" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text

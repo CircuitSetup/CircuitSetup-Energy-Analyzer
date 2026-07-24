@@ -130,6 +130,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         h2, h3, p { margin: 0; }
         h2 { font-size: 18px; }
         h3 { font-size: 15px; }
+        h3.peer-heading { font-size: 18px; }
         .muted { color: var(--secondary-text-color, #5b6470); }
         .kpis { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
         .metric { background: var(--secondary-background-color, #f4f6f8); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; padding: 10px; }
@@ -143,8 +144,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .flow-known { background: var(--primary-color, #0b6bcb); }
         .flow-unassigned { background: var(--warning-color, #b7791f); }
         .flow-labels { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
+        .flow-labels > span, .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
+        .flow-labels .swatch { flex: 0 0 auto; }
         .appliance-list, .appliance-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
         button.appliance-tile { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; color: var(--primary-text-color, #111827); cursor: pointer; min-height: 96px; padding: 12px; text-align: left; }
+        .appliance-heading ha-icon { --mdc-icon-size: 24px; }
         button.appliance-tile:focus-visible, button.control:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 2px; }
         .appliance-meta { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 13px; gap: 3px; margin-top: 6px; }
         .issue { color: var(--warning-color, #a15c00); font-weight: 600; }
@@ -181,6 +185,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .axis-label, .chart text { fill: var(--primary-text-color, #111827); font-size: 12px; }
         .legend { display: flex; flex-wrap: wrap; font-size: 12px; gap: 8px; justify-content: center; margin-top: 8px; }
         .legend-item { align-items: center; display: inline-flex; gap: 6px; }
+        .summary-list, .water-context-list { display: grid; gap: 8px; }
+        .summary-row, .summary-link { align-items: center; background: transparent; border: 0; color: var(--primary-text-color, #111827); display: flex; justify-content: space-between; min-height: 40px; padding: 4px 0; text-align: left; text-decoration: none; width: 100%; }
+        button.summary-row { cursor: pointer; }
+        .summary-row span:last-child { color: var(--secondary-text-color, #5b6470); margin-left: 12px; }
+        .water-pair { border-top: 1px solid var(--divider-color, #d8dee6); display: grid; gap: 6px; padding-top: 10px; }
+        .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
         @media (max-width: 520px) {
           .dashboard-card { padding: 12px; }
           .bar-row { grid-template-columns: minmax(80px, 1fr) minmax(70px, 2fr); }
@@ -190,6 +200,34 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           .timeline-scale > span:first-child { display: none; }
         }
       `;
+    }
+
+    _dashboardHistorySeries(payload, configuredEntities) {
+      const configs = new Map((configuredEntities || []).map((item) => [item.entity, item]));
+      const parsed = [];
+      for (const group of Array.isArray(payload) ? payload : []) {
+        const rows = Array.isArray(group) ? group : [group];
+        let entityId = "";
+        const points = [];
+        for (const row of rows.filter(Boolean)) {
+          entityId = row.entity_id || entityId;
+          const normalized = String(row.state || "").toLowerCase();
+          const value = normalized === "on" ? 1 : normalized === "off" ? 0 : Number.parseFloat(row.state);
+          const time = Date.parse(row.last_changed || row.last_updated || "");
+          if (Number.isFinite(value) && Number.isFinite(time)) points.push({ time, value });
+        }
+        const config = configs.get(entityId);
+        if (entityId && points.length) {
+          parsed.push({
+            entity_id: entityId,
+            name: config && config.name || this._friendlyEntityName(entityId),
+            unit: this._unit(entityId),
+            axis: config && config.axis || "left",
+            points: this._boundedChartPoints(points),
+          });
+        }
+      }
+      return parsed;
     }
 
     _contributionHtml(appliances) {
@@ -209,14 +247,131 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <h3>${this._escape(this._label("appliance_energy_cost", "Appliance Energy/Cost"))}</h3>
         <div class="controls">
           ${["energy", "cost"].map((mode) => `<button type="button" class="control" data-contribution-mode="${mode}" aria-pressed="${mode === this._contributionMode}">${this._escape(this._label(mode, mode))}</button>`).join("")}
-          ${[
-            ["24h", this._label("twenty_four_hours", "24 hours")],
-            ["7d", this._label("seven_days", "7 days")],
-            ["30d", this._label("thirty_days", "30 days")],
-          ].map(([window, label]) => `<button type="button" class="control" data-contribution-window="${window}" aria-pressed="${window === this._contributionWindow}">${this._escape(label)}</button>`).join("")}
+          <label>
+            <span class="sr-only">${this._escape(this._label("period", "Period"))}</span>
+            <select data-contribution-window aria-label="${this._escape(this._label("period", "Period"))}">
+              ${[
+                ["24h", this._label("twenty_four_hours", "24 hours")],
+                ["7d", this._label("seven_days", "7 days")],
+                ["30d", this._label("thirty_days", "30 days")],
+              ].map(([window, label]) => `<option value="${window}"${window === this._contributionWindow ? " selected" : ""}>${this._escape(label)}</option>`).join("")}
+            </select>
+          </label>
         </div>
         <div class="bars">${top.map((item) => `<div class="bar-row"><span>${this._escape(item.name)}</span><span class="bar-track"><span class="bar-fill" style="display:block;width:${Math.max(item[key] / max * 100, 2)}%"></span></span><strong>${this._escape(this._formatValue(item[key], unit))}</strong></div>`).join("")}</div>
       </section>`;
+    }
+  }
+
+  class CircuitSetupEnergyAnalyzerContextGraph extends DashboardCardBase {
+    constructor() {
+      super();
+      this._hours = null;
+      this._history = null;
+      this._historyKey = "";
+      this._historyError = "";
+    }
+
+    _render() {
+      if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      const config = this._dashboardConfig;
+      const entities = (config.entities || []).filter((item) => item && item.entity);
+      const periods = (config.periods || [24, 168, 720]).map(Number).filter(Number.isFinite);
+      if (!periods.includes(this._hours)) this._hours = Number(config.default_hours) || periods[0] || 24;
+      this._ensureHistory(entities);
+      const series = this._dashboardHistorySeries(this._history, entities);
+      const rightSeries = series.find((item) => item.axis === "right");
+      const chart = series.length
+        ? this._chartSvg(series, {
+          y_axis_label: config.y_axis_label || this._unit(entities[0] && entities[0].entity, "W"),
+          ...(rightSeries ? { right_y_axis_label: rightSeries.unit || this._label("temperature", "Temperature") } : {}),
+        })
+        : `<p class="muted">${this._escape(this._historyError || this._label("no_history", "No history is available for this period."))}</p>`;
+      this.shadowRoot.innerHTML = `
+        <ha-card>
+          <style>${this._styles()}</style>
+          <div class="dashboard-card">
+            <h2>${this._escape(config.title || "")}</h2>
+            <div class="controls">
+              <label>
+                <span class="sr-only">${this._escape(this._label("period", "Period"))}</span>
+                <select data-context-hours aria-label="${this._escape(this._label("period", "Period"))}">
+                  ${periods.map((hours) => `<option value="${hours}"${hours === this._hours ? " selected" : ""}>${this._escape(this._periodLabel(hours))}</option>`).join("")}
+                </select>
+              </label>
+            </div>
+            ${chart}
+          </div>
+        </ha-card>
+      `;
+      this.shadowRoot.querySelector("[data-context-hours]").addEventListener("change", (event) => {
+        this._hours = Number(event.target.value);
+        this._historyKey = "";
+        this._history = null;
+        this._render();
+      });
+      this._attachChartInspectors();
+    }
+
+    _periodLabel(hours) {
+      if (hours === 24) return this._label("twenty_four_hours", "24 hours");
+      if (hours === 168) return this._label("seven_days", "7 days");
+      if (hours === 720) return this._label("thirty_days", "30 days");
+      return `${hours} hours`;
+    }
+
+    _ensureHistory(entities) {
+      const key = `${this._hours}:${entities.map((item) => item.entity).join(",")}`;
+      if (!entities.length || key === this._historyKey) return;
+      this._historyKey = key;
+      const start = new Date(Date.now() - this._hours * 60 * 60 * 1000).toISOString();
+      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(entities.map((item) => item.entity).join(","))}&minimal_response=1&no_attributes=1`;
+      this._hass.callApi("GET", path).then((history) => {
+        this._history = history;
+        this._historyError = "";
+        this._render();
+      }).catch(() => {
+        this._history = [];
+        this._historyError = this._label("no_history", "No history is available for this period.");
+        this._render();
+      });
+    }
+  }
+
+  class CircuitSetupEnergyAnalyzerSummary extends DashboardCardBase {
+    _render() {
+      if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      const config = this._dashboardConfig;
+      this.shadowRoot.innerHTML = `
+        <ha-card>
+          <style>${this._styles()}</style>
+          <div class="dashboard-card">
+            <h2>${this._escape(config.title || "")}</h2>
+            ${config.description ? `<p class="muted">${this._escape(config.description)}</p>` : ""}
+            <div class="summary-list">
+              ${(config.entities || []).map((item) => {
+                const state = this._state(item.entity);
+                const unit = this._unit(item.entity);
+                const monetary = state && state.attributes && state.attributes.device_class === "monetary"
+                  || unit === this._currencyCode();
+                const numeric = this._number(item.entity);
+                const value = Number.isFinite(numeric)
+                  ? this._formatValue(numeric, monetary ? "currency" : unit)
+                  : state ? String(state.state) : this._label("unavailable", "Unavailable");
+                return `<button type="button" class="summary-row" data-summary-entity="${this._escape(item.entity)}"><strong>${this._escape(item.name || this._friendlyEntityName(item.entity))}</strong><span>${this._escape(value)}</span></button>`;
+              }).join("")}
+              ${(config.links || []).map((item) => `<a class="summary-link" href="${this._escape(item.path)}"><strong>${this._escape(item.name)}</strong><ha-icon icon="mdi:chevron-right"></ha-icon></a>`).join("")}
+            </div>
+          </div>
+        </ha-card>
+      `;
+      for (const row of this.shadowRoot.querySelectorAll("[data-summary-entity]")) {
+        row.addEventListener("click", () => this.dispatchEvent(new CustomEvent("hass-more-info", {
+          bubbles: true,
+          composed: true,
+          detail: { entityId: row.dataset.summaryEntity },
+        })));
+      }
     }
   }
 
@@ -279,9 +434,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             <span class="flow-unassigned" style="width:${100 - knownPercent}%"></span>
           </div>
           <div class="flow-labels">
-            <span>${this._escape(this._label("known_monitored_load", "Known monitored load"))}: ${this._escape(this._formatValue(knownPower, "W"))}</span>
-            <span>${this._escape(this._label("unassigned_load", "Unassigned load"))}: ${this._escape(this._formatValue(unassignedPower, "W"))}</span>
-            <span>${this._escape(this._label("known_load_coverage", "Known load coverage"))}: ${this._escape(this._formatValue(coverage, "%"))}</span>
+            <span><i class="swatch flow-known"></i>${this._escape(this._label("known_monitored_load", "Known monitored load"))}: ${this._escape(this._formatValue(knownPower, "W"))}</span>
+            <span><i class="swatch flow-unassigned"></i>${this._escape(this._label("unassigned_load", "Unassigned load"))}: ${this._escape(this._formatValue(unassignedPower, "W"))}</span>
+            <span><i class="swatch flow-known"></i>${this._escape(this._label("known_load_coverage", "Known load coverage"))}: ${this._escape(this._formatValue(coverage, "%"))}</span>
             ${mains.solar_surplus_power_entity ? `<span>${this._escape(this._label("solar_surplus", "Solar surplus"))}: ${this._escape(this._formatEntity(mains.solar_surplus_power_entity, "W"))}</span>` : ""}
           </div>
         </section>
@@ -337,9 +492,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._render();
         });
       }
-      for (const button of this.shadowRoot.querySelectorAll("[data-contribution-window]")) {
-        button.addEventListener("click", () => {
-          this._contributionWindow = button.dataset.contributionWindow;
+      const contributionWindow = this.shadowRoot.querySelector("[data-contribution-window]");
+      if (contributionWindow) {
+        contributionWindow.addEventListener("change", () => {
+          this._contributionWindow = contributionWindow.value;
           this._render();
         });
       }
@@ -543,8 +699,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${visible.map((item) => this._tile(item, !this._matchesSearch(item))).join("")}
             </div>
             <section class="timeline">
+              <h3>${this._escape(this._label("run_timeline", "Run timeline"))}</h3>
               <div class="controls">
-                <h3>${this._escape(this._label("run_timeline", "Run timeline"))}</h3>
                 <label>${this._escape(this._label("timeline_selection", "Timeline selection"))}
                   <select data-timeline-selection>
                     <option value="running">${this._escape(this._label("currently_running", "Currently running"))}</option>
@@ -595,7 +751,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _tile(item, hidden = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
       return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
-        <strong>${this._escape(item.name)}</strong>
+        <span class="appliance-heading"><ha-icon icon="${this._escape(item.icon || "mdi:power-plug-outline")}"></ha-icon><strong>${this._escape(item.name)}</strong></span>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
           <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>
@@ -682,6 +838,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._insights = null;
       this._wholeHouse = [];
       this._loadRequested = false;
+      this._waterHistory = null;
+      this._waterHistoryKey = "";
     }
 
     _render() {
@@ -697,6 +855,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._selection = items[0].circuit_id || items[0].appliance_key;
       }
       const rows = this._historyRows(items).slice(-this._historyDays);
+      const waterContexts = this._waterContexts();
+      this._ensureWaterHistory(waterContexts);
       const metrics = this._metricValues();
       const energyPoints = rows.map((row) => ({
         time: this._dailyTimestamp(row.date),
@@ -744,6 +904,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${chart}
               ${unavailable ? `<p class="muted">${this._escape(this._label("unavailable", "Unavailable"))}</p>` : ""}
             </section>
+            ${this._waterContextHtml(waterContexts)}
           </div>
         </ha-card>
       `;
@@ -826,6 +987,54 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _dailyTimestamp(value) {
       const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
       return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : Number.NaN;
+    }
+
+    _waterContexts() {
+      return (this._dashboardConfig.water_contexts || []).map((item) => {
+        const state = this._state(item.correlation_entity);
+        const raw = state && state.attributes && state.attributes.flow_sensor_entities;
+        const flowEntities = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [])
+          .filter((entityId) => typeof entityId === "string" && entityId);
+        return { ...item, flow_entities: [...new Set(flowEntities)] };
+      }).filter((item) => item.flow_entities.length);
+    }
+
+    _ensureWaterHistory(contexts) {
+      const entityIds = [...new Set(contexts.flatMap((item) => item.flow_entities))];
+      const key = entityIds.join(",");
+      if (!key || key === this._waterHistoryKey) return;
+      this._waterHistoryKey = key;
+      const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(key)}&minimal_response=1&no_attributes=1`;
+      this._hass.callApi("GET", path).then((history) => {
+        this._waterHistory = history;
+        this._render();
+      }).catch(() => {
+        this._waterHistory = [];
+        this._render();
+      });
+    }
+
+    _waterContextHtml(contexts) {
+      if (!contexts.length) return "";
+      return `<section>
+        <h3 class="peer-heading">${this._escape(this._dashboardConfig.water_context_title || "Water flow context")}</h3>
+        <div class="water-context-list">
+          ${contexts.map((context) => {
+            const configured = context.flow_entities.map((entity) => ({
+              entity,
+              name: this._friendlyEntityName(entity),
+            }));
+            const series = this._dashboardHistorySeries(this._waterHistory, configured)
+              .filter((item) => context.flow_entities.includes(item.entity_id));
+            const sensorNames = configured.map((item) => item.name).join(", ");
+            const chart = series.length
+              ? this._chartSvg(series, { y_axis_label: series[0].unit || this._label("flow", "Flow") })
+              : `<p class="muted">${this._escape(this._label("no_history", "No history is available for this period."))}</p>`;
+            return `<div class="water-pair"><strong>${this._escape(context.name)}</strong><span class="muted">${this._escape(sensorNames)}</span>${chart}</div>`;
+          }).join("")}
+        </div>
+      </section>`;
     }
 
   }
@@ -1194,6 +1403,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
   if (!customElements.get("circuitsetup-energy-analyzer-energy-cost")) {
     customElements.define("circuitsetup-energy-analyzer-energy-cost", CircuitSetupEnergyAnalyzerEnergyCost);
+  }
+  if (!customElements.get("circuitsetup-energy-analyzer-context-graph")) {
+    customElements.define("circuitsetup-energy-analyzer-context-graph", CircuitSetupEnergyAnalyzerContextGraph);
+  }
+  if (!customElements.get("circuitsetup-energy-analyzer-summary")) {
+    customElements.define("circuitsetup-energy-analyzer-summary", CircuitSetupEnergyAnalyzerSummary);
   }
   return CircuitSetupEnergyAnalyzerDashboardGraphs;
 }

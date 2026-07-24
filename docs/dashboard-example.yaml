@@ -32,6 +32,7 @@ views:
             appliances:
               - circuit_id: refrigerator
                 name: Refrigerator
+                icon: mdi:fridge-outline
                 area: Kitchen
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
                 power_entities:
@@ -42,6 +43,7 @@ views:
                 health_entity: sensor.refrigerator_health_summary
               - circuit_id: hvac
                 name: HVAC
+                icon: mdi:hvac
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
                 power_entities:
                   - sensor.hvac_power
@@ -49,6 +51,17 @@ views:
                 energy_today_entity: sensor.hvac_daily_energy_usage
                 cost_today_entity: sensor.hvac_cost_today
                 health_entity: sensor.hvac_health_summary
+              - circuit_id: washer
+                name: Washer
+                icon: mdi:washing-machine
+                area: Laundry
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=washer
+                power_entities:
+                  - sensor.washer_power
+                running_entity: binary_sensor.washer_running
+                energy_today_entity: sensor.washer_daily_energy_usage
+                cost_today_entity: sensor.washer_cost_today
+                health_entity: sensor.washer_health_summary
 
           - type: custom:circuitsetup-energy-analyzer-appliance-grid
             grid_options:
@@ -57,6 +70,7 @@ views:
             appliances:
               - circuit_id: refrigerator
                 name: Refrigerator
+                icon: mdi:fridge-outline
                 area: Kitchen
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
                 power_entities:
@@ -67,6 +81,7 @@ views:
                 health_entity: sensor.refrigerator_health_summary
               - circuit_id: hvac
                 name: HVAC
+                icon: mdi:hvac
                 detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
                 power_entities:
                   - sensor.hvac_power
@@ -74,6 +89,17 @@ views:
                 energy_today_entity: sensor.hvac_daily_energy_usage
                 cost_today_entity: sensor.hvac_cost_today
                 health_entity: sensor.hvac_health_summary
+              - circuit_id: washer
+                name: Washer
+                icon: mdi:washing-machine
+                area: Laundry
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=washer
+                power_entities:
+                  - sensor.washer_power
+                running_entity: binary_sensor.washer_running
+                energy_today_entity: sensor.washer_daily_energy_usage
+                cost_today_entity: sensor.washer_cost_today
+                health_entity: sensor.washer_health_summary
 
   - type: sections
     title: Energy & Costs
@@ -84,20 +110,23 @@ views:
       - type: grid
         column_span: 4
         cards:
-          - type: history-graph
+          - type: custom:circuitsetup-energy-analyzer-context-graph
             grid_options:
               columns: 24
             title: HVAC activity and outdoor temperature
-            hours_to_show: 168
+            default_hours: 24
+            periods:
+              - 24
+              - 168
+              - 720
+            y_axis_label: W
             entities:
-              - entity: sensor.outdoor_temperature
-                name: Outdoor temperature
               - entity: sensor.hvac_power
                 name: HVAC power
-              - entity: binary_sensor.hvac_running
-                name: HVAC running
-              - entity: sensor.hvac_daily_energy_usage
-                name: HVAC energy today
+                axis: left
+              - entity: sensor.outdoor_temperature
+                name: Outdoor temperature
+                axis: right
           - type: custom:circuitsetup-energy-analyzer-energy-cost
             grid_options:
               columns: 24
@@ -123,6 +152,16 @@ views:
                 cost_today_entity: sensor.hvac_cost_today
                 average_kwh_entity: sensor.hvac_average_kwh_per_day
                 average_cost_entity: sensor.hvac_average_cost_per_day
+              - circuit_id: washer
+                name: Washer
+                energy_today_entity: sensor.washer_daily_energy_usage
+                cost_today_entity: sensor.washer_cost_today
+                average_kwh_entity: sensor.washer_average_kwh_per_day
+                average_cost_entity: sensor.washer_average_cost_per_day
+            water_context_title: Water flow context
+            water_contexts:
+              - name: Washer
+                correlation_entity: sensor.washer_water_flow_correlation
   - type: sections
     title: Insights
     path: insights
@@ -156,7 +195,7 @@ views:
             tap_action:
               action: navigate
               navigation_path: /circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains
-          - type: entities
+          - type: custom:circuitsetup-energy-analyzer-summary
             grid_options:
               columns: 16
             title: Billing Cycle

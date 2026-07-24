@@ -225,14 +225,14 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.locator(".contribution")).toHaveCSS("margin-top", "12px");
   await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
-  await expect(card.getByRole("button", { name: "24 hours" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "7 days" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "30 days" })).toBeVisible();
+  await expect(card.locator("[data-contribution-window]")).toHaveValue("24h");
+  await expect(card.locator("[data-contribution-window] option")).toHaveCount(3);
+  await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
   await expect(card).toContainText("Unavailable");
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("1 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.34");
-  await card.getByRole("button", { name: "7 days" }).click();
+  await card.locator("[data-contribution-window]").selectOption("7d");
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
   await toHaveNoViolations(page);
   await page.evaluate(() => {
@@ -282,6 +282,7 @@ test("appliance grid filters live state and loads Running history", async ({ pag
       appliances: ["fridge", "oven"].map((id) => ({
         circuit_id: id,
         name: id[0].toUpperCase() + id.slice(1),
+        icon: id === "fridge" ? "mdi:fridge-outline" : "mdi:stove",
         area: id === "fridge" ? "Kitchen" : "Cooking",
         detail_path: `/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=${id}`,
         running_entity: `binary_sensor.${id}_running`,
@@ -345,6 +346,8 @@ test("appliance grid filters live state and loads Running history", async ({ pag
   await expect(card.locator("[data-timeline-tick]")).toHaveCount(5);
   await expect(card.locator("[data-timeline-tick]").first()).toHaveText("24h ago");
   await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Now");
+  await expect(card.locator(".timeline > h3 + .controls")).toBeVisible();
+  await expect(card.locator('[data-appliance-id="fridge"] .appliance-heading ha-icon')).toHaveAttribute("icon", "mdi:fridge-outline");
   await card.getByRole("tab", { name: "All", exact: true }).click();
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
@@ -358,6 +361,17 @@ test("energy and cost card switches completed-day windows and preserves cost sou
     cost_source: index < 5 ? "recorded" : index === 9 ? "unavailable" : "estimated",
   }));
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      const daysAgo = (days) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.laundry_flow", state: "0", last_changed: daysAgo(7) },
+          { state: "2.3", last_changed: daysAgo(1) },
+          { state: "0", last_changed: daysAgo(0) },
+        ]],
+      });
+      return true;
+    }
     if (!url.pathname.endsWith("/appliance_insights")) return false;
     await route.fulfill({
       json: {
@@ -401,6 +415,11 @@ test("energy and cost card switches completed-day windows and preserves cost sou
         average_kwh_entity: "sensor.fridge_average_energy",
         average_cost_entity: "sensor.fridge_average_cost",
       }],
+      water_context_title: "Water flow context",
+      water_contexts: [{
+        name: "Washer",
+        correlation_entity: "sensor.washer_water_context",
+      }],
       labels: {
         seven_days: "7 days",
         thirty_days: "30 days",
@@ -418,23 +437,106 @@ test("energy and cost card switches completed-day windows and preserves cost sou
       "sensor.fridge_cost": { state: "0.42", attributes: { unit_of_measurement: "USD" } },
       "sensor.fridge_average_energy": { state: "2.1", attributes: { unit_of_measurement: "kWh" } },
       "sensor.fridge_average_cost": { state: "0.36", attributes: { unit_of_measurement: "USD" } },
+      "sensor.washer_water_context": {
+        state: "correlated",
+        attributes: { flow_sensor_entities: ["sensor.laundry_flow"] },
+      },
+      "sensor.laundry_flow": {
+        state: "0",
+        attributes: { friendly_name: "Laundry flow meter", unit_of_measurement: "gal/min" },
+      },
     },
   );
 
-  await expect(card.locator("svg.chart")).toBeVisible();
+  await expect(card.locator("svg.chart").first()).toBeVisible();
   await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("strong")).toHaveText("$2.42");
   await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toContainText("Average: $2.16");
   await expect(card.locator(".metric").filter({ hasText: "Cost today" }).locator("small")).toHaveCSS("display", "block");
   await expect(card.locator("[data-energy-bar]")).toHaveCount(7);
   await expect(card.locator(".contribution")).toHaveCount(0);
   await card.locator('[data-cost-source="recorded"]').first().focus();
-  await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
-  await expect(card.locator("[data-chart-tooltip]")).toContainText("$0.80");
+  await expect(card.locator(".chart-frame").first().locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
+  await expect(card.locator(".chart-frame").first().locator("[data-chart-tooltip]")).toContainText("$0.80");
   await card.getByRole("button", { name: "30 days", exact: true }).click();
   await expect(card.locator("[data-energy-bar]")).toHaveCount(10);
   await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(5);
   await expect(card.locator('[data-cost-source="estimated"]')).toHaveCount(4);
   await expect(card).toContainText("Unavailable");
+  await expect(card).toContainText("Water flow context");
+  await expect(card).toContainText("Washer");
+  await expect(card).toContainText("Laundry flow meter");
+  await expect(card.locator(".water-pair svg.chart")).toBeVisible();
+  await toHaveNoViolations(page);
+});
+
+test("HVAC context graph overlays outdoor temperature on a selectable right axis", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    await route.fulfill({
+      json: [
+        [
+          { entity_id: "sensor.hvac_power", state: "0", last_changed: hoursAgo(24) },
+          { state: "2300", last_changed: hoursAgo(4) },
+          { state: "800", last_changed: hoursAgo(0) },
+        ],
+        [
+          { entity_id: "sensor.outdoor_temperature", state: "78", last_changed: hoursAgo(24) },
+          { state: "91", last_changed: hoursAgo(4) },
+          { state: "84", last_changed: hoursAgo(0) },
+        ],
+      ],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "HVAC activity and outdoor temperature",
+      default_hours: 24,
+      periods: [24, 168, 720],
+      y_axis_label: "W",
+      entities: [
+        { entity: "sensor.hvac_power", name: "HVAC power", axis: "left" },
+        { entity: "sensor.outdoor_temperature", name: "Outdoor temperature", axis: "right" },
+      ],
+      labels: { period: "Period", twenty_four_hours: "24 hours", seven_days: "7 days", thirty_days: "30 days" },
+    },
+    {
+      "sensor.hvac_power": { state: "800", attributes: { unit_of_measurement: "W" } },
+      "sensor.outdoor_temperature": { state: "84", attributes: { unit_of_measurement: "°F" } },
+    },
+  );
+
+  await expect(card.locator("h2")).toHaveCSS("font-size", "18px");
+  await expect(card.locator("[data-context-hours]")).toHaveValue("24");
+  await expect(card.locator("[data-context-hours] option")).toHaveCount(3);
+  await expect(card.locator("svg.chart")).toHaveAttribute("data-chart-right-axis", "°F");
+  await expect(card.locator(".legend")).toContainText("HVAC power");
+  await expect(card.locator(".legend")).toContainText("Outdoor temperature");
+  await card.locator("[data-context-hours]").selectOption("720");
+  await expect(card.locator("[data-context-hours]")).toHaveValue("720");
+  await toHaveNoViolations(page);
+});
+
+test("dashboard summary cards use the shared header style", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-summary",
+    {
+      title: "Billing Cycle",
+      entities: [{ entity: "sensor.billing_cost", name: "Cost so far" }],
+    },
+    {
+      "sensor.billing_cost": { state: "42.10", attributes: { unit_of_measurement: "USD" } },
+    },
+  );
+
+  await expect(card.locator("h2")).toHaveCSS("font-size", "18px");
+  await expect(card.locator(".summary-row")).toContainText("Cost so far");
+  await expect(card.locator(".summary-row")).toContainText("$42.10");
   await toHaveNoViolations(page);
 });
 
