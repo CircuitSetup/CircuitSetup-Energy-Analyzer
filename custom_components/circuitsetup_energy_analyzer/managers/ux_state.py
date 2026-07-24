@@ -27,6 +27,7 @@ from ..models import (
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import resolve_operating_detection_from_settings
 from ..state import circuit_is_learning
+from ..usage import _coerce_days, _usage_for_date
 from ..ux import data_quality_checklist, health_summary, learning_progress
 
 
@@ -50,6 +51,15 @@ class UxStateManager:
             coordinator.state,
             coordinator.store_data,
         )
+        today = local_date(now, coordinator.context_builder.time_zone()).isoformat()
+        for config in coordinator.circuit_configs:
+            history = coordinator.store_data.energy_usage_by_circuit.get(
+                config.circuit_id,
+                {},
+            )
+            coordinator.state.daily_energy_usage_by_circuit[config.circuit_id] = (
+                _usage_for_date(_coerce_days(history.get("days")), today)
+            )
         self.refresh_all(now)
         coordinator._refresh_settings_recommendation_state(now)
 
