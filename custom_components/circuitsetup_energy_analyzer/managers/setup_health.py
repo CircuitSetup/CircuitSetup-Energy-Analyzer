@@ -74,6 +74,17 @@ class SetupHealthAggregator:
             desired.add((circuit_id, problem))
         else:
             coordinator.state.data_quality_by_circuit.pop(circuit_id, None)
+        stale_issue = (circuit_id, "stale_source_sensor")
+        if stale_issue in desired:
+            config = coordinator.circuit_registry.config_for_circuit(circuit_id)
+            if (
+                config is None
+                or not coordinator.processor_runtime.learning_mature(
+                    config,
+                    coordinator.current_time(),
+                )
+            ):
+                desired.discard(stale_issue)
 
         current = {
             issue

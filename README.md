@@ -774,7 +774,7 @@ The analyzer uses two different Home Assistant surfaces:
 | **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
-Alert evidence can still be recorded during learning, but alert notifications, blueprint follow-up actions, and suggested settings wait until that appliance or mains circuit finishes both its shared baseline and any active rolling energy-use baseline.
+Routine alert evidence, alert notifications, blueprint follow-up actions, suggested settings, and stale-source repair issues wait until that appliance or mains circuit finishes both its shared baseline and any active rolling energy-use baseline. Configuration and missing-source repairs remain immediate.
 
 When an alert appears:
 

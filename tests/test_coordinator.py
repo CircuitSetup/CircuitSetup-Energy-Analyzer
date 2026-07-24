@@ -7784,7 +7784,9 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> None:
+async def test_stale_source_repair_waits_for_learning_and_names_stale_sensor(
+    monkeypatch,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -7856,6 +7858,10 @@ async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> N
         now_fn=lambda: now,
     )
 
+    await coordinator.async_process_update()
+    assert issues == []
+
+    coordinator.processor_runtime.learning_mature = lambda config, now: True
     await coordinator.async_process_update()
 
     assert issues == [

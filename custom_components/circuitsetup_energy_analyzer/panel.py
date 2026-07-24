@@ -1808,6 +1808,8 @@ def _state_alert_detail(
     feature: str | None = None,
 ) -> dict[str, Any] | None:
     state = getattr(coordinator, "state", None)
+    if circuit_is_learning(state, circuit_id):
+        return None
     details = getattr(state, "alert_evidence_by_circuit", {}) or {}
     detail = details.get(circuit_id)
     if not isinstance(detail, dict):

@@ -150,6 +150,10 @@ def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None
     alert = _alert(circuit_id="hvac_2", feature="real_power")
     coordinator = _coordinator(alert, config=_config("hvac_2"))
     coordinator.state.learning_by_circuit["hvac_2"] = True
+    coordinator.state.alert_evidence_by_circuit["hvac_2"] = {
+        "alert_id": "stored-state-fallback",
+        "feature": "real_power",
+    }
 
     payload = alert_evidence_payload(
         [coordinator],
