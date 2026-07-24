@@ -97,6 +97,7 @@ async function openDashboardCard(page, tagName, config, states = {}) {
   await page.goto(HARNESS);
   await page.waitForFunction(() => window.__panelReady === true);
   await page.evaluate(({ tagName: tag, cardConfig, cardStates }) => {
+    localStorage.removeItem("circuitsetup-energy-analyzer-dashboard-range");
     const hass = window.__panel._hass;
     const panelConfig = window.__panel._panel;
     Object.assign(hass.states, cardStates);
@@ -120,6 +121,28 @@ async function openDashboardCard(page, tagName, config, states = {}) {
     };
   }, { tagName, cardConfig: config, cardStates: states });
   return page.locator(tagName);
+}
+
+async function openDashboardCards(page, specs, states = {}) {
+  await page.goto(HARNESS);
+  await page.waitForFunction(() => window.__panelReady === true);
+  await page.evaluate(({ cardSpecs, cardStates }) => {
+    localStorage.removeItem("circuitsetup-energy-analyzer-dashboard-range");
+    const hass = window.__panel._hass;
+    const panelConfig = window.__panel._panel;
+    Object.assign(hass.states, cardStates);
+    window.__panel.remove();
+    const main = document.createElement("main");
+    for (const spec of cardSpecs) {
+      const card = document.createElement(spec.tagName);
+      card.panel = panelConfig;
+      card.setConfig(spec.config);
+      card.hass = hass;
+      main.append(card);
+    }
+    document.body.append(main);
+    window.__dashboardCards = [...main.children];
+  }, { cardSpecs: specs, cardStates: states });
 }
 
 async function toHaveNoViolations(page) {
@@ -537,6 +560,208 @@ test("water context graph combines paired appliance watts with one flow series",
     });
   });
   await expect(card).toBeHidden();
+});
+
+test("dashboard date range is shared with graph history requests", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[
+        {
+          entity_id: "sensor.fridge_power",
+          state: "120",
+          last_changed: "2026-07-10T00:00:00.000Z",
+        },
+        { state: "160", last_changed: "2026-07-12T23:00:00.000Z" },
+      ]],
+    });
+    return true;
+  });
+  await openDashboardCards(page, [
+    {
+      tagName: "circuitsetup-energy-analyzer-date-range",
+      config: { labels: { compare: "Compare", download_data: "Download data" } },
+    },
+    {
+      tagName: "circuitsetup-energy-analyzer-context-graph",
+      config: {
+        title: "All appliance power",
+        entities: [{
+          entity: "sensor.fridge_power",
+          name: "Fridge",
+          series_id: "circuit:fridge",
+          axis: "left",
+        }],
+      },
+    },
+  ], {
+    "sensor.fridge_power": {
+      state: "160",
+      attributes: { unit_of_measurement: "W" },
+    },
+  });
+  const selector = page.locator("circuitsetup-energy-analyzer-date-range");
+  await selector.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        value: {
+          startDate: new Date("2026-07-10T00:00:00.000Z"),
+          endDate: new Date("2026-07-12T23:59:59.999Z"),
+        },
+      },
+    }));
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("2026-07-10T00:00:00.000Z")) || ""
+  ))).toContain("2026-07-10T00:00:00.000Z");
+  const selectedRequest = await page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("2026-07-10T00:00:00.000Z"))
+  ));
+  expect(selectedRequest).toContain("end_time=2026-07-12T23%3A59%3A59.999Z");
+  await expect(selector).toContainText("Jul 10-12");
+});
+
+test("dashboard graph combines dual-phase appliance power into one series", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [
+        [
+          {
+            entity_id: "sensor.dryer_l1_power",
+            state: "400",
+            last_changed: "2026-07-24T00:00:00.000Z",
+          },
+          { state: "500", last_changed: "2026-07-24T01:00:00.000Z" },
+        ],
+        [
+          {
+            entity_id: "sensor.dryer_l2_power",
+            state: "600",
+            last_changed: "2026-07-24T00:30:00.000Z",
+          },
+          { state: "700", last_changed: "2026-07-24T01:30:00.000Z" },
+        ],
+      ],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "All appliance power",
+      entities: [
+        {
+          entity: "sensor.dryer_l1_power",
+          name: "Dryer",
+          series_id: "circuit:dryer",
+          axis: "left",
+        },
+        {
+          entity: "sensor.dryer_l2_power",
+          name: "Dryer",
+          series_id: "circuit:dryer",
+          axis: "left",
+        },
+      ],
+    },
+    {
+      "sensor.dryer_l1_power": {
+        state: "500",
+        attributes: { unit_of_measurement: "W" },
+      },
+      "sensor.dryer_l2_power": {
+        state: "700",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+  );
+
+  await expect(card.locator(".legend-item").filter({ hasText: "Dryer" })).toHaveCount(1);
+  await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,200"]')).toHaveCount(1);
+});
+
+test("dashboard comparison overlays previous data and downloads CSV", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    const start = decodeURIComponent(url.pathname.split("/history/period/")[1]);
+    const previous = start.startsWith("2026-07-07");
+    await route.fulfill({
+      json: [[
+        {
+          entity_id: "sensor.fridge_power",
+          state: previous ? "80" : "120",
+          last_changed: previous
+            ? "2026-07-07T00:00:00.000Z"
+            : "2026-07-10T00:00:00.000Z",
+        },
+        {
+          state: previous ? "100" : "160",
+          last_changed: previous
+            ? "2026-07-09T23:00:00.000Z"
+            : "2026-07-12T23:00:00.000Z",
+        },
+      ]],
+    });
+    return true;
+  });
+  await openDashboardCards(page, [
+    {
+      tagName: "circuitsetup-energy-analyzer-date-range",
+      config: { labels: { compare: "Compare", download_data: "Download data" } },
+    },
+    {
+      tagName: "circuitsetup-energy-analyzer-context-graph",
+      config: {
+        title: "All appliance power",
+        entities: [{
+          entity: "sensor.fridge_power",
+          name: "Fridge",
+          series_id: "circuit:fridge",
+          axis: "left",
+        }],
+      },
+    },
+  ], {
+    "sensor.fridge_power": {
+      state: "160",
+      attributes: { unit_of_measurement: "W" },
+    },
+  });
+  const selector = page.locator("circuitsetup-energy-analyzer-date-range");
+  await selector.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        value: {
+          startDate: new Date("2026-07-10T00:00:00.000Z"),
+          endDate: new Date("2026-07-12T23:59:59.999Z"),
+        },
+      },
+    }));
+  });
+  await selector.locator("[data-range-compare]").click();
+  const graph = page.locator("circuitsetup-energy-analyzer-context-graph");
+
+  await expect(graph.locator(".legend")).toContainText("Fridge (previous)");
+  await expect(graph.locator('polyline[stroke-dasharray="6 4"]')).toHaveCount(1);
+  const downloadPromise = page.waitForEvent("download");
+  await selector.locator("[data-range-download]").click();
+  const download = await downloadPromise;
+  const csv = await download.createReadStream().then(async (stream) => {
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8");
+  });
+  expect(csv).toContain("Fridge");
+  expect(csv).toContain("Fridge (previous)");
 });
 
 test("HVAC context graph overlays outdoor temperature on a selectable right axis", async ({ page }) => {

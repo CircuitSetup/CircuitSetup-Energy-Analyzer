@@ -1,4 +1,46 @@
 export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
+  const RANGE_EVENT = "circuitsetup-dashboard-range-changed";
+  const DATA_EVENT = "circuitsetup-dashboard-data-changed";
+  const RANGE_KEY = "circuitsetup-energy-analyzer-dashboard-range";
+  const dashboardSeries = new Map();
+
+  const defaultRange = () => {
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date(end);
+    start.setHours(0, 0, 0, 0);
+    return {
+      start: start.toISOString(),
+      end: end.toISOString(),
+      compare: false,
+    };
+  };
+
+  const validRange = (value) => {
+    const timestamp = (candidate) => candidate instanceof Date
+      ? candidate.getTime()
+      : Date.parse(candidate);
+    const start = timestamp(value && value.start);
+    const end = timestamp(value && value.end);
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start
+      ? { start: new Date(start).toISOString(), end: new Date(end).toISOString(), compare: Boolean(value.compare) }
+      : defaultRange();
+  };
+
+  const storedRange = () => {
+    try {
+      return validRange(JSON.parse(localStorage.getItem(RANGE_KEY) || "null"));
+    } catch (_error) {
+      return defaultRange();
+    }
+  };
+
+  const setDashboardRange = (value) => {
+    const range = validRange(value);
+    localStorage.setItem(RANGE_KEY, JSON.stringify(range));
+    window.dispatchEvent(new CustomEvent(RANGE_EVENT, { detail: range }));
+  };
+
   class DashboardCardBase extends CircuitSetupEnergyAnalyzerPanel {
     constructor() {
       super();
@@ -6,6 +48,29 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._hass = null;
       this._deferredHassRender = false;
       this._deferredRenderControl = null;
+      this._dashboardRange = storedRange();
+      this._handleDashboardRange = (event) => {
+        this._dashboardRange = validRange(event.detail);
+        this._historyKey = "";
+        this._history = null;
+        this._comparisonHistory = null;
+        this._chartZoomWindows && this._chartZoomWindows.clear();
+        this._render();
+      };
+    }
+
+    connectedCallback() {
+      super.connectedCallback();
+      this._dashboardRange = storedRange();
+      window.addEventListener(RANGE_EVENT, this._handleDashboardRange);
+    }
+
+    disconnectedCallback() {
+      super.disconnectedCallback();
+      window.removeEventListener(RANGE_EVENT, this._handleDashboardRange);
+      if (dashboardSeries.delete(this)) {
+        window.dispatchEvent(new Event(DATA_EVENT));
+      }
     }
 
     setConfig(config) {
@@ -208,6 +273,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       `;
     }
 
+    _publishDashboardSeries(series) {
+      dashboardSeries.set(this, Array.isArray(series) ? series : []);
+      window.dispatchEvent(new Event(DATA_EVENT));
+    }
+
     _dashboardHistorySeries(payload, configuredEntities) {
       const configs = new Map((configuredEntities || []).map((item) => [item.entity, item]));
       const parsed = [];
@@ -226,6 +296,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         if (entityId && points.length) {
           parsed.push({
             entity_id: entityId,
+            series_id: config && config.series_id || entityId,
             name: config && config.name || this._friendlyEntityName(entityId),
             unit: this._unit(entityId),
             axis: config && config.axis || "left",
@@ -234,6 +305,47 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         }
       }
       return parsed;
+    }
+
+    _groupDashboardHistorySeries(series) {
+      const groups = new Map();
+      for (const item of series) {
+        const key = item.series_id || item.entity_id || item.name;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      return [...groups.entries()].map(([seriesId, items]) => {
+        if (items.length === 1) return { ...items[0], series_id: seriesId };
+        const timestamps = [...new Set(items.flatMap((item) => (
+          item.points.map((point) => point.time)
+        )))].sort((left, right) => left - right);
+        const pointIndexes = new Map(items.map((item) => [item, 0]));
+        const latest = new Map();
+        const points = [];
+        for (const time of timestamps) {
+          for (const item of items) {
+            let index = pointIndexes.get(item);
+            while (index < item.points.length && item.points[index].time <= time) {
+              latest.set(item, item.points[index].value);
+              index += 1;
+            }
+            pointIndexes.set(item, index);
+          }
+          const values = [...latest.values()].filter(Number.isFinite);
+          if (values.length) {
+            points.push({
+              time,
+              value: values.reduce((total, value) => total + value, 0),
+            });
+          }
+        }
+        return {
+          ...items[0],
+          entity_id: seriesId,
+          series_id: seriesId,
+          points: this._boundedChartPoints(points),
+        };
+      });
     }
 
     _contributionHtml(appliances) {
@@ -269,11 +381,201 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
   }
 
+  class CircuitSetupEnergyAnalyzerDateRange extends DashboardCardBase {
+    constructor() {
+      super();
+      this._datePickerLoading = false;
+      this._handleDashboardData = () => this._render();
+    }
+
+    connectedCallback() {
+      super.connectedCallback();
+      window.addEventListener(DATA_EVENT, this._handleDashboardData);
+    }
+
+    disconnectedCallback() {
+      window.removeEventListener(DATA_EVENT, this._handleDashboardData);
+      super.disconnectedCallback();
+    }
+
+    _render() {
+      if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      this._ensureNativeDatePicker();
+      const range = validRange(this._dashboardRange);
+      const hasData = [...dashboardSeries.values()].some((series) => series.length);
+      this.shadowRoot.innerHTML = `
+        <ha-card>
+          <style>
+            ${this._styles()}
+            .range-card { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+            .range-picker { align-items: center; display: flex; min-width: 0; }
+            .range-picker ha-date-range-picker { max-width: 100%; }
+            .range-actions { align-items: center; display: flex; flex: 0 0 auto; }
+            .range-actions ha-icon-button { align-items: center; cursor: pointer; display: inline-flex; height: 40px; justify-content: center; width: 40px; }
+            .range-actions ha-icon-button[aria-pressed="true"] { color: var(--primary-color, #0b6bcb); }
+            @media (max-width: 520px) {
+              .range-card { align-items: stretch; flex-direction: column; }
+              .range-actions { justify-content: flex-end; }
+            }
+          </style>
+          <div class="dashboard-card range-card">
+            <div class="range-picker">
+              <ha-date-range-picker data-range-picker extended-presets backdrop></ha-date-range-picker>
+              <strong data-range-label>${this._escape(this._rangeLabel(range))}</strong>
+            </div>
+            <div class="range-actions">
+              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"))}
+              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"))}
+              ${this._rangeAction("now", "mdi:home-clock", this._label("now", "Now"))}
+              <ha-icon-button data-range-compare aria-label="${this._escape(this._label("compare", "Compare"))}" title="${this._escape(this._label("compare", "Compare"))}" aria-pressed="${range.compare}">
+                <ha-icon icon="${range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline"}"></ha-icon>
+              </ha-icon-button>
+              <ha-icon-button data-range-download aria-label="${this._escape(this._label("download_data", "Download data"))}" title="${this._escape(this._label("download_data", "Download data"))}"${hasData ? "" : " disabled"}>
+                <ha-icon icon="mdi:download"></ha-icon>
+              </ha-icon-button>
+            </div>
+          </div>
+        </ha-card>
+      `;
+      const picker = this.shadowRoot.querySelector("[data-range-picker]");
+      picker.startDate = new Date(range.start);
+      picker.endDate = new Date(range.end);
+      picker.extendedPresets = true;
+      picker.backdrop = true;
+      picker.addEventListener("value-changed", (event) => {
+        const value = event.detail && event.detail.value || {};
+        setDashboardRange({
+          start: value.startDate,
+          end: value.endDate,
+          compare: range.compare,
+        });
+      });
+      for (const action of ["previous", "next", "now"]) {
+        this.shadowRoot.querySelector(`[data-range-${action}]`).addEventListener("click", () => {
+          this._shiftRange(action);
+        });
+      }
+      this.shadowRoot.querySelector("[data-range-compare]").addEventListener("click", () => {
+        setDashboardRange({ ...range, compare: !range.compare });
+      });
+      this.shadowRoot.querySelector("[data-range-download]").addEventListener("click", () => {
+        if (hasData) this._downloadCsv(range);
+      });
+    }
+
+    _rangeAction(action, icon, label) {
+      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
+    }
+
+    _shiftRange(action) {
+      const range = validRange(this._dashboardRange);
+      const start = Date.parse(range.start);
+      const end = Date.parse(range.end);
+      const duration = end - start + 1;
+      if (action === "previous") {
+        setDashboardRange({
+          start: new Date(start - duration),
+          end: new Date(start - 1),
+          compare: range.compare,
+        });
+        return;
+      }
+      if (action === "next") {
+        setDashboardRange({
+          start: new Date(end + 1),
+          end: new Date(end + duration),
+          compare: range.compare,
+        });
+        return;
+      }
+      const nextEnd = new Date();
+      nextEnd.setHours(23, 59, 59, 999);
+      setDashboardRange({
+        start: new Date(nextEnd.getTime() - duration + 1),
+        end: nextEnd,
+        compare: range.compare,
+      });
+    }
+
+    _rangeLabel(range) {
+      const start = new Date(range.start);
+      const end = new Date(range.end);
+      const timeZone = this._timeZone();
+      const startParts = Object.fromEntries(new Intl.DateTimeFormat("en", {
+        timeZone,
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).formatToParts(start).map((part) => [part.type, part.value]));
+      const endParts = Object.fromEntries(new Intl.DateTimeFormat("en", {
+        timeZone,
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).formatToParts(end).map((part) => [part.type, part.value]));
+      if (startParts.year === endParts.year && startParts.month === endParts.month) {
+        return startParts.day === endParts.day
+          ? `${startParts.month} ${startParts.day}`
+          : `${startParts.month} ${startParts.day}-${endParts.day}`;
+      }
+      return `${startParts.month} ${startParts.day}-${endParts.month} ${endParts.day}`;
+    }
+
+    _downloadCsv(range) {
+      const byName = new Map();
+      for (const series of dashboardSeries.values()) {
+        for (const item of series) {
+          if (item && item.name && Array.isArray(item.points) && item.points.length) {
+            byName.set(item.name, item);
+          }
+        }
+      }
+      const names = [...byName.keys()];
+      const times = [...new Set([...byName.values()].flatMap((item) => (
+        item.points.map((point) => point.time)
+      )))].sort((left, right) => left - right);
+      const values = new Map([...byName].map(([name, item]) => [
+        name,
+        new Map(item.points.map((point) => [point.time, point.value])),
+      ]));
+      const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+      const rows = [
+        ["Timestamp", ...names].map(csvValue).join(","),
+        ...times.map((time) => [
+          new Date(time).toISOString(),
+          ...names.map((name) => values.get(name).get(time) ?? ""),
+        ].map(csvValue).join(",")),
+      ];
+      const url = URL.createObjectURL(new Blob([`${rows.join("\r\n")}\r\n`], {
+        type: "text/csv;charset=utf-8",
+      }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `circuitsetup-energy-${range.start.slice(0, 10)}-${range.end.slice(0, 10)}.csv`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    async _ensureNativeDatePicker() {
+      if (customElements.get("ha-date-range-picker") || this._datePickerLoading || !window.loadCardHelpers) return;
+      this._datePickerLoading = true;
+      try {
+        const helpers = await window.loadCardHelpers();
+        helpers.createCardElement({ type: "energy-date-selection" });
+        await customElements.whenDefined("ha-date-range-picker");
+        this._render();
+      } catch (_error) {
+        this._datePickerLoading = false;
+      }
+    }
+  }
+
   class CircuitSetupEnergyAnalyzerContextGraph extends DashboardCardBase {
     constructor() {
       super();
       this._hours = null;
       this._history = null;
+      this._comparisonHistory = null;
       this._historyKey = "";
       this._historyError = "";
     }
@@ -291,13 +593,37 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const periods = (config.periods || [24, 168, 720]).map(Number).filter(Number.isFinite);
       if (!periods.includes(this._hours)) this._hours = Number(config.default_hours) || periods[0] || 24;
       this._ensureHistory(entities);
-      const series = this._normalizedPowerSeries(
-        this._dashboardHistorySeries(this._history, entities),
-      );
+      const range = validRange(this._dashboardRange);
+      const currentSeries = this._groupDashboardHistorySeries(
+        this._normalizedPowerSeries(
+          this._dashboardHistorySeries(this._history, entities),
+        ),
+      ).map((item, index) => ({ ...item, color_index: index }));
+      const duration = Date.parse(range.end) - Date.parse(range.start) + 1;
+      const comparisonSeries = range.compare
+        ? this._groupDashboardHistorySeries(
+          this._normalizedPowerSeries(
+            this._dashboardHistorySeries(this._comparisonHistory, entities),
+          ),
+        ).map((item, index) => ({
+          ...item,
+          name: `${item.name} (${this._label("previous", "previous")})`,
+          color_index: index,
+          line_style: "dashed",
+          points: item.points.map((point) => ({
+            ...point,
+            source_time: point.time,
+            time: point.time + duration,
+          })),
+        }))
+        : [];
+      const series = [...currentSeries, ...comparisonSeries];
       const leftSeries = series.find((item) => item.axis !== "right");
       const rightSeries = series.find((item) => item.axis === "right");
       const chart = series.length
         ? this._chartSvg(series, {
+          graph_window_start: range.start,
+          graph_window_end: range.end,
           y_axis_label: config.y_axis_label || (leftSeries && leftSeries.unit) || "W",
           ...(rightSeries ? { right_y_axis_label: rightSeries.unit || this._label("temperature", "Temperature") } : {}),
         })
@@ -325,6 +651,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._history = null;
         this._render();
       });
+      this._publishDashboardSeries(series);
       this._attachChartInspectors();
     }
 
@@ -356,6 +683,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         powerEntities.push(...(context.power_entities || []).map((entity) => ({
           entity,
           name: `${context.name} power`,
+          series_id: context.series_id || `water:${context.name}`,
           axis: "left",
         })));
         flowEntities.push(...flows.map((entity) => ({
@@ -376,20 +704,31 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _ensureHistory(entities) {
-      const key = `${this._hours}:${entities.map((item) => item.entity).join(",")}`;
+      const range = validRange(this._dashboardRange);
+      const key = `${this._hours}:${range.start}:${range.end}:${range.compare}:${entities.map((item) => item.entity).join(",")}`;
       if (!entities.length || key === this._historyKey) return;
       this._historyKey = key;
-      const start = new Date(Date.now() - this._hours * 60 * 60 * 1000).toISOString();
-      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(entities.map((item) => item.entity).join(","))}&minimal_response=1&no_attributes=1`;
-      this._hass.callApi("GET", path).then((history) => {
+      const entityIds = encodeURIComponent(entities.map((item) => item.entity).join(","));
+      const historyPath = (start, end) => `history/period/${start}?filter_entity_id=${entityIds}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      const start = Date.parse(range.start);
+      const end = Date.parse(range.end);
+      const duration = end - start + 1;
+      const requests = [
+        this._hass.callApi("GET", historyPath(range.start, range.end)),
+        range.compare
+          ? this._hass.callApi("GET", historyPath(
+            new Date(start - duration).toISOString(),
+            new Date(start - 1).toISOString(),
+          ))
+          : Promise.resolve([]),
+      ];
+      Promise.allSettled(requests).then(([history, comparison]) => {
         if (this._historyKey !== key) return;
-        this._history = history;
-        this._historyError = "";
-        this._render();
-      }).catch(() => {
-        if (this._historyKey !== key) return;
-        this._history = [];
-        this._historyError = this._label("no_history", "No history is available for this period.");
+        this._history = history.status === "fulfilled" ? history.value : [];
+        this._comparisonHistory = comparison.status === "fulfilled" ? comparison.value : [];
+        this._historyError = history.status === "fulfilled"
+          ? ""
+          : this._label("no_history", "No history is available for this period.");
         this._render();
       });
     }
@@ -1399,6 +1738,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
   if (!customElements.get("circuitsetup-energy-analyzer-context-graph")) {
     customElements.define("circuitsetup-energy-analyzer-context-graph", CircuitSetupEnergyAnalyzerContextGraph);
+  }
+  if (!customElements.get("circuitsetup-energy-analyzer-date-range")) {
+    customElements.define("circuitsetup-energy-analyzer-date-range", CircuitSetupEnergyAnalyzerDateRange);
   }
   if (!customElements.get("circuitsetup-energy-analyzer-summary")) {
     customElements.define("circuitsetup-energy-analyzer-summary", CircuitSetupEnergyAnalyzerSummary);
