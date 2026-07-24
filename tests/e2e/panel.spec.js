@@ -816,6 +816,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
 });
 
 test("dashboard graph combines dual-phase appliance power into one series", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T03:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
     await route.fulfill({
@@ -823,11 +824,11 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
         [
           {
             entity_id: "sensor.dryer_l1_power",
-            state: "400",
+            state: "0.4",
             last_changed: "2026-07-24T00:00:00.000Z",
           },
           { state: "unavailable", last_changed: "2026-07-24T01:00:00.000Z" },
-          { state: "500", last_changed: "2026-07-24T02:00:00.000Z" },
+          { state: "0.5", last_changed: "2026-07-24T02:00:00.000Z" },
         ],
         [
           {
@@ -846,6 +847,7 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
     "circuitsetup-energy-analyzer-context-graph",
     {
       title: "All appliance power",
+      y_axis_label: "W",
       entities: [
         {
           entity: "sensor.dryer_l1_power",
@@ -863,8 +865,8 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
     },
     {
       "sensor.dryer_l1_power": {
-        state: "500",
-        attributes: { unit_of_measurement: "W" },
+        state: "0.5",
+        attributes: { unit_of_measurement: "kW" },
       },
       "sensor.dryer_l2_power": {
         state: "700",
@@ -876,6 +878,16 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
   await expect(card.locator(".legend-item").filter({ hasText: "Dryer" })).toHaveCount(1);
   await expect(card.locator(`[data-chart-time="${Date.parse("2026-07-24T01:00:00.000Z")}"]`)).toHaveAttribute("data-chart-value", "600");
   await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,200"]')).toHaveCount(1);
+  const historyCalls = await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
+  ));
+  await page.clock.fastForward("01:01");
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
+  ))).toBe(historyCalls + 1);
 });
 
 test("dashboard graphs use Recorder statistics for long ranges", async ({ page }) => {

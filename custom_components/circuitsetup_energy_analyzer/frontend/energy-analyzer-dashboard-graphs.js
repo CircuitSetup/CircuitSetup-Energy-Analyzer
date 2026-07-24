@@ -669,6 +669,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._comparisonHistory = null;
       this._historyKey = "";
       this._historyError = "";
+      this._historyLoadedAt = 0;
     }
 
     _render() {
@@ -687,6 +688,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const currentSeries = this._groupDashboardHistorySeries(
         this._normalizedPowerSeries(
           this._dashboardHistorySeries(this._history, entities),
+          config.y_axis_label,
         ),
       ).map((item, index) => ({ ...item, color_index: index }));
       const previousRange = this._previousRange(range);
@@ -698,6 +700,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ? this._groupDashboardHistorySeries(
           this._normalizedPowerSeries(
             this._dashboardHistorySeries(this._comparisonHistory, entities),
+            config.y_axis_label,
           ),
         ).map((item, index) => ({
           ...item,
@@ -737,16 +740,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._attachChartInspectors();
     }
 
-    _normalizedPowerSeries(series) {
+    _normalizedPowerSeries(series, targetUnit = "") {
       const wattsPerUnit = { W: 1, kW: 1000 };
       const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
-      if (!target) return series;
+      const normalizedUnit = wattsPerUnit[targetUnit] ? targetUnit : target && target.unit;
+      if (!normalizedUnit) return series;
       return series.map((item) => {
         const scale = item.axis !== "right" && wattsPerUnit[item.unit];
-        const factor = scale ? scale / wattsPerUnit[target.unit] : 1;
+        const factor = scale ? scale / wattsPerUnit[normalizedUnit] : 1;
         return factor === 1 ? item : {
           ...item,
-          unit: target.unit,
+          unit: normalizedUnit,
           points: item.points.map((point) => ({
             ...point,
             value: Number.isFinite(point.value) ? point.value * factor : point.value,
@@ -786,6 +790,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const key = `${range.start}:${range.end}:${range.compare}:${entities.map((item) => item.entity).join(",")}`;
       if (!entities.length || key === this._historyKey) return;
       this._historyKey = key;
+      this._historyLoadedAt = Date.now();
       const entityIds = entities.map((item) => item.entity);
       const previousRange = this._previousRange(range);
       const requests = [
@@ -807,6 +812,18 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           : this._label("no_history", "No history is available for this period.");
         this._render();
       });
+    }
+
+    _refreshLiveData() {
+      const { startKey, endKey } = this._calendarRange();
+      const todayKey = this._chartDateKey(Date.now());
+      if (
+        startKey <= todayKey
+        && endKey >= todayKey
+        && Date.now() - this._historyLoadedAt >= 60_000
+      ) {
+        this._historyKey = "";
+      }
     }
 
     _historyRequest(start, end, entityIds) {
