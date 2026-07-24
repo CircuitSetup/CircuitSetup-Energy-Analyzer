@@ -527,9 +527,9 @@ def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
                     platform=DOMAIN,
                     hidden_by="user",
                 ),
-                "binary_sensor.fridge_running": SimpleNamespace(
-                    entity_id="binary_sensor.fridge_running",
-                    unique_id="entry-1_fridge_running",
+                "binary_sensor.fridge_water_flow_mismatch": SimpleNamespace(
+                    entity_id="binary_sensor.fridge_water_flow_mismatch",
+                    unique_id="entry-1_fridge_water_flow_mismatch",
                     config_entry_id="entry-1",
                     platform=DOMAIN,
                     hidden_by=None,
@@ -691,7 +691,6 @@ async def test_sensor_setup_does_not_unhide_registry_entries_after_registration(
     ]
     assert {entry.entity_id for entry in hidden_entries} == {
         "sensor.fridge_always_on_power",
-        "sensor.fridge_standby_status",
     }
     assert fake_registry.updated == []
 
@@ -737,75 +736,6 @@ async def test_binary_sensor_setup_does_not_unhide_registry_entries_after_regist
     ]
     assert hidden_entries == []
     assert fake_registry.updated == []
-
-
-@pytest.mark.asyncio
-async def test_binary_sensor_setup_preserves_disabled_registry_entries(
-    monkeypatch,
-) -> None:
-    from custom_components.circuitsetup_energy_analyzer import binary_sensor
-    from custom_components.circuitsetup_energy_analyzer.entity import EntityCategory
-
-    fake_registry = _VisibilitySetupFakeEntityRegistry()
-    fake_registry.entities.update(
-        {
-            "binary_sensor.fridge_running": SimpleNamespace(
-                entity_id="binary_sensor.fridge_running",
-                unique_id="entry-1_fridge_running",
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-                disabled_by="integration",
-                hidden_by=None,
-                entity_category=EntityCategory.DIAGNOSTIC,
-            ),
-            "binary_sensor.freezer_running": SimpleNamespace(
-                entity_id="binary_sensor.freezer_running",
-                unique_id="entry-1_freezer_running",
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-                disabled_by="user",
-                hidden_by=None,
-                entity_category=None,
-            ),
-        }
-    )
-    _install_visibility_setup_registries(monkeypatch, fake_registry)
-    circuits = (
-        CircuitConfig(
-            circuit_id="fridge",
-            name="Kitchen Fridge",
-            appliance_profile=ApplianceProfile.REFRIGERATOR,
-            mode=CircuitMode.SINGLE_PHASE,
-            sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
-        ),
-        CircuitConfig(
-            circuit_id="freezer",
-            name="Garage Freezer",
-            appliance_profile=ApplianceProfile.FREEZER,
-            mode=CircuitMode.SINGLE_PHASE,
-            sensors=(SensorRef("sensor.freezer_power", SensorRole.REAL_POWER),),
-        ),
-    )
-    coordinator = SimpleNamespace(data=AnalyzerState(), circuit_configs=circuits)
-    hass = SimpleNamespace(
-        data={DOMAIN: {"entry-1": coordinator}},
-        entity_registry=fake_registry,
-    )
-    entry = SimpleNamespace(entry_id="entry-1", data={})
-    added_entities = []
-
-    await binary_sensor.async_setup_entry(hass, entry, added_entities.extend)
-
-    assert fake_registry.disabled_updates == []
-    assert (
-        fake_registry.entities["binary_sensor.fridge_running"].disabled_by
-        == "integration"
-    )
-    assert (
-        fake_registry.entities["binary_sensor.fridge_running"].entity_category is None
-    )
-    assert fake_registry.entities["binary_sensor.freezer_running"].disabled_by == "user"
-    assert "entry-1_fridge_running" in {entity.unique_id for entity in added_entities}
 
 
 def test_sync_entity_registry_categories_updates_existing_sensor_categories(
@@ -1691,9 +1621,17 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert health_attrs["evidence_path"] == (
         "/circuitsetup-energy-analyzer-evidence?circuit_id=washer"
     )
+    assert health_attrs["electrical_summary"] == "Possible Metric Mismatch"
+    assert health_attrs["metric_consistency_status"] == "metric_mismatch"
+    assert health_attrs["metric_consistency_score"] == 28.5
+    assert health_attrs["power_quality_evidence"] == (
+        "Possible issue: apparent power changed"
+    )
+    assert health_attrs["what_to_check_first"]
 
     assert activity_summary_value(state, "washer") == "Running"
     assert activity_summary_attributes(state, "washer") == {
+        "is_running": True,
         "run_cycle_status": "running",
         "standby_status": "on",
         "run_cycle_count": 2,
@@ -1863,22 +1801,6 @@ def test_activity_summary_reports_unavailable_operating_state() -> None:
         "Current operating state is unavailable because source data is missing "
         "or stale."
     )
-
-
-def test_operating_state_helpers_do_not_fallback_when_snapshot_is_unavailable() -> None:
-    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
-        is_appliance_running,
-    )
-
-    state = AnalyzerState(
-        latest_real_power_w_by_circuit={"fridge": 800.0},
-        run_cycle_status_by_circuit={"fridge": "running"},
-        operating_state_snapshot_by_circuit={
-            "fridge": {"state": "unavailable", "stable_state": "unavailable"}
-        },
-    )
-
-    assert is_appliance_running(state, "fridge", ApplianceProfile.REFRIGERATOR) is False
 
 
 def test_setup_health_prioritizes_actionable_next_steps() -> None:
@@ -2480,7 +2402,6 @@ def test_setup_health_merges_utility_comparison_config_sources_per_circuit() -> 
 def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         has_data_quality_problem,
-        is_appliance_running,
         is_learning,
         is_maintenance_active,
     )
@@ -2501,67 +2422,9 @@ def test_binary_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert has_data_quality_problem(state, "unknown") is False
     assert is_maintenance_active(state, "fridge") is True
     assert is_maintenance_active(state, "unknown") is False
-    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
-
-    state.latest_real_power_w_by_circuit["washer"] = 19.9
-    state.latest_real_power_w_by_circuit["dryer"] = 99.9
-    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
-    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is False
-
-    state.latest_real_power_w_by_circuit["washer"] = 20.0
-    state.latest_real_power_w_by_circuit["dryer"] = 100.0
-    state.latest_real_power_w_by_circuit["refrigerator"] = 40.0
-    state.latest_real_power_w_by_circuit["microwave"] = 650.0
-    state.latest_real_power_w_by_circuit["mixed"] = 1200.0
-    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is True
-    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
-    assert (
-        is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
-        is True
-    )
-    assert is_appliance_running(state, "microwave", ApplianceProfile.MICROWAVE) is True
-    assert is_appliance_running(state, "mixed", ApplianceProfile.MIXED) is False
-
-    state.run_cycle_status_by_circuit["refrigerator"] = "running"
-    state.run_cycle_status_by_circuit["oven"] = "idle"
-    state.latest_real_power_w_by_circuit["refrigerator"] = 0.0
-    state.latest_real_power_w_by_circuit["oven"] = 2000.0
-    assert is_appliance_running(state, "refrigerator", ApplianceProfile.REFRIGERATOR)
-    assert is_appliance_running(state, "oven", ApplianceProfile.OVEN) is False
-
-
-def test_operating_state_helpers_take_precedence_over_cycle_and_watts() -> None:
-    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
-        is_appliance_running,
-    )
-
-    state = AnalyzerState(
-        latest_real_power_w_by_circuit={
-            "washer": 120.0,
-            "dryer": 0.0,
-            "fridge": 0.0,
-        },
-        run_cycle_status_by_circuit={
-            "washer": "running",
-            "dryer": "idle",
-            "fridge": "idle",
-        },
-        operating_state_snapshot_by_circuit={
-            "washer": {"state": "pending_on", "stable_state": "off"},
-            "dryer": {"state": "pending_off", "stable_state": "running"},
-            "fridge": {"state": "running", "stable_state": "running"},
-        },
-    )
-
-    assert is_appliance_running(state, "washer", ApplianceProfile.WASHER) is False
-    assert is_appliance_running(state, "dryer", ApplianceProfile.DRYER) is True
-    assert is_appliance_running(state, "fridge", ApplianceProfile.REFRIGERATOR) is True
 
 
 def test_demo_source_values_are_intentionally_triggerable() -> None:
-    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
-        APPLIANCE_RUNNING_POWER_THRESHOLDS_W,
-    )
     from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
         evaluate_metric_consistency,
     )
@@ -2620,13 +2483,6 @@ def test_demo_source_values_are_intentionally_triggerable() -> None:
         leg_b_current_a=_demo_source_value("hvac_l2", SensorRole.CURRENT),
     )
     assert consistency.status in {"apparent_power_mismatch", "metric_mismatch"}
-
-    assert (
-        _demo_source_value("washer", SensorRole.REAL_POWER) or 0.0
-    ) > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.WASHER]
-    assert (_demo_source_value("dryer_l1", SensorRole.REAL_POWER) or 0.0) + (
-        _demo_source_value("dryer_l2", SensorRole.REAL_POWER) or 0.0
-    ) > APPLIANCE_RUNNING_POWER_THRESHOLDS_W[ApplianceProfile.DRYER]
 
 
 def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
@@ -2746,7 +2602,6 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert visible_by_default == {
         "health_summary",
         "activity_summary",
-        "electrical_health",
         "energy_summary",
         "daily_energy_usage",
         "cost_today",
@@ -2772,7 +2627,6 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     normal_entity_keys = {
         "health_summary",
         "activity_summary",
-        "electrical_health",
         "energy_summary",
         "nilm_signature_count",
         "nilm_unknown_loads",
@@ -2796,6 +2650,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "peak_demand",
         "demand_limit_usage",
         "capacity_usage",
+        "leg_imbalance",
         "balance_power",
         "monitored_power",
         "monitored_coverage",
@@ -2809,11 +2664,12 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
         "cost_cycle",
         "cost_cycle_forecast",
         "always_on_power",
-        "standby_status",
         "always_on_limit_usage",
     }
 
     assert normal_entity_keys <= set(descriptions)
+    assert "electrical_health" not in descriptions
+    assert "standby_status" not in descriptions
     assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
     assert descriptions["settings_suggestions"].entity_registry_enabled_default is False
     assert descriptions["settings_suggestions"].entity_registry_visible_default is False
@@ -2822,6 +2678,7 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert descriptions["nilm_signature_count"].entity_tier is EntityTier.SUMMARY
     assert descriptions["nilm_unknown_loads"].entity_tier is EntityTier.SUMMARY
     assert descriptions["energy_goal_status"].entity_tier is EntityTier.FEATURE
+    assert descriptions["leg_imbalance"].entity_tier is EntityTier.FEATURE
     assert descriptions["power_quality_score"].entity_tier is EntityTier.DIAGNOSTIC
     assert descriptions["power_quality_score"].entity_registry_enabled_default is False
     assert descriptions["metric_consistency_score"].entity_tier is (
@@ -2929,7 +2786,6 @@ def test_sensor_entities_use_purpose_specific_icons() -> None:
         "daily_energy_usage": "mdi:counter",
         "current_demand": "mdi:gauge",
         "metric_consistency_score": "mdi:clipboard-check-outline",
-        "standby_status": "mdi:power-sleep",
     }
 
     for key, icon in expected_icons.items():
@@ -3518,9 +3374,7 @@ def test_binary_sensor_descriptions_include_home_assistant_entity_defaults() -> 
     assert descriptions["maintenance"].entity_registry_visible_default is False
     assert descriptions["maintenance"].entity_registry_enabled_default is False
     assert descriptions["maintenance"].entity_tier is EntityTier.DIAGNOSTIC
-    assert descriptions["running"].entity_registry_visible_default is True
-    assert descriptions["running"].entity_registry_enabled_default is True
-    assert descriptions["running"].entity_tier is EntityTier.SUMMARY
+    assert "running" not in descriptions
     assert descriptions["water_flow_mismatch"].entity_tier is EntityTier.FEATURE
     assert descriptions["water_flow_mismatch"].entity_registry_enabled_default is False
 
@@ -3545,7 +3399,6 @@ def test_binary_sensor_entities_use_purpose_specific_icons() -> None:
         "learning": "mdi:school-outline",
         "data_quality_problem": "mdi:database-alert-outline",
         "maintenance": "mdi:bell-pause-outline",
-        "running": "mdi:power-cycle",
     }
 
     for key, icon in expected_icons.items():
@@ -3587,7 +3440,6 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_electricity_rate",
         "entry-1_fridge_health_summary",
         "entry-1_fridge_activity_summary",
-        "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
         "entry-1_fridge_daily_energy_usage",
         "entry-1_fridge_average_kwh_per_day",
@@ -3982,7 +3834,6 @@ async def test_sensor_setup_entry_omits_non_current_sensors() -> None:
     assert {
         "entry-1_fridge_health_summary",
         "entry-1_fridge_activity_summary",
-        "entry-1_fridge_electrical_health",
         "entry-1_fridge_energy_summary",
     } <= unique_ids
     assert {
@@ -4035,7 +3886,6 @@ async def test_sensor_setup_entry_adds_high_power_entities_only() -> None:
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
         "entry-1_hvac_activity_summary",
-        "entry-1_hvac_electrical_health",
         "entry-1_hvac_current_demand",
         "entry-1_hvac_capacity_usage",
         "entry-1_hvac_leg_imbalance",
@@ -4120,7 +3970,6 @@ async def test_sensor_setup_entry_adds_selected_cycle_and_electrical_graph_group
     } <= unique_ids
     assert {
         "entry-1_hvac_activity_summary",
-        "entry-1_hvac_electrical_health",
         "entry-1_hvac_leg_imbalance",
     } <= unique_ids
     assert (
@@ -4177,11 +4026,19 @@ async def test_sensor_setup_entry_condenses_billing_standby_and_weather_entities
         "entry-1_hvac_billing_cycle_usage",
         "entry-1_hvac_cost_cycle",
         "entry-1_hvac_always_on_power",
-        "entry-1_hvac_standby_status",
+        "entry-1_hvac_leg_imbalance",
         "entry-1_hvac_weather_context",
     } <= unique_ids
+    leg_imbalance = next(
+        entity
+        for entity in added_entities
+        if entity.unique_id == "entry-1_hvac_leg_imbalance"
+    )
+    assert leg_imbalance._attr_entity_registry_enabled_default is True
     assert (
         not {
+            "entry-1_hvac_electrical_health",
+            "entry-1_hvac_standby_status",
             "entry-1_hvac_billing_cycle_forecast",
             "entry-1_hvac_billing_cycle_budget_usage",
             "entry-1_hvac_billing_cycle_status",
@@ -4348,7 +4205,7 @@ async def test_sensor_setup_entry_adds_single_phase_metric_consistency() -> None
 
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
-        "entry-1_pool_pump_electrical_health",
+        "entry-1_pool_pump_health_summary",
         "entry-1_pool_pump_current_demand",
     } <= unique_ids
     assert (
@@ -5348,7 +5205,9 @@ async def test_binary_sensor_setup_selected_expert_diagnostics_preserve_visibili
 
 
 @pytest.mark.asyncio
-async def test_binary_sensor_setup_entry_adds_appliance_running_entities() -> None:
+async def test_binary_sensor_setup_entry_does_not_add_redundant_running_entities() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         async_setup_entry,
     )
@@ -5424,26 +5283,9 @@ async def test_binary_sensor_setup_entry_adds_appliance_running_entities() -> No
 
     await async_setup_entry(hass, entry, added_entities.extend)
 
-    running_entities = {
-        entity.circuit_id: entity
-        for entity in added_entities
-        if entity.entity_description.key == "running"
-    }
-    assert set(running_entities) == {"washer", "dryer", "refrigerator", "microwave"}
-    assert running_entities["washer"].name == "Washer Running"
-    assert running_entities["dryer"].name == "Dryer Running"
-    assert running_entities["refrigerator"].name == "Refrigerator Running"
-    assert running_entities["microwave"].name == "Microwave Running"
-    assert running_entities["washer"].is_on is True
-    assert running_entities["dryer"].is_on is False
-    assert running_entities["refrigerator"].is_on is True
-    assert running_entities["microwave"].is_on is True
-    assert {entity.unique_id for entity in running_entities.values()} == {
-        "entry-1_washer_running",
-        "entry-1_dryer_running",
-        "entry-1_refrigerator_running",
-        "entry-1_microwave_running",
-    }
+    assert all(
+        entity.entity_description.key != "running" for entity in added_entities
+    )
 
 
 @pytest.mark.asyncio
@@ -5568,7 +5410,6 @@ async def test_binary_sensor_setup_entry_applies_to_dict_circuits() -> None:
     await async_setup_entry(hass, entry, added_entities.extend)
 
     unique_ids = {entity.unique_id for entity in added_entities}
-    assert "entry-1_washer_running" in unique_ids
     assert "entry-1_washer_water_flow_mismatch" in unique_ids
 
 

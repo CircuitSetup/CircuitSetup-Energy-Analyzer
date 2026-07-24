@@ -121,6 +121,7 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
         "domain": DOMAIN,
         "service": "start_maintenance",
         "label": "Pause Alerts",
+        "icon": "mdi:bell-pause-outline",
         "data": {"circuit_id": "hvac"},
     }
     assert "start_maintenance" not in payload["actions"]
@@ -510,6 +511,7 @@ def test_alert_evidence_payload_switches_to_resume_alerts_when_paused() -> None:
         "domain": DOMAIN,
         "service": "end_maintenance",
         "label": "Resume Alerts",
+        "icon": "mdi:bell-pause-outline",
         "data": {"circuit_id": "hvac"},
     }
 
@@ -536,6 +538,7 @@ def test_alert_evidence_payload_allows_pause_alerts_without_current_alert() -> N
         "domain": DOMAIN,
         "service": "start_maintenance",
         "label": "Pause Alerts",
+        "icon": "mdi:bell-pause-outline",
         "data": {"circuit_id": "hvac"},
     }
 
@@ -3064,6 +3067,7 @@ def test_alert_evidence_payload_keeps_known_stale_circuit_actionable() -> None:
         "domain": DOMAIN,
         "service": "start_maintenance",
         "label": "Pause Alerts",
+        "icon": "mdi:bell-pause-outline",
         "data": {"circuit_id": "hvac"},
     }
     assert "start_maintenance" not in payload["actions"]

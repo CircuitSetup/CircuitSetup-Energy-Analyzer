@@ -862,7 +862,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const hintText = reason || helperText;
     const title = reason ? ` title="${this._escape(reason)}"` : "";
     const hint = hintText ? `<span class="action-reason">${this._escape(hintText)}</span>` : "";
-    return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${this._escape(action.label || label)}</button>${hint}</span>`;
+    const icon = action.icon ? `<ha-icon icon="${this._escape(action.icon)}"></ha-icon>` : "";
+    return `<span class="action-item"><button id="${actionKey}" class="${secondary ? "secondary" : ""}"${title} ${this._actionDisabled(actionKey, action)}>${icon}${this._escape(action.label || label)}</button>${hint}</span>`;
   }
 
   _changeSummary(alert) {

@@ -157,7 +157,7 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
     unique_ids = {entity.unique_id for entity in added_entities}
     assert {
         "runtime-entry_setup_health",
-        "runtime-entry_fridge_running",
+        "runtime-entry_fridge_activity_summary",
         "runtime-entry_run_mapping_checks",
         "runtime-entry_dashboard_layout",
         "runtime-entry_entity_detail_level",

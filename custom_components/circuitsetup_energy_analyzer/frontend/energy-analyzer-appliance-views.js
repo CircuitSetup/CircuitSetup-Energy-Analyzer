@@ -563,7 +563,6 @@ export function createApplianceViewMethods({
           </section>
           <section class="panel summary">
             ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
-            ${this._metric(this._panelText("appliance_detail.electrical"), detail.electrical_state, "mdi:lightning-bolt")}
             ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
             ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
           </section>

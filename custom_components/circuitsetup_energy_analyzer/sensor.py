@@ -185,6 +185,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     """Return health detail that would otherwise require noisy status entities."""
     summary = health_summary_value(state, circuit_id)
     readiness = readiness_value(state, circuit_id)
+    electrical = electrical_health_attributes(state, circuit_id)
     data_quality_problem = data_quality_checklist_value(state, circuit_id) == "problem"
     maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
     maintenance_active = (
@@ -203,6 +204,20 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "maintenance_active": maintenance_active,
         "active_alert_count": active_alert_count,
         "evidence_path": _circuit_evidence_path(circuit_id),
+        "electrical_summary": electrical["summary"],
+        "metric_consistency_status": electrical["metric_consistency_status"],
+        "metric_consistency_score": electrical["metric_consistency_score"],
+        "leg_imbalance_status": electrical["leg_imbalance_status"],
+        "leg_imbalance_percent": electrical["leg_imbalance_percent"],
+        "power_quality_score": electrical["power_quality_score"],
+        "power_quality_evidence": electrical["power_quality_evidence"],
+        "power_quality_alert_confirmed": electrical[
+            "power_quality_alert_confirmed"
+        ],
+        "electrical_status_explanation": electrical["status_explanation"],
+        "metric_status_explanation": electrical["metric_status_explanation"],
+        "leg_status_explanation": electrical["leg_status_explanation"],
+        "what_to_check_first": electrical["what_to_check_first"],
         "next_step": _health_summary_next_step(
             readiness,
             data_quality_problem=data_quality_problem,
@@ -771,6 +786,7 @@ def activity_summary_value(state: Any, circuit_id: str) -> str:
 
 def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     """Return activity detail that would otherwise require several entities."""
+    summary = activity_summary_value(state, circuit_id)
     run_status = run_cycle_status_value(state, circuit_id)
     standby_status = standby_status_value(state, circuit_id)
     operating_snapshot = _operating_state_snapshot(state, circuit_id)
@@ -789,6 +805,7 @@ def activity_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
                 "missing or stale."
             )
     attributes = {
+        "is_running": summary == "Running",
         "run_cycle_status": run_status,
         "standby_status": standby_status,
         "run_cycle_count": run_cycle_count_value(state, circuit_id),
@@ -1505,7 +1522,6 @@ SENSOR_ICONS: Mapping[str, str] = {
     "anomaly_score": "mdi:alert-octagon-outline",
     "health_summary": "mdi:heart-pulse",
     "activity_summary": "mdi:run-fast",
-    "electrical_health": "mdi:lightning-bolt-circle",
     "energy_summary": "mdi:home-lightning-bolt-outline",
     "energy_dashboard_status": "mdi:view-dashboard-outline",
     "recent_activity": "mdi:timeline-text-outline",
@@ -1559,7 +1575,6 @@ SENSOR_ICONS: Mapping[str, str] = {
     "cost_cycle": "mdi:cash-multiple",
     "cost_cycle_forecast": "mdi:chart-line",
     "always_on_power": "mdi:power-plug",
-    "standby_status": "mdi:power-sleep",
     "always_on_limit_usage": "mdi:power-cycle",
 }
 
@@ -1582,12 +1597,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         name_suffix="Activity Summary",
         value_fn=activity_summary_value,
         attributes_fn=activity_summary_attributes,
-    ),
-    DiagnosticSensorDescription(
-        key="electrical_health",
-        name_suffix="Electrical Health",
-        value_fn=electrical_health_value,
-        attributes_fn=electrical_health_attributes,
     ),
     DiagnosticSensorDescription(
         key="energy_summary",
@@ -1955,12 +1964,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
-        key="standby_status",
-        name_suffix="Standby Status",
-        value_fn=standby_status_value,
-        attributes_fn=_mapping_attributes("standby_evidence_by_circuit"),
-    ),
-    DiagnosticSensorDescription(
         key="always_on_limit_usage",
         name_suffix="Always On Limit Usage",
         value_fn=always_on_limit_usage_value,
@@ -1973,7 +1976,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
 _SUMMARY_SENSOR_KEYS = {
     "health_summary",
     "activity_summary",
-    "electrical_health",
     "energy_summary",
     "daily_energy_usage",
     "cost_today",
@@ -1991,7 +1993,6 @@ _VISIBLE_BY_DEFAULT_SENSOR_KEYS = {
 _NORMAL_ENTITY_SENSOR_KEYS = {
     "health_summary",
     "activity_summary",
-    "electrical_health",
     "energy_summary",
     "settings_suggestions",
     "daily_energy_usage",
@@ -2010,6 +2011,7 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "peak_demand",
     "demand_limit_usage",
     "capacity_usage",
+    "leg_imbalance",
     "balance_power",
     "monitored_power",
     "monitored_coverage",
@@ -2023,7 +2025,6 @@ _NORMAL_ENTITY_SENSOR_KEYS = {
     "cost_cycle",
     "cost_cycle_forecast",
     "always_on_power",
-    "standby_status",
     "always_on_limit_usage",
 }
 
@@ -2065,7 +2066,6 @@ _CORE_SENSOR_KEYS = {
     "anomaly_score",
     "health_summary",
     "activity_summary",
-    "electrical_health",
     "energy_summary",
     "energy_dashboard_status",
     "recent_activity",
@@ -2128,7 +2128,6 @@ _COST_SENSOR_KEYS = {
 }
 _STANDBY_SENSOR_KEYS = {
     "always_on_power",
-    "standby_status",
     "always_on_limit_usage",
 }
 _WEATHER_CONTEXT_SENSOR_KEYS = {"weather_context"}

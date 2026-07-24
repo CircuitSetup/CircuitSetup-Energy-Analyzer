@@ -107,7 +107,6 @@ class ApplianceDetail:
     model_status: str | None
     activity_state: str
     health_state: str
-    electrical_state: str
     energy_state: str
     current_power_w: float | None
     daily_energy_kwh: float | None

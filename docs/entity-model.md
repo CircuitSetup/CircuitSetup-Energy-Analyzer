@@ -8,8 +8,8 @@ model changes which results are exposed as standalone Home Assistant entities.
 
 | Detail level | What it creates | Typical use |
 |---|---|---|
-| Simple | Summary entities, Running when applicable, Daily Energy Usage and Goal when cumulative energy is available, Alert Sensitivity, Relearn Baseline, and Maintenance. | Normal appliance dashboards and automations. |
-| Standard | Simple plus configured canonical feature entities such as billing usage, cost cycle, standby status, weather/water context, capacity, and leg imbalance. | Feature-rich appliances without diagnostic clutter. |
+| Simple | Summary entities, Daily Energy Usage and Goal when cumulative energy is available, Alert Sensitivity, Relearn Baseline, and Maintenance. | Normal appliance dashboards and automations. |
+| Standard | Simple plus configured canonical feature entities such as billing usage, cost cycle, weather/water context, capacity, and leg imbalance. | Feature-rich appliances without diagnostic clutter. |
 | Expert | Standard plus only the diagnostic or graph groups selected in options. | Custom dashboards, graphing, and troubleshooting. |
 
 Choose Expert groups explicitly from the Entity Detail Level options screen.

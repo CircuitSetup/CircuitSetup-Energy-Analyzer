@@ -13,10 +13,10 @@ from homeassistant.util.yaml import load_yaml_dict
 
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.sensor import (
-    electrical_health_attributes,
-    electrical_health_value,
     energy_summary_attributes,
     energy_summary_value,
+    health_summary_attributes,
+    health_summary_value,
 )
 
 
@@ -46,7 +46,7 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
                 "input": {
                     "alert_entities": [
                         "sensor.washer_energy_summary",
-                        "sensor.washer_electrical_health",
+                        "sensor.washer_health_summary",
                     ],
                     "for_duration": {"seconds": 0},
                     "alert_actions": [
@@ -167,7 +167,7 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         for update_type, items in notification_updates
     )
 
-    hass.states.async_set("sensor.washer_electrical_health", "Normal")
+    hass.states.async_set("sensor.washer_health_summary", "Ready")
     await hass.async_block_till_done()
     provisional_state = AnalyzerState(
         power_quality_evidence_by_circuit={
@@ -176,15 +176,15 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         learning_by_circuit={"washer": False},
     )
     hass.states.async_set(
-        "sensor.washer_electrical_health",
-        electrical_health_value(provisional_state, "washer"),
-        electrical_health_attributes(provisional_state, "washer"),
+        "sensor.washer_health_summary",
+        health_summary_value(provisional_state, "washer"),
+        health_summary_attributes(provisional_state, "washer"),
     )
     await hass.async_block_till_done()
     assert len(events) == 1
     assert len(notifications) == 1
 
-    hass.states.async_set("sensor.washer_electrical_health", "Normal")
+    hass.states.async_set("sensor.washer_health_summary", "Ready")
     await hass.async_block_till_done()
     confirmed_state = AnalyzerState(
         power_quality_evidence_by_circuit={
@@ -198,9 +198,9 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         learning_by_circuit={"washer": False},
     )
     hass.states.async_set(
-        "sensor.washer_electrical_health",
-        electrical_health_value(confirmed_state, "washer"),
-        electrical_health_attributes(confirmed_state, "washer"),
+        "sensor.washer_health_summary",
+        health_summary_value(confirmed_state, "washer"),
+        health_summary_attributes(confirmed_state, "washer"),
     )
     await hass.async_block_till_done()
 

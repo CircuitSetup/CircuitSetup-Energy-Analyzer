@@ -120,7 +120,7 @@ Use the integration in this order:
 - **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
 - **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
 - **Classify circuits deliberately**: choose the appliance type and source sensors, then review the automatically derived circuit mode and power-flow mode before trusting appliance evidence.
-- **Use it day to day**: start with Health Summary, Activity Summary, Electrical Health, Energy Summary, Energy Usage Today, and the Running binary sensor.
+- **Use it day to day**: start with Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
 - **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
 - **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
 - **When an alert appears**: read the notification, open the evidence view, compare observed and expected values, and verify source data before treating it as an appliance problem.
@@ -133,13 +133,13 @@ You do not need to enable every diagnostic entity. For behavior alerts, let the 
 The generated dashboard and evidence panel are organized around appliance
 questions instead of raw diagnostic entity lists:
 
-- **Appliance Detail** combines current activity, health, electrical state,
+- **Appliance Detail** combines current activity, health with electrical evidence,
   energy state, Today vs Normal comparisons, behavior expectations, active
   alerts, first checks, and actions for one appliance or circuit. Empty evidence
   and check sections stay hidden, the activity facts and deduplicated history
   share a two-column layout, and the history graph moves between 24 hours, 7
   days, and 30 days with point inspection in a Home Assistant-style hover tooltip.
-- **Appliance Status** keeps activity, electrical health, energy state, and
+- **Appliance Status** keeps activity, health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
   days. Energy, runtime, run count, cost, and demand peak use the same local-day
@@ -295,7 +295,7 @@ Most users should build dashboards from the summary entities first. Detailed dia
 
 The integration has an **Entity Detail Level** option under **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure**:
 
-- **Simple**: default for most homes. Enables the main summary entities, Energy Usage Today when usable, and appliance Running sensors.
+- **Simple**: default for most homes. Enables the main summary entities and Energy Usage Today when usable.
 - **Standard**: also enables configured feature-status entities, such as energy goals, billing/cost, weather context, water-flow context, and other features you turned on.
 - **Expert**: creates only the diagnostic or graph groups you select under **Expert Entity Groups**, useful for troubleshooting and custom diagnostic dashboards.
 
@@ -308,12 +308,10 @@ For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, th
 | Entity | Example | What it tells you |
 |---|---|---|
 | **Setup Health / Next Step** | `sensor.circuitsetup_energy_analyzer_setup_health` | The highest-priority setup action across the integration, with attributes for the reason, affected circuit, blocking issue count, and configuration path. |
-| **Health Summary** | `sensor.<circuit>_health_summary` | Whether the circuit is ready, learning, missing data, paused, or showing a possible issue. |
-| **Activity Summary** | `sensor.<circuit>_activity_summary` | What the appliance appears to be doing now: running, idle, standby, on, off, or no recent activity. |
-| **Electrical Health** | `sensor.<circuit>_electrical_health` | Combined electrical condition, including power-quality, metric-consistency, and leg-balance evidence when available. |
+| **Health Summary** | `sensor.<circuit>_health_summary` | Whether the circuit is ready, learning, missing data, paused, or showing a possible issue. Attributes include the electrical-health, power-quality, metric-consistency, and leg-balance evidence when available. |
+| **Activity Summary** | `sensor.<circuit>_activity_summary` | What the appliance appears to be doing now: running, idle, standby, on, off, or no recent activity. Attributes include `is_running` for automations plus run-cycle and standby detail. |
 | **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goal, billing, cost, and high-usage evidence. |
 | **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh when a cumulative energy source is available. |
-| **Running** | `binary_sensor.<circuit>_running` | Simple on/off running state for automations. |
 | **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available from the Expert Developer Diagnostics group or by enabling the entity. |
 
 Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page leads with a visual observed-versus-expected comparison and graph-first evidence, then explains what happened, why it matters, sample count, first/last seen times, and what to check first. Power-quality comparisons name the measured metric and show W, VAR, VA, power factor, or a percentage as appropriate. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
@@ -347,7 +345,7 @@ You can also choose the preferred layout from `select.circuitsetup_energy_analyz
 
 The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. The first path remains `overview`, and the dashboard uses at most three full-width views: Home, Energy & Costs, and Insights. Home includes the appliance grid with profile icons, a labeled run timeline, dropdown period selection for appliance energy or cost, and the completed-day Energy and costs card in the left column. The Home energy summary's existing Energy today and Cost today boxes show their daily averages on a second line without percentage comparisons. Energy & Costs keeps graphs half-width on the left: HVAC overlays outdoor temperature on a second axis, while Water flow context overlays correlated appliance power and deduplicated flow sensors. Both graphs offer 24-hour, 7-day, and 30-day ranges. Insights keeps non-graph mains status, contextual summaries, billing-cycle totals, and Expert-only diagnostics. Empty optional views and empty NILM graph placeholders are omitted.
 
-Home live-sorts appliance tiles by attention state, Running state, current power, and name without repeating a separate Active Now list. Appliance rankings exclude mains, show the top five plus Other, and provide Energy/Cost plus 24 hours/7 days/30 days controls beneath the Appliance Energy/Cost heading. The 24-hour energy ranking integrates recorder real-power history, and its cost ranking follows recorded cost changes across daily resets; the longer windows use completed-day totals. The appliance grid keeps the All, Running, and Needs attention filters alongside search and detail navigation. Its selected 24-hour timeline is built from each appliance's Running binary sensor rather than its text summary and shows segmented Running intervals against a labeled 24-hour scale. Live state refresh pauses while a search or selector has focus.
+Home live-sorts appliance tiles by attention state, Running state, current power, and name without repeating a separate Active Now list. Appliance rankings exclude mains, show the top five plus Other, and provide Energy/Cost plus 24 hours/7 days/30 days controls beneath the Appliance Energy/Cost heading. The 24-hour energy ranking integrates recorder real-power history, and its cost ranking follows recorded cost changes across daily resets; the longer windows use completed-day totals. The appliance grid keeps the All, Running, and Needs attention filters alongside search and detail navigation. Its selected 24-hour timeline is built from each appliance's Activity Summary history and shows segmented Running intervals against a labeled 24-hour scale. Live state refresh pauses while a search or selector has focus.
 
 Energy & Costs uses two equal-width columns for every available graph, including HVAC, water context, and the NILM mains graph. The appliance contribution ranking appears only on Home, not a second time on this graph tab. HVAC and appliance displays use real power in watts and exclude apparent and reactive power (`VA` and `var`) sources. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. Completed-day charts remain in the Home Energy and costs card and use the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Monetary sensors and cards use Home Assistant's configured currency.
 
@@ -357,12 +355,12 @@ The custom cards are first-party integration resources and require no third-part
 
 For manual dashboards, start with the same summary contract:
 
-1. Activity Summary
-2. Electrical Health
+1. Health Summary
+2. Activity Summary
 3. Energy Summary
 4. Energy Usage Today
 
-Add Cost Today and average daily energy or cost where useful. Use the Running binary sensor for timelines and automations such as washer finished, dryer finished, pump running, or microwave activity.
+Add Cost Today and average daily energy or cost where useful. Use Activity Summary state or its `is_running` attribute for timelines and automations such as washer finished, dryer finished, pump running, or microwave activity.
 
 For YAML reference, an example dashboard is still included:
 
@@ -382,9 +380,9 @@ A good dashboard order is:
 
 When a single appliance needs review, use this pattern:
 
-1. **Appliance status card**: Health Summary, Activity Summary, Electrical Health, Energy Summary, and Energy Usage Today.
+1. **Appliance status card**: Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
 2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, and use the graph controls to zoom or pan.
-3. **Appliance automations**: Running binary sensor for washer, dryer, pump, microwave, or appliance-complete automations.
+3. **Appliance automations**: Activity Summary state or `is_running` attribute for washer, dryer, pump, microwave, or appliance-complete automations.
 4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
 5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
 6. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
@@ -834,15 +832,16 @@ The examples below show the underlying automation/action structure for users who
 
 ### Washer finished notification
 
-Use the Running binary sensor for simple appliance-finished notifications.
+Use the Activity Summary `is_running` attribute for simple appliance-finished notifications.
 
 ```yaml
 alias: Washer finished
 trigger:
   - platform: state
-    entity_id: binary_sensor.washer_running
-    from: "on"
-    to: "off"
+    entity_id: sensor.washer_activity_summary
+    attribute: is_running
+    from: true
+    to: false
     for: "00:03:00"
 action:
   - service: notify.mobile_app_phone
@@ -968,10 +967,8 @@ Entity IDs use your configured circuit ID. For example, a circuit named `refrige
 ```text
 sensor.refrigerator_health_summary
 sensor.refrigerator_activity_summary
-sensor.refrigerator_electrical_health
 sensor.refrigerator_energy_summary
 sensor.refrigerator_daily_energy_usage
-binary_sensor.refrigerator_running
 ```
 
 Use **Entity Detail Level** for normal entity creation: Simple keeps the core summary set, Standard adds configured feature entities, and Expert creates only the selected diagnostic or graph groups. You can still use Home Assistant's entity registry for one-off manual entity changes.
@@ -981,7 +978,7 @@ Use **Entity Detail Level** for normal entity creation: Simple keeps the core su
 The analyzer uses a compact entity model so Home Assistant gets appliance-focused
 entities instead of every intermediate calculation as a standalone entity.
 
-- **Simple** creates summary entities, Running, Energy Usage Today when available,
+- **Simple** creates summary entities, Energy Usage Today when available,
   and the small daily control set.
 - **Standard** adds canonical status and graph entities for features you configured.
 - **Expert** adds only the diagnostic or graph groups you explicitly select.
@@ -1007,15 +1004,13 @@ Start with these on dashboards.
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Review utility comparison` |
-| Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. | Core/default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
-| Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with run-cycle and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity` |
-| Electrical Health | `sensor.<circuit>_electrical_health` | Combined electrical condition for power quality, metric consistency, dual-phase balance, mains balance, and solar flow. | Core/default visible for configured circuits. | `Normal`, `Needs Metrics`, `Possible Imbalance`, `Possible Metric Mismatch`, `Possible Power Quality Change` |
+| Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. Attributes include the electrical summary, power-quality evidence, metric consistency, and dual-phase leg balance. | Core/default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
+| Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with `is_running`, run-cycle, and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity`, `Unavailable` |
 | Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
 | Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
 | Cost Today | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
 | Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
 | Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data is available. | `kWh` |
-| Running | `binary_sensor.<circuit>_running` | Simple appliance-running state for automations. | Core/default visible for appliance circuits with active-power sensors. | `on`, `off` |
 
 Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
 
@@ -1023,7 +1018,7 @@ The appliance detail view graphs daily energy and cost for up to 30 completed da
 
 ### Running Vs Observations Vs Alerts
 
-- Running is the current operating state used for automations.
+- Activity Summary is the current operating state; use its state or `is_running` attribute for automations.
 - Observation recorded means the analyzer noticed something unusual, but one observation alone is not an alert.
 - Possible issue means repeated evidence crossed the alert threshold.
 
@@ -1090,7 +1085,7 @@ Capacity sensors require either current sensors or real power plus voltage, and 
 | **Demand Status** | `sensor.<circuit>_demand_status` | Demand tracker state. | Expert Demand and Capacity group. | `unconfigured`, `tracking`, over-limit evidence states |
 | **Circuit Capacity Usage** | `sensor.<circuit>_capacity_usage` | Current amps as a percent of configured circuit capacity. | Standard feature entity when capacity is configured. | Percentage values |
 | **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Expert Demand and Capacity group. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
-| **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Standard feature entity for dual-phase circuits. | Percentage imbalance |
+| **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Created and enabled at Standard or Expert for dual-phase circuits; omitted at Simple. | Percentage imbalance |
 
 ### Mains NILM, balance, solar, and utility comparison sensors
 
@@ -1119,18 +1114,19 @@ These apply to non-mains load circuits with real-power data. They are useful for
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Always On Power** | `sensor.<circuit>_always_on_power` | Lowest retained power level in the standby window. | Standard feature entity for non-mains load circuits. | Watts |
-| **Standby Status** | `sensor.<circuit>_standby_status` | Current standby state. | Standard feature entity for non-mains load circuits. | `learning`, `off`, `standby`, `on` |
 | **Always On Limit Usage** | `sensor.<circuit>_always_on_limit_usage` | Always-on estimate as a percent of the configured limit. | Expert Standby group. | Percentage values |
+
+Current standby state remains available in Activity Summary and its
+`standby_status` attribute.
 
 ### Binary sensors
 
-Diagnostic binary sensors are created for configured circuits. Operational binary sensors appear only when the circuit has the required profile and source data.
+Diagnostic binary sensors are created for configured circuits. Feature binary sensors appear only when the circuit has the required profile and source data.
 
 | Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
 |---|---|---|---|---|
 | **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Expert Developer Diagnostics group. | `on`, `off` |
 | **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Expert Developer Diagnostics group. | `on`, `off` |
-| **Running** | `binary_sensor.<circuit>_running` | On when watts exceed the appliance running threshold or the cycle analyzer reports `running`. Not created for mixed circuits, Mains NILM, or solar inverter feeds. | Core/default visible for appliance circuits. | `on`, `off` |
 | **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Standard feature entity for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `on`, `off` |
 
 ## Status Glossary

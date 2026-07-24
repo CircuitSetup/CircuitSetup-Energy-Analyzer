@@ -125,20 +125,33 @@ variables:
   persistent_notification_id: >-
     circuitsetup_energy_analyzer_blueprint_{{ alert_entity_id | replace('.', '_') }}
   alert_entity_name: "{{ trigger.to_state.name if trigger.to_state else trigger.entity_id }}"
-  alert_state: "{{ trigger.to_state.state if trigger.to_state else 'unknown' }}"
+  alert_state: >-
+    {% set state = trigger.to_state.state if trigger.to_state else 'unknown' %}
+    {% set electrical = trigger.to_state.attributes.get('electrical_summary')
+       if trigger.to_state else none %}
+    {{ electrical if electrical and electrical not in ['Normal', 'Needs Metrics']
+       else state }}
   alert_state_normalized: >-
-    {% set raw_state = trigger.to_state.state if trigger.to_state else 'unknown' %}
-    {% set base_state = (raw_state | string).split(':', 1)[0] %}
+    {% set base_state = (alert_state | string).split(':', 1)[0] %}
     {{ base_state | lower | trim | replace(' ', '_') | replace('-', '_') }}
   alert_evidence: >-
     {% if trigger.to_state %}
-      {{ trigger.to_state.attributes.get('evidence')
-         or trigger.to_state.attributes.get('message')
-         or trigger.to_state.attributes.get('status_explanation')
-         or trigger.to_state.attributes.get('summary_explanation')
-         or trigger.to_state.attributes.get('power_quality_evidence')
-         or trigger.to_state.attributes.get('friendly_name')
-         or trigger.to_state.state }}
+      {% set attrs = trigger.to_state.attributes %}
+      {% set electrical = attrs.get('electrical_summary') %}
+      {% if electrical and electrical not in ['Normal', 'Needs Metrics'] %}
+        {{ attrs.get('electrical_status_explanation')
+           or attrs.get('power_quality_evidence')
+           or attrs.get('status_explanation')
+           or trigger.to_state.state }}
+      {% else %}
+        {{ attrs.get('evidence')
+           or attrs.get('message')
+           or attrs.get('status_explanation')
+           or attrs.get('summary_explanation')
+           or attrs.get('power_quality_evidence')
+           or attrs.get('friendly_name')
+           or trigger.to_state.state }}
+      {% endif %}
     {% else %}
       Alert entity changed.
     {% endif %}
