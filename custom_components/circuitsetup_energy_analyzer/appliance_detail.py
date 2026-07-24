@@ -36,7 +36,6 @@ from .profiles import get_profile_definition
 from .sensor import (
     activity_summary_value,
     electrical_health_attributes,
-    electrical_health_value,
     energy_summary_value,
     health_summary_attributes,
     health_summary_value,
@@ -163,7 +162,6 @@ def appliance_detail_for_circuit(
         model_status=None,
         activity_state=activity_summary_value(state, config.circuit_id),
         health_state=health_summary_value(state, config.circuit_id),
-        electrical_state=electrical_health_value(state, config.circuit_id),
         energy_state=energy_summary_value(state, config.circuit_id),
         current_power_w=_state_number(
             state,
@@ -315,7 +313,6 @@ def _nilm_detail(
         model_status=state.model_status,
         activity_state="Estimated Running" if state.is_running else "Idle",
         health_state="Needs validation" if review_needed else "Estimated",
-        electrical_state="Estimated by NILM",
         energy_state="Estimated",
         current_power_w=state.estimated_power_w,
         daily_energy_kwh=state.estimated_energy_kwh_today,

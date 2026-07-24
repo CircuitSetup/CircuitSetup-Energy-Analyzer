@@ -35,10 +35,6 @@ from .nilm_virtual import (
     nilm_virtual_unique_id,
     published_nilm_virtual_appliance_states,
 )
-from .operating_detection import (
-    PROFILE_RUNNING_ON_THRESHOLDS_W,
-    operating_state_is_running,
-)
 from .state import circuit_is_learning
 
 try:
@@ -47,44 +43,6 @@ except ModuleNotFoundError:
 
     class BinarySensorEntity:
         """Fallback binary sensor base for tests without Home Assistant."""
-
-
-_RUNNING_BINARY_SENSOR_PROFILES = frozenset(
-    {
-        ApplianceProfile.REFRIGERATOR,
-        ApplianceProfile.FREEZER,
-        ApplianceProfile.HVAC,
-        ApplianceProfile.HVAC_COMPRESSOR,
-        ApplianceProfile.HVAC_BLOWER,
-        ApplianceProfile.ELECTRIC_HEAT,
-        ApplianceProfile.WATER_HEATER,
-        ApplianceProfile.OVEN,
-        ApplianceProfile.MICROWAVE,
-        ApplianceProfile.WASHER,
-        ApplianceProfile.DRYER,
-        ApplianceProfile.POOL_PUMP,
-        ApplianceProfile.WATER_PUMP,
-        ApplianceProfile.WELL_PUMP,
-        ApplianceProfile.SUMP_PUMP,
-        ApplianceProfile.EV_CHARGER,
-        ApplianceProfile.MOTOR_LOAD,
-        ApplianceProfile.RESISTIVE_LOAD,
-    }
-)
-
-APPLIANCE_RUNNING_POWER_THRESHOLDS_W = {
-    profile: PROFILE_RUNNING_ON_THRESHOLDS_W[profile]
-    for profile in _RUNNING_BINARY_SENSOR_PROFILES
-}
-
-LAUNDRY_RUNNING_POWER_THRESHOLDS_W = {
-    ApplianceProfile.WASHER: APPLIANCE_RUNNING_POWER_THRESHOLDS_W[
-        ApplianceProfile.WASHER
-    ],
-    ApplianceProfile.DRYER: APPLIANCE_RUNNING_POWER_THRESHOLDS_W[
-        ApplianceProfile.DRYER
-    ],
-}
 
 
 def is_learning(
@@ -116,46 +74,6 @@ def is_maintenance_active(
     if not isinstance(maintenance, dict):
         return False
     return maintenance.get("active") is True
-
-
-def is_appliance_running(
-    state: Any,
-    circuit_id: str,
-    appliance_profile: ApplianceProfile | str | None = None,
-) -> bool:
-    """Return whether an appliance appears active from cycle status or watts."""
-    profile = _appliance_profile(appliance_profile)
-    threshold = APPLIANCE_RUNNING_POWER_THRESHOLDS_W.get(profile)
-    if threshold is None:
-        return False
-
-    operating_snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
-    if isinstance(operating_snapshots, dict):
-        snapshot = operating_snapshots.get(circuit_id)
-        if isinstance(snapshot, Mapping):
-            running = operating_state_is_running(snapshot)
-            if running is not None:
-                return running
-            return False
-
-    cycle_status_by_circuit = getattr(state, "run_cycle_status_by_circuit", {})
-    if isinstance(cycle_status_by_circuit, dict):
-        cycle_status = str(cycle_status_by_circuit.get(circuit_id, "")).lower()
-        if cycle_status == "running":
-            return True
-        if cycle_status == "idle":
-            return False
-
-    power_by_circuit = getattr(state, "latest_real_power_w_by_circuit", {})
-    if not isinstance(power_by_circuit, dict):
-        return False
-    power_w = power_by_circuit.get(circuit_id)
-    if power_w is None:
-        return False
-    try:
-        return float(power_w) >= threshold
-    except (TypeError, ValueError):
-        return False
 
 
 def has_water_flow_mismatch(
@@ -200,7 +118,6 @@ BINARY_SENSOR_ICONS = {
     "learning": "mdi:school-outline",
     "data_quality_problem": "mdi:database-alert-outline",
     "maintenance": "mdi:bell-pause-outline",
-    "running": "mdi:power-cycle",
     "water_flow_mismatch": "mdi:pipe-leak",
 }
 
@@ -226,14 +143,6 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
         value_fn=is_maintenance_active,
         entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
-    ),
-    DiagnosticBinarySensorDescription(
-        key="running",
-        name_suffix="Running",
-        value_fn=is_appliance_running,
-        device_class="running",
-        entity_category=None,
-        entity_tier=EntityTier.SUMMARY,
     ),
     DiagnosticBinarySensorDescription(
         key="water_flow_mismatch",
@@ -308,22 +217,6 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
     def icon(self) -> str | None:
         """Return the purpose-specific icon for fallback tests."""
         return self._attr_icon
-
-    @property
-    def available(self) -> bool:
-        """Report when the Running state is temporarily unavailable."""
-        if self.entity_description.key != "running":
-            return True
-        state = self.coordinator_state
-        if state is None:
-            return True
-        snapshots = getattr(state, "operating_state_snapshot_by_circuit", {})
-        if not isinstance(snapshots, Mapping):
-            return True
-        snapshot = snapshots.get(self.circuit_id)
-        if not isinstance(snapshot, Mapping):
-            return True
-        return operating_state_is_running(snapshot) is not None
 
     @property
     def is_on(self) -> bool:
@@ -484,21 +377,7 @@ def binary_sensor_description_applies(
             }
             and _has_water_flow_source(coordinator, circuit)
         )
-    if description.key != "running":
-        return True
-    return (
-        _appliance_profile(getattr(circuit, "appliance_profile", None))
-        in APPLIANCE_RUNNING_POWER_THRESHOLDS_W
-        and _has_real_power_sensor(circuit)
-    )
-
-
-def _has_real_power_sensor(circuit: Any) -> bool:
-    """Return true when the configured circuit has active-power data."""
-    return any(
-        _sensor_role(sensor) is SensorRole.REAL_POWER
-        for sensor in getattr(circuit, "sensors", ()) or ()
-    )
+    return True
 
 
 def _sensor_role(sensor: Any) -> SensorRole | None:

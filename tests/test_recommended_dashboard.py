@@ -301,9 +301,9 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
             "sensor.fridge_activity",
             "entry-1_fridge_activity_summary",
         ),
-        "sensor.fridge_electrical": _registry_entry(
-            "sensor.fridge_electrical",
-            "entry-1_fridge_electrical_health",
+        "sensor.fridge_health": _registry_entry(
+            "sensor.fridge_health",
+            "entry-1_fridge_health_summary",
         ),
         "sensor.fridge_energy": _registry_entry(
             "sensor.fridge_energy",
@@ -317,9 +317,9 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
             "sensor.mains_activity",
             "entry-1_mains_activity_summary",
         ),
-        "sensor.mains_electrical": _registry_entry(
-            "sensor.mains_electrical",
-            "entry-1_mains_electrical_health",
+        "sensor.mains_health": _registry_entry(
+            "sensor.mains_health",
+            "entry-1_mains_health_summary",
         ),
         "sensor.mains_energy": _registry_entry(
             "sensor.mains_energy",
@@ -495,7 +495,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
     assert all("cost_today" not in entity_id for entity_id in billing_entities)
 
 
-def test_appliance_timeline_uses_binary_running_entities() -> None:
+def test_appliance_timeline_uses_activity_summary_entities() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -509,14 +509,14 @@ def test_appliance_timeline_uses_binary_running_entities() -> None:
     )
 
     assert {
-        appliance["running_entity"]
+        appliance["activity_entity"]
         for appliance in appliance_card["appliances"]
-    } == {"binary_sensor.fridge_running", "binary_sensor.hvac_running"}
+    } == {"sensor.fridge_activity_summary", "sensor.hvac_activity_summary"}
     assert {
         appliance["icon"] for appliance in appliance_card["appliances"]
     } == {"mdi:fridge-outline", "mdi:hvac"}
     assert all(
-        "activity_summary" not in str(appliance)
+        "running_entity" not in appliance
         for appliance in appliance_card["appliances"]
     )
 
@@ -736,11 +736,10 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
     assert "sensor.fridge_cost_today" in refs
     assert "sensor.mains_average_cost_per_day" in refs
     assert "sensor.fridge_health_summary" in refs
-    assert "binary_sensor.fridge_running" in refs
+    assert "sensor.fridge_activity_summary" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
     assert "sensor.mains_cost_cycle" in refs
     assert "sensor.mains_cost_cycle_forecast" in refs
-    assert "sensor.fridge_activity_summary" not in refs
     assert "select.fridge_alert_sensitivity" not in refs
     assert "button.fridge_relearn_baseline" not in refs
 
@@ -876,9 +875,9 @@ def test_dashboard_preflight_reports_missing_and_disabled_entities() -> None:
                     "sensor.fridge_activity",
                     "entry-1_fridge_activity_summary",
                 ),
-                "sensor.fridge_electrical": _registry_entry(
-                    "sensor.fridge_electrical",
-                    "entry-1_fridge_electrical_health",
+                "sensor.fridge_health": _registry_entry(
+                    "sensor.fridge_health",
+                    "entry-1_fridge_health_summary",
                     disabled_by="integration",
                 ),
             }
@@ -892,7 +891,7 @@ def test_dashboard_preflight_reports_missing_and_disabled_entities() -> None:
         entry_id="entry-1",
     )
 
-    assert "Refrigerator: Electrical Health" in preflight["disabled_entities"]
+    assert "Refrigerator: Health" in preflight["disabled_entities"]
     assert "Refrigerator: Energy Summary" in preflight["missing_source_data"]
     assert "Refrigerator: Daily Energy Usage" in preflight["missing_source_data"]
 
@@ -913,12 +912,12 @@ def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None
     )
 
     assert refrigerator["health_entity"] == "sensor.fridge_health_summary"
-    assert refrigerator["running_entity"] == "binary_sensor.fridge_running"
+    assert refrigerator["activity_entity"] == "sensor.fridge_activity_summary"
     assert refrigerator["energy_today_entity"] == (
         "sensor.fridge_daily_energy_usage"
     )
     appliance_text = str(appliance_card)
-    assert "sensor.fridge_activity_summary" not in appliance_text
+    assert "binary_sensor.fridge_running" not in appliance_text
     assert "sensor.fridge_electrical_health" not in appliance_text
     assert "sensor.fridge_energy_usage_status" not in appliance_text
     assert "sensor.fridge_alert_evidence" not in appliance_text
@@ -1305,14 +1304,13 @@ def test_dashboard_layout_uses_example_summary_and_shared_tracking_entities() ->
     assert dashboard["views"][0]["path"] == "overview"
     assert {
         "sensor.fridge_health_summary",
+        "sensor.fridge_activity_summary",
         "sensor.fridge_daily_energy_usage",
         "sensor.fridge_cost_today",
-        "binary_sensor.fridge_running",
     } <= refs
     assert "mains-nilm" not in {
         view["path"] for view in _dashboard_views(dashboard)
     }
-    assert "sensor.fridge_activity_summary" not in refs
     assert "sensor.fridge_metric_consistency_status" not in refs
     assert "sensor.fridge_alert_evidence" not in refs
 
@@ -1322,7 +1320,7 @@ def test_standard_dashboard_layout_keeps_appliance_cards_compact() -> None:
     refs = _entity_refs(dashboard)
 
     assert "sensor.fridge_health_summary" in refs
-    assert "binary_sensor.fridge_running" in refs
+    assert "sensor.fridge_activity_summary" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
     assert "sensor.fridge_metric_consistency_status" not in refs
     assert "sensor.fridge_energy_usage_status" not in refs
@@ -1370,7 +1368,7 @@ def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> No
     markdown = str(dashboard)
 
     assert "sensor.fridge_health_summary" in refs
-    assert "binary_sensor.fridge_running" in refs
+    assert "sensor.fridge_activity_summary" in refs
     assert "sensor.fridge_alert_evidence" not in refs
     assert "sensor.fridge_power_quality_evidence" not in refs
     assert "sensor.fridge_energy_dashboard_status" not in refs
@@ -1396,10 +1394,6 @@ def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
                         "sensor.kitchen_fridge_activity",
                         "entry-1_fridge_activity_summary",
                     ),
-                    "sensor.kitchen_fridge_electrical": _registry_entry(
-                        "sensor.kitchen_fridge_electrical",
-                        "entry-1_fridge_electrical_health",
-                    ),
                     "sensor.kitchen_fridge_energy": _registry_entry(
                         "sensor.kitchen_fridge_energy",
                         "entry-1_fridge_energy_summary",
@@ -1407,10 +1401,6 @@ def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
                     "sensor.kitchen_fridge_daily_kwh": _registry_entry(
                         "sensor.kitchen_fridge_daily_kwh",
                         "entry-1_fridge_daily_energy_usage",
-                    ),
-                    "binary_sensor.kitchen_fridge_running_now": _registry_entry(
-                        "binary_sensor.kitchen_fridge_running_now",
-                        "entry-1_fridge_running",
                     ),
                 }
             )
@@ -1421,8 +1411,8 @@ def test_dashboard_uses_entity_registry_ids_for_renamed_entities() -> None:
 
     assert {
         "sensor.kitchen_fridge_health",
+        "sensor.kitchen_fridge_activity",
         "sensor.kitchen_fridge_daily_kwh",
-        "binary_sensor.kitchen_fridge_running_now",
     } <= refs
     assert "sensor.fridge_health_summary" not in refs
     assert "sensor.fridge_activity_summary" not in refs

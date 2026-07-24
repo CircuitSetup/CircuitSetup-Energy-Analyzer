@@ -55,14 +55,12 @@ _DASHBOARD_ENTITY_DOMAINS = {
     "cost_cycle_forecast": "sensor",
     "cost_today": "sensor",
     "daily_energy_usage": "sensor",
-    "electrical_health": "sensor",
     "energy_summary": "sensor",
     "health_summary": "sensor",
     "monitored_coverage": "sensor",
     "monitored_power": "sensor",
     "nilm_signature_count": "sensor",
     "nilm_unknown_loads": "sensor",
-    "running": "binary_sensor",
     "solar_flow_status": "sensor",
     "solar_surplus_power": "sensor",
     "utility_comparison_status": "sensor",
@@ -104,12 +102,8 @@ class DashboardContext:
     has_water: bool
 
 APPLIANCE_STATUS_ENTITY_SPECS = (
+    ("sensor", "health_summary", _dashboard_text("entity_labels", "health")),
     ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
-    (
-        "sensor",
-        "electrical_health",
-        _dashboard_text("entity_labels", "electrical_health"),
-    ),
     ("sensor", "energy_summary", _dashboard_text("entity_labels", "energy_summary")),
     (
         "sensor",
@@ -118,8 +112,8 @@ APPLIANCE_STATUS_ENTITY_SPECS = (
     ),
 )
 MAINS_ROLLUP_ENTITY_SPECS = (
+    ("sensor", "health_summary", _dashboard_text("entity_labels", "health")),
     ("sensor", "activity_summary", _dashboard_text("entity_labels", "activity")),
-    ("sensor", "electrical_health", _dashboard_text("entity_labels", "electrical")),
     ("sensor", "energy_summary", _dashboard_text("entity_labels", "energy")),
 )
 MAINS_LOAD_MATCH_ENTITY_SPECS = (
@@ -700,7 +694,7 @@ def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
         **_named_entities(
             circuit,
             {
-                "running": "running_entity",
+                "activity_summary": "activity_entity",
                 "daily_energy_usage": "energy_today_entity",
                 "cost_today": "cost_today_entity",
                 "health_summary": "health_entity",
@@ -848,7 +842,8 @@ def dashboard_preflight_summary(
             "appliance_grid": bool(context.appliances),
             "energy_cost": bool(context.appliances or context.primary_mains),
             "running_timeline": any(
-                circuit.entities.get("running") for circuit in context.appliances
+                circuit.entities.get("activity_summary")
+                for circuit in context.appliances
             ),
             "mains_nilm": bool(context.mains),
             "weather": context.has_weather,

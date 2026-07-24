@@ -1753,6 +1753,7 @@ def _pause_alerts_action(
             "labels",
             "resume_alerts" if paused else "pause_alerts",
         ),
+        "icon": "mdi:bell-pause-outline",
         "data": data,
     }
 

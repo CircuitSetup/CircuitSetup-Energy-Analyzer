@@ -184,6 +184,7 @@ def test_existing_summary_fields_feed_appliance_story() -> None:
 
     assert activity_summary_value(state, "fridge") == "Running"
     assert activity_summary_attributes(state, "fridge") == {
+        "is_running": True,
         "run_cycle_status": "running",
         "standby_status": "learning",
         "run_cycle_count": 14,
@@ -218,7 +219,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["confidence"] is None
     assert detail["activity_state"] == "Running"
     assert detail["health_state"] == "Ready"
-    assert detail["electrical_state"] == "Normal"
+    assert "electrical_state" not in detail
     assert detail["energy_state"] == "Normal"
     assert detail["current_power_w"] == 128.4
     assert detail["daily_energy_kwh"] == 1.82
@@ -707,7 +708,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["model_status"] == "needs_validation"
     assert detail["activity_state"] == "Idle"
     assert detail["health_state"] == "Needs validation"
-    assert detail["electrical_state"] == "Estimated by NILM"
+    assert "electrical_state" not in detail
     assert detail["energy_state"] == "Estimated"
     assert detail["current_power_w"] == 0.0
     assert detail["daily_energy_kwh"] == 0.818

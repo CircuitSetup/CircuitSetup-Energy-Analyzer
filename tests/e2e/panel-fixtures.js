@@ -155,7 +155,6 @@ export const applianceDetail = {
     learning_readiness: { status: "ready", label: "Ready" },
     confidence: 0.98,
     health_state: "Needs attention",
-    electrical_state: "Normal",
     energy_state: "Above normal",
     model_status: "Ready",
     daily_energy_kwh: 2.4,

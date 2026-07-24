@@ -102,8 +102,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _applianceState(appliance) {
-      const health = String((this._state(appliance.health_entity) || {}).state || "");
-      const running = String((this._state(appliance.running_entity) || {}).state || "").toLowerCase() === "on";
+      const healthState = this._state(appliance.health_entity) || {};
+      const electrical = String((healthState.attributes || {}).electrical_summary || "");
+      const electricalIssue = Boolean(
+        electrical && !["Normal", "Needs Metrics"].includes(electrical),
+      );
+      const health = electricalIssue
+        ? electrical
+        : String(healthState.state || "");
+      const running = String((this._state(appliance.activity_entity) || {}).state || "").toLowerCase() === "running";
       return {
         ...appliance,
         power: this._sum(appliance.power_entities),
@@ -111,7 +118,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         cost: this._number(appliance.cost_today_entity),
         health,
         running,
-        issue: /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
+        issue: electricalIssue || /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
       };
     }
 
@@ -826,8 +833,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _ensureTimeline(appliances) {
-      const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.running_entity);
-      const ids = selected.map((item) => item.running_entity);
+      const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.activity_entity);
+      const ids = selected.map((item) => item.activity_entity);
       const key = ids.join(",");
       if (!key || key === this._timelineKey) return;
       this._timelineKey = key;
@@ -855,11 +862,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _timelineHtml(appliances) {
-      const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.running_entity);
+      const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.activity_entity);
       const end = Date.now();
       const start = end - 24 * 60 * 60 * 1000;
       const lanes = selected.map((item) => {
-        const points = this._timelineRows.filter((row) => row.entity_id === item.running_entity)
+        const points = this._timelineRows.filter((row) => row.entity_id === item.activity_entity)
           .map((row) => ({
             time: Date.parse(row.last_changed || row.last_updated || ""),
             state: row.state,
@@ -875,7 +882,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const bands = windowPoints.map((point, index) => ({
           ...point,
           end: windowPoints[index + 1] ? windowPoints[index + 1].time : end,
-        })).filter((point) => point.state === "on" && point.end > point.time);
+        })).filter((point) => String(point.state).toLowerCase() === "running" && point.end > point.time);
         return `<div class="timeline-lane"><span>${this._escape(item.name)}</span><span class="timeline-track">${bands.map((band) => `<span class="running-band" data-running-band style="left:${(band.time - start) / (end - start) * 100}%;width:${(band.end - band.time) / (end - start) * 100}%"></span>`).join("")}</span></div>`;
       }).filter(Boolean);
       const scale = `<div class="timeline-scale"><span></span><div class="timeline-axis" aria-label="${this._escape(this._label("past_24_hours", "Past 24 hours"))}">
