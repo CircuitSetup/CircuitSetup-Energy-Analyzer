@@ -130,7 +130,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         h2, h3, p { margin: 0; }
         h2 { font-size: 18px; }
         h3 { font-size: 15px; }
-        h3.peer-heading { font-size: 18px; }
         .muted { color: var(--secondary-text-color, #5b6470); }
         .kpis { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
         .metric { background: var(--secondary-background-color, #f4f6f8); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; padding: 10px; }
@@ -185,11 +184,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .axis-label, .chart text { fill: var(--primary-text-color, #111827); font-size: 12px; }
         .legend { display: flex; flex-wrap: wrap; font-size: 12px; gap: 8px; justify-content: center; margin-top: 8px; }
         .legend-item { align-items: center; display: inline-flex; gap: 6px; }
-        .summary-list, .water-context-list { display: grid; gap: 8px; }
+        .summary-list { display: grid; gap: 8px; }
         .summary-row, .summary-link { align-items: center; background: transparent; border: 0; color: var(--primary-text-color, #111827); display: flex; justify-content: space-between; min-height: 40px; padding: 4px 0; text-align: left; text-decoration: none; width: 100%; }
         button.summary-row { cursor: pointer; }
         .summary-row span:last-child { color: var(--secondary-text-color, #5b6470); margin-left: 12px; }
-        .water-pair { border-top: 1px solid var(--divider-color, #d8dee6); display: grid; gap: 6px; padding-top: 10px; }
         .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
         @media (max-width: 520px) {
           .dashboard-card { padding: 12px; }
@@ -275,7 +273,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
-      const entities = (config.entities || []).filter((item) => item && item.entity);
+      const entities = this._resolvedEntities(config);
+      if ((config.water_contexts || []).length && !entities.some((item) => item.axis === "right")) {
+        this.style.display = "none";
+        this.shadowRoot.innerHTML = "";
+        return;
+      }
+      this.style.display = "";
       const periods = (config.periods || [24, 168, 720]).map(Number).filter(Number.isFinite);
       if (!periods.includes(this._hours)) this._hours = Number(config.default_hours) || periods[0] || 24;
       this._ensureHistory(entities);
@@ -311,6 +315,31 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._render();
       });
       this._attachChartInspectors();
+    }
+
+    _resolvedEntities(config) {
+      const entities = (config.entities || []).filter((item) => item && item.entity);
+      const powerEntities = [];
+      const flowEntities = [];
+      for (const context of config.water_contexts || []) {
+        const state = this._state(context.correlation_entity);
+        const raw = state && state.attributes && state.attributes.flow_sensor_entities;
+        const flows = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [])
+          .filter((entityId) => typeof entityId === "string" && entityId);
+        if (!flows.length) continue;
+        powerEntities.push(...(context.power_entities || []).map((entity) => ({
+          entity,
+          name: `${context.name} power`,
+          axis: "left",
+        })));
+        flowEntities.push(...flows.map((entity) => ({
+          entity,
+          name: this._friendlyEntityName(entity),
+          axis: "right",
+        })));
+      }
+      return [...new Map([...entities, ...powerEntities, ...flowEntities]
+        .map((item) => [item.entity, item])).values()];
     }
 
     _periodLabel(hours) {
@@ -414,6 +443,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const costToday = config.primary_mains && mains.cost_today_entity
         ? this._number(mains.cost_today_entity)
         : null;
+      const averageEnergy = config.primary_mains && mains.average_kwh_per_day_entity
+        ? this._number(mains.average_kwh_per_day_entity)
+        : null;
+      const averageCost = config.primary_mains && mains.average_cost_per_day_entity
+        ? this._number(mains.average_cost_per_day_entity)
+        : null;
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -446,8 +481,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
           ${this._metricHtml(housePowerLabel, housePower, "W")}
-          ${this._metricHtml(this._label("energy_today", "Energy today"), energyToday, "kWh")}
-          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, "currency")}
+          ${this._metricHtml(this._label("energy_today", "Energy today"), energyToday, "kWh", averageEnergy)}
+          ${this._metricHtml(this._label("cost_today", "Cost today"), costToday, "currency", averageCost)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
@@ -503,8 +538,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
     }
 
-    _metricHtml(label, value, unit) {
-      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong></div>`;
+    _metricHtml(label, value, unit, average = null) {
+      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}</small>` : ""}</div>`;
     }
 
     _statusMetric(label, entityId) {
@@ -840,8 +875,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._insights = null;
       this._wholeHouse = [];
       this._loadRequested = false;
-      this._waterHistory = null;
-      this._waterHistoryKey = "";
     }
 
     _render() {
@@ -857,9 +890,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._selection = items[0].circuit_id || items[0].appliance_key;
       }
       const rows = this._historyRows(items).slice(-this._historyDays);
-      const waterContexts = this._waterContexts();
-      this._ensureWaterHistory(waterContexts);
-      const metrics = this._metricValues();
       const energyPoints = rows.map((row) => ({
         time: this._dailyTimestamp(row.date),
         value: Number(row.energy_kwh),
@@ -891,13 +921,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <div class="dashboard-card">
             <h2>${this._escape(this._dashboardConfig.title || "Energy and costs")}</h2>
             <section>
-              <h3>${this._escape(this._label("today_vs_normal", "Today versus normal"))}</h3>
-              <div class="kpis">
-                ${this._metricHtml(this._label("energy_today", "Energy today"), metrics.energyToday, "kWh", metrics.averageEnergy)}
-                ${this._metricHtml(this._label("cost_today", "Cost today"), metrics.costToday, "currency", metrics.averageCost)}
-              </div>
-            </section>
-            <section>
               <div class="controls">
                 <h3>${this._escape(this._label("completed_history", "Completed-day history"))}</h3>
                 <select data-energy-selection aria-label="${this._escape(this._label("completed_history", "Completed-day history"))}">${selectedOptions}</select>
@@ -906,7 +929,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${chart}
               ${unavailable ? `<p class="muted">${this._escape(this._label("unavailable", "Unavailable"))}</p>` : ""}
             </section>
-            ${this._waterContextHtml(waterContexts)}
           </div>
         </ha-card>
       `;
@@ -966,77 +988,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .map((row) => ({ ...row, cost: row.cost_available ? row.cost : null }));
     }
 
-    _metricValues() {
-      const appliances = this._dashboardConfig.appliances || [];
-      const selected = this._selection === "whole"
-        ? this._dashboardConfig.primary_mains
-        : appliances.find((item) => item.circuit_id === this._selection);
-      return {
-        energyToday: selected ? this._number(selected.energy_today_entity || selected.daily_energy_usage_entity) : null,
-        costToday: selected ? this._number(selected.cost_today_entity) : null,
-        averageEnergy: selected ? this._number(selected.average_kwh_entity || selected.average_kwh_per_day_entity) : null,
-        averageCost: selected ? this._number(selected.average_cost_entity || selected.average_cost_per_day_entity) : null,
-      };
-    }
-
-    _metricHtml(label, value, unit, average) {
-      const change = Number.isFinite(value) && Number.isFinite(average) && average > 0
-        ? `${value >= average ? "+" : ""}${((value / average - 1) * 100).toFixed(0)}%`
-        : "";
-      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}${change ? ` · ${this._escape(change)}` : ""}</small>` : ""}</div>`;
-    }
-
     _dailyTimestamp(value) {
       const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
       return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : Number.NaN;
-    }
-
-    _waterContexts() {
-      return (this._dashboardConfig.water_contexts || []).map((item) => {
-        const state = this._state(item.correlation_entity);
-        const raw = state && state.attributes && state.attributes.flow_sensor_entities;
-        const flowEntities = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [])
-          .filter((entityId) => typeof entityId === "string" && entityId);
-        return { ...item, flow_entities: [...new Set(flowEntities)] };
-      }).filter((item) => item.flow_entities.length);
-    }
-
-    _ensureWaterHistory(contexts) {
-      const entityIds = [...new Set(contexts.flatMap((item) => item.flow_entities))];
-      const key = entityIds.join(",");
-      if (!key || key === this._waterHistoryKey) return;
-      this._waterHistoryKey = key;
-      const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const path = `history/period/${start}?filter_entity_id=${encodeURIComponent(key)}&minimal_response=1&no_attributes=1`;
-      this._hass.callApi("GET", path).then((history) => {
-        this._waterHistory = history;
-        this._render();
-      }).catch(() => {
-        this._waterHistory = [];
-        this._render();
-      });
-    }
-
-    _waterContextHtml(contexts) {
-      if (!contexts.length) return "";
-      return `<section>
-        <h3 class="peer-heading">${this._escape(this._dashboardConfig.water_context_title || "Water flow context")}</h3>
-        <div class="water-context-list">
-          ${contexts.map((context) => {
-            const configured = context.flow_entities.map((entity) => ({
-              entity,
-              name: this._friendlyEntityName(entity),
-            }));
-            const series = this._dashboardHistorySeries(this._waterHistory, configured)
-              .filter((item) => context.flow_entities.includes(item.entity_id));
-            const sensorNames = configured.map((item) => item.name).join(", ");
-            const chart = series.length
-              ? this._chartSvg(series, { y_axis_label: series[0].unit || this._label("flow", "Flow") })
-              : `<p class="muted">${this._escape(this._label("no_history", "No history is available for this period."))}</p>`;
-            return `<div class="water-pair"><strong>${this._escape(context.name)}</strong><span class="muted">${this._escape(sensorNames)}</span>${chart}</div>`;
-          }).join("")}
-        </div>
-      </section>`;
     }
 
   }

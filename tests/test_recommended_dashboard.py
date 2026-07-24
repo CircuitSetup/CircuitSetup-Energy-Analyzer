@@ -345,7 +345,7 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     [
         (
             DASHBOARD_LAYOUT_SIMPLE,
-            ["overview", "energy-costs"],
+            ["overview"],
         ),
         (
             DASHBOARD_LAYOUT_STANDARD,
@@ -397,11 +397,13 @@ def test_dashboard_groups_related_cards_into_three_views() -> None:
     assert {
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
-    } <= cards_by_view["overview"]
-    assert {
         "custom:circuitsetup-energy-analyzer-energy-cost",
-        CONTEXT_GRAPH_CARD,
-    } <= cards_by_view["energy-costs"]
+    } <= cards_by_view["overview"]
+    assert {CONTEXT_GRAPH_CARD} <= cards_by_view["energy-costs"]
+    assert (
+        "custom:circuitsetup-energy-analyzer-energy-cost"
+        not in cards_by_view["energy-costs"]
+    )
     assert {
         "custom:circuitsetup-energy-analyzer-house-flow",
         SUMMARY_CARD,
@@ -450,34 +452,35 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         _example_circuits(),
         DASHBOARD_LAYOUT_STANDARD,
     )
-    energy_view = next(
-        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    home_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
     energy_card = _card_of_type(
-        energy_view,
+        home_view,
         "custom:circuitsetup-energy-analyzer-energy-cost",
     )
-    assert energy_view["sections"][0]["cards"] == [energy_card]
+    home_summary = _card_of_type(
+        home_view,
+        "custom:circuitsetup-energy-analyzer-house-flow",
+    )
+    assert energy_card in home_view["sections"][0]["cards"]
+    assert "energy-costs" not in {
+        view["path"] for view in _dashboard_views(dashboard)
+    }
     assert energy_card["grid_options"]["columns"] == 24
-
-    assert {
-        appliance["cost_today_entity"]
-        for appliance in energy_card["appliances"]
-    } == {"sensor.fridge_cost_today", "sensor.hvac_cost_today"}
-    assert {
-        appliance["average_cost_entity"]
-        for appliance in energy_card["appliances"]
-    } == {
-        "sensor.fridge_average_cost_per_day",
-        "sensor.hvac_average_cost_per_day",
-    }
-    assert {
-        appliance["average_kwh_entity"]
-        for appliance in energy_card["appliances"]
-    } == {
-        "sensor.fridge_average_kwh_per_day",
-        "sensor.hvac_average_kwh_per_day",
-    }
+    assert "appliances" not in energy_card
+    assert home_summary["primary_mains"]["daily_energy_usage_entity"] == (
+        "sensor.mains_daily_energy_usage"
+    )
+    assert home_summary["primary_mains"]["cost_today_entity"] == (
+        "sensor.mains_cost_today"
+    )
+    assert home_summary["primary_mains"]["average_kwh_per_day_entity"] == (
+        "sensor.mains_average_kwh_per_day"
+    )
+    assert home_summary["primary_mains"]["average_cost_per_day_entity"] == (
+        "sensor.mains_average_cost_per_day"
+    )
     insights_view = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "insights"
     )
@@ -643,7 +646,6 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
 
     assert [view["path"] for view in _dashboard_views(dashboard)] == [
         "overview",
-        "energy-costs",
         "insights",
     ]
     assert dashboard["views"][0]["type"] == "sections"
@@ -728,12 +730,11 @@ def test_dashboard_visual_story_sections_use_existing_summary_entities() -> None
 
     assert {view["path"] for view in _dashboard_views(dashboard)} >= {
         "overview",
-        "energy-costs",
         "insights",
     }
     assert "sensor.fridge_daily_energy_usage" in refs
     assert "sensor.fridge_cost_today" in refs
-    assert "sensor.fridge_average_cost_per_day" in refs
+    assert "sensor.mains_average_cost_per_day" in refs
     assert "sensor.fridge_health_summary" in refs
     assert "binary_sensor.fridge_running" in refs
     assert "sensor.mains_nilm_unknown_loads" in refs
@@ -792,6 +793,7 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
+                or (view["path"] == "overview" and len(section["cards"]) > 1)
                 else 48 // min(4, len(section["cards"]))
             )
             assert {
@@ -837,7 +839,7 @@ def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
         if card.get("type")
         == "custom:circuitsetup-energy-analyzer-appliance-grid"
     ]
-    assert preflight["will_include"] == ["Home", "Energy & Costs", "Insights"]
+    assert preflight["will_include"] == ["Home", "Insights"]
 
 
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
@@ -860,7 +862,6 @@ def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
     assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
     assert preflight["will_include"] == [
         "Home",
-        "Energy & Costs",
         "Insights",
     ]
     assert preflight["nilm_enabled"] is True
@@ -1008,19 +1009,9 @@ def test_dashboard_omits_empty_nilm_graph_from_graph_tab() -> None:
         entry_id="entry-1",
     )
 
-    cards = _dashboard_cards(
-        next(
-            view
-            for view in _dashboard_views(dashboard)
-            if view["path"] == "energy-costs"
-        )
-    )
-
-    assert not [
-        card
-        for card in cards
-        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
-    ]
+    assert "energy-costs" not in {
+        view["path"] for view in _dashboard_views(dashboard)
+    }
     assert "resources" not in dashboard
 
 
@@ -1036,18 +1027,9 @@ def test_expert_dashboard_keeps_nilm_review_without_empty_graph() -> None:
     )
     cards = _dashboard_cards(insights_view)
 
-    graph_cards = _dashboard_cards(
-        next(
-            view
-            for view in _dashboard_views(dashboard)
-            if view["path"] == "energy-costs"
-        )
-    )
-    assert not [
-        card
-        for card in graph_cards
-        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
-    ]
+    assert "energy-costs" not in {
+        view["path"] for view in _dashboard_views(dashboard)
+    }
     assert any(
         card.get("name") == "Review NILM Assignments"
         for card in cards
@@ -1231,18 +1213,13 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     refs = _entity_refs(history_graph)
 
     assert history_graph["type"] == CONTEXT_GRAPH_CARD
-    assert graph_cards[0] == history_graph
-    assert graph_cards[1]["type"] == (
-        "custom:circuitsetup-energy-analyzer-energy-cost"
-    )
+    assert graph_cards == [history_graph]
     assert "sensor.compressor_w" in refs
     assert "sensor.compressor_va" not in refs
     assert "sensor.compressor_var" not in refs
 
 
-def test_water_context_uses_resolved_flow_sensor_attributes_under_energy_costs() -> (
-    None
-):
+def test_water_context_is_a_separate_dual_axis_graph() -> None:
     washer = CircuitConfig(
         circuit_id="washer",
         name="Washer",
@@ -1268,16 +1245,26 @@ def test_water_context_uses_resolved_flow_sensor_attributes_under_energy_costs()
     energy_view = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
     )
+    home_view = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
     energy_card = _card_of_type(
-        energy_view,
+        home_view,
         "custom:circuitsetup-energy-analyzer-energy-cost",
     )
+    water_card = _card_with_title(energy_view, "Water flow context")
 
-    assert energy_view["sections"][0]["cards"] == [energy_card]
-    assert energy_card["water_contexts"] == [
+    assert energy_view["sections"][0]["cards"] == [water_card]
+    assert "water_contexts" not in energy_card
+    assert water_card["type"] == CONTEXT_GRAPH_CARD
+    assert water_card["default_hours"] == 24
+    assert water_card["periods"] == [24, 168, 720]
+    assert water_card["y_axis_label"] == "W"
+    assert water_card["water_contexts"] == [
         {
             "name": "Washer",
             "correlation_entity": "sensor.washer_water_context",
+            "power_entities": ["sensor.washer_power"],
         }
     ]
 
@@ -1652,9 +1639,9 @@ def test_dashboard_uses_registry_ids_and_ignores_controls() -> None:
     assert {
         "sensor.fridge_activity",
         "sensor.fridge_electrical",
-        "sensor.fridge_energy",
         "sensor.fridge_daily",
     } <= refs
+    assert "sensor.fridge_energy" not in refs
     assert not {
         entity_id
         for entity_id in refs
@@ -1754,7 +1741,7 @@ def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
     assert "sensor.fridge_activity" not in refs
     assert "sensor.fridge_electrical" not in refs
     assert "sensor.fridge_daily" not in refs
-    assert "sensor.fridge_energy" in refs
+    assert "sensor.fridge_energy" not in refs
 
 
 class _FakeDashboardsCollection:
@@ -2146,7 +2133,7 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
     assert update["title"] == "CircuitSetup Energy Analyzer"
     assert "config" not in update
     saved_dashboard = str(dashboard_store.saved[0])
-    assert "'path': 'energy-costs'" in saved_dashboard
+    assert "custom:circuitsetup-energy-analyzer-energy-cost" in saved_dashboard
     assert "sensor.fridge_health_summary" in saved_dashboard
     assert "sensor.fridge_alert_evidence" not in saved_dashboard
     assert coordinator.last_dashboard_create_request["action"] == "updated"

@@ -22,6 +22,8 @@ views:
                 - sensor.mains_power
               daily_energy_usage_entity: sensor.mains_daily_energy_usage
               cost_today_entity: sensor.mains_cost_today
+              average_kwh_per_day_entity: sensor.mains_average_kwh_per_day
+              average_cost_per_day_entity: sensor.mains_average_cost_per_day
               monitored_power_entity: sensor.mains_monitored_power
               balance_power_entity: sensor.mains_balance_power
               monitored_coverage_entity: sensor.mains_monitored_coverage
@@ -101,6 +103,15 @@ views:
                 cost_today_entity: sensor.washer_cost_today
                 health_entity: sensor.washer_health_summary
 
+          - type: custom:circuitsetup-energy-analyzer-energy-cost
+            grid_options:
+              columns: 24
+            title: Energy and costs
+            api_path: circuitsetup_energy_analyzer/appliance_insights
+            primary_mains:
+              circuit_id: mains
+              name: Mains
+
   - type: sections
     title: Energy & Costs
     path: energy-costs
@@ -127,41 +138,21 @@ views:
               - entity: sensor.outdoor_temperature
                 name: Outdoor temperature
                 axis: right
-          - type: custom:circuitsetup-energy-analyzer-energy-cost
+          - type: custom:circuitsetup-energy-analyzer-context-graph
             grid_options:
               columns: 24
-            title: Energy and costs
-            api_path: circuitsetup_energy_analyzer/appliance_insights
-            primary_mains:
-              circuit_id: mains
-              name: Mains
-              daily_energy_usage_entity: sensor.mains_daily_energy_usage
-              cost_today_entity: sensor.mains_cost_today
-              average_kwh_per_day_entity: sensor.mains_average_kwh_per_day
-              average_cost_per_day_entity: sensor.mains_average_cost_per_day
-            appliances:
-              - circuit_id: refrigerator
-                name: Refrigerator
-                energy_today_entity: sensor.refrigerator_daily_energy_usage
-                cost_today_entity: sensor.refrigerator_cost_today
-                average_kwh_entity: sensor.refrigerator_average_kwh_per_day
-                average_cost_entity: sensor.refrigerator_average_cost_per_day
-              - circuit_id: hvac
-                name: HVAC
-                energy_today_entity: sensor.hvac_daily_energy_usage
-                cost_today_entity: sensor.hvac_cost_today
-                average_kwh_entity: sensor.hvac_average_kwh_per_day
-                average_cost_entity: sensor.hvac_average_cost_per_day
-              - circuit_id: washer
-                name: Washer
-                energy_today_entity: sensor.washer_daily_energy_usage
-                cost_today_entity: sensor.washer_cost_today
-                average_kwh_entity: sensor.washer_average_kwh_per_day
-                average_cost_entity: sensor.washer_average_cost_per_day
-            water_context_title: Water flow context
+            title: Water flow context
+            default_hours: 24
+            periods:
+              - 24
+              - 168
+              - 720
+            y_axis_label: W
             water_contexts:
               - name: Washer
                 correlation_entity: sensor.washer_water_flow_correlation
+                power_entities:
+                  - sensor.washer_power
   - type: sections
     title: Insights
     path: insights
