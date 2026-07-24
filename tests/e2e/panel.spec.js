@@ -603,7 +603,8 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   const fullSpan = await chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
   ));
-  await chart.dblclick({ position: { x: 450, y: 120 } });
+  const chartBox = await chart.boundingBox();
+  await chart.dblclick({ position: { x: chartBox.width / 2, y: chartBox.height / 2 } });
   await expect.poll(() => chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
   ))).toBeLessThan(fullSpan * 0.6);
