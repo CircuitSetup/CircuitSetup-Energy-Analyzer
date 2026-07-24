@@ -1259,7 +1259,7 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     assert water_card["type"] == CONTEXT_GRAPH_CARD
     assert water_card["default_hours"] == 24
     assert water_card["periods"] == [24, 168, 720]
-    assert water_card["y_axis_label"] == "W"
+    assert "y_axis_label" not in water_card
     assert water_card["water_contexts"] == [
         {
             "name": "Washer",

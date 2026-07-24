@@ -130,7 +130,6 @@ views:
               - 24
               - 168
               - 720
-            y_axis_label: W
             entities:
               - entity: sensor.hvac_power
                 name: HVAC power
@@ -147,7 +146,6 @@ views:
               - 24
               - 168
               - 720
-            y_axis_label: W
             water_contexts:
               - name: Washer
                 correlation_entity: sensor.washer_water_flow_correlation

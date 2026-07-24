@@ -589,7 +589,6 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
                 "title": _dashboard_text("cards", "hvac_weather_correlation"),
                 "default_hours": 24,
                 "periods": [24, 168, 720],
-                "y_axis_label": "W",
                 "entities": list(_dedupe_entity_rows(history_rows)),
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }
@@ -618,7 +617,6 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
                 "title": _dashboard_text("cards", "water_flow_context"),
                 "default_hours": 24,
                 "periods": [24, 168, 720],
-                "y_axis_label": "W",
                 "water_contexts": water_contexts,
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }

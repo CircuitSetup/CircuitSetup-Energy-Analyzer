@@ -538,13 +538,13 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-    const peakPower = requestNumber === 1 ? "2300" : "9900";
+    const peakPower = requestNumber === 1 ? "2.3" : "9.9";
     await route.fulfill({
       json: [
         [
           { entity_id: "sensor.hvac_power", state: "0", last_changed: hoursAgo(24) },
           { state: peakPower, last_changed: hoursAgo(4) },
-          { state: "800", last_changed: hoursAgo(0) },
+          { state: "0.8", last_changed: hoursAgo(0) },
         ],
         [
           { entity_id: "sensor.outdoor_temperature", state: "78", last_changed: hoursAgo(24) },
@@ -562,7 +562,6 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
       title: "HVAC activity and outdoor temperature",
       default_hours: 24,
       periods: [24, 168, 720],
-      y_axis_label: "W",
       entities: [
         { entity: "sensor.hvac_power", name: "HVAC power", axis: "left" },
         { entity: "sensor.outdoor_temperature", name: "Outdoor temperature", axis: "right" },
@@ -570,7 +569,7 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
       labels: { period: "Period", twenty_four_hours: "24 hours", seven_days: "7 days", thirty_days: "30 days" },
     },
     {
-      "sensor.hvac_power": { state: "800", attributes: { unit_of_measurement: "W" } },
+      "sensor.hvac_power": { state: "0.8", attributes: { unit_of_measurement: "kW" } },
       "sensor.outdoor_temperature": { state: "84", attributes: { unit_of_measurement: "°F" } },
     },
   );
@@ -580,11 +579,12 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   await expect(card.locator("[data-context-hours] option")).toHaveCount(3);
   await card.locator("[data-context-hours]").selectOption("720");
   await expect(card.locator("svg.chart")).toHaveAttribute("data-chart-right-axis", "°F");
-  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9,900/);
+  await expect(card.locator(".axis-label").filter({ hasText: "kW" })).toHaveCount(1);
+  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9.9/);
   await expect(card.locator(".legend")).toContainText("HVAC power");
   await expect(card.locator(".legend")).toContainText("Outdoor temperature");
   await page.waitForTimeout(300);
-  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9,900/);
+  await expect(card.locator("svg.chart")).toHaveAttribute("aria-label", /9.9/);
   await expect(card.locator("[data-context-hours]")).toHaveValue("720");
   await toHaveNoViolations(page);
 });
