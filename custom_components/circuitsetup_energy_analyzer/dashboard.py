@@ -536,11 +536,23 @@ def _build_energy_costs_view(
     )
     if context.primary_mains is not None and appliance_power_rows:
         cards.append(
-            _nilm_dashboard_graphs_card(
-                circuit_id=context.primary_mains.circuit_id,
-                entry_id=context.entry_id,
-                appliance_power_rows=appliance_power_rows,
-            )
+            {
+                "type": CONTEXT_GRAPH_CARD,
+                "title": _dashboard_text(
+                    "cards",
+                    "defined_nilm_appliance_power",
+                ),
+                "y_axis_label": "W",
+                "entities": [
+                    {
+                        **row,
+                        "series_id": f"nilm:{row['entity']}",
+                        "axis": "left",
+                    }
+                    for row in appliance_power_rows
+                ],
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
         )
     return _dashboard_view(
         title=_dashboard_text("views", "energy_costs"),
@@ -634,8 +646,6 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
             {
                 "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "hvac_weather_correlation"),
-                "default_hours": 24,
-                "periods": [24, 168, 720],
                 "entities": list(_dedupe_entity_rows(history_rows)),
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }
@@ -663,8 +673,6 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
             {
                 "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "water_flow_context"),
-                "default_hours": 24,
-                "periods": [24, 168, 720],
                 "water_contexts": water_contexts,
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }

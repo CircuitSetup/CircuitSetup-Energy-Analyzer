@@ -601,8 +601,8 @@ def test_insights_include_every_hvac_circuit() -> None:
     refs = _entity_refs(graphs)
 
     assert graph["type"] == CONTEXT_GRAPH_CARD
-    assert graph["default_hours"] == 24
-    assert graph["periods"] == [24, 168, 720]
+    assert "default_hours" not in graph
+    assert "periods" not in graph
     assert graph["entities"][-1]["axis"] == "right"
     assert "sensor.hvac_power" in refs
     assert "sensor.heat_pump_power" in refs
@@ -1100,7 +1100,8 @@ def test_expert_dashboard_keeps_nilm_review_without_empty_graph() -> None:
     assert "resources" not in dashboard
 
 
-def test_standard_dashboard_adds_nilm_graph_card_for_defined_appliances() -> None:
+def test_standard_dashboard_adds_date_driven_nilm_graph_for_defined_appliances(
+) -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
@@ -1121,18 +1122,24 @@ def test_standard_dashboard_adds_nilm_graph_card_for_defined_appliances() -> Non
         )
     )
 
-    custom_graph = next(
+    graph = next(
         card
         for card in cards
-        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+        if card.get("title") == "Defined NILM appliance power"
     )
-    assert custom_graph["appliance_power_entities"] == [
-        "sensor.pool_pump_estimated_power"
+    assert graph["type"] == CONTEXT_GRAPH_CARD
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.pool_pump_estimated_power",
+            "name": "Pool Pump",
+            "series_id": "nilm:sensor.pool_pump_estimated_power",
+            "axis": "left",
+        }
     ]
     assert "resources" not in dashboard
 
 
-def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None:
+def test_expert_dashboard_adds_date_driven_nilm_graph_for_defined_appliances() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_EXPERT,
@@ -1150,28 +1157,26 @@ def test_expert_dashboard_adds_nilm_graph_cards_for_defined_appliances() -> None
     )
     cards = _dashboard_cards(graph_view)
 
-    custom_graph = next(
+    graph = next(
         card
         for card in cards
-        if card.get("type") == "custom:circuitsetup-energy-analyzer-dashboard-graphs"
+        if card.get("title") == "Defined NILM appliance power"
     )
-    custom_graph_without_text = dict(custom_graph)
-    text = custom_graph_without_text.pop("text")
-    assert text["dashboard_graphs"]["title"] == "NILM mains power"
-    assert custom_graph_without_text == {
-        "type": "custom:circuitsetup-energy-analyzer-dashboard-graphs",
-        "title": "NILM mains power",
-        "entry_id": "entry-1",
-        "circuit_id": "mains",
-        "detail_path": (
-            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
-        ),
-        "appliance_power_entities": ["sensor.pool_pump_estimated_power"],
+    assert graph == {
+        "type": CONTEXT_GRAPH_CARD,
+        "title": "Defined NILM appliance power",
+        "y_axis_label": "W",
+        "entities": [
+            {
+                "entity": "sensor.pool_pump_estimated_power",
+                "name": "Pool Pump",
+                "series_id": "nilm:sensor.pool_pump_estimated_power",
+                "axis": "left",
+            }
+        ],
+        "labels": graph["labels"],
         "grid_options": {"columns": 24},
     }
-    assert not [
-        card for card in cards if card.get("title") == "Defined NILM appliance power"
-    ]
     assert "resources" not in dashboard
 
 
@@ -1320,8 +1325,8 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     assert energy_view["sections"][0]["cards"][1:] == [water_card]
     assert "water_contexts" not in energy_card
     assert water_card["type"] == CONTEXT_GRAPH_CARD
-    assert water_card["default_hours"] == 24
-    assert water_card["periods"] == [24, 168, 720]
+    assert "default_hours" not in water_card
+    assert "periods" not in water_card
     assert "y_axis_label" not in water_card
     assert water_card["water_contexts"] == [
         {
