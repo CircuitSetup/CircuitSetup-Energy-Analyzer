@@ -772,16 +772,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const key = `${range.start}:${range.end}:${range.compare}:${entities.map((item) => item.entity).join(",")}`;
       if (!entities.length || key === this._historyKey) return;
       this._historyKey = key;
-      const entityIds = encodeURIComponent(entities.map((item) => item.entity).join(","));
-      const historyPath = (start, end) => `history/period/${start}?filter_entity_id=${entityIds}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      const entityIds = entities.map((item) => item.entity);
       const previousRange = this._previousRange(range);
       const requests = [
-        this._hass.callApi("GET", historyPath(range.start, range.end)),
+        this._historyRequest(range.start, range.end, entityIds),
         range.compare
-          ? this._hass.callApi("GET", historyPath(
+          ? this._historyRequest(
             previousRange.start,
             previousRange.end,
-          ))
+            entityIds,
+          )
           : Promise.resolve([]),
       ];
       Promise.allSettled(requests).then(([history, comparison]) => {
@@ -793,6 +793,38 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           : this._label("no_history", "No history is available for this period.");
         this._render();
       });
+    }
+
+    _historyRequest(start, end, entityIds) {
+      const spanDays = (Date.parse(end) - Date.parse(start)) / 86_400_000;
+      if (spanDays <= 31) {
+        const ids = encodeURIComponent(entityIds.join(","));
+        const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+        return this._hass.callApi("GET", path);
+      }
+      if (typeof this._hass.callWS !== "function") return Promise.resolve([]);
+      const period = spanDays <= 90
+        ? "hour"
+        : spanDays <= 730
+          ? "day"
+          : spanDays <= 5_110 ? "week" : "month";
+      return this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: start,
+        end_time: end,
+        statistic_ids: entityIds,
+        period,
+        types: ["mean"],
+      }).then((result) => Object.entries(result || {}).map(([entityId, rows]) => (
+        (rows || []).flatMap((row) => {
+          const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
+          return Number.isFinite(Number(row.mean)) && Number.isFinite(time) ? [{
+            entity_id: entityId,
+            state: row.mean,
+            last_changed: new Date(time).toISOString(),
+          }] : [];
+        })
+      )));
     }
   }
 
@@ -979,6 +1011,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const appliances = this._dashboardConfig.appliances || [];
       const mains = this._dashboardConfig.primary_mains || {};
       const range = validRange(this._dashboardRange);
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
       const entityIds = [...new Set([
         ...appliances.flatMap((item) => [...(item.power_entities || []), item.cost_today_entity]),
         ...(mains.power_entities || []),
@@ -989,21 +1023,74 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._contributionLoadKey = key;
       const start = Date.parse(range.start);
       const end = Math.max(start, Math.min(Date.parse(range.end), Date.now()));
-      const historyPath = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(new Date(end).toISOString())}&minimal_response=1&no_attributes=1`;
-      let payload = [];
-      try {
-        payload = entityIds.length ? await this._hass.callApi("GET", historyPath) : [];
-      } catch (_error) {
-        payload = [];
-      }
+      const liveStart = Math.max(start, this._zonedTimestamp(todayKey));
+      const hasLiveWindow = startKey <= todayKey && endKey >= todayKey && end > liveStart;
+      const historyPath = `history/period/${new Date(liveStart).toISOString()}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(new Date(end).toISOString())}&minimal_response=1&no_attributes=1`;
+      const [insightsResult, historyResult] = await Promise.allSettled([
+        this._hass.callApi("GET", this._dashboardConfig.api_path),
+        entityIds.length && hasLiveWindow
+          ? this._hass.callApi("GET", historyPath)
+          : Promise.resolve([]),
+      ]);
       if (this._contributionLoadKey !== key) return;
-      this._rollingContributionByCircuit = this._rollingTotals(payload, appliances, start, end);
-      this._rangeSummary = this._rollingTotals(payload, [{
+      const insights = insightsResult.status === "fulfilled" ? insightsResult.value || {} : {};
+      const payload = historyResult.status === "fulfilled" ? historyResult.value : [];
+      const liveAppliances = this._rollingTotals(payload, appliances, liveStart, end);
+      const retainedItems = (insights.items || []).filter((item) => (
+        !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
+      ));
+      this._rollingContributionByCircuit = Object.fromEntries(appliances.map((appliance) => {
+        const retained = retainedItems.find((item) => (
+          item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
+        ));
+        return [appliance.circuit_id, this._mergeRangeTotals(
+          this._retainedRangeTotals(retained, startKey, endKey, todayKey),
+          liveAppliances[appliance.circuit_id],
+        )];
+      }));
+      const liveSummary = this._rollingTotals(payload, [{
         circuit_id: "mains",
         power_entities: mains.power_entities || [],
         cost_today_entity: mains.cost_today_entity,
-      }], start, end).mains || {};
+      }], liveStart, end).mains;
+      const retainedMains = (insights.whole_house || []).find((item) => (
+        (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
+        && (!mains.circuit_id || item.circuit_id === mains.circuit_id)
+      ));
+      this._rangeSummary = this._mergeRangeTotals(
+        this._retainedRangeTotals(retainedMains, startKey, endKey, todayKey),
+        liveSummary,
+      );
       this._render();
+    }
+
+    _retainedRangeTotals(item, startKey, endKey, todayKey) {
+      const rows = (item && item.daily_totals || []).filter((row) => (
+        String(row.date) >= startKey
+        && String(row.date) <= endKey
+        && String(row.date) < todayKey
+      ));
+      if (!rows.length) return startKey < todayKey ? { energy: null, cost: null } : {};
+      const energy = rows.map((row) => Number(row.energy_kwh));
+      const cost = rows.map((row) => (
+        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost)
+      ));
+      const sum = (values) => values.every(Number.isFinite)
+        ? values.reduce((total, value) => total + value, 0)
+        : null;
+      return { energy: sum(energy), cost: sum(cost) };
+    }
+
+    _mergeRangeTotals(retained = {}, live = {}) {
+      const combined = (stored, current) => {
+        if (stored === null) return null;
+        const values = [stored, current].filter(Number.isFinite);
+        return values.length ? values.reduce((total, value) => total + value, 0) : null;
+      };
+      return {
+        energy: combined(retained.energy, live && live.energy),
+        cost: combined(retained.cost, live && live.cost),
+      };
     }
 
     _rollingTotals(payload, appliances, start, end) {

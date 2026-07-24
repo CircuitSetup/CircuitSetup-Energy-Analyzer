@@ -190,12 +190,21 @@ test("home energy card omits Active now and separates contribution", async ({ pa
           entry_id: "entry-1",
           circuit_id: id,
           display_name: id,
-          daily_totals: Array.from({ length: 7 }, (_, day) => ({
-            date: `2026-07-${String(day + 1).padStart(2, "0")}`,
+          daily_totals: ["10", "11"].map((day) => ({
+            date: `2026-07-${day}`,
             energy_kwh: index + 1,
             cost: (index + 1) * 0.1,
           })),
         })),
+        whole_house: [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          daily_totals: ["10", "11"].map((day) => ({
+            date: `2026-07-${day}`,
+            energy_kwh: 24,
+            cost: 1,
+          })),
+        }],
       },
     });
     return true;
@@ -284,13 +293,13 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
-  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$1.50");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$3.50");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $2.16");
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("60 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("18 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$1.50");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
   await toHaveNoViolations(page);
   await page.evaluate(() => {
     const root = document.documentElement.style;
@@ -302,6 +311,63 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     root.setProperty("--warning-color", "#fbbf24");
   });
   await toHaveNoViolations(page);
+});
+
+test("home totals use retained completed days without Recorder history", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "current-only",
+          display_name: "Current-only appliance",
+          daily_totals: [
+            { date: "2026-05-01", energy_kwh: 2, cost: 0.4 },
+            { date: "2026-05-02", energy_kwh: 3, cost: 0.6 },
+          ],
+        }],
+        whole_house: [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          daily_totals: [
+            { date: "2026-05-01", energy_kwh: 8, cost: 1.6 },
+            { date: "2026-05-02", energy_kwh: 10, cost: 2 },
+          ],
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { circuit_id: "mains" },
+      appliances: [{ circuit_id: "current-only", name: "Current-only appliance" }],
+    },
+  );
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-05-01T00:00:00.000Z",
+        end: "2026-05-02T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Energy (May 1-2)" })).toContainText("18 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (May 1-2)" })).toContainText("$3.60");
+  await expect(card.locator(".bar-row").filter({ hasText: "Current-only appliance" })).toContainText("5 kWh");
+  expect(await page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-05"))
+  ))).toBe(false);
 });
 
 test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
@@ -753,6 +819,66 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
 
   await expect(card.locator(".legend-item").filter({ hasText: "Dryer" })).toHaveCount(1);
   await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,200"]')).toHaveCount(1);
+});
+
+test("dashboard graphs use Recorder statistics for long ranges", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({ json: [] });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "All appliance power",
+      entities: [{
+        entity: "sensor.fridge_power",
+        name: "Fridge",
+        series_id: "circuit:fridge",
+        axis: "left",
+      }],
+    },
+    {
+      "sensor.fridge_power": {
+        state: "160",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+  );
+  await page.evaluate(() => {
+    window.__wsCalls = [];
+    window.__dashboardHass.callWS = async (request) => {
+      window.__wsCalls.push(request);
+      return {
+        "sensor.fridge_power": [
+          { start: Date.parse("2026-01-01T00:00:00.000Z"), mean: 100 },
+          { start: Date.parse("2026-06-30T00:00:00.000Z"), mean: 140 },
+        ],
+      };
+    };
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-01-01T00:00:00.000Z",
+        end: "2026-06-30T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__wsCalls[0])).toEqual({
+    type: "recorder/statistics_during_period",
+    start_time: "2026-01-01T00:00:00.000Z",
+    end_time: "2026-06-30T23:59:59.999Z",
+    statistic_ids: ["sensor.fridge_power"],
+    period: "day",
+    types: ["mean"],
+  });
+  expect(await page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-01"))
+  ))).toBe(false);
+  await expect(card.locator(".legend")).toContainText("Fridge");
 });
 
 test("dashboard comparison overlays previous data and downloads CSV", async ({ page }) => {
