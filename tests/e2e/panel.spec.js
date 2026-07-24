@@ -93,13 +93,14 @@ async function openDashboardGraphs(page) {
   return dashboard;
 }
 
-async function openDashboardCard(page, tagName, config, states = {}) {
+async function openDashboardCard(page, tagName, config, states = {}, hassConfig = {}) {
   await page.goto(HARNESS);
   await page.waitForFunction(() => window.__panelReady === true);
-  await page.evaluate(({ tagName: tag, cardConfig, cardStates }) => {
+  await page.evaluate(({ tagName: tag, cardConfig, cardStates, nextHassConfig }) => {
     localStorage.removeItem("circuitsetup-energy-analyzer-dashboard-range");
     const hass = window.__panel._hass;
     const panelConfig = window.__panel._panel;
+    Object.assign(hass.config, nextHassConfig);
     Object.assign(hass.states, cardStates);
     window.__panel.remove();
     const main = document.createElement("main");
@@ -119,7 +120,12 @@ async function openDashboardCard(page, tagName, config, states = {}) {
       hass.states[entityId] = state;
       card.hass = hass;
     };
-  }, { tagName, cardConfig: config, cardStates: states });
+  }, {
+    tagName,
+    cardConfig: config,
+    cardStates: states,
+    nextHassConfig: hassConfig,
+  });
   return page.locator(tagName);
 }
 
@@ -845,6 +851,27 @@ test("dashboard date navigation uses calendar days across DST", async ({ page })
     start: "2026-03-07T05:00:00.000Z",
     end: "2026-03-08T04:59:59.999Z",
     compare: true,
+  });
+});
+
+test("dashboard initializes today in the Home Assistant timezone", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T20:00:00.000Z") });
+  await mockPanelApi(page);
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "Pacific/Auckland" },
+  );
+
+  const range = await page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ));
+  expect(range).toEqual({
+    start: "2026-07-24T12:00:00.000Z",
+    end: "2026-07-25T11:59:59.999Z",
+    compare: false,
   });
 });
 

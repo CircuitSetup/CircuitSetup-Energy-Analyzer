@@ -85,6 +85,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     set hass(value) {
       this._hass = value;
+      if (!localStorage.getItem(RANGE_KEY)) {
+        const todayKey = this._chartDateKey(Date.now());
+        this._dashboardRange = this._rangeFromDateKeys(todayKey, todayKey);
+        setDashboardRange(this._dashboardRange);
+      }
       const active = this.shadowRoot && this.shadowRoot.activeElement;
       if (active && active.matches("input, select, textarea")) {
         this._deferredHassRender = true;
