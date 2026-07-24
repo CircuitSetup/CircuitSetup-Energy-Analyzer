@@ -1,10 +1,10 @@
 # CircuitSetup Energy Analyzer Codegraph
 
-> **Pinned source:** `f0dee7a` (`f0dee7a5a2104dcad4d099b97b9f3f2cc3d44780`), integration version `0.9.1`  
-> **Repository:** https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer  
+> **Pinned source:** `5b9cc33` (`5b9cc338b68bacd63aa36bdbd09eb475a9d8ccb5`), integration version `0.13.5`
+> **Repository:** https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer
 > **Primary source:** `custom_components/circuitsetup_energy_analyzer`
 
-This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact. Run `generate_codegraph.py` inside a checkout when exact AST-derived import and symbol graphs are needed for that commit.
+This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact. Run the repository codegraph script inside a checkout when exact AST-derived import and symbol graphs are needed for that commit.
 
 ## How Codex should use this
 
@@ -13,8 +13,8 @@ This document is a Codex-oriented semantic map of the project. It explains owner
    git rev-parse HEAD
    ```
 2. Generate an exact graph:
-   ```bash
-   python generate_codegraph.py . --output-dir docs/codegraph/generated
+   ```powershell
+   .\.codex\scripts\update-codegraph.ps1
    ```
 3. Read this file for semantic ownership and runtime flow.
 4. Inspect the generated local graph for exact imports, symbols, entrypoints and cycles when a change is cross-cutting.
@@ -36,13 +36,17 @@ flowchart LR
   BOOT[__init__.py bootstrap]
   CFG[Config flow / discovery / mapping / profiles]
   COORD[EnergyAnalyzerCoordinator]
-  NORM[Normalization + local/context building]
+  FACTORY[Runtime factory]
+  MANAGER[Runtime managers]
+  NORM[Source samples + normalization + context]
   PROC[Feature processors]
   FEATURES[Domain analytics modules]
-  ALERT[Alerting + feedback + settings advisor]
+  REDUCE[State reducer]
+  STATE[AnalyzerState]
+  ALERT[Alerting / feedback / settings / notifications]
   STORE[FeatureStoreData / HA .storage]
-  ENT[Sensor / binary sensor / button / select / number]
-  PANEL[Evidence API + custom panel]
+  ENT[HA entity platforms]
+  PANEL[Panel API / payloads / frontend]
   DASH[Generated Lovelace dashboard]
   REPAIR[Repairs + notifications]
   REC[Recorder / statistics]
@@ -51,21 +55,27 @@ flowchart LR
   HA --> BOOT
   BOOT --> CFG
   BOOT --> COORD
-  SRC --> COORD
-  COORD --> NORM
+  COORD --> FACTORY
+  FACTORY --> MANAGER
+  FACTORY --> PROC
+  SRC --> MANAGER
+  MANAGER --> NORM
   NORM --> PROC
   PROC --> FEATURES
   PROC --> ALERT
-  COORD --> ALERT
-  COORD <--> STORE
-  COORD --> ENT
-  COORD --> PANEL
+  PROC --> REDUCE
+  REDUCE --> STATE
+  MANAGER --> ALERT
+  MANAGER <--> STORE
+  STATE --> ENT
+  STATE --> PANEL
   PANEL --> ALERT
   HA --> ENT
   HA --> PANEL
   HA --> DASH
-  COORD --> REPAIR
+  MANAGER --> REPAIR
   REC --> FEATURES
+  REC --> MANAGER
   CFG --> DASH
   TEST --> BOOT
   TEST --> COORD
@@ -79,19 +89,20 @@ flowchart LR
 
 1. Home Assistant loads `manifest.json`.
 2. `__init__.async_setup_entry` loads `FeatureStoreData`.
-3. It constructs `EnergyAnalyzerCoordinator`.
+3. It constructs `EnergyAnalyzerCoordinator`; `runtime_factory.initialize_runtime` attaches managers, processors and `AnalyzerState`.
 4. For the first config entry, it registers shared services and the evidence panel.
-5. The coordinator starts listeners for all selected source entities.
-6. Home Assistant forwards setup to `sensor`, `binary_sensor`, `button`, `select`, and `number`.
+5. `SourceUpdateManager` starts listeners for selected source, context and schedule entities.
+6. Home Assistant forwards setup to `sensor`, `binary_sensor`, `button`, `select`, `number`, `switch`, `text`, and `time`.
 
 ### Source update
 
 ```text
 Home Assistant state_changed event
-  -> EnergyAnalyzerCoordinator
-  -> normalize.py
+  -> SourceUpdateManager (debounce and bounded batching)
+  -> SourceSampleBuilder / normalize.py
   -> NormalizedCircuitSample
-  -> local_time/contextual_baseline context
+  -> ProcessingContextBuilder
+  -> ProcessingPipeline
   -> processors/*
   -> FeatureResult
        events
@@ -100,8 +111,10 @@ Home Assistant state_changed event
        state updates
        repairs
        notifications
-  -> coordinator applies results
-  -> storage / notifications / Repairs
+  -> EnergyAnalyzerCoordinator.async_apply_feature_result
+  -> StateReducer
+  -> StorePersistenceManager / NotificationController / Repairs
+  -> AnalyzerState
   -> Home Assistant entities and evidence panel
 ```
 
@@ -109,8 +122,9 @@ Home Assistant state_changed event
 
 ```text
 Evidence panel or HA control
-  -> panel.py / services.py / button.py / select.py / number.py
-  -> coordinator operation
+  -> panel*.py / services.py / button.py / select.py / number.py / switch.py / text.py / time.py
+  -> coordinator facade
+  -> evidence, NILM, settings, dashboard or entity-profile controller
   -> alert feedback, NILM review, recommendation decision or circuit setting
   -> FeatureStoreData
   -> future processing behavior
@@ -123,16 +137,21 @@ Evidence panel or HA control
 |---|---|---|
 | `bootstrap` | `custom_components/circuitsetup_energy_analyzer/__init__.py` | Home Assistant config-entry lifecycle; constructs coordinator, loads store, registers shared services/panel, starts source listeners, forwards platforms. |
 | `bootstrap` | `custom_components/circuitsetup_energy_analyzer/const.py` | Domain, platform list, config keys, defaults, storage key/version, entity-detail and dashboard-layout constants. |
-| `bootstrap` | `custom_components/circuitsetup_energy_analyzer/manifest.json` | See generated AST graph for symbols/imports. |
+| `bootstrap` | `custom_components/circuitsetup_energy_analyzer/manifest.json` | Home Assistant integration metadata, dependencies and release version. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/config_flow.py` | Initial and options flows: source discovery, circuit assignments, advanced settings, entity detail, dashboard creation and suggested settings. |
+| `configuration` | `custom_components/circuitsetup_energy_analyzer/config_parsing.py` | Converts config-entry data/options and source entities into runtime circuit and mains-context configs. |
+| `configuration` | `custom_components/circuitsetup_energy_analyzer/context_sources.py` | Shared missing-versus-explicit-empty-aware parsing for optional mains, weather and water context sources. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/discovery.py` | Source-device/entity discovery and grouping. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/mapping.py` | Sensor-to-circuit role mapping and mapping validation. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/profiles.py` | Appliance-profile capabilities, required/recommended roles and feature applicability. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/appliance_metadata.py` | User-facing appliance labels and metadata. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/demo.py` | Demo source bundle and sample setup support. |
+| `configuration` | `custom_components/circuitsetup_energy_analyzer/localized_text.py` | Runtime access to bundled translated panel and notification text. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/ux.py` | User-facing status labels, sensitivity normalization and explanation helpers. |
-| `orchestration` | `custom_components/circuitsetup_energy_analyzer/coordinator.py` | Central runtime orchestration and AnalyzerState; receives source changes, builds context, runs processors, applies results, manages persistence and feedback. |
-| `orchestration` | `custom_components/circuitsetup_energy_analyzer/processors/base.py` | See generated AST graph for symbols/imports. |
+| `orchestration` | `custom_components/circuitsetup_energy_analyzer/coordinator.py` | Stable Home Assistant-facing facade that delegates source updates, processing, persistence, feedback and settings to runtime managers. |
+| `orchestration` | `custom_components/circuitsetup_energy_analyzer/runtime_factory.py` | Composition root for managers, ordered processors, callbacks, retained runtime caches and `AnalyzerState`. |
+| `orchestration` | `custom_components/circuitsetup_energy_analyzer/state.py` | `AnalyzerState`, shared learning-state query and final event/alert reduction. |
+| `orchestration` | `custom_components/circuitsetup_energy_analyzer/managers/` | Runtime ownership boundaries for source ingestion, processing, state reduction, persistence, controllers and Home Assistant side effects. |
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/models.py` | Core immutable domain types: appliance profiles, circuit modes, sensor roles, configs, samples, events, baselines and alert evidence. |
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/normalize.py` | Converts Home Assistant states into normalized single/dual-phase circuit samples with units, sign conventions and quality issues. |
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/local_time.py` | Home Assistant-local calendar/time conversion helpers used by daily and contextual analysis. |
@@ -142,28 +161,39 @@ Evidence panel or HA control
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/events.py` | Event compatibility/helpers around detected circuit activity. |
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/cycles.py` | Run-session construction, short-gap merging, runtime/duty-cycle summaries and cycle feature extraction. |
 | `domain_model` | `custom_components/circuitsetup_energy_analyzer/aggregation.py` | Cross-sensor/cross-circuit aggregation helpers. |
+| `domain_model` | `custom_components/circuitsetup_energy_analyzer/ids.py` | Stable readable tuple identifiers for persisted and user-action records. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/activity_alerts.py` | Activity-duration and inactivity evidence logic. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/activity_timeline.py` | Recent activity timeline assembly. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/appliance_detail.py` | Direct-meter and NILM appliance detail, comparisons, expectations, readiness, history and cost summaries. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/appliance_detail_models.py` | Typed appliance-detail, comparison, expectation and timeline payload contracts. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/appliance_insights.py` | Cross-appliance insights and bounded explanations for energy changes. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/attention.py` | Prioritized actionable appliance attention items for the panel. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/balance.py` | Mains versus monitored-load balance calculations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/billing.py` | Billing-cycle usage and forecast calculations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/capacity.py` | Current/capacity usage and limit evidence. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/cost.py` | Energy-cost and time-of-use calculations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/demand.py` | Rolling and monthly demand calculations and evidence. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/energy_dashboard.py` | Home Assistant Energy Dashboard readiness checks. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/expected_schedule.py` | Appliance expected-schedule settings, active-window evaluation and missed/late/extra-use context. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/goals.py` | Daily energy-goal tracking. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/load_shift.py` | Flexible-load and solar load-shift analysis. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/metric_consistency.py` | W/VA/V/A/PF relationship checks. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/nilm.py` | Experimental mains edge detection, masking, clustering and signature logic. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/nilm_virtual.py` | Virtual-appliance state derived from reviewed NILM assignments and sessions. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/phase_balance.py` | Dual-phase leg balance calculations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/power_quality.py` | Power-quality feature observation and baseline comparison. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/safety.py` | Safety-adjacent wording/guardrails. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/session_timeline.py` | Bounded appliance-session timeline and history helpers. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/settings_preview.py` | Recommendation-only impact previews computed from retained observations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/solar_flow.py` | Solar generation, site load, import/export and surplus calculations. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/standby.py` | Standby/Always-On estimation and status. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/tariff.py` | Shared configured electricity-rate selection from global cost settings. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/unknown_loads.py` | NILM unknown-load inventory, review state and heuristic classification. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/usage.py` | Cumulative-energy folding and daily usage/spike analysis. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/utility_comparison.py` | Measured-versus-utility/Opower energy comparison. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/water_correlations.py` | Rain, pump and water-flow correlation/mismatch evidence. |
 | `analytics` | `custom_components/circuitsetup_energy_analyzer/weather_context.py` | Outdoor-temperature-aware HVAC context and expected ranges. |
+| `analytics` | `custom_components/circuitsetup_energy_analyzer/weekly_digest.py` | Completed-week appliance digest aggregation and idempotence keys. |
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/__init__.py` | See generated AST graph for symbols/imports. |
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/activity.py` | See generated AST graph for symbols/imports. |
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/base.py` | See generated AST graph for symbols/imports. |
@@ -185,9 +215,11 @@ Evidence panel or HA control
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/standby.py` | See generated AST graph for symbols/imports. |
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/utility_comparison.py` | See generated AST graph for symbols/imports. |
 | `processors` | `custom_components/circuitsetup_energy_analyzer/processors/water_context.py` | See generated AST graph for symbols/imports. |
-| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/storage.py` | Home Assistant Store-backed FeatureStoreData, migrations, serialization, pruning and retention caps. |
+| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/storage.py` | Home Assistant Store-backed `FeatureStoreData`, schema migrations, serialization and retention policy. |
+| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/alert_feedback.py` | Shared alert-feedback status, expiry and timestamp parsing. |
 | `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/alerting.py` | Diagnostic observations, conservative repeated-evidence policy, alert fingerprints and user feedback effects. |
-| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/settings_advisor.py` | Evidence-driven advanced-setting recommendations and apply/deny/dismiss decision handling. |
+| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/appliance_notifications.py` | Per-appliance notification preferences and notification eligibility. |
+| `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/settings_advisor.py` | Evidence-driven advanced-setting recommendation candidates, confidence and ranking. |
 | `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/recommendation_guidance.py` | Human-readable guidance for setting recommendations. |
 | `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/notifications.py` | Persistent alert and settings-recommendation notification construction. |
 | `persistence_feedback` | `custom_components/circuitsetup_energy_analyzer/repairs.py` | Home Assistant Repairs issue synchronization for setup/data-quality problems. |
@@ -198,9 +230,16 @@ Evidence panel or HA control
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/button.py` | Per-circuit and integration-level action buttons. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/select.py` | Sensitivity, entity-detail and dashboard-layout select controls. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/number.py` | Numeric controls such as daily energy goals. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/switch.py` | Boolean controls for notification, expected-schedule and time-of-use settings. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/text.py` | Text controls for tariff and appliance-setting values. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/time.py` | Time controls for time-of-use boundaries. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/services.py` | Service registration, target resolution, validation and dispatch to coordinator operations. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/services.yaml` | See generated AST graph for symbols/imports. |
-| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel.py` | Authenticated evidence API and custom panel registration/action endpoints. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel.py` | Panel registration, top-level payload assembly, actions and recorder-history access. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel_contracts.py` | Panel routes, API paths, custom-element names and frontend cache-buster version. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel_views.py` | Authenticated evidence, appliance, setup-health and NILM HTTP views. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel_nilm.py` | Bounded NILM workspace, assignment, overlay, session and history payloads. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/panel_common.py` | Shared panel payload and parsing helpers. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/dashboard.py` | Creates/updates a starter Lovelace dashboard using actual entity-registry IDs. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/diagnostics.py` | Home Assistant diagnostics payload. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/exporting.py` | Diagnostic/history export helpers. |
@@ -209,8 +248,37 @@ Evidence panel or HA control
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entities/nilm.py` | See generated AST graph for symbols/imports. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entities/settings_suggestions.py` | See generated AST graph for symbols/imports. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entities/setup_health.py` | See generated AST graph for symbols/imports. |
-| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js` | Browser-side evidence, NILM review and suggested-setting action interface. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/entity_catalog.py` | Compact entity exposure rules, group selection and count previews shared by setup and platforms. |
+| `ha_surface` | `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js` | Browser entry module for the modular panel shell, appliance views, evidence views, dashboard graphs and NILM workspace. |
 | `ha_surface` | `custom_components/circuitsetup_energy_analyzer/translations/en.json` | See generated AST graph for symbols/imports. |
+
+### Runtime managers
+
+| Manager | Primary responsibility |
+|---|---|
+| `alert_policies.py` | Feedback-aware conservative alert policies and per-feature policy selection. |
+| `circuit_registry.py` | Circuit lookup and runtime circuit relationships. |
+| `config_entry_controller.py` | Config-entry option writes, reloads and entry-derived mutations. |
+| `context.py` | `ProcessingContext` construction and context-source values. |
+| `dashboard_controller.py` | Dashboard create/remove requests and persisted dashboard status. |
+| `demo_data.py` | Deterministic demo-state and retained-history seeding. |
+| `entity_profile_controller.py` | Entity-detail/profile changes and compact entity exposure. |
+| `environmental_context.py` | Weather, rain, pump and water-flow histories and context refresh. |
+| `evidence_actions.py` | Alert acknowledgement/feedback, maintenance and relearn actions. |
+| `export_manager.py` | Diagnostics and retained-history export assembly. |
+| `nilm_controller.py` | NILM runtime state, review actions, assignments and processor integration. |
+| `notification_controller.py` | Learning-gated alert, settings and weekly-digest notification delivery. |
+| `processing_pipeline.py` | Ordered per-circuit processor execution and feature-result application. |
+| `processor_runtime.py` | Processor settings, learning maturity and cross-feature runtime helpers. |
+| `recommendation_episodes.py` | Recommendation evidence episode compaction. |
+| `settings_controller.py` | Advanced settings, recommendations, previews and HA setting controls. |
+| `setup_health.py` | Setup-health aggregation, mapping checks and Repairs synchronization. |
+| `source_samples.py` | Home Assistant source-state collection and normalized sample construction. |
+| `source_updates.py` | Source listeners, deduplication, debounce and maximum-batch scheduling. |
+| `state_reducer.py` | Applies `FeatureResult` state updates, observations, events and alerts. |
+| `store_persistence.py` | Runtime hydration, bounded pruning and scheduled `FeatureStoreData` saves. |
+| `utility_energy_sources.py` | Recorder/statistics access and energy-source aggregation. |
+| `ux_state.py` | Derived readiness, health, evidence and user-facing state refresh. |
 
 ## Processor-to-feature adapters
 
@@ -276,6 +344,29 @@ Shared processor contract:
 
 All feature processors should return results rather than causing scattered Home Assistant side effects.
 
+### `runtime_factory.py` and `managers/`
+
+`runtime_factory.initialize_runtime` is the composition root. `EnergyAnalyzerCoordinator` remains the public facade, while managers own distinct runtime behavior:
+
+- source batching and sample construction;
+- processing context and processor order;
+- state reduction and derived UX state;
+- persisted-store pruning and saves;
+- settings, evidence, NILM, dashboard, export and notification actions.
+
+Add a manager only for a durable ownership boundary. Route shared Home Assistant operations through the coordinator facade instead of importing managers across features.
+
+### `state.py` and `managers/state_reducer.py`
+
+`AnalyzerState` is the entity/panel-facing runtime snapshot. `StateReducer` is the authoritative `FeatureResult` application path for:
+
+- `StateUpdate` assignment and clear semantics;
+- observation history;
+- event and alert state;
+- feature-specific clear operations.
+
+Processors and controllers should not create parallel state-reduction paths.
+
 ### `operating_detection.py`
 
 Authoritative appliance operating-state subsystem:
@@ -297,11 +388,11 @@ Owns the distinction between:
 - a user-facing alert;
 - feedback fingerprints/effects.
 
-Only qualified alert evidence should create notifications.
+Only qualified alert evidence should reach notification policy. Routine notifications and suggested settings also require current per-circuit learning maturity in their owning controllers.
 
-### `storage.py`
+### `storage.py` and `managers/store_persistence.py`
 
-Owns persisted semantics and migrations. Any new persisted field or changed meaning requires:
+`storage.py` owns persisted semantics, serialization and migrations. `StorePersistenceManager` owns runtime hydration, pruning and save scheduling. Any new persisted field or changed meaning requires:
 
 - schema review;
 - bounded retention;
@@ -313,17 +404,20 @@ Owns persisted semantics and migrations. Any new persisted field or changed mean
 
 | Surface | Files |
 |---|---|
-| Config and options flows | `config_flow.py`, `discovery.py`, `mapping.py`, `profiles.py`, `demo.py` |
-| Sensors | `sensor.py`, `entities/*` |
+| Config and options flows | `config_flow.py`, `config_parsing.py`, `context_sources.py`, `discovery.py`, `mapping.py`, `profiles.py`, `demo.py` |
+| Sensors | `sensor.py`, `entities/*`, `entity_catalog.py` |
 | Binary sensors | `binary_sensor.py` |
 | Buttons | `button.py` |
 | Selects | `select.py` |
 | Numbers | `number.py` |
+| Switches | `switch.py` |
+| Text controls | `text.py` |
+| Time controls | `time.py` |
 | Services | `services.py`, `services.yaml` |
-| Evidence API/panel | `panel.py`, `frontend/energy-analyzer-panel.js` |
+| Evidence API/panel | `panel.py`, `panel_common.py`, `panel_contracts.py`, `panel_views.py`, `panel_nilm.py`, `frontend/energy-analyzer-*.js` |
 | Starter dashboard | `dashboard.py` |
 | Repairs | `repairs.py` |
-| Notifications | `notifications.py`, `alert_links.py` |
+| Notifications | `notifications.py`, `appliance_notifications.py`, `alert_links.py`, `managers/notification_controller.py` |
 | Diagnostics/exports | `diagnostics.py`, `exporting.py` |
 
 ## Cross-circuit features
@@ -350,12 +444,14 @@ Changes to these features should inspect coordinator ordering, source selection 
   - `custom_components/circuitsetup_energy_analyzer/models.py`
   - `custom_components/circuitsetup_energy_analyzer/profiles.py`
   - `custom_components/circuitsetup_energy_analyzer/processors/base.py`
-  - `custom_components/circuitsetup_energy_analyzer/coordinator.py`
+  - `custom_components/circuitsetup_energy_analyzer/runtime_factory.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/processing_pipeline.py`
 
 **Usually touched**
 
   - `custom_components/circuitsetup_energy_analyzer/<feature>.py`
   - `custom_components/circuitsetup_energy_analyzer/processors/<feature>.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/state_reducer.py`
   - `custom_components/circuitsetup_energy_analyzer/sensor.py`
   - `custom_components/circuitsetup_energy_analyzer/translations/en.json`
   - `tests/test_processors.py`
@@ -372,7 +468,8 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Usually touched**
 
   - `custom_components/circuitsetup_energy_analyzer/config_flow.py`
-  - `custom_components/circuitsetup_energy_analyzer/settings_advisor.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/processor_runtime.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/settings_controller.py`
   - `custom_components/circuitsetup_energy_analyzer/storage.py`
   - `tests/test_operating_detection.py`
   - `tests/test_cycles.py`
@@ -381,14 +478,17 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Inspect first**
 
   - `custom_components/circuitsetup_energy_analyzer/alerting.py`
-  - `custom_components/circuitsetup_energy_analyzer/coordinator.py`
+  - `custom_components/circuitsetup_energy_analyzer/alert_feedback.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/evidence_actions.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/notification_controller.py`
   - `custom_components/circuitsetup_energy_analyzer/storage.py`
   - `custom_components/circuitsetup_energy_analyzer/panel.py`
-  - `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js`
+  - `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-evidence-views.js`
 
 **Usually touched**
 
   - `custom_components/circuitsetup_energy_analyzer/notifications.py`
+  - `custom_components/circuitsetup_energy_analyzer/appliance_notifications.py`
   - `custom_components/circuitsetup_energy_analyzer/services.py`
   - `tests/test_alerting.py`
   - `tests/test_panel.py`
@@ -398,12 +498,13 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Inspect first**
 
   - `custom_components/circuitsetup_energy_analyzer/storage.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/store_persistence.py`
   - `custom_components/circuitsetup_energy_analyzer/const.py`
   - `custom_components/circuitsetup_energy_analyzer/models.py`
 
 **Usually touched**
 
-  - `custom_components/circuitsetup_energy_analyzer/coordinator.py`
+  - `custom_components/circuitsetup_energy_analyzer/runtime_factory.py`
   - `tests/test_storage.py`
   - `tests/fixtures/`
 
@@ -413,8 +514,15 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Inspect first**
 
   - `custom_components/circuitsetup_energy_analyzer/entity.py`
+  - `custom_components/circuitsetup_energy_analyzer/entity_catalog.py`
   - `custom_components/circuitsetup_energy_analyzer/sensor.py`
   - `custom_components/circuitsetup_energy_analyzer/binary_sensor.py`
+  - `custom_components/circuitsetup_energy_analyzer/button.py`
+  - `custom_components/circuitsetup_energy_analyzer/select.py`
+  - `custom_components/circuitsetup_energy_analyzer/number.py`
+  - `custom_components/circuitsetup_energy_analyzer/switch.py`
+  - `custom_components/circuitsetup_energy_analyzer/text.py`
+  - `custom_components/circuitsetup_energy_analyzer/time.py`
   - `custom_components/circuitsetup_energy_analyzer/entities/`
   - `custom_components/circuitsetup_energy_analyzer/config_flow.py`
 
@@ -431,6 +539,8 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Inspect first**
 
   - `custom_components/circuitsetup_energy_analyzer/config_flow.py`
+  - `custom_components/circuitsetup_energy_analyzer/config_parsing.py`
+  - `custom_components/circuitsetup_energy_analyzer/context_sources.py`
   - `custom_components/circuitsetup_energy_analyzer/discovery.py`
   - `custom_components/circuitsetup_energy_analyzer/mapping.py`
   - `custom_components/circuitsetup_energy_analyzer/profiles.py`
@@ -439,6 +549,9 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Usually touched**
 
   - `custom_components/circuitsetup_energy_analyzer/__init__.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/source_samples.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/source_updates.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/setup_health.py`
   - `custom_components/circuitsetup_energy_analyzer/repairs.py`
   - `custom_components/circuitsetup_energy_analyzer/entities/setup_health.py`
   - `tests/test_config_flow.py`
@@ -448,44 +561,54 @@ Changes to these features should inspect coordinator ordering, source selection 
 **Inspect first**
 
   - `custom_components/circuitsetup_energy_analyzer/panel.py`
-  - `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-panel.js`
+  - `custom_components/circuitsetup_energy_analyzer/panel_contracts.py`
+  - `custom_components/circuitsetup_energy_analyzer/panel_views.py`
+  - `custom_components/circuitsetup_energy_analyzer/panel_nilm.py`
+  - `custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-*.js`
   - `custom_components/circuitsetup_energy_analyzer/services.py`
 
 **Usually touched**
 
-  - `custom_components/circuitsetup_energy_analyzer/coordinator.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/evidence_actions.py`
+  - `custom_components/circuitsetup_energy_analyzer/managers/settings_controller.py`
   - `custom_components/circuitsetup_energy_analyzer/alerting.py`
   - `custom_components/circuitsetup_energy_analyzer/settings_advisor.py`
   - `tests/test_panel.py`
 
+> **Warning:** Bump `panel_contracts.py::PANEL_MODULE_VERSION` whenever shipped frontend JavaScript changes.
+
 ## High-risk modules
 
-1. `coordinator.py`
-   - broad shared state and update ordering;
-   - cross-circuit context;
-   - store scheduling;
-   - side-effect boundary.
+1. `runtime_factory.py` + `managers/processing_pipeline.py`
+   - manager/processor composition and callback wiring;
+   - feature order and cross-circuit processing;
+   - state, persistence and side-effect boundaries.
 
-2. `config_flow.py`
+2. `coordinator.py`
+   - broad public facade used by platforms, services, panel and tests;
+   - source-update and configuration lifecycle.
+
+3. `config_flow.py` + `managers/settings_controller.py`
    - setup and options compatibility;
    - source expansion;
    - advanced-setting round trips;
+   - recommendation generation, previews and decisions;
    - user-facing validation.
 
-3. `storage.py`
+4. `storage.py` + `managers/store_persistence.py`
    - backwards compatibility and bounded growth.
 
-4. `sensor.py`
-   - large Home Assistant entity surface and recorder impact.
+5. `sensor.py` + `entity_catalog.py`
+   - large Home Assistant entity surface, stable identities and recorder impact.
 
-5. `alerting.py`
-   - user trust, alert qualification and feedback matching.
+6. `alerting.py` + `managers/notification_controller.py`
+   - user trust, alert qualification, learning gates and feedback matching.
 
-6. `operating_detection.py`
+7. `operating_detection.py`
    - Running automations, cycle counts and baseline evidence.
 
-7. `panel.py` + frontend JavaScript
-   - authenticated actions and internal-ID resolution.
+8. `panel.py` + `panel_views.py` + `panel_nilm.py` + frontend JavaScript
+   - authenticated actions, bounded history, internal-ID resolution and backend/frontend contracts.
 
 ## Repository/test map
 
@@ -525,7 +648,11 @@ Regenerate this graph after:
 - adding a platform;
 - changing config-entry entrypoints;
 - changing processor registration;
+- changing runtime-manager ownership or composition;
 - moving feature logic between processor and domain module;
+- changing `FeatureResult` or `AnalyzerState` reduction;
+- changing entity-catalog exposure rules or platforms;
 - adding a panel API endpoint;
+- changing panel contracts or frontend entry modules;
 - changing storage ownership;
 - changing the coordinator pipeline.
