@@ -2552,6 +2552,8 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
     )
 
     assert descriptions["daily_energy_usage"].name_suffix == "Energy Usage Today"
+    assert descriptions["daily_energy_usage"].device_class == "energy"
+    assert descriptions["daily_energy_usage"].state_class == "total_increasing"
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.56
     state.cost_today_status_by_circuit["fridge"] = "unavailable"
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.48
