@@ -404,7 +404,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           const normalized = String(row.state || "").toLowerCase();
           const value = normalized === "on" ? 1 : normalized === "off" ? 0 : Number.parseFloat(row.state);
           const time = Date.parse(row.last_changed || row.last_updated || "");
-          if (Number.isFinite(value) && Number.isFinite(time)) points.push({ time, value });
+          if (Number.isFinite(time)) {
+            points.push({ time, value: Number.isFinite(value) ? value : null });
+          }
         }
         const config = configs.get(entityId);
         if (entityId && points.length) {
@@ -429,7 +431,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         groups.get(key).push(item);
       }
       return [...groups.entries()].map(([seriesId, items]) => {
-        if (items.length === 1) return { ...items[0], series_id: seriesId };
+        if (items.length === 1) {
+          return {
+            ...items[0],
+            series_id: seriesId,
+            points: items[0].points.filter((point) => Number.isFinite(point.value)),
+          };
+        }
         const timestamps = [...new Set(items.flatMap((item) => (
           item.points.map((point) => point.time)
         )))].sort((left, right) => left - right);
@@ -459,7 +467,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           series_id: seriesId,
           points: this._boundedChartPoints(points),
         };
-      });
+      }).filter((item) => item.points.length);
     }
 
     _contributionHtml(appliances) {
@@ -739,7 +747,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return factor === 1 ? item : {
           ...item,
           unit: target.unit,
-          points: item.points.map((point) => ({ ...point, value: point.value * factor })),
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) ? point.value * factor : point.value,
+          })),
         };
       });
     }

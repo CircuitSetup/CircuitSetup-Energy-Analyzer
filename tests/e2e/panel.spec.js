@@ -826,7 +826,8 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
             state: "400",
             last_changed: "2026-07-24T00:00:00.000Z",
           },
-          { state: "500", last_changed: "2026-07-24T01:00:00.000Z" },
+          { state: "unavailable", last_changed: "2026-07-24T01:00:00.000Z" },
+          { state: "500", last_changed: "2026-07-24T02:00:00.000Z" },
         ],
         [
           {
@@ -873,6 +874,7 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
   );
 
   await expect(card.locator(".legend-item").filter({ hasText: "Dryer" })).toHaveCount(1);
+  await expect(card.locator(`[data-chart-time="${Date.parse("2026-07-24T01:00:00.000Z")}"]`)).toHaveAttribute("data-chart-value", "600");
   await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,200"]')).toHaveCount(1);
 });
 
