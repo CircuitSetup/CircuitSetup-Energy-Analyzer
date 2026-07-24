@@ -139,10 +139,12 @@ except ModuleNotFoundError:
 
         MEASUREMENT = "measurement"
         TOTAL = "total"
+        TOTAL_INCREASING = "total_increasing"
 
     class SensorDeviceClass:
         """Fallback sensor device class constants."""
 
+        ENERGY = "energy"
         MONETARY = "monetary"
 
 try:
@@ -1712,8 +1714,9 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
         key="daily_energy_usage",
         name_suffix="Energy Usage Today",
         value_fn=daily_energy_usage_value,
+        device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        state_class=SensorStateClass.MEASUREMENT,
+        state_class=SensorStateClass.TOTAL_INCREASING,
         attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(

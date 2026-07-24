@@ -1778,6 +1778,40 @@ def test_nilm_controller_hydrates_ignored_signatures_from_store() -> None:
     assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
 
 
+def test_coordinator_hydrates_todays_energy_usage_from_store() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            energy_usage_by_circuit={
+                "fridge": {
+                    "days": [
+                        {"date": "2026-07-23", "usage_kwh": 4.2},
+                        {"date": "2026-07-24", "usage_kwh": 5.1},
+                    ]
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    assert coordinator.state.daily_energy_usage_by_circuit["fridge"] == 5.1
+
+
 def test_nilm_controller_filters_known_load_events() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
