@@ -1200,6 +1200,28 @@ test("dashboard summary cards use the shared header style", async ({ page }) => 
   await toHaveNoViolations(page);
 });
 
+test("analyzer detail links render as a tight vertical list", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-summary",
+    {
+      title: "Detail links",
+      links: [
+        { name: "Fridge details", path: "/fridge" },
+        { name: "Washer details", path: "/washer" },
+      ],
+    },
+  );
+
+  await expect(card.locator(".summary-list")).toHaveCSS("gap", "0px");
+  await expect(card.locator(".summary-link")).toHaveCount(2);
+  const links = await card.locator(".summary-link").evaluateAll((rows) => (
+    rows.map((row) => row.getBoundingClientRect().toJSON())
+  ));
+  expect(links[1].top).toBe(links[0].bottom);
+});
+
 for (const route of [
   { name: "appliance insights", query: "?appliance_insights=1", heading: "Appliance Insights" },
   { name: "appliance detail", query: "?appliance_detail=1&circuit_id=kitchen", heading: "Kitchen Appliances" },

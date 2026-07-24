@@ -268,6 +268,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .legend-item { align-items: center; display: inline-flex; gap: 6px; }
         .legend-marker { --mdc-icon-size: 16px; }
         .summary-list { display: grid; gap: 8px; }
+        .summary-list.compact-links { gap: 0; }
+        .compact-links .summary-link { min-height: 0; padding: 0; }
         .summary-row, .summary-link { align-items: center; background: transparent; border: 0; color: var(--primary-text-color, #111827); display: flex; justify-content: space-between; min-height: 40px; padding: 4px 0; text-align: left; text-decoration: none; width: 100%; }
         button.summary-row { cursor: pointer; }
         .summary-row span:last-child { color: var(--secondary-text-color, #5b6470); margin-left: 12px; }
@@ -833,13 +835,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
+      const compactLinks = (config.links || []).length && !(config.entities || []).length;
       this.shadowRoot.innerHTML = `
         <ha-card>
           <style>${this._styles()}</style>
           <div class="dashboard-card">
             <h2>${this._escape(config.title || "")}</h2>
             ${config.description ? `<p class="muted">${this._escape(config.description)}</p>` : ""}
-            <div class="summary-list">
+            <div class="summary-list${compactLinks ? " compact-links" : ""}">
               ${(config.entities || []).map((item) => {
                 const state = this._state(item.entity);
                 const unit = this._unit(item.entity);
