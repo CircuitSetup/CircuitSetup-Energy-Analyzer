@@ -283,11 +283,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const periods = (config.periods || [24, 168, 720]).map(Number).filter(Number.isFinite);
       if (!periods.includes(this._hours)) this._hours = Number(config.default_hours) || periods[0] || 24;
       this._ensureHistory(entities);
-      const series = this._dashboardHistorySeries(this._history, entities);
+      const series = this._normalizedPowerSeries(
+        this._dashboardHistorySeries(this._history, entities),
+      );
+      const leftSeries = series.find((item) => item.axis !== "right");
       const rightSeries = series.find((item) => item.axis === "right");
       const chart = series.length
         ? this._chartSvg(series, {
-          y_axis_label: config.y_axis_label || this._unit(entities[0] && entities[0].entity, "W"),
+          y_axis_label: config.y_axis_label || (leftSeries && leftSeries.unit) || "W",
           ...(rightSeries ? { right_y_axis_label: rightSeries.unit || this._label("temperature", "Temperature") } : {}),
         })
         : `<p class="muted">${this._escape(this._historyError || this._label("no_history", "No history is available for this period."))}</p>`;
@@ -315,6 +318,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._render();
       });
       this._attachChartInspectors();
+    }
+
+    _normalizedPowerSeries(series) {
+      const wattsPerUnit = { W: 1, kW: 1000 };
+      const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
+      if (!target) return series;
+      return series.map((item) => {
+        const scale = item.axis !== "right" && wattsPerUnit[item.unit];
+        const factor = scale ? scale / wattsPerUnit[target.unit] : 1;
+        return factor === 1 ? item : {
+          ...item,
+          unit: target.unit,
+          points: item.points.map((point) => ({ ...point, value: point.value * factor })),
+        };
+      });
     }
 
     _resolvedEntities(config) {
