@@ -1311,8 +1311,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
+        self.state_reducer.apply_updates(self.state, result.state_updates)
         result = replace(
             result,
+            state_updates=[],
             alerts=[
                 alert
                 for alert in result.alerts

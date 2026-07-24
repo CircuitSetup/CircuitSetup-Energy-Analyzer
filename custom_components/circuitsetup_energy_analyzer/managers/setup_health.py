@@ -4,6 +4,7 @@ from typing import Any
 
 from .. import repairs
 from ..context_sources import has_mains_source_configured
+from ..state import circuit_is_learning
 
 _DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
     {
@@ -75,16 +76,11 @@ class SetupHealthAggregator:
         else:
             coordinator.state.data_quality_by_circuit.pop(circuit_id, None)
         stale_issue = (circuit_id, "stale_source_sensor")
-        if stale_issue in desired:
-            config = coordinator.circuit_registry.config_for_circuit(circuit_id)
-            if (
-                config is None
-                or not coordinator.processor_runtime.learning_mature(
-                    config,
-                    coordinator.current_time(),
-                )
-            ):
-                desired.discard(stale_issue)
+        if stale_issue in desired and circuit_is_learning(
+            coordinator.state,
+            circuit_id,
+        ):
+            desired.discard(stale_issue)
 
         current = {
             issue
