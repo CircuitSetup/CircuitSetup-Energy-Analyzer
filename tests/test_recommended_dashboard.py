@@ -411,6 +411,63 @@ def test_dashboard_groups_related_cards_into_three_views() -> None:
     assert "history-graph" not in cards_by_view["insights"]
 
 
+def test_dashboard_adds_shared_date_control_and_orders_home_cards() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+
+    assert all(
+        view["sections"][0]["cards"][0]["type"]
+        == "custom:circuitsetup-energy-analyzer-date-range"
+        for view in _dashboard_views(dashboard)
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+    assert [card["type"] for card in home["sections"][0]["cards"][:5]] == [
+        "custom:circuitsetup-energy-analyzer-date-range",
+        CONTEXT_GRAPH_CARD,
+        "custom:circuitsetup-energy-analyzer-house-flow",
+        "custom:circuitsetup-energy-analyzer-energy-cost",
+        "custom:circuitsetup-energy-analyzer-appliance-grid",
+    ]
+    assert home["sections"][0]["cards"][1]["title"] == "All appliance power"
+
+
+def test_appliance_power_graph_groups_dual_phase_entities() -> None:
+    dryer = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        appliance_profile=ApplianceProfile.DRYER,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(
+            SensorRef("sensor.dryer_l1_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.dryer_l2_power", SensorRole.REAL_POWER),
+        ),
+    )
+    dashboard = build_recommended_dashboard(
+        (dryer, *_circuits()),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+    graph = _card_with_title(home, "All appliance power")
+    dryer_rows = [
+        row
+        for row in graph["entities"]
+        if row["entity"].startswith("sensor.dryer_")
+    ]
+
+    assert [row["series_id"] for row in dryer_rows] == [
+        "circuit:dryer",
+        "circuit:dryer",
+    ]
+    assert {row["name"] for row in dryer_rows} == {"Dryer"}
+
+
 def test_home_card_receives_every_appliance_for_live_sorting() -> None:
     appliances = tuple(
         CircuitConfig(
@@ -795,8 +852,10 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
                 or (view["path"] == "overview" and len(section["cards"]) > 1)
                 else 48 // min(4, len(section["cards"]))
             )
+            date_card, *content_cards = section["cards"]
+            assert date_card["grid_options"]["columns"] == 48
             assert {
-                card["grid_options"]["columns"] for card in section["cards"]
+                card["grid_options"]["columns"] for card in content_cards
             } == {expected_columns}
     assert _card_of_type(
         dashboard,
@@ -923,7 +982,7 @@ def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None
     assert "sensor.fridge_alert_evidence" not in appliance_text
 
 
-def test_dashboard_omits_appliance_detail_buttons_in_favor_of_evidence_links() -> None:
+def test_dashboard_detail_links_open_appliance_detail_pages() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_EXPERT,
@@ -934,8 +993,13 @@ def test_dashboard_omits_appliance_detail_buttons_in_favor_of_evidence_links() -
 
     assert not [card for card in buttons if "Detail" in str(card.get("name", ""))]
     assert "appliance_detail=1" in str(dashboard)
-    assert "Analyzer evidence links" in str(dashboard)
-    assert "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge" in str(dashboard)
+    assert "Detail links" in str(dashboard)
+    assert (
+        "/circuitsetup-energy-analyzer-evidence?"
+        "circuit_id=fridge&amp;appliance_detail=1"
+    ) not in str(dashboard)
+    assert "circuit_id=fridge&appliance_detail=1" in str(dashboard)
+    assert "circuit_id=mains&appliance_detail=1" not in str(dashboard)
     assert "Open Refrigerator Evidence" not in str(dashboard)
 
 
@@ -1208,7 +1272,7 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
         graphs,
         "HVAC activity and outdoor temperature",
     )
-    graph_cards = graphs["sections"][0]["cards"]
+    graph_cards = graphs["sections"][0]["cards"][1:]
     refs = _entity_refs(history_graph)
 
     assert history_graph["type"] == CONTEXT_GRAPH_CARD
@@ -1253,7 +1317,7 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     )
     water_card = _card_with_title(energy_view, "Water flow context")
 
-    assert energy_view["sections"][0]["cards"] == [water_card]
+    assert energy_view["sections"][0]["cards"][1:] == [water_card]
     assert "water_contexts" not in energy_card
     assert water_card["type"] == CONTEXT_GRAPH_CARD
     assert water_card["default_hours"] == 24
@@ -1262,6 +1326,7 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     assert water_card["water_contexts"] == [
         {
             "name": "Washer",
+            "series_id": "circuit:washer",
             "correlation_entity": "sensor.washer_water_context",
             "power_entities": ["sensor.washer_power"],
         }

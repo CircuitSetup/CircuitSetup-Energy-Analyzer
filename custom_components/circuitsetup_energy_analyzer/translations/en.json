@@ -995,6 +995,7 @@
         "setup_health": "Setup Health",
         "home_summary": "Home energy summary",
         "appliances": "Appliances",
+        "all_appliance_power": "All appliance power",
         "energy_and_costs": "Energy and costs",
         "billing_cycle": "Billing Cycle",
         "mains_and_nilm": "Mains and NILM",
@@ -1081,9 +1082,9 @@
         "missing": "Missing entities: {labels}\nNext step: reload the integration or review Entity Detail Level."
       },
       "expert": {
-        "heading": "Analyzer evidence links",
-        "description": "Open these views when you want alert evidence, analyzer actions, and troubleshooting context without adding more diagnostic rows to every appliance card.",
-        "link_label": "{name} evidence"
+        "heading": "Detail links",
+        "description": "Open an appliance detail page for history, comparisons, analyzer findings, and available actions.",
+        "link_label": "{name} details"
       }
     },
     "panel": {

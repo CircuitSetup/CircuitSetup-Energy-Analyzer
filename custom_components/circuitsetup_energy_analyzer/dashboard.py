@@ -34,12 +34,14 @@ HOUSE_FLOW_CARD = "custom:circuitsetup-energy-analyzer-house-flow"
 APPLIANCE_GRID_CARD = "custom:circuitsetup-energy-analyzer-appliance-grid"
 ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
 CONTEXT_GRAPH_CARD = "custom:circuitsetup-energy-analyzer-context-graph"
+DATE_RANGE_CARD = "custom:circuitsetup-energy-analyzer-date-range"
 SUMMARY_CARD = "custom:circuitsetup-energy-analyzer-summary"
 DASHBOARD_CUSTOM_CARD_TYPES = (
     HOUSE_FLOW_CARD,
     APPLIANCE_GRID_CARD,
     ENERGY_COST_CARD,
     CONTEXT_GRAPH_CARD,
+    DATE_RANGE_CARD,
     SUMMARY_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
 )
@@ -212,10 +214,6 @@ def build_recommended_dashboard(
         outdoor_temperature_entity=outdoor_temperature_entity,
     )
     home_view = _build_home_view(context)
-    if context.appliances:
-        home_view["sections"][0]["cards"].extend(
-            _build_appliances_view(context)["sections"][0]["cards"]
-        )
     if context.appliances or context.primary_mains is not None:
         home_view["sections"][0]["cards"].append(
             {
@@ -230,6 +228,10 @@ def build_recommended_dashboard(
                 "labels": dict(translation_section("dashboard", "live_cards")),
                 "grid_options": {"columns": 12},
             }
+        )
+    if context.appliances:
+        home_view["sections"][0]["cards"].extend(
+            _build_appliances_view(context)["sections"][0]["cards"]
         )
     contextual_cards: list[dict[str, Any]] = []
     if (
@@ -283,6 +285,14 @@ def build_recommended_dashboard(
         )
     for view in views:
         cards = view["sections"][0]["cards"]
+        cards.insert(
+            0,
+            {
+                "type": DATE_RANGE_CARD,
+                "labels": dict(translation_section("dashboard", "live_cards")),
+                "grid_options": {"columns": DASHBOARD_COLUMNS * 12},
+            },
+        )
         # A full-width section has 12 card cells for each spanned view column.
         card_columns = (
             24
@@ -295,7 +305,11 @@ def build_recommended_dashboard(
             )
         )
         for card in cards:
-            card["grid_options"]["columns"] = card_columns
+            card["grid_options"]["columns"] = (
+                DASHBOARD_COLUMNS * 12
+                if card["type"] == DATE_RANGE_CARD
+                else card_columns
+            )
     return {
         "title": DASHBOARD_TITLE,
         "views": views,
@@ -418,7 +432,7 @@ def _source_entities_for_role(
 
 
 def _build_home_view(context: DashboardContext) -> dict[str, Any]:
-    card = {
+    summary = {
         "type": HOUSE_FLOW_CARD,
         "title": _dashboard_text("cards", "home_summary"),
         "entry_id": context.entry_id,
@@ -445,12 +459,50 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
         ],
         "labels": dict(translation_section("dashboard", "live_cards")),
     }
+    power_rows = _appliance_power_rows(context)
+    cards = []
+    if power_rows:
+        cards.append(
+            {
+                "type": CONTEXT_GRAPH_CARD,
+                "title": _dashboard_text("cards", "all_appliance_power"),
+                "y_axis_label": "W",
+                "entities": power_rows,
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
+        )
+    cards.append(summary)
     return _dashboard_view(
         title=_dashboard_text("views", "home"),
         path="overview",
         icon=DASHBOARD_ICON,
-        cards=[card],
+        cards=cards,
     )
+
+
+def _appliance_power_rows(context: DashboardContext) -> list[dict[str, str]]:
+    rows = [
+        {
+            "entity": entity_id,
+            "name": circuit.name,
+            "series_id": f"circuit:{circuit.circuit_id}",
+            "axis": "left",
+        }
+        for circuit in context.appliances
+        for entity_id in circuit.power_entities
+    ]
+    rows.extend(
+        {
+            **row,
+            "series_id": f"nilm:{row['entity']}",
+            "axis": "left",
+        }
+        for row in _published_nilm_power_rows(
+            context.registry_lookup,
+            context.entry_id,
+        )
+    )
+    return rows
 
 
 def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
@@ -563,6 +615,7 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
                 {
                     "entity": entity_id,
                     "name": f"{circuit.name} power",
+                    "series_id": f"circuit:{circuit.circuit_id}",
                     "axis": "left",
                 }
             )
@@ -597,6 +650,7 @@ def _build_insights_view(context: DashboardContext) -> dict[str, Any]:
     water_contexts = [
         {
             "name": circuit.name,
+            "series_id": f"circuit:{circuit.circuit_id}",
             "correlation_entity": entity_id,
             "power_entities": list(circuit.power_entities),
         }
@@ -637,12 +691,9 @@ def _build_diagnostics_view(context: DashboardContext) -> dict[str, Any]:
                         "name": _dashboard_text("expert", "link_label").format(
                             name=circuit.name
                         ),
-                        "path": (
-                            f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
-                            f"{urlencode({'circuit_id': circuit.circuit_id})}"
-                        ),
+                        "path": circuit.detail_path,
                     }
-                    for circuit in context.circuits
+                    for circuit in context.appliances
                 ],
             )
         ],
