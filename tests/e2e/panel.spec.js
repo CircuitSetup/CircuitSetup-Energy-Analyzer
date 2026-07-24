@@ -164,7 +164,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
             { state: "2.50", last_changed: "2026-07-12T23:59:59.999Z" },
           ],
           [
-            { entity_id: "sensor.oven_power", state: "1000", last_changed: "2026-07-10T00:00:00.000Z" },
+            { entity_id: "sensor.oven_power", state: "1", last_changed: "2026-07-10T00:00:00.000Z" },
             { state: "0", last_changed: "2026-07-12T23:59:59.999Z" },
           ],
           [
@@ -213,7 +213,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     "sensor.washer_cost": { state: "0.5", attributes: { unit_of_measurement: "USD" } },
     "sensor.washer_health": { state: "Normal", attributes: {} },
     "sensor.oven_activity": { state: "Idle", attributes: { is_running: false } },
-    "sensor.oven_power": { state: "100", attributes: { unit_of_measurement: "W" } },
+    "sensor.oven_power": { state: "0.1", attributes: { unit_of_measurement: "kW" } },
     "sensor.oven_energy": { state: "0.7", attributes: { unit_of_measurement: "kWh" } },
     "sensor.oven_cost": { state: "0.14", attributes: { unit_of_measurement: "USD" } },
     "sensor.oven_health": {
@@ -470,10 +470,12 @@ test("energy and cost card follows the dashboard range and preserves cost source
   await expect(card.locator(".metric")).toHaveCount(0);
   await expect(card).toContainText("Completed-day history");
   await page.evaluate(() => {
+    window.__dashboardHass.config.time_zone = "Pacific/Auckland";
+    window.__dashboardCard.hass = window.__dashboardHass;
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
-        start: "2026-07-04T00:00:00.000Z",
-        end: "2026-07-10T23:59:59.999Z",
+        start: "2026-07-03T12:00:00.000Z",
+        end: "2026-07-10T11:59:59.999Z",
         compare: false,
       },
     }));
@@ -488,8 +490,8 @@ test("energy and cost card follows the dashboard range and preserves cost source
   await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
-        start: "2026-07-01T00:00:00.000Z",
-        end: "2026-07-10T23:59:59.999Z",
+        start: "2026-06-30T12:00:00.000Z",
+        end: "2026-07-10T11:59:59.999Z",
         compare: false,
       },
     }));
@@ -812,6 +814,38 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
   });
   expect(csv).toContain("Fridge");
   expect(csv).toContain("Fridge (previous)");
+  expect(csv).toContain("2026-07-07T00:00:00.000Z");
+});
+
+test("dashboard date navigation uses calendar days across DST", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+  await page.evaluate(() => {
+    window.__dashboardHass.config.time_zone = "America/New_York";
+    window.__dashboardCard.hass = window.__dashboardHass;
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-03-08T05:00:00.000Z",
+        end: "2026-03-09T03:59:59.999Z",
+        compare: true,
+      },
+    }));
+  });
+  await card.locator("[data-range-previous]").click();
+  const previous = await page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ));
+
+  expect(previous).toEqual({
+    start: "2026-03-07T05:00:00.000Z",
+    end: "2026-03-08T04:59:59.999Z",
+    compare: true,
+  });
 });
 
 test("HVAC context graph overlays outdoor temperature on a selectable right axis", async ({ page }) => {

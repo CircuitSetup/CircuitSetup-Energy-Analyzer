@@ -300,6 +300,88 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return `${startParts.month} ${startParts.day}-${endParts.month} ${endParts.day}`;
     }
 
+    _shiftDateKey(value, days) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+      if (!match) return "";
+      const date = new Date(Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]) + days,
+      ));
+      return date.toISOString().slice(0, 10);
+    }
+
+    _zonedTimestamp(value, hour = 0, minute = 0, second = 0, millisecond = 0) {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+      if (!match) return Number.NaN;
+      const target = Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        hour,
+        minute,
+        second,
+      );
+      let guess = target;
+      try {
+        const formatter = new Intl.DateTimeFormat("en-US", {
+          timeZone: this._timeZone(),
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hourCycle: "h23",
+        });
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const parts = Object.fromEntries(formatter.formatToParts(new Date(guess))
+            .map((part) => [part.type, part.value]));
+          const rendered = Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day),
+            Number(parts.hour),
+            Number(parts.minute),
+            Number(parts.second),
+          );
+          const adjustment = target - rendered;
+          if (!adjustment) break;
+          guess += adjustment;
+        }
+      } catch (_error) {
+        return target + millisecond;
+      }
+      return guess + millisecond;
+    }
+
+    _calendarRange(range = this._dashboardRange) {
+      const startKey = this._chartDateKey(Date.parse(range.start));
+      const endKey = this._chartDateKey(Date.parse(range.end));
+      const days = Math.max(1, Math.round(
+        (Date.parse(`${endKey}T00:00:00Z`) - Date.parse(`${startKey}T00:00:00Z`))
+        / 86_400_000,
+      ) + 1);
+      return { startKey, endKey, days };
+    }
+
+    _rangeFromDateKeys(startKey, endKey, compare = false) {
+      return {
+        start: new Date(this._zonedTimestamp(startKey)).toISOString(),
+        end: new Date(this._zonedTimestamp(endKey, 23, 59, 59, 999)).toISOString(),
+        compare,
+      };
+    }
+
+    _previousRange(range = this._dashboardRange) {
+      const { startKey, days } = this._calendarRange(range);
+      return this._rangeFromDateKeys(
+        this._shiftDateKey(startKey, -days),
+        this._shiftDateKey(startKey, -1),
+        range.compare,
+      );
+    }
+
     _dashboardHistorySeries(payload, configuredEntities) {
       const configs = new Map((configuredEntities || []).map((item) => [item.entity, item]));
       const parsed = [];
@@ -481,32 +563,25 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _shiftRange(action) {
       const range = validRange(this._dashboardRange);
-      const start = Date.parse(range.start);
-      const end = Date.parse(range.end);
-      const duration = end - start + 1;
+      const { startKey, endKey, days } = this._calendarRange(range);
       if (action === "previous") {
-        setDashboardRange({
-          start: new Date(start - duration),
-          end: new Date(start - 1),
-          compare: range.compare,
-        });
+        setDashboardRange(this._previousRange(range));
         return;
       }
       if (action === "next") {
-        setDashboardRange({
-          start: new Date(end + 1),
-          end: new Date(end + duration),
-          compare: range.compare,
-        });
+        setDashboardRange(this._rangeFromDateKeys(
+          this._shiftDateKey(endKey, 1),
+          this._shiftDateKey(endKey, days),
+          range.compare,
+        ));
         return;
       }
-      const nextEnd = new Date();
-      nextEnd.setHours(23, 59, 59, 999);
-      setDashboardRange({
-        start: new Date(nextEnd.getTime() - duration + 1),
-        end: nextEnd,
-        compare: range.compare,
-      });
+      const todayKey = this._chartDateKey(Date.now());
+      setDashboardRange(this._rangeFromDateKeys(
+        this._shiftDateKey(todayKey, 1 - days),
+        todayKey,
+        range.compare,
+      ));
     }
 
     _downloadCsv(range) {
@@ -519,12 +594,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         }
       }
       const names = [...byName.keys()];
+      const exportTime = (point) => point.source_time ?? point.time;
       const times = [...new Set([...byName.values()].flatMap((item) => (
-        item.points.map((point) => point.time)
+        item.points.map(exportTime)
       )))].sort((left, right) => left - right);
       const values = new Map([...byName].map(([name, item]) => [
         name,
-        new Map(item.points.map((point) => [point.time, point.value])),
+        new Map(item.points.map((point) => [exportTime(point), point.value])),
       ]));
       const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
       const rows = [
@@ -585,7 +661,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._dashboardHistorySeries(this._history, entities),
         ),
       ).map((item, index) => ({ ...item, color_index: index }));
-      const duration = Date.parse(range.end) - Date.parse(range.start) + 1;
+      const previousRange = this._previousRange(range);
+      const currentStart = Date.parse(range.start);
+      const currentDuration = Date.parse(range.end) - currentStart;
+      const previousStart = Date.parse(previousRange.start);
+      const previousDuration = Date.parse(previousRange.end) - previousStart;
       const comparisonSeries = range.compare
         ? this._groupDashboardHistorySeries(
           this._normalizedPowerSeries(
@@ -599,7 +679,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           points: item.points.map((point) => ({
             ...point,
             source_time: point.time,
-            time: point.time + duration,
+            time: currentStart + (
+              (point.time - previousStart) / Math.max(previousDuration, 1)
+            ) * currentDuration,
           })),
         }))
         : [];
@@ -675,15 +757,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._historyKey = key;
       const entityIds = encodeURIComponent(entities.map((item) => item.entity).join(","));
       const historyPath = (start, end) => `history/period/${start}?filter_entity_id=${entityIds}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
-      const start = Date.parse(range.start);
-      const end = Date.parse(range.end);
-      const duration = end - start + 1;
+      const previousRange = this._previousRange(range);
       const requests = [
         this._hass.callApi("GET", historyPath(range.start, range.end)),
         range.compare
           ? this._hass.callApi("GET", historyPath(
-            new Date(start - duration).toISOString(),
-            new Date(start - 1).toISOString(),
+            previousRange.start,
+            previousRange.end,
           ))
           : Promise.resolve([]),
       ];
@@ -924,7 +1004,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return Object.fromEntries(appliances.map((appliance) => {
         const powerEntities = appliance.power_entities || [];
         const energyValues = powerEntities.map((entityId) => (
-          this._integratedEnergy(history[entityId], start, end)
+          this._integratedEnergy(
+            history[entityId],
+            start,
+            end,
+            this._unit(entityId) === "kW" ? 1000 : 1,
+          )
         ));
         const energy = powerEntities.length && energyValues.every(Number.isFinite)
           ? energyValues.reduce((total, value) => total + value, 0)
@@ -936,7 +1021,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }));
     }
 
-    _integratedEnergy(rows, start, end) {
+    _integratedEnergy(rows, start, end, wattsPerUnit = 1) {
       const points = (rows || []).map((row) => ({
         time: Date.parse(row.last_changed || row.last_updated || ""),
         value: Number(row.state),
@@ -949,7 +1034,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const time = Math.max(start, point.time);
         if (!Number.isFinite(point.value) || point.value < 0) {
           if (previous && time > previous.time) {
-            energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
+            energy += previous.value * wattsPerUnit * (time - previous.time) / 3_600_000 / 1_000;
           }
           previous = null;
           continue;
@@ -957,12 +1042,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const value = point.value;
         sawValue = true;
         if (previous && time > previous.time) {
-          energy += previous.value * (time - previous.time) / 3_600_000 / 1_000;
+          energy += previous.value * wattsPerUnit * (time - previous.time) / 3_600_000 / 1_000;
         }
         previous = { time, value };
       }
       if (previous && end > previous.time) {
-        energy += previous.value * (end - previous.time) / 3_600_000 / 1_000;
+        energy += previous.value * wattsPerUnit * (end - previous.time) / 3_600_000 / 1_000;
       }
       return sawValue ? energy : null;
     }
@@ -1199,14 +1284,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._selection = items[0].circuit_id || items[0].appliance_key;
       }
       const range = validRange(this._dashboardRange);
-      const start = Date.parse(range.start);
-      const end = Date.parse(range.end);
-      const duration = end - start + 1;
+      const { startKey, endKey, days } = this._calendarRange(range);
       const historyRows = this._historyRows(items);
-      const rows = historyRows.filter((row) => {
-        const time = this._dailyTimestamp(row.date);
-        return time >= start && time <= end;
-      });
+      const rows = historyRows.filter((row) => (
+        String(row.date) >= startKey && String(row.date) <= endKey
+      ));
       const energyPoints = rows.map((row) => ({
         time: this._dailyTimestamp(row.date),
         value: Number(row.energy_kwh),
@@ -1217,19 +1299,32 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         cost_source: row.cost_source,
       })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
       const currency = this._currencySymbol();
-      const previousRows = range.compare ? historyRows.filter((row) => {
-        const time = this._dailyTimestamp(row.date);
-        return time >= start - duration && time < start;
-      }) : [];
-      const shiftedPoints = (key) => previousRows.map((row) => ({
-        time: this._dailyTimestamp(row.date) + duration,
-        value: Number(row[key]),
-      })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
-      const previousEnergy = shiftedPoints("energy_kwh");
-      const previousCost = previousRows.map((row) => ({
-        time: this._dailyTimestamp(row.date) + duration,
-        value: row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost),
-      })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
+      const previousStartKey = this._shiftDateKey(startKey, -days);
+      const previousEndKey = this._shiftDateKey(startKey, -1);
+      const previousRows = range.compare ? historyRows.filter((row) => (
+        String(row.date) >= previousStartKey && String(row.date) <= previousEndKey
+      )) : [];
+      const shiftedPoint = (row, value) => ({
+        source_time: this._dailyTimestamp(row.date),
+        time: this._dailyTimestamp(this._shiftDateKey(
+          startKey,
+          Math.round((
+            Date.parse(`${row.date}T00:00:00Z`)
+            - Date.parse(`${previousStartKey}T00:00:00Z`)
+          ) / 86_400_000),
+        )),
+        value,
+      });
+      const validPoint = (point) => (
+        Number.isFinite(point.time) && Number.isFinite(point.value)
+      );
+      const previousEnergy = previousRows.map((row) => (
+        shiftedPoint(row, Number(row.energy_kwh))
+      )).filter(validPoint);
+      const previousCost = previousRows.map((row) => shiftedPoint(
+        row,
+        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost),
+      )).filter(validPoint);
       const hasEnergy = energyPoints.length || previousEnergy.length;
       const hasCost = costPoints.length || previousCost.length;
       const series = [
@@ -1319,8 +1414,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _dailyTimestamp(value) {
-      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
-      return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12) : Number.NaN;
+      return this._zonedTimestamp(value, 12);
     }
 
   }
