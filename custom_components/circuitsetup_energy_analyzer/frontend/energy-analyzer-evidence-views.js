@@ -265,6 +265,28 @@ export function createEvidenceViewMethods({
     return start + ((end - start) * ratio);
   }
 
+  _zoomChartAt(event, chart) {
+    const key = chart.dataset.chartZoomKey;
+    const center = this._chartEventTime(event, chart);
+    const start = Number(chart.dataset.chartStart);
+    const end = Number(chart.dataset.chartEnd);
+    const min = Number(chart.dataset.chartMin);
+    const max = Number(chart.dataset.chartMax);
+    if (!key || !Number.isFinite(center) || !Number.isFinite(start) || !Number.isFinite(end)
+      || !Number.isFinite(min) || !Number.isFinite(max)) {
+      return;
+    }
+    const span = Math.max(15 * 60 * 1000, (end - start) / 2);
+    if (span >= end - start) return;
+    this._chartZoomWindows ||= new Map();
+    this._setGraphWindow(
+      center - span / 2,
+      center + span / 2,
+      { min, max },
+      (window) => this._chartZoomWindows.set(key, window),
+    );
+  }
+
   _renderRecommendations() {
     const recommendations = this._payload && this._payload.setting_recommendations;
     if (!recommendations || !recommendations.length) {
@@ -468,8 +490,12 @@ export function createEvidenceViewMethods({
     const sampleMaxTime = Math.max(...allPoints.map((point) => point.time));
     const graphStart = Date.parse(alert.graph_window_start);
     const graphEnd = Date.parse(alert.graph_window_end);
-    const minTime = Number.isFinite(graphStart) ? graphStart : sampleMinTime;
-    const maxTime = Number.isFinite(graphEnd) && graphEnd > minTime ? graphEnd : sampleMaxTime;
+    const baseMinTime = Number.isFinite(graphStart) ? graphStart : sampleMinTime;
+    const baseMaxTime = Number.isFinite(graphEnd) && graphEnd > baseMinTime ? graphEnd : sampleMaxTime;
+    const zoomKey = `${series.map((item) => `${item.entity_id || item.name}:${item.axis || "left"}`).join("|")}:${baseMinTime}:${baseMaxTime}`;
+    const zoomWindow = this._chartZoomWindows && this._chartZoomWindows.get(zoomKey);
+    const minTime = zoomWindow ? zoomWindow.start : baseMinTime;
+    const maxTime = zoomWindow ? zoomWindow.end : baseMaxTime;
     const leftPoints = series.filter((item) => !rightAxis || item.axis !== "right").flatMap((item) => item.points);
     const rightPoints = rightAxis ? series.filter((item) => item.axis === "right").flatMap((item) => item.points) : [];
     const leftSeries = series.filter((item) => !rightAxis || item.axis !== "right");
@@ -525,11 +551,11 @@ export function createEvidenceViewMethods({
         return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`;
       }).join("");
       const dash = axis === "right" ? ' stroke-dasharray="6 4"' : "";
-      return `<polyline fill="none" stroke="${color}" stroke-width="1.5"${dash} points="${points}"></polyline>${circles}`;
+      return `<polyline fill="none" stroke="${color}" stroke-width="2"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
       const color = CHART_COLORS[index % CHART_COLORS.length];
-      return `<div class="legend-item"><span class="swatch" style="background:${color}"></span><span>${this._escape(item.name)}</span></div>`;
+      return `<div class="legend-item"><ha-icon class="legend-marker" icon="mdi:check-circle" style="color:${color}"></ha-icon><span>${this._escape(item.name)}</span></div>`;
     }).join("");
     const minLabel = leftAxisCurrency ? this._formatCost(minValue) : this._formatNumber(minValue);
     const maxLabel = leftAxisCurrency ? this._formatCost(maxValue) : this._formatNumber(maxValue);
@@ -586,8 +612,9 @@ export function createEvidenceViewMethods({
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
       : "";
+    const chartAttrs = ` data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-min="${baseMinTime}" data-chart-max="${baseMaxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}" data-chart-zoom-key="${this._escape(zoomKey)}"`;
     const selectAttrs = alert.nilm_select_interval
-      ? ` tabindex="0" data-nilm-chart-select="1" data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}"${edgeTimesAttr}`
+      ? ` tabindex="0" data-nilm-chart-select="1"${edgeTimesAttr}`
       : "";
     let ariaLabel = this._panelTextFormat("chart.accessible_summary", {
       series_count: series.length,
@@ -608,7 +635,7 @@ export function createEvidenceViewMethods({
 
     return `
       <div class="chart-frame" data-chart-frame>
-        <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${selectAttrs}>
+        <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
           <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
           <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
           ${rightAxis ? `<line class="axis" x1="${width - padRight}" y1="${padTop}" x2="${width - padRight}" y2="${height - padBottom}"></line>` : ""}
@@ -634,6 +661,10 @@ export function createEvidenceViewMethods({
 
   _attachChartInspectors() {
     for (const svg of this.shadowRoot.querySelectorAll("svg.chart")) {
+      svg.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        this._zoomChartAt(event, svg);
+      });
       const points = Array.from(svg.querySelectorAll("[data-chart-point]"));
       const crosshair = svg.querySelector("[data-chart-crosshair]");
       const frame = svg.closest("[data-chart-frame]");

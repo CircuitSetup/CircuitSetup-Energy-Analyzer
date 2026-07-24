@@ -33,7 +33,14 @@ export const ACTION_SERVICE_NAMES = {
   undo_setting_recommendation: "undo_setting_recommendation",
   reset_setting_recommendation: "reset_setting_recommendation",
 };
-export const CHART_COLORS = ["#0b6bcb", "#d97706", "#15803d", "#be123c", "#7c3aed", "#0f766e"];
+export const CHART_COLORS = [
+  "var(--energy-grid-consumption-color, #488fc2)",
+  "var(--energy-solar-color, #ff9800)",
+  "var(--energy-battery-out-color, #4db6ac)",
+  "var(--energy-battery-in-color, #f06292)",
+  "var(--energy-water-color, #00bcd4)",
+  "var(--energy-gas-color, #8e021b)",
+];
 export const PANEL_METHOD_DEPENDENCIES = {
   APPLIANCE_DETAIL_API_PATH,
   APPLIANCE_DETAIL_CALL_API_PATH,
