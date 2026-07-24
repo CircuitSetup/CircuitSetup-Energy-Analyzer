@@ -987,7 +987,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .filter(Boolean))];
       const key = `${range.start}:${range.end}:${entityIds.join(",")}`;
       this._contributionLoadKey = key;
-      const historyPath = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(range.end)}&minimal_response=1&no_attributes=1`;
+      const start = Date.parse(range.start);
+      const end = Math.max(start, Math.min(Date.parse(range.end), Date.now()));
+      const historyPath = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(new Date(end).toISOString())}&minimal_response=1&no_attributes=1`;
       let payload = [];
       try {
         payload = entityIds.length ? await this._hass.callApi("GET", historyPath) : [];
@@ -995,8 +997,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         payload = [];
       }
       if (this._contributionLoadKey !== key) return;
-      const start = Date.parse(range.start);
-      const end = Date.parse(range.end);
       this._rollingContributionByCircuit = this._rollingTotals(payload, appliances, start, end);
       this._rangeSummary = this._rollingTotals(payload, [{
         circuit_id: "mains",
@@ -1241,6 +1241,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const range = validRange(this._dashboardRange);
       const start = Date.parse(range.start);
       const end = Date.parse(range.end);
+      const observedEnd = Math.max(start, Math.min(end, Date.now()));
       const lanes = selected.map((item) => {
         const points = this._timelineRows.filter((row) => row.entity_id === item.activity_entity)
           .map((row) => ({
@@ -1253,11 +1254,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const stateAtStart = points.filter((point) => point.time <= start).at(-1);
         const windowPoints = [
           ...(stateAtStart ? [{ ...stateAtStart, time: start }] : []),
-          ...points.filter((point) => point.time > start && point.time <= end),
+          ...points.filter((point) => point.time > start && point.time <= observedEnd),
         ];
         const bands = windowPoints.map((point, index) => ({
           ...point,
-          end: windowPoints[index + 1] ? windowPoints[index + 1].time : end,
+          end: windowPoints[index + 1] ? windowPoints[index + 1].time : observedEnd,
         })).filter((point) => String(point.state).toLowerCase() === "running" && point.end > point.time);
         return `<div class="timeline-lane"><span>${this._escape(item.name)}</span><span class="timeline-track">${bands.map((band) => `<span class="running-band" data-running-band style="left:${(band.time - start) / (end - start) * 100}%;width:${(band.end - band.time) / (end - start) * 100}%"></span>`).join("")}</span></div>`;
       }).filter(Boolean);

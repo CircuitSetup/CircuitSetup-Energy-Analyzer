@@ -3296,7 +3296,7 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
     ]
 
 
-def test_appliance_insights_payload_retains_comparison_daily_totals() -> None:
+def test_appliance_insights_payload_retains_all_available_daily_totals() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_insights_payload,
     )
@@ -3319,8 +3319,8 @@ def test_appliance_insights_payload_retains_comparison_daily_totals() -> None:
 
     (item,) = appliance_insights_payload([coordinator])["items"]
 
-    assert len(item["daily_totals"]) == 60
-    assert item["daily_totals"][0]["date"] == "2026-05-24"
+    assert len(item["daily_totals"]) == 61
+    assert item["daily_totals"][0]["date"] == "2026-05-23"
     assert item["daily_totals"][-1]["date"] == "2026-07-22"
 
 

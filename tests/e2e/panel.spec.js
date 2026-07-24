@@ -157,6 +157,7 @@ async function toHaveNoViolations(page) {
 }
 
 test("home energy card omits Active now and separates contribution", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
       await route.fulfill({
@@ -167,7 +168,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
           ],
           [
             { entity_id: "sensor.mains_cost_today", state: "1.00", last_changed: "2026-07-10T00:00:00.000Z" },
-            { state: "2.50", last_changed: "2026-07-12T23:59:59.999Z" },
+            { state: "2.50", last_changed: "2026-07-12T12:00:00.000Z" },
           ],
           [
             { entity_id: "sensor.oven_power", state: "1", last_changed: "2026-07-10T00:00:00.000Z" },
@@ -175,7 +176,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
           ],
           [
             { entity_id: "sensor.oven_cost", state: "1.00", last_changed: "2026-07-10T00:00:00.000Z" },
-            { state: "2.50", last_changed: "2026-07-12T23:59:59.999Z" },
+            { state: "2.50", last_changed: "2026-07-12T12:00:00.000Z" },
           ],
         ],
       });
@@ -281,13 +282,13 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     };
   });
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
-  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("72 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$1.50");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $2.16");
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("72 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("60 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$1.50");
   await toHaveNoViolations(page);
@@ -304,6 +305,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
 });
 
 test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
     await route.fulfill({
@@ -312,7 +314,6 @@ test("appliance grid filters live state and loads Activity Summary history", asy
         { state: "Running", last_changed: "2026-07-10T04:00:00.000Z" },
         { state: "Idle", last_changed: "2026-07-10T05:00:00.000Z" },
         { state: "Running", last_changed: "2026-07-12T21:00:00.000Z" },
-        { state: "Idle", last_changed: "2026-07-12T22:00:00.000Z" },
       ]],
     });
     return true;
@@ -419,6 +420,10 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     ))
   ))).toBe(true);
   await expect(card.locator("[data-running-band]")).toHaveCount(2);
+  const finalBandWidth = await card.locator("[data-running-band]").nth(1).evaluate(
+    (band) => Number.parseFloat(band.style.width),
+  );
+  expect(finalBandWidth).toBeCloseTo(100 / 72, 2);
   await expect(card.locator("[data-timeline-tick]")).toHaveCount(5);
   await expect(card.locator("[data-timeline-tick]").first()).toHaveText("Jul 10");
   await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Jul 12");
