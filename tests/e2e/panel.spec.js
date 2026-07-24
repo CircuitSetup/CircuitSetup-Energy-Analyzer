@@ -592,9 +592,22 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
     },
   );
 
-  await expect(card.locator("h2")).toHaveCSS("font-size", "18px");
+  await expect(card.locator("h2")).toHaveCSS("font-size", "24px");
+  await expect(card.locator("h2")).toHaveCSS("font-weight", "400");
+  await expect(card.locator(".dashboard-card")).toHaveCSS("font-size", "14px");
   await expect(card.locator("[data-context-hours]")).toHaveValue("24");
   await expect(card.locator("[data-context-hours] option")).toHaveCount(3);
+  await expect(card.locator(".legend-marker")).toHaveCount(3);
+  await expect(card.locator("[data-chart-point]").first()).toHaveCSS("fill", "rgb(72, 143, 194)");
+  const chart = card.locator("svg.chart");
+  const fullSpan = await chart.evaluate((element) => (
+    Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
+  ));
+  const chartBox = await chart.boundingBox();
+  await chart.dblclick({ position: { x: chartBox.width / 2, y: chartBox.height / 2 } });
+  await expect.poll(() => chart.evaluate((element) => (
+    Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
+  ))).toBeLessThan(fullSpan * 0.6);
   await card.locator("[data-context-hours]").selectOption("720");
   await expect(card.locator("svg.chart")).toHaveAttribute("data-chart-right-axis", "°F");
   await expect(card.locator(".axis-label").filter({ hasText: "kW" })).toHaveCount(1);
@@ -622,7 +635,7 @@ test("dashboard summary cards use the shared header style", async ({ page }) => 
     },
   );
 
-  await expect(card.locator("h2")).toHaveCSS("font-size", "18px");
+  await expect(card.locator("h2")).toHaveCSS("font-size", "24px");
   await expect(card.locator(".summary-row")).toContainText("Cost so far");
   await expect(card.locator(".summary-row")).toContainText("$42.10");
   await toHaveNoViolations(page);

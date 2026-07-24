@@ -3835,7 +3835,9 @@ for (const expected of [
   'data-chart-unit="W"',
   'data-chart-tooltip',
   'data-chart-crosshair',
-  'stroke-width="1.5"',
+  'stroke-width="2"',
+  'class="legend-marker"',
+  'icon="mdi:check-circle"',
 ]) {
   assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
 }

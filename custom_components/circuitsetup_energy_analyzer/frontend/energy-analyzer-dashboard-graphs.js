@@ -133,10 +133,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         :host { display: block; }
         * { box-sizing: border-box; letter-spacing: 0; }
         ha-card { background: var(--card-background-color, #fff); overflow: hidden; }
-        .dashboard-card { color: var(--primary-text-color, #111827); display: grid; font-family: Roboto, Noto, sans-serif; gap: 16px; padding: 16px; }
+        .dashboard-card { color: var(--primary-text-color, #111827); display: grid; font-family: Roboto, Noto, sans-serif; font-size: 14px; gap: 16px; line-height: 20px; padding: 16px; }
         h2, h3, p { margin: 0; }
-        h2 { font-size: 18px; }
-        h3 { font-size: 15px; }
+        h2 { font-size: 24px; font-weight: 400; line-height: 32px; }
+        h3 { font-size: 20px; font-weight: 400; line-height: 28px; }
         .muted { color: var(--secondary-text-color, #5b6470); }
         .kpis { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
         .metric { background: var(--secondary-background-color, #f4f6f8); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; padding: 10px; }
@@ -160,7 +160,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .issue { color: var(--warning-color, #a15c00); font-weight: 600; }
         .contribution { display: grid; gap: 8px; margin-top: 12px; }
         .controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
-        button.control, select, input { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #aeb7c2); border-radius: 4px; color: var(--primary-text-color, #111827); min-height: 36px; padding: 6px 10px; }
+        button.control, select, input { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #aeb7c2); border-radius: 4px; color: var(--primary-text-color, #111827); font: inherit; min-height: 36px; padding: 6px 10px; }
         button.control { cursor: pointer; }
         button.control[aria-selected="true"], button.control[aria-pressed="true"] { background: var(--primary-color, #0b6bcb); color: var(--text-primary-color, #fff); }
         input { min-width: min(240px, 100%); }
@@ -191,6 +191,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .axis-label, .chart text { fill: var(--primary-text-color, #111827); font-size: 12px; }
         .legend { display: flex; flex-wrap: wrap; font-size: 12px; gap: 8px; justify-content: center; margin-top: 8px; }
         .legend-item { align-items: center; display: inline-flex; gap: 6px; }
+        .legend-marker { --mdc-icon-size: 16px; }
         .summary-list { display: grid; gap: 8px; }
         .summary-row, .summary-link { align-items: center; background: transparent; border: 0; color: var(--primary-text-color, #111827); display: flex; justify-content: space-between; min-height: 40px; padding: 4px 0; text-align: left; text-decoration: none; width: 100%; }
         button.summary-row { cursor: pointer; }
@@ -1076,18 +1077,26 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       <ha-card>
         <style>
           .dashboard-graphs {
+            color: var(--primary-text-color, #111827);
             display: grid;
+            font-family: Roboto, Noto, sans-serif;
+            font-size: 14px;
             gap: 16px;
+            line-height: 20px;
             padding: 16px;
           }
           h2, h3 {
             margin: 0;
           }
           h2 {
-            font-size: 18px;
+            font-size: 24px;
+            font-weight: 400;
+            line-height: 32px;
           }
           h3 {
-            font-size: 15px;
+            font-size: 20px;
+            font-weight: 400;
+            line-height: 28px;
           }
           p {
             margin: 8px 0 0;
@@ -1247,6 +1256,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             align-items: center;
             display: inline-flex;
             gap: 6px;
+          }
+          .legend-marker {
+            --mdc-icon-size: 16px;
           }
           .swatch {
             border-radius: 50%;
