@@ -87,6 +87,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     set hass(value) {
       this._hass = value;
+      if (typeof this._refreshLiveData === "function") this._refreshLiveData();
       if (!localStorage.getItem(RANGE_KEY)) {
         const todayKey = this._chartDateKey(Date.now());
         this._dashboardRange = this._rangeFromDateKeys(todayKey, todayKey);
@@ -872,6 +873,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rollingContributionByCircuit = {};
       this._rangeSummary = {};
       this._contributionLoadKey = "";
+      this._rangeTotalsLoadedAt = 0;
     }
 
     _render() {
@@ -1021,6 +1023,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .filter(Boolean))];
       const key = `${range.start}:${range.end}:${entityIds.join(",")}`;
       this._contributionLoadKey = key;
+      this._rangeTotalsLoadedAt = Date.now();
       const start = Date.parse(range.start);
       const end = Math.max(start, Math.min(Date.parse(range.end), Date.now()));
       const liveStart = Math.max(start, this._zonedTimestamp(todayKey));
@@ -1062,6 +1065,18 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         liveSummary,
       );
       this._render();
+    }
+
+    _refreshLiveData() {
+      const { startKey, endKey } = this._calendarRange();
+      const todayKey = this._chartDateKey(Date.now());
+      if (
+        startKey <= todayKey
+        && endKey >= todayKey
+        && Date.now() - this._rangeTotalsLoadedAt >= 60_000
+      ) {
+        this._contributionLoadKey = "";
+      }
     }
 
     _retainedRangeTotals(item, startKey, endKey, todayKey) {
@@ -1295,7 +1310,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     async _ensureTimeline(appliances) {
       const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.activity_entity);
       const ids = selected.map((item) => item.activity_entity);
-      const range = validRange(this._dashboardRange);
+      const range = this._timelineRange();
       const key = `${range.start}:${range.end}:${ids.join(",")}`;
       if (!ids.length || key === this._timelineKey) return;
       this._timelineKey = key;
@@ -1325,7 +1340,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _timelineHtml(appliances) {
       const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.activity_entity);
-      const range = validRange(this._dashboardRange);
+      const range = this._timelineRange();
       const start = Date.parse(range.start);
       const end = Date.parse(range.end);
       const observedEnd = Math.max(start, Math.min(end, Date.now()));
@@ -1353,6 +1368,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ${this._timelineTicks(start, end).map((label) => `<span data-timeline-tick>${this._escape(label)}</span>`).join("")}
       </div></div>`;
       return lanes.length ? `${lanes.join("")}${scale}` : `<p class="muted">${this._escape(this._label("no_history", "No running history is available for this period."))}</p>`;
+    }
+
+    _timelineRange() {
+      const range = validRange(this._dashboardRange);
+      const { endKey, days } = this._calendarRange(range);
+      return days <= 31
+        ? range
+        : this._rangeFromDateKeys(this._shiftDateKey(endKey, -30), endKey);
     }
 
     _timelineTicks(start, end) {

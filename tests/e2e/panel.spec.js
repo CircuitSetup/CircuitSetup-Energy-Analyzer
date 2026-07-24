@@ -300,6 +300,16 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("18 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
+  const historyCalls = await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
+  ));
+  await page.clock.fastForward("01:01");
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
+  ))).toBe(historyCalls + 1);
   await toHaveNoViolations(page);
   await page.evaluate(() => {
     const root = document.documentElement.style;
@@ -498,6 +508,51 @@ test("appliance grid filters live state and loads Activity Summary history", asy
   await card.getByRole("tab", { name: "All", exact: true }).click();
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
+});
+
+test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[
+        { entity_id: "sensor.fridge_activity", state: "Running", last_changed: "2026-05-31T00:00:00.000Z" },
+        { state: "Idle", last_changed: "2026-06-01T00:00:00.000Z" },
+      ]],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        activity_entity: "sensor.fridge_activity",
+      }],
+    },
+    {
+      "sensor.fridge_activity": { state: "Running", attributes: {} },
+    },
+  );
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-01-01T00:00:00.000Z",
+        end: "2026-06-30T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("end_time=2026-06-30")) || ""
+  ))).toContain("history/period/2026-05-31T00:00:00.000Z");
+  await expect(card.locator("[data-timeline-tick]").first()).toHaveText("May 31");
+  await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Jun 30");
 });
 
 test("energy and cost card follows the dashboard range and preserves cost source", async ({ page }) => {
