@@ -846,13 +846,13 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
     )
     for view in _dashboard_views(dashboard):
         for section in view["sections"]:
+            date_card, *content_cards = section["cards"]
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
-                or (view["path"] == "overview" and len(section["cards"]) > 1)
-                else 48 // min(4, len(section["cards"]))
+                or (view["path"] == "overview" and len(content_cards) > 1)
+                else 48 // min(4, len(content_cards))
             )
-            date_card, *content_cards = section["cards"]
             assert date_card["grid_options"]["columns"] == 48
             assert {
                 card["grid_options"]["columns"] for card in content_cards
@@ -861,6 +861,19 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
         dashboard,
         "custom:circuitsetup-energy-analyzer-appliance-grid",
     )
+
+
+def test_single_insight_card_uses_full_width() -> None:
+    dashboard = build_recommended_dashboard(
+        (_example_circuits()[1],),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+
+    _, card = insights["sections"][0]["cards"]
+    assert card["grid_options"]["columns"] == 48
 
 
 def test_dashboard_balancing_accounts_for_wide_appliance_status_section() -> None:

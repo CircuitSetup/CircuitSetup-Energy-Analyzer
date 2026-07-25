@@ -285,6 +285,7 @@ def build_recommended_dashboard(
         )
     for view in views:
         cards = view["sections"][0]["cards"]
+        content_card_count = len(cards)
         cards.insert(
             0,
             {
@@ -297,11 +298,11 @@ def build_recommended_dashboard(
         card_columns = (
             24
             if view["path"] == "energy-costs"
-            or (view["path"] == "overview" and len(cards) > 1)
+            or (view["path"] == "overview" and content_card_count > 1)
             else (DASHBOARD_COLUMNS * 12)
             // min(
                 DASHBOARD_COLUMNS,
-                max(1, len(cards)),
+                max(1, content_card_count),
             )
         )
         for card in cards:
