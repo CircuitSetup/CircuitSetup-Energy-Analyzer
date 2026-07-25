@@ -278,6 +278,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
   await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
   const clearedTotals = await page.evaluate(() => {
+    window.__apiCalls.length = 0;
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
         start: "2026-07-10T00:00:00.000Z",
@@ -291,25 +292,37 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     };
   });
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
-  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60.4 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
-  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$3.50");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Unavailable");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $2.16");
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("18 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("6.7 kWh");
   await card.locator('[data-contribution-mode="cost"]').click();
-  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$2.10");
+  await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.74");
   const historyCalls = await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
   ));
-  await page.clock.fastForward("01:01");
+  const insightCalls = await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
+  ));
   await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_energy", {
+      state: "2.4",
+      attributes: { unit_of_measurement: "kWh" },
+    });
     window.__dashboardCard.hass = window.__dashboardHass;
   });
-  await expect.poll(() => page.evaluate(() => (
+  await card.locator('[data-contribution-mode="energy"]').click();
+  await expect(card.locator(".bar-row").filter({ hasText: "Fridge" })).toContainText("4.4 kWh");
+  expect(await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
-  ))).toBe(historyCalls + 1);
+  ))).toBe(0);
+  expect(await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
+  ))).toBe(insightCalls);
+  expect(historyCalls).toBe(0);
   await toHaveNoViolations(page);
   await page.evaluate(() => {
     const root = document.documentElement.style;
