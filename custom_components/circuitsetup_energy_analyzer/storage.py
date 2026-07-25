@@ -793,6 +793,7 @@ class FeatureStore:
                 )
                 return {}
 
+        self._hass = hass
         self._store: Store[dict[str, Any]] = _CurrentOnlyStore(
             hass,
             STORAGE_VERSION,
@@ -806,11 +807,12 @@ class FeatureStore:
         return self.data
 
     async def async_save(self: Self) -> None:
-        """Schedule persistence without serializing on the event loop."""
-        self._store.async_delay_save(
-            lambda: feature_store_data_to_dict(self.data),
-            delay=0,
+        """Persist the current payload without serializing on the event loop."""
+        data = await self._hass.async_add_executor_job(
+            feature_store_data_to_dict,
+            self.data,
         )
+        await self._store.async_save(data)
 
 
 def _features_to_dict(features: Any) -> dict[str, Any]:

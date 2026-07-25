@@ -1,7 +1,5 @@
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Any
 
 import pytest
 
@@ -1272,30 +1270,30 @@ def test_expected_schedule_settings_and_evidence_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_feature_store_defers_serialization_to_ha_storage() -> None:
+async def test_feature_store_defers_serialization_to_executor() -> None:
     """Catch feature-store snapshots being rebuilt on the event loop."""
-    scheduled: list[tuple[Callable[[], dict[str, Any]], float]] = []
+    executor_calls: list[tuple[object, object]] = []
+    saved: list[dict[str, object]] = []
+
+    class FakeHass:
+        async def async_add_executor_job(
+            self,
+            target: object,
+            data: object,
+        ) -> dict[str, object]:
+            executor_calls.append((target, data))
+            return {"serialized": True}
 
     class FakeHAStore:
-        def async_delay_save(
-            self,
-            data_func: Callable[[], dict[str, Any]],
-            delay: float,
-        ) -> None:
-            scheduled.append((data_func, delay))
+        async def async_save(self, data: dict[str, object]) -> None:
+            saved.append(data)
 
     store = FeatureStore.__new__(FeatureStore)
+    store._hass = FakeHass()
     store._store = FakeHAStore()
     store.data = FeatureStoreData()
 
     await store.async_save()
 
-    assert len(scheduled) == 1
-    data_func, delay = scheduled[0]
-    assert delay == 0
-    store.data.learning_started_at_by_circuit["fridge"] = (
-        "2026-07-25T12:00:00+00:00"
-    )
-    assert data_func()["learning_started_at_by_circuit"] == {
-        "fridge": "2026-07-25T12:00:00+00:00"
-    }
+    assert executor_calls == [(feature_store_data_to_dict, store.data)]
+    assert saved == [{"serialized": True}]
