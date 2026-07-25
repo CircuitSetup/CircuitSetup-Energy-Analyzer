@@ -1110,7 +1110,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
   });
   await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-10T00:00:00.000Z")}"]`)).toHaveCount(1);
   await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-09T23:00:00.000Z")}"]`)).toHaveCount(0);
-  await expect(selector).toContainText("Jul 10-12");
+  await expect(selector).toContainText("Jul 10–Jul 12");
   await selector.locator("[data-range-previous]").click();
   await expect.poll(() => page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range")).start
@@ -1746,6 +1746,176 @@ test("dashboard date picker stays mounted while it is open", async ({ page }) =>
     && window.__dashboardCard.shadowRoot.querySelector("ha-date-range-picker")
       === window.__openDatePicker
   ))).toBe(true);
+});
+
+test("dashboard date selector loads every stock Energy control", async ({ page }) => {
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {});
+    window.__dateControlHelperLoads = 0;
+    window.loadCardHelpers = async () => ({
+      createCardElement() {
+        window.__dateControlHelperLoads += 1;
+        for (const tag of ["ha-dropdown", "ha-dropdown-item", "ha-ripple", "ha-spinner"]) {
+          if (!customElements.get(tag)) customElements.define(tag, class extends HTMLElement {});
+        }
+      },
+    });
+  });
+  await mockPanelApi(page);
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+
+  await expect.poll(() => page.evaluate(() => window.__dateControlHelperLoads)).toBe(1);
+  expect(await page.evaluate(() => (
+    ["ha-dropdown", "ha-dropdown-item", "ha-ripple", "ha-spinner"]
+      .every((tag) => Boolean(customElements.get(tag)))
+  ))).toBe(true);
+});
+
+test("dashboard date selector mirrors stock Energy controls and presets", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+
+  await expect(card.locator(".row > .backdrop")).toHaveCount(1);
+  await expect(card.locator(".content > .date-picker-icon ha-date-range-picker")).toHaveCount(1);
+  await expect(card.locator(".date-range ha-ripple")).toHaveCount(1);
+  await expect(card.locator(".date-range ha-spinner.loading-indicator")).toHaveCount(1);
+  const narrow = await card.evaluate((element) => element._narrow);
+  await expect(card.locator(".date-actions ha-button[data-range-now]")).toHaveCount(narrow ? 0 : 1);
+  await expect(card.locator(".date-actions > .overflow > ha-icon-button[data-range-previous]")).toHaveCount(1);
+  await expect(card.locator(".date-actions > .overflow > ha-icon-button[data-range-next]")).toHaveCount(1);
+  await expect(card.locator("ha-dropdown ha-dropdown-item[data-range-compare]")).toHaveCount(1);
+  await expect(card.locator("ha-dropdown ha-dropdown-item[data-range-download]")).toHaveCount(1);
+  expect(await card.locator("ha-date-range-picker").evaluate((picker) => (
+    Object.keys(picker.ranges || {})
+  ))).toEqual([
+    "Today",
+    "Yesterday",
+    "This week",
+    "This month",
+    "This quarter",
+    "This year",
+    "Last 7 days",
+    "Last 30 days",
+    "Last 365 days",
+    "Last 12 months",
+  ]);
+});
+
+test("dashboard date selector shows the stock delayed loading indicator", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+
+  await card.locator("[data-range-previous]").click();
+  await expect(card.locator("ha-spinner.loading-indicator")).toHaveClass(/is-loading/, {
+    timeout: 1_000,
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("circuitsetup-dashboard-data-changed"));
+  });
+  await expect(card.locator("ha-spinner.loading-indicator")).not.toHaveClass(/is-loading/);
+});
+
+test("dashboard date selector uses stock responsive overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+  await expect.poll(() => card.evaluate((element) => element._narrow)).toBe(true);
+  await expect(card.locator("ha-button[data-range-now]")).toHaveCount(0);
+  await expect(card.locator("ha-dropdown-item[data-range-now]")).toHaveCount(1);
+  await expect(card.locator(".overflow > ha-icon-button[data-range-previous]")).toHaveCount(1);
+
+  await card.evaluate((element) => {
+    element.style.width = "250px";
+    element._measure();
+  });
+  await expect.poll(() => card.evaluate((element) => element._collapseButtons)).toBe(true);
+  await expect(card.locator(".overflow > ha-icon-button[data-range-previous]")).toHaveCount(0);
+  await expect(card.locator("ha-dropdown-item[data-range-previous]")).toHaveCount(1);
+});
+
+test("dashboard date selector uses stock month navigation within history bounds", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-06-01T00:00:00.000Z",
+      end: "2026-06-30T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("[data-range-previous]").click();
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-05-01T00:00:00.000Z",
+    end: "2026-05-31T23:59:59.999Z",
+    compare: false,
+  });
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-06-01T00:00:00.000Z",
+        end: "2026-06-30T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+  await card.locator("[data-range-now]").click();
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-01T00:00:00.000Z",
+    end: "2026-07-24T23:59:59.999Z",
+    compare: false,
+  });
+});
+
+test("dashboard date selector matches stock cross-year date formatting", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2025-12-31T00:00:00.000Z",
+      end: "2026-01-01T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect(card.locator("[data-range-label]")).toHaveText("Dec 31–Jan 1");
+  await expect(card.locator("[data-range-subtitle]")).toHaveText("2025–2026");
 });
 
 test("dashboard date range is bounded by retained history and today", async ({ page }) => {
