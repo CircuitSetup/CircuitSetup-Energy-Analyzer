@@ -1247,7 +1247,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const range = validRange(this._dashboardRange);
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
-      const key = `${range.start}:${range.end}`;
+      const key = `${range.start}:${range.end}:${todayKey}`;
       const rolloverReload = this._rangeTotalsRolloverReloadKey === key;
       this._contributionLoadKey = key;
       this._rangeTotalsDateKey = todayKey;

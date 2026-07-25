@@ -488,6 +488,9 @@ test("home totals retry when the first midnight payload is stale", async ({ page
   const insightCalls = await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
   ));
+  const requestKeyBeforeMidnight = await page.evaluate(() => (
+    window.__dashboardCard._contributionLoadKey
+  ));
 
   await page.clock.fastForward("02:00");
   afterMidnight = true;
@@ -502,6 +505,8 @@ test("home totals retry when the first midnight payload is stale", async ({ page
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
   ))).toBe(insightCalls + 1);
+  expect(await page.evaluate(() => window.__dashboardCard._contributionLoadKey))
+    .not.toBe(requestKeyBeforeMidnight);
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("10 kWh");
   await page.clock.fastForward(30_000);
   await expect.poll(() => page.evaluate(() => (
