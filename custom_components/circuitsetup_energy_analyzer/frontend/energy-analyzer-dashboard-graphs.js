@@ -1200,8 +1200,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
       if (
-        previousDateKey
-        && previousDateKey !== todayKey
+        (!previousDateKey || previousDateKey !== todayKey)
         && startKey <= completedDayKey
         && endKey >= completedDayKey
         && !completedDayReady

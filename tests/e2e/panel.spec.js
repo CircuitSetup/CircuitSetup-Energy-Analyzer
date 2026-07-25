@@ -93,11 +93,31 @@ async function openDashboardGraphs(page) {
   return dashboard;
 }
 
-async function openDashboardCard(page, tagName, config, states = {}, hassConfig = {}) {
+async function openDashboardCard(
+  page,
+  tagName,
+  config,
+  states = {},
+  hassConfig = {},
+  dashboardRange = null,
+) {
   await page.goto(HARNESS);
   await page.waitForFunction(() => window.__panelReady === true);
-  await page.evaluate(({ tagName: tag, cardConfig, cardStates, nextHassConfig }) => {
-    localStorage.removeItem("circuitsetup-energy-analyzer-dashboard-range");
+  await page.evaluate(({
+    tagName: tag,
+    cardConfig,
+    cardStates,
+    nextHassConfig,
+    nextDashboardRange,
+  }) => {
+    if (nextDashboardRange) {
+      localStorage.setItem(
+        "circuitsetup-energy-analyzer-dashboard-range",
+        JSON.stringify(nextDashboardRange),
+      );
+    } else {
+      localStorage.removeItem("circuitsetup-energy-analyzer-dashboard-range");
+    }
     const hass = window.__panel._hass;
     const panelConfig = window.__panel._panel;
     Object.assign(hass.config, nextHassConfig);
@@ -125,6 +145,7 @@ async function openDashboardCard(page, tagName, config, states = {}, hassConfig 
     cardConfig: config,
     cardStates: states,
     nextHassConfig: hassConfig,
+    nextDashboardRange: dashboardRange,
   });
   return page.locator(tagName);
 }
@@ -489,6 +510,55 @@ test("home totals retry when the first midnight payload is stale", async ({ page
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 11-12)" })).toContainText("$3.00");
   await expect(card.locator(".bar-row").filter({ hasText: "Fridge" })).toContainText("3 kWh");
+});
+
+test("newly mounted home totals retry stale rollover data", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-13T00:01:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [],
+        whole_house: [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          daily_totals: [
+            { date: "2026-07-11", energy_kwh: 10, cost: 2 },
+            ...(insightCalls > 1
+              ? [{ date: "2026-07-12", energy_kwh: 4, cost: 1 }]
+              : []),
+          ],
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { circuit_id: "mains" },
+      appliances: [],
+    },
+    {},
+    {},
+    {
+      start: "2026-07-11T00:00:00.000Z",
+      end: "2026-07-12T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("10 kWh");
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
 });
 
 test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
