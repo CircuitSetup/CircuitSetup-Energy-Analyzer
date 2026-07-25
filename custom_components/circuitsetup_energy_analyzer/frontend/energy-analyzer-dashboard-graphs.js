@@ -682,7 +682,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._historyBoundsLoaded = true;
         this._render();
       } catch (_error) {
-        this._historyBoundsLoaded = true;
+        return;
       } finally {
         this._historyBoundsLoading = false;
       }

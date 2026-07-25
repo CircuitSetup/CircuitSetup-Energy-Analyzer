@@ -1657,9 +1657,20 @@ test("dashboard date picker stays mounted while it is open", async ({ page }) =>
 });
 
 test("dashboard date range is bounded by retained history and today", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/appliance_insights" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "appliance_insights: net::ERR_ABORTED" },
+  );
   await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    if (insightCalls === 1) {
+      await route.fulfill({ status: 503, body: "" });
+      return true;
+    }
     await route.fulfill({
       json: {
         status: "ok",
@@ -1688,6 +1699,13 @@ test("dashboard date range is bounded by retained history and today", async ({ p
     {},
     { time_zone: "UTC" },
   );
+  await expect.poll(() => page.evaluate(() => (
+    window.__dashboardCard._historyBoundsLoading
+  ))).toBe(false);
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => insightCalls).toBe(2);
   await expect.poll(() => card.locator("[data-range-previous]").getAttribute("disabled"))
     .toBeNull();
 
