@@ -1431,7 +1431,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "detail.recent_timeline",
         "_renderApplianceTimeline",
         '_panelText("appliance_detail.behavior_expectations")',
-        '_panelText("common.source")',
         '_panelText("common.confidence")',
         "NILM_WORKSPACE_CALL_API_PATH",
         "nilm_workspace",
@@ -1696,10 +1695,10 @@ panel._applianceDetail = {
 const html = panel._renderApplianceDetailBody();
 for (const expected of [
   'data-appliance-daily-cost',
-  "Cost Today",
-  "Average Cost per Day",
   "kWh Today",
   "Average kWh per Day",
+  "Cost Today",
+  "Average Cost per Day",
   "€0.60",
   "Cost today",
   "Normal",
@@ -1714,6 +1713,25 @@ if (html.includes("$")) {
 }
 assert.equal((html.match(/>Cost Today</g) || []).length, 1);
 assert.equal((html.match(/class="chart"/g) || []).length, 1);
+assert.equal((html.match(/class="panel summary appliance-detail-facts"/g) || []).length, 1);
+const dailyMetricOrder = [
+  ">kWh Today<",
+  ">Average kWh per Day<",
+  ">Cost Today<",
+  ">Average Cost per Day<",
+].map((label) => html.indexOf(label));
+assert.ok(dailyMetricOrder.every((index) => index >= 0));
+assert.deepEqual(dailyMetricOrder, [...dailyMetricOrder].sort((left, right) => left - right));
+for (const removed of [
+  ">Learning<",
+  ">Source<",
+  ">Mains Source<",
+  ">Data Quality<",
+  ">Model<",
+  ">Energy Today<",
+]) {
+  assert.ok(!html.includes(removed), `unexpected appliance fact ${removed}: ${html}`);
+}
 assert.ok(html.includes('data-chart-right-axis="€"'));
 assert.ok(html.includes('>€0.55</text>'));
 assert.equal((html.match(/stroke-dasharray="6 4"/g) || []).length, 1);
@@ -1946,12 +1964,8 @@ const html = panel._renderApplianceDetailBody();
 for (const expected of [
   'icon="mdi:play-circle-outline"',
   'icon="mdi:flash-outline"',
-  'icon="mdi:transmission-tower"',
-  'icon="mdi:database-check-outline"',
-  'icon="mdi:school-outline"',
   'icon="mdi:heart-pulse"',
   'icon="mdi:chart-line"',
-  'icon="mdi:cpu-64-bit"',
   'icon="mdi:calendar-today"',
   'icon="mdi:timer-outline"',
   'icon="mdi:counter"',
@@ -2101,9 +2115,16 @@ const panel = new context.Panel();
 panel._applianceDetail = {
   status: "ok",
   history: {
-    entities: ["sensor.fridge_power", "sensor.fridge_energy"],
+    entities: [
+      "sensor.fridge_power",
+      "sensor.fridge_power_factor",
+      "sensor.fridge_current",
+      "sensor.fridge_energy",
+    ],
     entity_series: [
       { entity_id: "sensor.fridge_power", unit: "W" },
+      { entity_id: "sensor.fridge_power_factor", unit: "PF" },
+      { entity_id: "sensor.fridge_current", unit: "A" },
       { entity_id: "sensor.fridge_energy", unit: "kWh" },
     ],
     default_hours: 168,
@@ -2133,6 +2154,12 @@ panel._applianceDetailHistorySeries = [[
   { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
 ], [
+  { entity_id: "sensor.fridge_power_factor", state: "0.92", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_power_factor", state: "0.88", last_changed: "2026-07-10T13:00:00Z" },
+], [
+  { entity_id: "sensor.fridge_current", state: "1.4", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_current", state: "1.1", last_changed: "2026-07-10T13:00:00Z" },
+], [
   { entity_id: "sensor.fridge_energy", state: "1.2", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_energy", state: "1.4", last_changed: "2026-07-10T13:00:00Z" },
 ]];
@@ -2142,7 +2169,7 @@ panel._applianceDetailHistoryBounds = {
 };
 const html = panel._renderApplianceDetailBody();
 const graph = html.indexOf('class="chart"');
-const summary = html.indexOf('class="panel summary"');
+const summary = html.indexOf('class="panel summary appliance-detail-facts"');
 if (graph < 0 || graph > summary) {
   throw new Error(`expected appliance history graph before summaries: ${html}`);
 }
@@ -2158,9 +2185,12 @@ for (const expected of [
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
-if ((html.match(/class="chart"/g) || []).length !== 2) {
-  throw new Error(`expected separate power and energy charts: ${html}`);
+if ((html.match(/class="chart"/g) || []).length !== 4) {
+  throw new Error(`expected separate power, amps, power factor, and energy charts: ${html}`);
 }
+const axisLabels = [...html.matchAll(/class="axis-label"[^>]*>([^<]+)<\\/text>/g)]
+  .map((match) => match[1]);
+assert.deepEqual(axisLabels, ["W", "A", "PF", "kWh"]);
 """
     )
 

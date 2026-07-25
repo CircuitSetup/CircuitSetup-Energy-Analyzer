@@ -3737,6 +3737,79 @@ async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
 
 
 @pytest.mark.asyncio
+async def test_runtime_does_not_persist_processor_alerts_while_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="hvac_2",
+        severity=Severity.WARNING,
+        message="Real power is above normal.",
+        feature="real_power",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["hvac_2"] = True
+
+    _, active_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(alerts=[alert], notifications=[alert])
+    )
+
+    assert active_alerts == []
+    assert coordinator.store_data.alerts == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_applies_learning_updates_before_filtering_alerts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    now = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="hvac_2",
+        severity=Severity.WARNING,
+        message="Real power is above normal.",
+        feature="real_power",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["hvac_2"] = True
+    coordinator._notify_alert = AsyncMock()
+
+    _, active_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(
+            alerts=[alert],
+            notifications=[alert],
+            state_updates=[
+                StateUpdate(("learning_by_circuit", "hvac_2"), False),
+            ],
+        )
+    )
+
+    assert active_alerts == [alert]
+    assert coordinator.store_data.alerts == [alert]
+    coordinator._notify_alert.assert_awaited_once_with(alert)
+
+
+@pytest.mark.asyncio
 async def test_setup_entry_loads_feature_store_and_runtime_saves(monkeypatch) -> None:
     import custom_components.circuitsetup_energy_analyzer as integration
 
@@ -4263,6 +4336,7 @@ async def test_expected_alert_feedback_suppresses_matching_future_notification(
         ),
         now_fn=lambda: now + timedelta(days=1),
     )
+    coordinator.state.learning_by_circuit["fridge"] = False
 
     _, active_alerts = await coordinator.async_apply_feature_result(
         FeatureResult(alerts=[repeated_alert], notifications=[repeated_alert])
@@ -7751,7 +7825,9 @@ async def test_runtime_data_quality_creates_repairs_issue(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> None:
+async def test_stale_source_repair_waits_for_learning_and_names_stale_sensor(
+    monkeypatch,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -7824,6 +7900,21 @@ async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> N
     )
 
     await coordinator.async_process_update()
+    assert issues == []
+
+    coordinator.processor_runtime.learning_mature = lambda config, now: True
+    coordinator.state.learning_by_circuit["ac2"] = False
+    coordinator.state.energy_usage_evidence_by_circuit["ac2"] = {
+        "status": "learning"
+    }
+    await coordinator.async_process_update()
+    assert issues == []
+
+    coordinator.state.learning_by_circuit["ac2"] = False
+    coordinator.state.energy_usage_evidence_by_circuit["ac2"] = {
+        "status": "tracking"
+    }
+    await coordinator.async_process_update()
 
     assert issues == [
         (
@@ -7844,6 +7935,10 @@ async def test_stale_source_repair_names_only_the_stale_sensor(monkeypatch) -> N
 
     issues.clear()
     stale_entity[0] = "sensor.ac2_current"
+    coordinator.state.learning_by_circuit["ac2"] = False
+    coordinator.state.energy_usage_evidence_by_circuit["ac2"] = {
+        "status": "tracking"
+    }
     await coordinator.async_process_update()
 
     assert issues[0][2] == ["sensor.ac2_current"]
@@ -10902,9 +10997,8 @@ async def test_runtime_real_power_fallback_waits_while_optional_metrics_learn(
         await coordinator.async_process_update()
 
     assert notifications == []
-    assert coordinator.state.active_alerts_by_circuit["fridge"][0].feature == (
-        "real_power"
-    )
+    assert coordinator.state.active_alerts_by_circuit == {}
+    assert coordinator.store_data.alerts == []
     assert coordinator.state.learning_by_circuit["fridge"] is True
     assert coordinator._baseline_values["fridge:reactive_power"] == [20.0, 20.0, 20.0]
     assert "fridge:reactive_power" not in coordinator.store_data.baselines

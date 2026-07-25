@@ -551,27 +551,15 @@ export function createApplianceViewMethods({
       ${this._renderApplianceDetailHistory(payload.history)}
       ${this._renderApplianceDailyCost(payload, detail)}
       <div class="appliance-detail-overview">
-        <div class="appliance-detail-facts">
-          <section class="panel summary">
-            ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
-            ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
-            ${this._metric(this._panelText("common.source"), this._sourceLabel(detail.source_type), "mdi:transmission-tower")}
-            ${detail.source_type === "nilm_estimate" && (detail.mains_source || detail.mains_circuit_id) ? this._metric(this._panelText("appliance_detail.mains_source"), detail.mains_source || detail.mains_circuit_id, "mdi:home-lightning-bolt-outline") : ""}
-            ${detail.source_quality ? this._metric(this._panelText("appliance_detail.data_quality"), detail.source_quality.label || this._friendlyFeature(detail.source_quality.status), "mdi:database-check-outline") : ""}
-            ${detail.learning_readiness ? this._metric(this._panelText("appliance_detail.learning_readiness"), detail.learning_readiness.label || this._friendlyFeature(detail.learning_readiness.status), "mdi:school-outline") : ""}
-            ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
-          </section>
-          <section class="panel summary">
-            ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
-            ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
-            ${this._metric(this._panelText("appliance_detail.model"), detail.model_status || this._sourceLabel("direct_meter"), "mdi:cpu-64-bit")}
-          </section>
-          <section class="panel summary">
-            ${this._metric(this._panelText("appliance_detail.energy_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
-            ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
-            ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-          </section>
-        </div>
+        <section class="panel summary appliance-detail-facts">
+          ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+          ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+          ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
+          ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+          ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+          ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
+          ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
+        </section>
         <section class="panel appliance-detail-timeline">
           <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
           ${this._renderApplianceTimeline(detail.recent_timeline)}
@@ -630,10 +618,10 @@ export function createApplianceViewMethods({
       <h2>${this._escape(this._panelText("appliance_detail.daily_cost_and_energy"))}</h2>
       ${charts || `<p class="muted">${this._escape(this._panelText("appliance_detail.no_completed_days"))}</p>`}
       <div class="summary appliance-daily-metrics">
-        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
-        ${this._metric(this._panelText("appliance_detail.average_cost_per_day"), this._formatCost(detail.average_cost_per_day), "mdi:cash-multiple")}
         ${this._metric(this._panelText("appliance_detail.kwh_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
         ${this._metric(this._panelText("appliance_detail.average_kwh_per_day"), this._formatKwh(detail.average_kwh_per_day), "mdi:chart-line")}
+        ${this._metric(this._panelText("appliance_detail.cost_today"), this._formatCost(detail.cost_today), "mdi:cash")}
+        ${this._metric(this._panelText("appliance_detail.average_cost_per_day"), this._formatCost(detail.average_cost_per_day), "mdi:cash-multiple")}
       </div>
     </section>`;
   }
@@ -675,6 +663,12 @@ export function createApplianceViewMethods({
       : this._chartSeries(this._applianceDetailHistorySeries, history.entity_series);
     const series = window ? this._visibleParsedChartSeries(parsedSeries, window) : [];
     const groupedSeries = this._chartSeriesByUnit(series);
+    const powerFactorIndex = groupedSeries.findIndex(({ unit }) => unit === "PF");
+    const ampsIndex = groupedSeries.findIndex(({ unit }) => unit === "A");
+    if (powerFactorIndex >= 0 && ampsIndex >= 0 && powerFactorIndex !== ampsIndex + 1) {
+      const [powerFactor] = groupedSeries.splice(powerFactorIndex, 1);
+      groupedSeries.splice(groupedSeries.findIndex(({ unit }) => unit === "A") + 1, 0, powerFactor);
+    }
     const chartOptions = {
       graph_window_start: window ? new Date(window.start).toISOString() : "",
       graph_window_end: window ? new Date(window.end).toISOString() : "",

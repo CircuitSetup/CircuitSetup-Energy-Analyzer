@@ -77,7 +77,10 @@ def _coordinator(
     return SimpleNamespace(
         store_data=SimpleNamespace(alerts=list(alerts)),
         circuit_configs=configs or (default_config,),
-        state=SimpleNamespace(alert_evidence_by_circuit={}),
+        state=SimpleNamespace(
+            alert_evidence_by_circuit={},
+            learning_by_circuit={default_config.circuit_id: False},
+        ),
     )
 
 
@@ -137,6 +140,28 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
         "/config/integrations/"
     )
     assert "workspace_call_api_path" not in payload["nilm"]
+
+
+def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert(circuit_id="hvac_2", feature="real_power")
+    coordinator = _coordinator(alert, config=_config("hvac_2"))
+    coordinator.state.learning_by_circuit["hvac_2"] = True
+    coordinator.state.alert_evidence_by_circuit["hvac_2"] = {
+        "alert_id": "stored-state-fallback",
+        "feature": "real_power",
+    }
+
+    payload = alert_evidence_payload(
+        [coordinator],
+        circuit_id="hvac_2",
+    )
+
+    assert payload["status"] == "circuit_found_no_evidence"
+    assert payload["alert"] is None
 
 
 @pytest.mark.asyncio

@@ -422,6 +422,7 @@ async def test_coordinator_applies_feature_result() -> None:
         store_data=FeatureStoreData(),
         now_fn=lambda: now,
     )
+    coordinator.state.learning_by_circuit["fridge"] = False
 
     async def fake_notify(alert_to_notify: AlertEvidence) -> None:
         notifications.append(alert_to_notify)

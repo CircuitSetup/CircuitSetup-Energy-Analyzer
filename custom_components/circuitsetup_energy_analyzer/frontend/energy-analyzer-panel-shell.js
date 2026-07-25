@@ -339,9 +339,12 @@ export class PanelShellMethods {
           align-items: center;
           display: flex;
           gap: 12px;
+          line-height: 16px;
         }
         .metric-heading ha-icon {
+          --mdc-icon-size: 16px;
           color: var(--secondary-text-color, #5f6b7a);
+          flex: 0 0 16px;
           height: 16px;
           width: 16px;
         }
@@ -727,13 +730,6 @@ export class PanelShellMethods {
           display: grid;
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .appliance-detail-facts {
-          display: grid;
-          gap: 16px;
-        }
-        .appliance-detail-facts .summary {
-          grid-template-columns: minmax(0, 1fr);
         }
         .appliance-detail-timeline {
           align-self: start;

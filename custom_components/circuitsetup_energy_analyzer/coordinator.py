@@ -247,6 +247,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Evaluate schedule context and persist any new evidence."""
         active_alerts: list[AlertEvidence] = []
         for schedule_alert in refresh_expected_schedule_contexts(self, now):
+            if not self.notification_controller.learning_allows_alert(schedule_alert):
+                continue
             schedule_alert = self.evidence_actions.alert_with_feedback(schedule_alert)
             if schedule_alert.feedback_status != "expected":
                 active_alerts.append(schedule_alert)
@@ -417,6 +419,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 events,
                 context,
             ):
+                if not self.notification_controller.learning_allows_alert(nilm_alert):
+                    continue
                 nilm_alert = self.evidence_actions.alert_with_feedback(nilm_alert)
                 if nilm_alert.feedback_status != "expected":
                     alerts.append(nilm_alert)
@@ -444,7 +448,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 config,
                 now,
             )
-            if water_context_alert is not None:
+            if (
+                water_context_alert is not None
+                and self.notification_controller.learning_allows_alert(
+                    water_context_alert
+                )
+            ):
                 water_context_alert = self.evidence_actions.alert_with_feedback(
                     water_context_alert
                 )
@@ -1302,6 +1311,21 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         result: FeatureResult,
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
+        self.state_reducer.apply_updates(self.state, result.state_updates)
+        result = replace(
+            result,
+            state_updates=[],
+            alerts=[
+                alert
+                for alert in result.alerts
+                if self.notification_controller.learning_allows_alert(alert)
+            ],
+            notifications=[
+                alert
+                for alert in result.notifications
+                if self.notification_controller.learning_allows_alert(alert)
+            ],
+        )
         applied = self.state_reducer.apply_feature_result(
             self.state,
             self.store_data,

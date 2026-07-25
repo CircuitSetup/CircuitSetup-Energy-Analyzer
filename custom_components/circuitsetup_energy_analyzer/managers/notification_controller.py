@@ -46,7 +46,7 @@ class NotificationController:
 
     async def async_notify_alert(self, alert: AlertEvidence) -> None:
         """Create one persistent alert notification when it is not suppressed."""
-        if not self._learning_allows_alert(alert):
+        if not self.learning_allows_alert(alert):
             return
         if self._coordinator.evidence_actions.alerts_paused(alert.circuit_id):
             return
@@ -83,7 +83,8 @@ class NotificationController:
             self._current_time(alert.timestamp),
         )
 
-    def _learning_allows_alert(self, alert: AlertEvidence) -> bool:
+    def learning_allows_alert(self, alert: AlertEvidence) -> bool:
+        """Return whether learned evidence is ready for this alert."""
         return not self._circuit_is_learning(alert.circuit_id)
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
@@ -172,7 +173,7 @@ class NotificationController:
                 continue
             if (
                 alert_id not in active_alert_ids
-                or not self._learning_allows_alert(alert)
+                or not self.learning_allows_alert(alert)
             ):
                 continue
             await notifications.async_create_alert_notification(
@@ -230,7 +231,7 @@ class NotificationController:
                 and self._local_time(queued_at).date() <= week_end
             ):
                 alert = alerts_by_id.get(str(item.get("alert_id") or ""))
-                if alert is None or not self._learning_allows_alert(alert):
+                if alert is None or not self.learning_allows_alert(alert):
                     blocked_weekly = True
                     continue
                 due_weekly.append(item)
@@ -298,7 +299,7 @@ class NotificationController:
             alerts_by_id[alert_id]
             for item in ready
             if (alert_id := str(item.get("alert_id") or "")) in alerts_by_id
-            and self._learning_allows_alert(alerts_by_id[alert_id])
+            and self.learning_allows_alert(alerts_by_id[alert_id])
         ]
         if alerts:
             await notifications.async_create_daily_summary_notification(
@@ -318,6 +319,8 @@ class NotificationController:
         """Create notifications for published NILM virtual appliance alerts."""
         active_alerts: list[AlertEvidence] = []
         for alert in nilm_virtual_appliance_alerts(self._coordinator, now=now):
+            if not self.learning_allows_alert(alert):
+                continue
             alert = self._coordinator.evidence_actions.alert_with_feedback(alert)
             alert_id = notifications.notification_id_for_alert(alert)
             if alert.feedback_status != "expected":
@@ -364,6 +367,8 @@ class NotificationController:
                     "evaluated_at": now.isoformat(),
                 },
             )
+            if not self.learning_allows_alert(alert):
+                continue
             decision, _, _ = self._delivery_decision(alert)
             if decision.action == "suppress":
                 continue
