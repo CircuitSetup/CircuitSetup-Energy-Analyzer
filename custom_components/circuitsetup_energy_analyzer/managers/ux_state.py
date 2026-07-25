@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -78,9 +79,22 @@ class UxStateManager:
         sample: NormalizedCircuitSample | None,
         now: datetime,
         context: Any | None = None,
+        *,
+        circuit_events: Sequence[Any] | None = None,
+        circuit_alerts: Sequence[AlertEvidence] | None = None,
     ) -> None:
         coordinator = self._coordinator
         circuit_id = config.circuit_id
+        events = (
+            coordinator.store_data.events
+            if circuit_events is None
+            else circuit_events
+        )
+        alerts = (
+            coordinator.store_data.alerts
+            if circuit_alerts is None
+            else circuit_alerts
+        )
         coordinator.evidence_actions.expire_maintenance_if_due(circuit_id, now)
         checklist = data_quality_checklist(config, sample)
         if (
@@ -107,7 +121,7 @@ class UxStateManager:
         suppression_reason = self.suppression_reason(circuit_id, learning)
         progress = learning_progress(
             config,
-            events=coordinator.store_data.events,
+            events=events,
             baselines=coordinator.store_data.baselines,
             baseline_buffer_counts={
                 key: len(values) for key, values in coordinator._baseline_values.items()
@@ -127,7 +141,7 @@ class UxStateManager:
             ).get(circuit_id, {}),
         ).profile.merge_gap_seconds
         cycle_summary = summarize_circuit_cycles(
-            coordinator.store_data.events,
+            events,
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
@@ -174,7 +188,7 @@ class UxStateManager:
         coordinator.state_reducer.refresh_alert_evidence_state(
             coordinator.state,
             circuit_id,
-            self.latest_alert_for_circuit(circuit_id),
+            self.latest_alert_for_circuit(circuit_id, stored_alerts=alerts),
             config=coordinator.circuit_registry.config_for_circuit(circuit_id),
         )
         coordinator.state_reducer.refresh_recent_activity_state(
@@ -182,6 +196,8 @@ class UxStateManager:
             coordinator.store_data,
             circuit_id,
             now,
+            events=events,
+            alerts=alerts,
         )
         coordinator.nilm_controller.refresh_state(circuit_id, context)
 
@@ -226,15 +242,24 @@ class UxStateManager:
             return "learning"
         return None
 
-    def latest_alert_for_circuit(self, circuit_id: str) -> AlertEvidence | None:
+    def latest_alert_for_circuit(
+        self,
+        circuit_id: str,
+        *,
+        stored_alerts: Sequence[AlertEvidence] | None = None,
+    ) -> AlertEvidence | None:
         coordinator = self._coordinator
         alerts = list(coordinator.state.active_alerts_by_circuit.get(circuit_id, []))
         if not alerts:
-            alerts = [
-                alert
-                for alert in coordinator.store_data.alerts
-                if alert.circuit_id == circuit_id
-            ]
+            alerts = (
+                list(stored_alerts)
+                if stored_alerts is not None
+                else [
+                    alert
+                    for alert in coordinator.store_data.alerts
+                    if alert.circuit_id == circuit_id
+                ]
+            )
         if not alerts:
             return None
         return max(alerts, key=lambda alert: alert.timestamp)

@@ -2533,8 +2533,8 @@ async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
     _record_source_scoped_update_work(coordinator)
     calls: list[str] = []
 
-    def fake_refresh_ux_state(config, sample, now, context=None):
-        del sample, now, context
+    def fake_refresh_ux_state(config, sample, now, context=None, **history):
+        del sample, now, context, history
         calls.append(config.circuit_id)
         asyncio.get_running_loop().call_soon(
             calls.append,
@@ -2555,6 +2555,91 @@ async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
         "well_pump",
         "tick:well_pump",
     ]
+
+
+@pytest.mark.asyncio
+async def test_source_update_reuses_per_circuit_ux_history() -> None:
+    """Catch every UX refresh rescanning the full retained event list."""
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+    coordinator = _source_scoped_coordinator(
+        coordinator_module,
+        {"value": now},
+    )
+    _record_source_scoped_update_work(coordinator)
+
+    class CountingEvents(list[CircuitEvent]):
+        iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            return super().__iter__()
+
+    retained_events = CountingEvents(
+        [
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=10),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            ),
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=5),
+                circuit_id="hvac",
+                event_type=EventType.STOP,
+            ),
+        ]
+    )
+    coordinator.store_data.events = retained_events
+    coordinator.store_data.alerts = [
+        AlertEvidence(
+            timestamp=now - timedelta(minutes=2),
+            circuit_id="hvac",
+            severity=Severity.WARNING,
+            message="HVAC alert",
+        )
+    ]
+    captured_events: dict[str, list[CircuitEvent]] = {}
+    captured_alerts: dict[str, list[AlertEvidence]] = {}
+
+    def fake_refresh_ux_state(
+        config,
+        sample,
+        timestamp,
+        context=None,
+        *,
+        circuit_events=None,
+        circuit_alerts=None,
+    ):
+        del sample, timestamp, context
+        captured_events[config.circuit_id] = list(circuit_events or [])
+        captured_alerts[config.circuit_id] = list(circuit_alerts or [])
+
+    coordinator._refresh_ux_state = fake_refresh_ux_state
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert retained_events.iterations == 1
+    assert {
+        circuit_id: [event.circuit_id for event in events]
+        for circuit_id, events in captured_events.items()
+    } == {
+        "fridge": ["fridge"],
+        "hvac": ["hvac"],
+        "well_pump": [],
+    }
+    assert {
+        circuit_id: [alert.circuit_id for alert in alerts]
+        for circuit_id, alerts in captured_alerts.items()
+    } == {
+        "fridge": [],
+        "hvac": ["hvac"],
+        "well_pump": [],
+    }
 
 
 @pytest.mark.asyncio

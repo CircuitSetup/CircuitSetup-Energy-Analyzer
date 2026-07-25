@@ -202,12 +202,15 @@ class StateReducer:
         store_data: Any,
         circuit_id: str,
         now: datetime,
+        *,
+        events: Iterable[Any] | None = None,
+        alerts: Iterable[Any] | None = None,
     ) -> None:
         """Refresh the compact recent-activity state for one circuit."""
         timeline = build_recent_activity_timeline(
             circuit_id=circuit_id,
-            events=store_data.events,
-            alerts=store_data.alerts,
+            events=store_data.events if events is None else events,
+            alerts=store_data.alerts if alerts is None else alerts,
             observations=state.recent_observations_by_circuit.get(circuit_id, []),
             now=now,
         )
