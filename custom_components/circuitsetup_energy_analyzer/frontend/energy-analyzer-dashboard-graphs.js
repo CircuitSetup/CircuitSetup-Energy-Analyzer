@@ -838,7 +838,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         Date.parse(range.start),
         Number.isFinite(latest) ? latest - 1_000 : Date.parse(range.start),
       )).toISOString();
-      this._historyRequest(start, range.end, entities.map((item) => item.entity))
+      this._historyRequest(
+        start,
+        range.end,
+        entities.map((item) => item.entity),
+        this._calendarRange(range).days,
+      )
         .then((tail) => {
           if (this._historyKey !== key) return;
           this._history = this._mergeHistory(this._history, tail);
@@ -893,8 +898,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
     }
 
-    _historyRequest(start, end, entityIds) {
-      const { days: spanDays } = this._calendarRange({ start, end });
+    _historyRequest(start, end, entityIds, rangeDays = null) {
+      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
       if (spanDays <= 1) {
         const ids = encodeURIComponent(entityIds.join(","));
         const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
@@ -974,6 +979,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rollingContributionByCircuit = {};
       this._rangeSummary = {};
       this._contributionLoadKey = "";
+      this._rangeTotalsDateKey = "";
     }
 
     _render() {
@@ -1130,6 +1136,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const todayKey = this._chartDateKey(Date.now());
       const key = `${range.start}:${range.end}`;
       this._contributionLoadKey = key;
+      this._rangeTotalsDateKey = todayKey;
       const insightsResult = await Promise.allSettled([
         this._hass.callApi("GET", this._dashboardConfig.api_path),
       ]);
@@ -1156,6 +1163,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._retainedRangeTotals(retainedMains, startKey, endKey, todayKey),
       );
       this._render();
+    }
+
+    _refreshLiveData() {
+      const todayKey = this._chartDateKey(Date.now());
+      if (this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey) {
+        this._contributionLoadKey = "";
+        this._rollingContributionByCircuit = {};
+        this._rangeSummary = {};
+      }
     }
 
     _liveRangeTotals(energyEntity, costEntity) {

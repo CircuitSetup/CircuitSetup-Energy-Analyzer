@@ -393,6 +393,96 @@ test("home totals use retained completed days without Recorder history", async (
   ))).toBe(false);
 });
 
+test("home totals reload retained days after local midnight", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    const afterMidnight = Date.now() >= Date.parse("2026-07-13T00:00:00.000Z");
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "fridge",
+          daily_totals: [
+            { date: "2026-07-11", energy_kwh: 1, cost: 0.2 },
+            ...(afterMidnight
+              ? [{ date: "2026-07-12", energy_kwh: 2, cost: 0.5 }]
+              : []),
+          ],
+        }],
+        whole_house: [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          daily_totals: [
+            { date: "2026-07-11", energy_kwh: 10, cost: 2 },
+            ...(afterMidnight
+              ? [{ date: "2026-07-12", energy_kwh: 4, cost: 1 }]
+              : []),
+          ],
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        circuit_id: "mains",
+        daily_energy_usage_entity: "sensor.mains_energy_today",
+        cost_today_entity: "sensor.mains_cost_today",
+      },
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+      }],
+    },
+    {
+      "sensor.mains_energy_today": { state: "4", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.mains_cost_today": { state: "1", attributes: { unit_of_measurement: "USD" } },
+      "sensor.fridge_energy": { state: "2", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.5", attributes: { unit_of_measurement: "USD" } },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-11T00:00:00.000Z",
+        end: "2026-07-12T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
+  await expect(card.locator(".bar-row").filter({ hasText: "Fridge" })).toContainText("3 kWh");
+  const insightCalls = await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
+  ));
+
+  await page.clock.fastForward("02:00");
+  await page.evaluate(() => {
+    window.__dashboardHass.states["sensor.mains_energy_today"].state = "0";
+    window.__dashboardHass.states["sensor.mains_cost_today"].state = "0";
+    window.__dashboardHass.states["sensor.fridge_energy"].state = "0";
+    window.__dashboardHass.states["sensor.fridge_cost"].state = "0";
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
+  ))).toBe(insightCalls + 1);
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 11-12)" })).toContainText("$3.00");
+  await expect(card.locator(".bar-row").filter({ hasText: "Fridge" })).toContainText("3 kWh");
+});
+
 test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
@@ -986,7 +1076,8 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
       window.__wsCalls.push(request);
       return {
         "sensor.fridge_power": [
-          { start: Date.parse("2026-01-02T00:00:00.000Z"), mean: null },
+          { start: Date.parse("2026-01-03T00:00:00.000Z"), mean: null },
+          { start: Date.parse("2026-01-02T00:00:00.000Z"), mean: 0 },
           { start: Date.parse("2026-01-01T00:00:00.000Z"), mean: 100 },
           { start: Date.parse("2026-06-30T00:00:00.000Z"), mean: 140 },
         ],
@@ -1014,7 +1105,8 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-01"))
   ))).toBe(false);
   await expect(card.locator(".legend")).toContainText("Fridge");
-  await expect(card.locator(`[data-chart-time="${Date.parse("2026-01-02T00:00:00.000Z")}"]`)).toHaveCount(0);
+  await expect(card.locator(`[data-chart-time="${Date.parse("2026-01-02T00:00:00.000Z")}"][data-chart-value="0"]`)).toHaveCount(1);
+  await expect(card.locator(`[data-chart-time="${Date.parse("2026-01-03T00:00:00.000Z")}"]`)).toHaveCount(0);
 
   await page.evaluate(() => {
     window.__apiCalls.length = 0;
@@ -1039,6 +1131,84 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
   });
   expect(await page.evaluate(() => (
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-10-10"))
+  ))).toBe(false);
+});
+
+test("multi-day graph refresh keeps Recorder statistics granularity", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T03:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[{
+        entity_id: "sensor.fridge_power",
+        state: "120",
+        last_changed: "2026-07-24T02:00:00.000Z",
+      }]],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "All appliance power",
+      entities: [{
+        entity: "sensor.fridge_power",
+        name: "Fridge",
+        axis: "left",
+      }],
+    },
+    {
+      "sensor.fridge_power": {
+        state: "120",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+  );
+  await expect(card.locator("svg.chart")).toBeVisible();
+  await page.evaluate(() => {
+    window.__apiCalls.length = 0;
+    window.__wsCalls = [];
+    window.__dashboardHass.callWS = async (request) => {
+      window.__wsCalls.push(request);
+      return {
+        "sensor.fridge_power": window.__wsCalls.length === 1
+          ? [
+            { start: Date.parse("2026-07-22T00:00:00.000Z"), mean: 80 },
+            { start: Date.parse("2026-07-24T02:00:00.000Z"), mean: 120 },
+          ]
+          : [
+            { start: Date.parse("2026-07-24T02:00:00.000Z"), mean: 120 },
+            { start: Date.parse("2026-07-24T02:30:00.000Z"), mean: 140 },
+          ],
+      };
+    };
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-22T00:00:00.000Z",
+        end: "2026-07-24T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(1);
+
+  await page.clock.fastForward("01:01");
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(2);
+  expect(await page.evaluate(() => window.__wsCalls[1])).toEqual({
+    type: "recorder/statistics_during_period",
+    start_time: "2026-07-24T01:59:59.000Z",
+    end_time: "2026-07-24T23:59:59.999Z",
+    statistic_ids: ["sensor.fridge_power"],
+    period: "hour",
+    types: ["mean"],
+  });
+  expect(await page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/"))
   ))).toBe(false);
 });
 
