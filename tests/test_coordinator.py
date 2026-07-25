@@ -2861,6 +2861,50 @@ async def test_source_dirty_store_save_is_throttled(
 
 
 @pytest.mark.asyncio
+async def test_dirty_store_retries_when_data_changes_during_save() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    first_save_started = asyncio.Event()
+    release_first_save = asyncio.Event()
+    saved: list[dict[str, str]] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(dict(self.data.learning_started_at_by_circuit))
+            if len(saved) == 1:
+                first_save_started.set()
+                await release_first_save.wait()
+                raise RuntimeError("dictionary changed size during iteration")
+
+    store_data = FeatureStoreData()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store=FakeStore(),
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+    coordinator.store_persistence.mark_dirty()
+    save_task = asyncio.create_task(
+        coordinator.store_persistence.async_save_if_dirty(now),
+    )
+    await first_save_started.wait()
+
+    store_data.learning_started_at_by_circuit["fridge"] = now.isoformat()
+    coordinator.store_persistence.mark_dirty()
+    release_first_save.set()
+    await save_task
+
+    assert saved == [{}, {"fridge": now.isoformat()}]
+    assert coordinator.store_persistence.dirty is False
+
+
+@pytest.mark.asyncio
 async def test_setup_entry_stores_and_unload_stops_coordinator_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         async_setup_entry,

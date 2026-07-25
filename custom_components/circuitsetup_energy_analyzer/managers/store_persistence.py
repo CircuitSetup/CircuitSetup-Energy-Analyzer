@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -73,9 +74,12 @@ class StorePersistenceManager:
         )
         self._last_dirty_save_retention_at: datetime | None = None
         self._last_dirty_save_at: datetime | None = None
+        self._dirty_generation = 0
+        self._save_lock = asyncio.Lock()
         self.dirty = False
 
     def mark_dirty(self) -> None:
+        self._dirty_generation += 1
         self.dirty = True
 
     def reset_baseline_for_circuit(
@@ -102,18 +106,26 @@ class StorePersistenceManager:
         self.mark_dirty()
 
     async def async_save_if_dirty(self, now: datetime, *, force: bool = True) -> None:
-        store = getattr(self._coordinator, "_store", None)
-        if store is None or not self.dirty:
-            return
-        if not force and not self._dirty_save_due(now):
-            return
-        if self._dirty_save_retention_due(now):
-            self.apply_retention(now)
-            self._last_dirty_save_retention_at = now
-        store.data = self._coordinator.store_data
-        await store.async_save()
-        self._last_dirty_save_at = now
-        self.dirty = False
+        async with self._save_lock:
+            store = getattr(self._coordinator, "_store", None)
+            if store is None or not self.dirty:
+                return
+            if not force and not self._dirty_save_due(now):
+                return
+            if self._dirty_save_retention_due(now):
+                self.apply_retention(now)
+                self._last_dirty_save_retention_at = now
+            store.data = self._coordinator.store_data
+            while self.dirty:
+                generation = self._dirty_generation
+                try:
+                    await store.async_save()
+                except RuntimeError:
+                    if generation == self._dirty_generation:
+                        raise
+                    continue
+                self._last_dirty_save_at = now
+                self.dirty = generation != self._dirty_generation
 
     def _dirty_save_due(self, now: datetime) -> bool:
         if self._last_dirty_save_at is None:
