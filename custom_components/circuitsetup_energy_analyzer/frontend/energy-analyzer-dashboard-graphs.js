@@ -996,6 +996,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeSummary = {};
       this._contributionLoadKey = "";
       this._rangeTotalsDateKey = "";
+      this._rangeTotalsRolloverReload = false;
+      this._rangeTotalsReloadTimer = 0;
+    }
+
+    disconnectedCallback() {
+      clearTimeout(this._rangeTotalsReloadTimer);
+      super.disconnectedCallback();
     }
 
     _render() {
@@ -1145,12 +1152,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadRangeTotals() {
+      clearTimeout(this._rangeTotalsReloadTimer);
+      this._rangeTotalsReloadTimer = 0;
       const appliances = this._dashboardConfig.appliances || [];
       const mains = this._dashboardConfig.primary_mains || {};
       const range = validRange(this._dashboardRange);
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
       const key = `${range.start}:${range.end}`;
+      const previousDateKey = this._rangeTotalsDateKey;
+      const rolloverReload = this._rangeTotalsRolloverReload;
       this._contributionLoadKey = key;
       this._rangeTotalsDateKey = todayKey;
       const insightsResult = await Promise.allSettled([
@@ -1178,6 +1189,34 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeSummary = this._mergeRangeTotals(
         this._retainedRangeTotals(retainedMains, startKey, endKey, todayKey),
       );
+      const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const retainedSources = [
+        retainedMains,
+        ...appliances.map((appliance) => retainedItems.find((item) => (
+          item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
+        ))),
+      ].filter(Boolean);
+      const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
+        (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
+      ));
+      if (
+        previousDateKey
+        && previousDateKey !== todayKey
+        && startKey <= completedDayKey
+        && endKey >= completedDayKey
+        && !completedDayReady
+        && !rolloverReload
+      ) {
+        this._rangeTotalsRolloverReload = true;
+        this._rangeTotalsReloadTimer = setTimeout(() => {
+          this._rangeTotalsReloadTimer = 0;
+          if (!this.isConnected) return;
+          this._contributionLoadKey = "";
+          this._render();
+        }, 30_000);
+      } else {
+        this._rangeTotalsRolloverReload = false;
+      }
       this._render();
     }
 

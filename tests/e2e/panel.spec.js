@@ -393,11 +393,13 @@ test("home totals use retained completed days without Recorder history", async (
   ))).toBe(false);
 });
 
-test("home totals reload retained days after local midnight", async ({ page }) => {
+test("home totals retry when the first midnight payload is stale", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
+  let afterMidnight = false;
+  let rolloverCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
-    const afterMidnight = Date.now() >= Date.parse("2026-07-13T00:00:00.000Z");
+    const completedDayReady = afterMidnight && rolloverCalls++ > 0;
     await route.fulfill({
       json: {
         status: "ok",
@@ -406,7 +408,7 @@ test("home totals reload retained days after local midnight", async ({ page }) =
           circuit_id: "fridge",
           daily_totals: [
             { date: "2026-07-11", energy_kwh: 1, cost: 0.2 },
-            ...(afterMidnight
+            ...(completedDayReady
               ? [{ date: "2026-07-12", energy_kwh: 2, cost: 0.5 }]
               : []),
           ],
@@ -416,7 +418,7 @@ test("home totals reload retained days after local midnight", async ({ page }) =
           circuit_id: "mains",
           daily_totals: [
             { date: "2026-07-11", energy_kwh: 10, cost: 2 },
-            ...(afterMidnight
+            ...(completedDayReady
               ? [{ date: "2026-07-12", energy_kwh: 4, cost: 1 }]
               : []),
           ],
@@ -467,6 +469,7 @@ test("home totals reload retained days after local midnight", async ({ page }) =
   ));
 
   await page.clock.fastForward("02:00");
+  afterMidnight = true;
   await page.evaluate(() => {
     window.__dashboardHass.states["sensor.mains_energy_today"].state = "0";
     window.__dashboardHass.states["sensor.mains_cost_today"].state = "0";
@@ -478,6 +481,11 @@ test("home totals reload retained days after local midnight", async ({ page }) =
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
   ))).toBe(insightCalls + 1);
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("10 kWh");
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.endsWith("/appliance_insights")).length
+  ))).toBe(insightCalls + 2);
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 11-12)" })).toContainText("$3.00");
   await expect(card.locator(".bar-row").filter({ hasText: "Fridge" })).toContainText("3 kWh");
