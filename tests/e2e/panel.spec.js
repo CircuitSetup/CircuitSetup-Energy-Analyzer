@@ -408,7 +408,11 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     return true;
   });
   const states = {
-    "sensor.fridge_activity": { state: "Running", attributes: { is_running: true } },
+    "sensor.fridge_activity": {
+      state: "Running",
+      last_changed: "2026-07-12T21:00:00.000Z",
+      attributes: { is_running: true },
+    },
     "sensor.fridge_power": { state: "140", attributes: { unit_of_measurement: "W" } },
     "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
     "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
@@ -518,6 +522,19 @@ test("appliance grid filters live state and loads Activity Summary history", asy
   await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Jul 12");
   await expect(card.locator(".timeline > h3 + .controls")).toBeVisible();
   await expect(card.locator('[data-appliance-id="fridge"] .appliance-heading ha-icon')).toHaveAttribute("icon", "mdi:fridge-outline");
+  const timelineHistoryCalls = await page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("sensor.fridge_activity")).length
+  ));
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_activity", {
+      state: "Idle",
+      last_changed: "2026-07-12T22:00:00.000Z",
+      attributes: { is_running: false },
+    });
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.filter(({ apiPath }) => apiPath.includes("sensor.fridge_activity")).length
+  ))).toBe(timelineHistoryCalls + 1);
   await card.getByRole("tab", { name: "All", exact: true }).click();
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
@@ -787,6 +804,18 @@ test("dashboard date range is shared with graph history requests", async ({ page
       attributes: { unit_of_measurement: "W" },
     },
   });
+  await page.evaluate(() => {
+    window.__wsCalls = [];
+    window.__dashboardCards[1]._hass.callWS = async (request) => {
+      window.__wsCalls.push(request);
+      return {
+        "sensor.fridge_power": [
+          { start: Date.parse("2026-07-10T00:00:00.000Z"), mean: 140 },
+          { start: Date.parse("2026-07-12T23:00:00.000Z"), mean: 160 },
+        ],
+      };
+    };
+  });
   const selector = page.locator("circuitsetup-energy-analyzer-date-range");
   await selector.locator("ha-date-range-picker").evaluate((picker) => {
     picker.dispatchEvent(new CustomEvent("value-changed", {
@@ -801,15 +830,15 @@ test("dashboard date range is shared with graph history requests", async ({ page
     }));
   });
 
-  await expect.poll(() => page.evaluate(() => (
-    window.__apiCalls.map(({ apiPath }) => apiPath)
-      .find((apiPath) => apiPath.includes("2026-07-10T00:00:00.000Z")) || ""
-  ))).toContain("2026-07-10T00:00:00.000Z");
-  const selectedRequest = await page.evaluate(() => (
-    window.__apiCalls.map(({ apiPath }) => apiPath)
-      .find((apiPath) => apiPath.includes("2026-07-10T00:00:00.000Z"))
-  ));
-  expect(selectedRequest).toContain("end_time=2026-07-12T23%3A59%3A59.999Z");
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__wsCalls[0])).toEqual({
+    type: "recorder/statistics_during_period",
+    start_time: "2026-07-10T00:00:00.000Z",
+    end_time: "2026-07-12T23:59:59.999Z",
+    statistic_ids: ["sensor.fridge_power"],
+    period: "hour",
+    types: ["mean"],
+  });
   await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-10T00:00:00.000Z")}"]`)).toHaveCount(1);
   await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-09T23:00:00.000Z")}"]`)).toHaveCount(0);
   await expect(selector).toContainText("Jul 10-12");
@@ -834,8 +863,23 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
   await page.clock.install({ time: new Date("2026-07-24T03:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
+    const tail = decodeURIComponent(url.pathname).includes("2026-07-24T01:59:59.000Z");
     await route.fulfill({
-      json: [
+      json: tail ? [
+        [
+          {
+            entity_id: "sensor.dryer_l1_power",
+            state: "0.5",
+            last_changed: "2026-07-24T02:00:00.000Z",
+          },
+          { state: "0.6", last_changed: "2026-07-24T02:30:00.000Z" },
+        ],
+        [{
+          entity_id: "sensor.dryer_l2_power",
+          state: "800",
+          last_changed: "2026-07-24T02:15:00.000Z",
+        }],
+      ] : [
         [
           {
             entity_id: "sensor.dryer_l1_power",
@@ -901,8 +945,14 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
     window.__dashboardCard.hass = window.__dashboardHass;
   });
   await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("2026-07-24T01:59:59.000Z")) || ""
+  ))).toContain("2026-07-24T01:59:59.000Z");
+  expect(await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
   ))).toBe(historyCalls + 1);
+  await expect(card.locator(`[data-chart-time="${Date.parse("2026-07-24T02:00:00.000Z")}"]`)).toHaveCount(1);
+  await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,400"]')).toHaveCount(1);
 });
 
 test("dashboard graphs use Recorder statistics for long ranges", async ({ page }) => {
@@ -978,11 +1028,18 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
       },
     }));
   });
-  await expect.poll(() => page.evaluate(() => (
-    window.__apiCalls.map(({ apiPath }) => apiPath)
-      .find((apiPath) => apiPath.includes("history/period/2026-10-10")) || ""
-  ))).toContain("end_time=2026-11-10T04%3A59%3A59.999Z");
-  expect(await page.evaluate(() => window.__wsCalls)).toEqual([]);
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__wsCalls[0])).toEqual({
+    type: "recorder/statistics_during_period",
+    start_time: "2026-10-10T04:00:00.000Z",
+    end_time: "2026-11-10T04:59:59.999Z",
+    statistic_ids: ["sensor.fridge_power"],
+    period: "hour",
+    types: ["mean"],
+  });
+  expect(await page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-10-10"))
+  ))).toBe(false);
 });
 
 test("dashboard comparison overlays previous data and downloads CSV", async ({ page }) => {
@@ -1054,6 +1111,23 @@ test("dashboard comparison overlays previous data and downloads CSV", async ({ p
       state: "260",
       attributes: { unit_of_measurement: "W" },
     },
+  });
+  await page.evaluate(() => {
+    window.__dashboardCards[1]._hass.callWS = async (request) => {
+      const previous = request.start_time.startsWith("2026-07-07");
+      const start = previous ? "2026-07-07T00:00:00.000Z" : "2026-07-10T00:00:00.000Z";
+      const end = previous ? "2026-07-09T23:00:00.000Z" : "2026-07-12T23:00:00.000Z";
+      return {
+        "sensor.fridge_power": [
+          { start: Date.parse(start), mean: previous ? 80 : 120 },
+          { start: Date.parse(end), mean: previous ? 100 : 160 },
+        ],
+        "sensor.freezer_power": [
+          { start: Date.parse(start), mean: previous ? 180 : 220 },
+          { start: Date.parse(end), mean: previous ? 200 : 260 },
+        ],
+      };
+    };
   });
   const selector = page.locator("circuitsetup-energy-analyzer-date-range");
   await selector.locator("ha-date-range-picker").evaluate((picker) => {
@@ -1212,6 +1286,23 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   ))).toBe(fullSpan);
   await expect(card.locator("[data-chart-reset]")).toHaveCount(0);
   await page.evaluate(() => {
+    window.__dashboardCard._hass.callWS = async () => ({
+      "sensor.hvac_power": [
+        { start: Date.now() - 24 * 60 * 60 * 1000, mean: 0 },
+        { start: Date.now() - 4 * 60 * 60 * 1000, mean: 9.9 },
+        { start: Date.now(), mean: 0.8 },
+      ],
+      "sensor.aux_heat_power": [
+        { start: Date.now() - 24 * 60 * 60 * 1000, mean: 0 },
+        { start: Date.now() - 4 * 60 * 60 * 1000, mean: 1000 },
+        { start: Date.now(), mean: 500 },
+      ],
+      "sensor.outdoor_temperature": [
+        { start: Date.now() - 24 * 60 * 60 * 1000, mean: 78 },
+        { start: Date.now() - 4 * 60 * 60 * 1000, mean: 91 },
+        { start: Date.now(), mean: 84 },
+      ],
+    });
     const end = new Date();
     const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
