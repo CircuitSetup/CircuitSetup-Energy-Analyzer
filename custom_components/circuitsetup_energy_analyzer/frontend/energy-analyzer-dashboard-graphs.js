@@ -59,6 +59,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._contributionLoadKey = "";
         this._rangeSummary = {};
         this._rollingContributionByCircuit = {};
+        this._applianceRangeTotals = {};
+        this._applianceRangeKey = "";
         this._chartZoomWindows && this._chartZoomWindows.clear();
         this._render();
       };
@@ -87,12 +89,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     set hass(value) {
+      const initial = !this._hass;
       this._hass = value;
-      if (typeof this._refreshLiveData === "function") this._refreshLiveData();
       if (!localStorage.getItem(RANGE_KEY)) {
         const todayKey = this._chartDateKey(Date.now());
         this._dashboardRange = this._rangeFromDateKeys(todayKey, todayKey);
         setDashboardRange(this._dashboardRange);
+      }
+      const liveRange = this._rangeIncludesToday();
+      const liveDataChanged = typeof this._refreshLiveData === "function"
+        && Boolean(this._refreshLiveData());
+      if (!initial) {
+        const shouldRender = typeof this._shouldRenderForHassUpdate === "function"
+          ? this._shouldRenderForHassUpdate({ liveRange, liveDataChanged })
+          : liveRange || liveDataChanged;
+        if (!shouldRender) return;
       }
       const active = this.shadowRoot && this.shadowRoot.activeElement;
       if (active && active.matches("input, select, textarea")) {
@@ -177,7 +188,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return this._formatValue(this._number(entityId), this._unit(entityId, fallbackUnit));
     }
 
-    _applianceState(appliance) {
+    _applianceState(appliance, rangeTotals = null) {
       const healthState = this._state(appliance.health_entity) || {};
       const electrical = String((healthState.attributes || {}).electrical_summary || "");
       const electricalIssue = Boolean(
@@ -190,8 +201,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return {
         ...appliance,
         power: this._sum(appliance.power_entities),
-        energy: this._number(appliance.energy_today_entity),
-        cost: this._number(appliance.cost_today_entity),
+        energy: rangeTotals
+          ? rangeTotals.energy ?? null
+          : this._number(appliance.energy_today_entity),
+        cost: rangeTotals
+          ? rangeTotals.cost ?? null
+          : this._number(appliance.cost_today_entity),
         health,
         running,
         issue: electricalIssue || /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
@@ -384,6 +399,56 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       };
     }
 
+    _rangeIncludesToday(range = this._dashboardRange) {
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      return startKey <= todayKey && endKey >= todayKey;
+    }
+
+    _isTodayRange(range = this._dashboardRange) {
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      return startKey === todayKey && endKey === todayKey;
+    }
+
+    _liveRangeTotals(energyEntity, costEntity) {
+      return this._rangeIncludesToday()
+        ? {
+          energy: energyEntity ? this._number(energyEntity) : null,
+          cost: costEntity ? this._number(costEntity) : null,
+        }
+        : {};
+    }
+
+    _retainedRangeTotals(item, startKey, endKey, todayKey) {
+      const rows = (item && item.daily_totals || []).filter((row) => (
+        String(row.date) >= startKey
+        && String(row.date) <= endKey
+        && String(row.date) < todayKey
+      ));
+      if (!rows.length) return startKey < todayKey ? { energy: null, cost: null } : {};
+      const energy = rows.map((row) => Number(row.energy_kwh));
+      const cost = rows.map((row) => (
+        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost)
+      ));
+      const sum = (values) => values.every(Number.isFinite)
+        ? values.reduce((total, value) => total + value, 0)
+        : null;
+      return { energy: sum(energy), cost: sum(cost) };
+    }
+
+    _mergeRangeTotals(retained = {}, live = {}) {
+      const combined = (stored, current) => {
+        if (stored === null || current === null) return null;
+        const values = [stored, current].filter(Number.isFinite);
+        return values.length ? values.reduce((total, value) => total + value, 0) : null;
+      };
+      return {
+        energy: combined(retained.energy, live && live.energy),
+        cost: combined(retained.cost, live && live.cost),
+      };
+    }
+
     _previousRange(range = this._dashboardRange) {
       const { startKey, days } = this._calendarRange(range);
       return this._rangeFromDateKeys(
@@ -543,26 +608,31 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <ha-card>
           <style>
             ${this._styles()}
-            .range-card { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
-            .range-picker { align-items: center; display: flex; min-width: 0; }
-            .range-picker ha-date-range-picker { max-width: 100%; }
+            .range-card { align-items: center; display: flex; gap: 0; min-height: 56px; padding: 8px; }
+            .range-picker { align-items: center; display: flex; flex: 0 0 auto; }
+            .range-label { background: transparent; border: 0; color: var(--primary-text-color, #111827); cursor: pointer; flex: 1; font: inherit; min-height: 40px; min-width: 0; padding: 2px 8px 2px 0; text-align: left; }
+            .range-title { display: block; font-size: 20px; font-weight: 500; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .range-actions { align-items: center; display: flex; flex: 0 0 auto; }
+            .range-actions ha-button { margin: 0 8px; }
             .range-actions ha-icon-button { align-items: center; cursor: pointer; display: inline-flex; height: 40px; justify-content: center; width: 40px; }
             .range-actions ha-icon-button[aria-pressed="true"] { color: var(--primary-color, #0b6bcb); }
             @media (max-width: 520px) {
-              .range-card { align-items: stretch; flex-direction: column; }
-              .range-actions { justify-content: flex-end; }
+              .range-title { font-size: 14px; line-height: 20px; }
+              .range-actions ha-button { display: none; }
+              .range-actions ha-icon-button { height: 36px; width: 36px; }
             }
           </style>
           <div class="dashboard-card range-card">
             <div class="range-picker">
-              <ha-date-range-picker data-range-picker extended-presets backdrop></ha-date-range-picker>
-              <strong class="sr-only" data-range-label>${this._escape(this._rangeLabel(range))}</strong>
+              <ha-date-range-picker data-range-picker minimal extended-presets backdrop></ha-date-range-picker>
             </div>
+            <button type="button" class="range-label" data-range-open>
+              <strong class="range-title" data-range-label>${this._escape(this._rangeLabel(range))}</strong>
+            </button>
             <div class="range-actions">
+              <ha-button data-range-now appearance="filled" size="s">${this._escape(this._label("now", "Now"))}</ha-button>
               ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"), Boolean(this._historyStartKey && startKey <= this._historyStartKey))}
               ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"), endKey >= todayKey)}
-              ${this._rangeAction("now", "mdi:home-clock", this._label("now", "Now"))}
               <ha-icon-button data-range-compare aria-label="${this._escape(this._label("compare", "Compare"))}" title="${this._escape(this._label("compare", "Compare"))}" aria-pressed="${range.compare}">
                 <ha-icon icon="${range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline"}"></ha-icon>
               </ha-icon-button>
@@ -576,15 +646,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const picker = this.shadowRoot.querySelector("[data-range-picker]");
       picker.startDate = new Date(range.start);
       picker.endDate = new Date(range.end);
+      picker.minimal = true;
       picker.extendedPresets = true;
       picker.backdrop = true;
-      picker.addEventListener("click", () => {
-        this._datePickerOpen = true;
-      }, { capture: true });
-      picker.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") this._datePickerOpen = true;
-      }, { capture: true });
-      picker.addEventListener("picker-closed", () => this._closeDatePicker());
+      picker.popoverPlacement = "top-start";
+      picker.addEventListener("toggle", (event) => {
+        this._datePickerOpen = Boolean(event.detail && event.detail.open);
+        if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
+      });
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
         this._datePickerOpen = false;
@@ -594,11 +663,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           compare: range.compare,
         })));
       });
-      for (const action of ["previous", "next", "now"]) {
+      this.shadowRoot.querySelector("[data-range-open]").addEventListener("click", () => {
+        picker.open();
+      });
+      for (const action of ["previous", "next"]) {
         this.shadowRoot.querySelector(`[data-range-${action}]`).addEventListener("click", () => {
           this._shiftRange(action);
         });
       }
+      this.shadowRoot.querySelector("[data-range-now]").addEventListener("click", () => {
+        this._shiftRange("now");
+      });
       this.shadowRoot.querySelector("[data-range-compare]").addEventListener("click", () => {
         setDashboardRange({ ...range, compare: !range.compare });
       });
@@ -652,11 +727,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       if (endKey > todayKey) endKey = todayKey;
       return this._rangeFromDateKeys(startKey, endKey, range.compare);
-    }
-
-    _closeDatePicker() {
-      this._datePickerOpen = false;
-      if (this._datePickerRenderDue) this._render();
     }
 
     async _loadHistoryBounds() {
@@ -764,6 +834,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
       const entities = this._resolvedEntities(config);
+      this._resolvedEntityKey = entities.map((item) => item.entity).join(",");
       if ((config.water_contexts || []).length && !entities.some((item) => item.axis === "right")) {
         this.style.display = "none";
         this.shadowRoot.innerHTML = "";
@@ -984,6 +1055,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ) {
         this._historyRefreshDue = true;
       }
+      return this._historyRefreshDue;
+    }
+
+    _shouldRenderForHassUpdate({ liveRange, liveDataChanged }) {
+      const entityKey = this._resolvedEntities(this._dashboardConfig)
+        .map((item) => item.entity)
+        .join(",");
+      return entityKey !== this._resolvedEntityKey
+        || liveRange
+          && liveDataChanged
+          && !this.shadowRoot.querySelector('[data-chart-tooltip][aria-hidden="false"]');
     }
 
     _historyRequest(start, end, entityIds, rangeDays = null) {
@@ -1309,51 +1391,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _refreshLiveData() {
       const todayKey = this._chartDateKey(Date.now());
-      if (this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey) {
+      const changed = this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey;
+      if (changed) {
         this._contributionLoadKey = "";
         this._rollingContributionByCircuit = {};
         this._rangeSummary = {};
       }
-    }
-
-    _liveRangeTotals(energyEntity, costEntity) {
-      const { startKey, endKey } = this._calendarRange();
-      const todayKey = this._chartDateKey(Date.now());
-      return startKey <= todayKey && endKey >= todayKey
-        ? {
-          energy: energyEntity ? this._number(energyEntity) : null,
-          cost: costEntity ? this._number(costEntity) : null,
-        }
-        : {};
-    }
-
-    _retainedRangeTotals(item, startKey, endKey, todayKey) {
-      const rows = (item && item.daily_totals || []).filter((row) => (
-        String(row.date) >= startKey
-        && String(row.date) <= endKey
-        && String(row.date) < todayKey
-      ));
-      if (!rows.length) return startKey < todayKey ? { energy: null, cost: null } : {};
-      const energy = rows.map((row) => Number(row.energy_kwh));
-      const cost = rows.map((row) => (
-        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost)
-      ));
-      const sum = (values) => values.every(Number.isFinite)
-        ? values.reduce((total, value) => total + value, 0)
-        : null;
-      return { energy: sum(energy), cost: sum(cost) };
-    }
-
-    _mergeRangeTotals(retained = {}, live = {}) {
-      const combined = (stored, current) => {
-        if (stored === null || current === null) return null;
-        const values = [stored, current].filter(Number.isFinite);
-        return values.length ? values.reduce((total, value) => total + value, 0) : null;
-      };
-      return {
-        energy: combined(retained.energy, live && live.energy),
-        cost: combined(retained.cost, live && live.cost),
-      };
+      return changed;
     }
 
   }
@@ -1366,11 +1410,32 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._timelineSelection = "running";
       this._timelineKey = "";
       this._timelineRows = [];
+      this._applianceRangeTotals = {};
+      this._applianceRangeKey = "";
+    }
+
+    _shouldRenderForHassUpdate() {
+      return this._isTodayRange();
     }
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
-      const appliances = (this._dashboardConfig.appliances || []).map((item) => this._applianceState(item));
+      const historical = !this._isTodayRange();
+      if (historical) {
+        if (this._filter !== "all") this._filter = "all";
+        if (this._timelineSelection === "running") this._timelineSelection = "all";
+        this._loadApplianceRangeTotals();
+      } else if (this._timelineSelection === "all") {
+        this._timelineSelection = "running";
+      }
+      const appliances = (this._dashboardConfig.appliances || []).map((item) => (
+        this._applianceState(
+          item,
+          historical
+            ? this._applianceRangeTotals[item.circuit_id] || { energy: null, cost: null }
+            : null,
+        )
+      ));
       const visible = appliances.filter((item) => (
         this._filter === "all"
           || this._filter === "running" && item.running
@@ -1381,7 +1446,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           || (right.power || 0) - (left.power || 0)
           || String(left.name).localeCompare(String(right.name))
       ));
-      const filters = [
+      const filters = historical ? [] : [
         ["all", this._label("all", "All")],
         ["running", this._label("running", "Running")],
         ["attention", this._label("needs_attention", "Needs attention")],
@@ -1392,19 +1457,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <style>${this._styles()}</style>
           <div class="dashboard-card">
             <h2>${this._escape(this._dashboardConfig.title || "Appliances")}</h2>
-            <div class="controls" role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}">
+            <div class="controls"${historical ? "" : ` role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}"`}>
               ${filters.map(([key, label]) => `<button type="button" class="control" role="tab" data-filter="${key}" aria-selected="${key === this._filter}">${this._escape(label)}</button>`).join("")}
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid">
-              ${visible.map((item) => this._tile(item, !this._matchesSearch(item))).join("")}
+              ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical)).join("")}
             </div>
             <section class="timeline">
               <h3>${this._escape(this._label("run_timeline", "Run timeline"))}</h3>
               <div class="controls">
                 <label>${this._escape(this._label("timeline_selection", "Timeline selection"))}
                   <select data-timeline-selection>
-                    <option value="running">${this._escape(this._label("currently_running", "Currently running"))}</option>
+                    ${historical
+                      ? `<option value="all">${this._escape(this._label("all", "All"))}</option>`
+                      : `<option value="running">${this._escape(this._label("currently_running", "Currently running"))}</option>`}
                     ${areas.map((area) => `<option value="area:${this._escape(area)}">${this._escape(area)}</option>`).join("")}
                     ${appliances.map((item) => `<option value="${this._escape(item.circuit_id)}">${this._escape(item.name)}</option>`).join("")}
                   </select>
@@ -1449,26 +1516,67 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return !search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search);
     }
 
-    _tile(item, hidden = false) {
+    _tile(item, hidden = false, historical = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
+      const energyLabel = historical
+        ? `${this._label("energy", "Energy")} ${this._rangeLabel()}`
+        : this._label("energy_today", "Energy today");
       return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
         <span class="appliance-heading"><ha-icon icon="${this._escape(item.icon || "mdi:power-plug-outline")}"></ha-icon><strong>${this._escape(item.name)}</strong></span>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
-          <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>
-          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
-          <span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>
+          ${historical ? "" : `<span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>`}
+          <span>${this._escape(energyLabel)}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
+          ${historical ? "" : `<span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>`}
         </div>
       </button>`;
     }
 
     _selectedTimelineAppliances(appliances) {
+      if (this._timelineSelection === "all") return appliances.slice(0, 5);
       if (this._timelineSelection === "running") return appliances.filter((item) => item.running).slice(0, 5);
       if (this._timelineSelection.startsWith("area:")) {
         const area = this._timelineSelection.slice(5);
         return appliances.filter((item) => item.area === area).slice(0, 5);
       }
       return appliances.filter((item) => item.circuit_id === this._timelineSelection).slice(0, 1);
+    }
+
+    async _loadApplianceRangeTotals() {
+      if (!this._dashboardConfig.api_path) return;
+      const range = validRange(this._dashboardRange);
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      const key = `${range.start}:${range.end}:${todayKey}`;
+      if (this._applianceRangeKey === key) return;
+      this._applianceRangeKey = key;
+      this._applianceRangeTotals = {};
+      let insights;
+      try {
+        insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
+      } catch (_error) {
+        return;
+      }
+      if (this._applianceRangeKey !== key) return;
+      const retainedItems = (insights.items || []).filter((item) => (
+        !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
+      ));
+      this._applianceRangeTotals = Object.fromEntries(
+        (this._dashboardConfig.appliances || []).map((appliance) => {
+          const retained = retainedItems.find((item) => (
+            item.circuit_id === appliance.circuit_id
+            || item.appliance_key === appliance.circuit_id
+          ));
+          return [appliance.circuit_id, this._mergeRangeTotals(
+            this._retainedRangeTotals(retained, startKey, endKey, todayKey),
+            this._liveRangeTotals(
+              appliance.energy_today_entity,
+              appliance.cost_today_entity,
+            ),
+          )];
+        }),
+      );
+      this._render();
     }
 
     async _ensureTimeline(appliances) {

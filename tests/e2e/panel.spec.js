@@ -728,10 +728,85 @@ test("appliance grid filters live state and loads Activity Summary history", asy
   });
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("sensor.fridge_activity")).length
-  ))).toBe(timelineHistoryCalls + 1);
-  await card.getByRole("tab", { name: "All", exact: true }).click();
+  ))).toBe(timelineHistoryCalls);
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
+});
+
+test("historical appliance grid uses selected-date totals without live status", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_activity", state: "Idle", last_changed: "2026-07-10T00:00:00.000Z" },
+          { state: "Running", last_changed: "2026-07-10T04:00:00.000Z" },
+          { state: "Idle", last_changed: "2026-07-10T05:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "fridge",
+          daily_totals: [{ date: "2026-07-10", energy_kwh: 2.5, cost: 0.75 }],
+        }],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        activity_entity: "sensor.fridge_activity",
+        power_entities: ["sensor.fridge_power"],
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+        health_entity: "sensor.fridge_health",
+      }],
+    },
+    {
+      "sensor.fridge_activity": {
+        state: "Running",
+        last_changed: "2026-07-12T21:00:00.000Z",
+        attributes: {},
+      },
+      "sensor.fridge_power": { state: "150", attributes: { unit_of_measurement: "W" } },
+      "sensor.fridge_energy": { state: "9.9", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "4.2", attributes: {} },
+      "sensor.fridge_health": {
+        state: "Ready",
+        attributes: { electrical_summary: "Possible Imbalance" },
+      },
+    },
+    {},
+    {
+      start: "2026-07-10T00:00:00.000Z",
+      end: "2026-07-10T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect(card.getByRole("tab", { name: "Running", exact: true })).toHaveCount(0);
+  await expect(card.getByRole("tab", { name: "Needs attention", exact: true })).toHaveCount(0);
+  await expect(card.locator("[data-timeline-selection]")).not.toContainText("Currently running");
+  await expect(card.locator("[data-timeline-selection]")).toHaveValue("all");
+  const tile = card.locator('[data-appliance-id="fridge"]');
+  await expect(tile).toContainText("Energy Jul 10: 2.5 kWh · $0.75");
+  await expect(tile).not.toContainText("150 W");
+  await expect(tile).not.toContainText("Possible Imbalance");
 });
 
 test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
@@ -1044,7 +1119,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
   await expect.poll(() => page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range")).start
   ))).toBe("2026-07-10T00:00:00.000Z");
-  await selector.locator("[data-range-now]").click();
+  await selector.locator("[data-range-now]").dispatchEvent("click");
   const nowRange = await page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ));
@@ -1648,12 +1723,18 @@ test("dashboard date picker stays mounted while it is open", async ({ page }) =>
   );
   await page.waitForFunction(() => window.__dashboardCard._loading === false);
   await card.locator("ha-date-range-picker").evaluate((picker) => {
-    picker.tabIndex = 0;
-    picker.focus();
+    picker.dispatchEvent(new CustomEvent("toggle", {
+      bubbles: true,
+      composed: true,
+      detail: { open: true },
+    }));
     window.__openDatePicker = picker;
-    picker.click();
   });
   expect(await page.evaluate(() => window.__dashboardCard._datePickerOpen)).toBe(true);
+  expect(await page.evaluate(() => ({
+    minimal: window.__openDatePicker.minimal,
+    placement: window.__openDatePicker.popoverPlacement,
+  }))).toEqual({ minimal: true, placement: "top-start" });
 
   await page.evaluate(() => {
     window.dispatchEvent(new Event("circuitsetup-dashboard-data-changed"));
@@ -1762,6 +1843,70 @@ test("dashboard date range is bounded by retained history and today", async ({ p
   await expect(card.locator("[data-range-next]")).toHaveAttribute("disabled", "");
 });
 
+test("historical graph tooltip survives Home Assistant state updates", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[
+        {
+          entity_id: "sensor.fridge_power",
+          state: "100",
+          last_changed: "2026-07-10T00:00:00.000Z",
+        },
+        { state: "150", last_changed: "2026-07-10T12:00:00.000Z" },
+      ]],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "All appliance power",
+      y_axis_label: "W",
+      entities: [{
+        entity: "sensor.fridge_power",
+        name: "Fridge",
+        series_id: "circuit:fridge",
+        axis: "left",
+      }],
+    },
+    {
+      "sensor.fridge_power": {
+        state: "200",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+    {},
+    {
+      start: "2026-07-10T00:00:00.000Z",
+      end: "2026-07-10T23:59:59.999Z",
+      compare: false,
+    },
+  );
+  const point = card.locator("[data-chart-point]").first();
+  await expect(point).toBeVisible();
+  await point.evaluate((element) => {
+    const svg = element.closest("svg");
+    const rect = svg.getBoundingClientRect();
+    svg.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    }));
+  });
+  await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
+  await page.evaluate(() => {
+    window.__inspectedHistoricalPoint = window.__dashboardCard.shadowRoot
+      .querySelector("[data-chart-point]");
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  expect(await page.evaluate(() => window.__inspectedHistoricalPoint.isConnected)).toBe(true);
+  await expect(card.locator("[data-chart-tooltip]")).toHaveAttribute("aria-hidden", "false");
+});
+
 test("dashboard chart legend colors stay distinct", async ({ page }) => {
   await mockPanelApi(page);
   await openDashboardCard(
@@ -1772,9 +1917,17 @@ test("dashboard chart legend colors stay distinct", async ({ page }) => {
   );
 
   const colors = await page.evaluate(() => {
+    [
+      "--energy-grid-consumption-color",
+      "--energy-solar-color",
+      "--energy-battery-out-color",
+      "--energy-battery-in-color",
+      "--energy-water-color",
+      "--energy-gas-color",
+    ].forEach((name) => document.documentElement.style.setProperty(name, "#123456"));
     const container = document.createElement("div");
     container.innerHTML = window.__dashboardCard._chartSvg(
-      Array.from({ length: 8 }, (_, index) => ({
+      Array.from({ length: 12 }, (_, index) => ({
         name: `Series ${index + 1}`,
         points: [
           { time: Date.parse("2026-07-24T00:00:00.000Z"), value: index },
@@ -1786,8 +1939,9 @@ test("dashboard chart legend colors stay distinct", async ({ page }) => {
         graph_window_end: "2026-07-24T01:00:00.000Z",
       },
     );
+    document.body.append(container);
     return [...container.querySelectorAll(".legend-marker")]
-      .map((marker) => marker.getAttribute("style"));
+      .map((marker) => getComputedStyle(marker).color);
   });
 
   expect(new Set(colors).size).toBe(colors.length);
@@ -1869,7 +2023,7 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   await expect(card.locator(".dashboard-card")).toHaveCSS("font-size", "14px");
   await expect(card.locator("[data-context-hours]")).toHaveCount(0);
   await expect(card.locator(".legend-marker")).toHaveCount(3);
-  await expect(card.locator("[data-chart-point]").first()).toHaveCSS("fill", "rgb(72, 143, 194)");
+  await expect(card.locator("[data-chart-point]").first()).toHaveCSS("fill", "rgb(41, 107, 174)");
   const chart = card.locator("svg.chart");
   const fullSpan = await chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)

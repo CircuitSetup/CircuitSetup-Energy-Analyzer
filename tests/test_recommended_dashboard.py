@@ -419,26 +419,25 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards() -> None:
     )
 
     assert all(
-        view["sections"][0]["cards"][0]["type"]
+        view["footer"]["card"]["type"]
         == "custom:circuitsetup-energy-analyzer-date-range"
         for view in _dashboard_views(dashboard)
     )
     assert all(
-        view["sections"][0]["cards"][0]["api_path"]
+        view["footer"]["card"]["api_path"]
         == "circuitsetup_energy_analyzer/appliance_insights"
         for view in _dashboard_views(dashboard)
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
-    assert [card["type"] for card in home["sections"][0]["cards"][:5]] == [
-        "custom:circuitsetup-energy-analyzer-date-range",
+    assert [card["type"] for card in home["sections"][0]["cards"][:4]] == [
         CONTEXT_GRAPH_CARD,
         "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-energy-cost",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
     ]
-    assert home["sections"][0]["cards"][1]["title"] == "All appliance power"
+    assert home["sections"][0]["cards"][0]["title"] == "All appliance power"
 
 
 def test_appliance_power_graph_groups_dual_phase_entities() -> None:
@@ -851,14 +850,13 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
     )
     for view in _dashboard_views(dashboard):
         for section in view["sections"]:
-            date_card, *content_cards = section["cards"]
+            content_cards = section["cards"]
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
                 or (view["path"] == "overview" and len(content_cards) > 1)
                 else 48 // min(4, len(content_cards))
             )
-            assert date_card["grid_options"]["columns"] == 48
             assert {
                 card["grid_options"]["columns"] for card in content_cards
             } == {expected_columns}
@@ -877,7 +875,7 @@ def test_single_insight_card_uses_full_width() -> None:
         view for view in _dashboard_views(dashboard) if view["path"] == "insights"
     )
 
-    _, card = insights["sections"][0]["cards"]
+    (card,) = insights["sections"][0]["cards"]
     assert card["grid_options"]["columns"] == 48
 
 
@@ -1295,7 +1293,7 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
         graphs,
         "HVAC activity and outdoor temperature",
     )
-    graph_cards = graphs["sections"][0]["cards"][1:]
+    graph_cards = graphs["sections"][0]["cards"]
     refs = _entity_refs(history_graph)
 
     assert history_graph["type"] == CONTEXT_GRAPH_CARD
@@ -1340,7 +1338,7 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     )
     water_card = _card_with_title(energy_view, "Water flow context")
 
-    assert energy_view["sections"][0]["cards"][1:] == [water_card]
+    assert energy_view["sections"][0]["cards"] == [water_card]
     assert "water_contexts" not in energy_card
     assert water_card["type"] == CONTEXT_GRAPH_CARD
     assert "default_hours" not in water_card

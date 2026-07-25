@@ -286,16 +286,14 @@ def build_recommended_dashboard(
     for view in views:
         cards = view["sections"][0]["cards"]
         content_card_count = len(cards)
-        cards.insert(
-            0,
-            {
+        view["footer"] = {
+            "card": {
                 "type": DATE_RANGE_CARD,
                 "entry_id": context.entry_id,
                 "api_path": f"{DOMAIN}/appliance_insights",
                 "labels": dict(translation_section("dashboard", "live_cards")),
-                "grid_options": {"columns": DASHBOARD_COLUMNS * 12},
-            },
-        )
+            }
+        }
         # A full-width section has 12 card cells for each spanned view column.
         card_columns = (
             24
@@ -308,11 +306,7 @@ def build_recommended_dashboard(
             )
         )
         for card in cards:
-            card["grid_options"]["columns"] = (
-                DASHBOARD_COLUMNS * 12
-                if card["type"] == DATE_RANGE_CARD
-                else card_columns
-            )
+            card["grid_options"]["columns"] = card_columns
     return {
         "title": DASHBOARD_TITLE,
         "views": views,
@@ -517,6 +511,8 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
             {
                 "type": APPLIANCE_GRID_CARD,
                 "title": _dashboard_text("cards", "appliances"),
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/appliance_insights",
                 "appliances": [
                     _appliance_card_payload(circuit)
                     for circuit in context.appliances

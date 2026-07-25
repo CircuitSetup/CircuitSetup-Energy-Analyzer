@@ -33,14 +33,10 @@ export const ACTION_SERVICE_NAMES = {
   undo_setting_recommendation: "undo_setting_recommendation",
   reset_setting_recommendation: "reset_setting_recommendation",
 };
-export const CHART_COLORS = [
-  "var(--energy-grid-consumption-color, #488fc2)",
-  "var(--energy-solar-color, #ff9800)",
-  "var(--energy-battery-out-color, #4db6ac)",
-  "var(--energy-battery-in-color, #f06292)",
-  "var(--energy-water-color, #00bcd4)",
-  "var(--energy-gas-color, #8e021b)",
-];
+export const CHART_COLORS = Array.from(
+  { length: 32 },
+  (_item, index) => `hsl(${(210 + index * 137.508) % 360} ${62 + index % 3 * 8}% ${42 + Math.floor(index / 3) % 3 * 8}%)`,
+);
 export const PANEL_METHOD_DEPENDENCIES = {
   APPLIANCE_DETAIL_API_PATH,
   APPLIANCE_DETAIL_CALL_API_PATH,

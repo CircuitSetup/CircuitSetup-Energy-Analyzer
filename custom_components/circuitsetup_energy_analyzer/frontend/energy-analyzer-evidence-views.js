@@ -4,7 +4,7 @@ export function createEvidenceViewMethods({
   CHART_COLORS,
 }) {
   const chartColor = (index) => CHART_COLORS[index]
-    || `hsl(${(index * 137.508) % 360} 65% 45%)`;
+    || `hsl(${(210 + index * 137.508) % 360} ${62 + index % 3 * 8}% ${42 + Math.floor(index / 3) % 3 * 8}%)`;
 
   return class EvidenceViewMethods {
   async _loadHistory(alert, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
