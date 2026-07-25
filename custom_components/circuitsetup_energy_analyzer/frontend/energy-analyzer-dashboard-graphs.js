@@ -834,7 +834,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!this._historyRefreshDue || this._historyRefreshInFlight) return;
       this._historyRefreshDue = false;
       this._historyRefreshInFlight = true;
-      const latest = this._latestHistoryTime(this._history);
+      const statisticsLatest = this._latestHistoryTime(this._history, true);
+      const latest = Number.isFinite(statisticsLatest)
+        ? statisticsLatest
+        : this._latestHistoryTime(this._history);
       const start = new Date(Math.max(
         Date.parse(range.start),
         Number.isFinite(latest) ? latest - 1_000 : Date.parse(range.start),
@@ -849,6 +852,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           if (this._historyKey !== key) return;
           this._history = this._mergeHistory(this._history, tail);
           this._historyError = "";
+          this._historyRefreshDue = false;
           this._historyLoadedAt = Date.now();
           this._render();
         })
@@ -860,11 +864,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         });
     }
 
-    _latestHistoryTime(payload) {
+    _latestHistoryTime(payload, statisticsOnly = false) {
       return Math.max(...(payload || []).flatMap((group) => (
-        (Array.isArray(group) ? group : [group]).map((row) => (
-          Date.parse(row && (row.last_changed || row.last_updated) || "")
-        ))
+        (Array.isArray(group) ? group : [group])
+          .filter((row) => !statisticsOnly || row && row.statistics_period)
+          .map((row) => Date.parse(row && (row.last_changed || row.last_updated) || ""))
       )).filter(Number.isFinite), Number.NEGATIVE_INFINITY);
     }
 
@@ -929,6 +933,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               entity_id: entityId,
               state: row.mean,
               last_changed: new Date(time).toISOString(),
+              statistics_period: period,
             }] : [];
           })
         ));

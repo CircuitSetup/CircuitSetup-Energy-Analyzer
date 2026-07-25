@@ -1260,7 +1260,7 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
     window.__dashboardHass.callWS = async (request) => {
       window.__wsCalls.push(request);
       if (window.__wsCalls.length === 2) throw new Error("temporary statistics failure");
-      return {
+      const result = {
         "sensor.fridge_power": window.__wsCalls.length === 1
           ? [
             { start: Date.parse("2026-07-22T00:00:00.000Z"), mean: 80 },
@@ -1271,6 +1271,11 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
             { start: Date.parse("2026-07-24T02:30:00.000Z"), mean: 140 },
           ],
       };
+      return window.__wsCalls.length === 3
+        ? new Promise((resolve) => {
+          window.__resolveStatisticsTail = () => resolve(result);
+        })
+        : result;
     };
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
@@ -1312,6 +1317,16 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
     period: "hour",
     types: ["mean"],
   });
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+    window.__resolveStatisticsTail();
+  });
+  await page.waitForFunction(() => window.__dashboardCard._historyRefreshInFlight === false);
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(() => window.__wsCalls.length)).toBe(3);
 });
 
 test("multi-day graphs fall back only for missing statistic ids", async ({ page }) => {
@@ -1325,7 +1340,7 @@ test("multi-day graphs fall back only for missing statistic ids", async ({ page 
           state: "40",
           last_changed: "2026-07-10T00:00:00.000Z",
         },
-        { state: "60", last_changed: "2026-07-12T23:00:00.000Z" },
+        { state: "60", last_changed: "2026-07-12T23:45:00.000Z" },
       ]] : [],
     });
     return true;
@@ -1383,6 +1398,13 @@ test("multi-day graphs fall back only for missing statistic ids", async ({ page 
   ))).toBe(false);
   await expect(card.locator(".legend")).toContainText("Fridge");
   await expect(card.locator(".legend")).toContainText("Legacy");
+  await page.evaluate(() => {
+    window.__dashboardCard._historyRefreshDue = true;
+    window.__dashboardCard._render();
+  });
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(2);
+  expect(await page.evaluate(() => window.__wsCalls[1].start_time))
+    .toBe("2026-07-12T22:59:59.000Z");
 });
 
 test("state updates do not duplicate a pending graph history load", async ({ page }) => {
