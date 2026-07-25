@@ -68,6 +68,7 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     baseline_values["washer:real_power"].append(400.0)
     manager = object.__new__(StorePersistenceManager)
     manager._coordinator = SimpleNamespace(store_data=store_data)
+    manager._dirty_generation = 0
     manager.dirty = False
 
     manager.reset_baseline_for_circuit("fridge", baseline_values, now)

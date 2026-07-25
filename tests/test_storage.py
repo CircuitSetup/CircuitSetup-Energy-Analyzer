@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.const import STORAGE_VERSION
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -11,6 +13,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import (
+    FeatureStore,
     FeatureStoreData,
     alert_from_dict,
     alert_to_dict,
@@ -1264,3 +1267,33 @@ def test_expected_schedule_settings_and_evidence_round_trip() -> None:
 
     assert restored.appliance_schedule_settings == data.appliance_schedule_settings
     assert restored.appliance_schedule_evidence == data.appliance_schedule_evidence
+
+
+@pytest.mark.asyncio
+async def test_feature_store_defers_serialization_to_executor() -> None:
+    """Catch feature-store snapshots being rebuilt on the event loop."""
+    executor_calls: list[tuple[object, object]] = []
+    saved: list[dict[str, object]] = []
+
+    class FakeHass:
+        async def async_add_executor_job(
+            self,
+            target: object,
+            data: object,
+        ) -> dict[str, object]:
+            executor_calls.append((target, data))
+            return {"serialized": True}
+
+    class FakeHAStore:
+        async def async_save(self, data: dict[str, object]) -> None:
+            saved.append(data)
+
+    store = FeatureStore.__new__(FeatureStore)
+    store._hass = FakeHass()
+    store._store = FakeHAStore()
+    store.data = FeatureStoreData()
+
+    await store.async_save()
+
+    assert executor_calls == [(feature_store_data_to_dict, store.data)]
+    assert saved == [{"serialized": True}]

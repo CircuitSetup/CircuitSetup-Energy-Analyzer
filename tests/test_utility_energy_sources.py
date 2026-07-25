@@ -242,6 +242,89 @@ async def test_statistics_kwh_sum_for_entities_matches_requested_period() -> Non
 
 
 @pytest.mark.asyncio
+async def test_statistics_readings_are_cached_for_fifteen_minutes() -> None:
+    """Catch source batches repeating unchanged Recorder statistics queries."""
+    now = datetime(2026, 6, 5, 0, 0, tzinfo=UTC)
+    period_start = datetime(2026, 6, 2, 0, 0, tzinfo=UTC)
+    period_end = datetime(2026, 6, 3, 0, 0, tzinfo=UTC)
+    calls: list[set[str]] = []
+
+    def timestamp_ms(value: datetime) -> int:
+        return int(value.timestamp() * 1000)
+
+    def fake_statistics_during_period(
+        hass: object,
+        start_time: datetime,
+        end_time: datetime | None,
+        statistic_ids: set[str],
+        period: str,
+        units: dict[str, str],
+        types: set[str],
+    ) -> dict[str, list[dict[str, float]]]:
+        del hass, start_time, end_time, period, units, types
+        calls.append(set(statistic_ids))
+        return {
+            entity_id: [
+                {
+                    "start": timestamp_ms(period_start),
+                    "end": timestamp_ms(period_end),
+                    "change": 30.0,
+                }
+            ]
+            for entity_id in statistic_ids
+        }
+
+    class FakeRecorder:
+        async def async_add_executor_job(self, target, *args):
+            return target(*args)
+
+    manager = UtilityEnergySourceManager(
+        _coordinator(),
+        statistics_during_period=fake_statistics_during_period,
+        recorder_get_instance=lambda _hass: FakeRecorder(),
+    )
+
+    for timestamp in (now, now + timedelta(minutes=5)):
+        await manager.statistics_kwh_for_id(
+            "opower:utility_elec_consumption",
+            timestamp,
+            "day",
+        )
+        await manager.statistics_kwh_sum_for_entities(
+            ("sensor.fridge_energy",),
+            timestamp,
+            "day",
+            period_start,
+            period_end,
+        )
+
+    assert calls == [
+        {"opower:utility_elec_consumption"},
+        {"sensor.fridge_energy"},
+    ]
+
+    timestamp = now + timedelta(minutes=15)
+    await manager.statistics_kwh_for_id(
+        "opower:utility_elec_consumption",
+        timestamp,
+        "day",
+    )
+    await manager.statistics_kwh_sum_for_entities(
+        ("sensor.fridge_energy",),
+        timestamp,
+        "day",
+        period_start,
+        period_end,
+    )
+    assert calls == [
+        {"opower:utility_elec_consumption"},
+        {"sensor.fridge_energy"},
+        {"opower:utility_elec_consumption"},
+        {"sensor.fridge_energy"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_recorder_statistics_skip_generic_executor_fallback() -> None:
     generic_jobs: list[object] = []
     statistics_calls = 0

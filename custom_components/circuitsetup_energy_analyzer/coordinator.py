@@ -438,8 +438,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
 
         process_events_into_state(self.state, events, alerts)
+        events_by_circuit = _items_by_circuit(self.store_data.events)
+        alerts_by_circuit = _items_by_circuit(self.store_data.alerts)
         for config, sample in samples:
-            self._refresh_ux_state(config, sample, now, context)
+            self._refresh_ux_state(
+                config,
+                sample,
+                now,
+                context,
+                circuit_events=events_by_circuit.get(config.circuit_id, ()),
+                circuit_alerts=alerts_by_circuit.get(config.circuit_id, ()),
+            )
             await asyncio.sleep(0)
             if config.circuit_id not in processing_circuit_ids:
                 continue
@@ -1202,8 +1211,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         sample: NormalizedCircuitSample | None,
         now: datetime,
         context: Any | None = None,
+        *,
+        circuit_events: Iterable[CircuitEvent] | None = None,
+        circuit_alerts: Iterable[AlertEvidence] | None = None,
     ) -> None:
-        self.ux_state.refresh_config(config, sample, now, context)
+        self.ux_state.refresh_config(
+            config,
+            sample,
+            now,
+            context,
+            circuit_events=circuit_events,
+            circuit_alerts=circuit_alerts,
+        )
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         return self.ux_state.latest_alert_for_circuit(circuit_id)
@@ -1393,3 +1412,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         return await self.notification_controller.async_notify_nilm_virtual_appliances(
             now
         )
+
+
+def _items_by_circuit(items: Iterable[Any]) -> dict[str, list[Any]]:
+    grouped: defaultdict[str, list[Any]] = defaultdict(list)
+    for item in items:
+        grouped[item.circuit_id].append(item)
+    return dict(grouped)

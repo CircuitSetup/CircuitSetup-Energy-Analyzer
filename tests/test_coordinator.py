@@ -2533,8 +2533,8 @@ async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
     _record_source_scoped_update_work(coordinator)
     calls: list[str] = []
 
-    def fake_refresh_ux_state(config, sample, now, context=None):
-        del sample, now, context
+    def fake_refresh_ux_state(config, sample, now, context=None, **history):
+        del sample, now, context, history
         calls.append(config.circuit_id)
         asyncio.get_running_loop().call_soon(
             calls.append,
@@ -2555,6 +2555,91 @@ async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
         "well_pump",
         "tick:well_pump",
     ]
+
+
+@pytest.mark.asyncio
+async def test_source_update_reuses_per_circuit_ux_history() -> None:
+    """Catch every UX refresh rescanning the full retained event list."""
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+    coordinator = _source_scoped_coordinator(
+        coordinator_module,
+        {"value": now},
+    )
+    _record_source_scoped_update_work(coordinator)
+
+    class CountingEvents(list[CircuitEvent]):
+        iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            return super().__iter__()
+
+    retained_events = CountingEvents(
+        [
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=10),
+                circuit_id="fridge",
+                event_type=EventType.START,
+            ),
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=5),
+                circuit_id="hvac",
+                event_type=EventType.STOP,
+            ),
+        ]
+    )
+    coordinator.store_data.events = retained_events
+    coordinator.store_data.alerts = [
+        AlertEvidence(
+            timestamp=now - timedelta(minutes=2),
+            circuit_id="hvac",
+            severity=Severity.WARNING,
+            message="HVAC alert",
+        )
+    ]
+    captured_events: dict[str, list[CircuitEvent]] = {}
+    captured_alerts: dict[str, list[AlertEvidence]] = {}
+
+    def fake_refresh_ux_state(
+        config,
+        sample,
+        timestamp,
+        context=None,
+        *,
+        circuit_events=None,
+        circuit_alerts=None,
+    ):
+        del sample, timestamp, context
+        captured_events[config.circuit_id] = list(circuit_events or [])
+        captured_alerts[config.circuit_id] = list(circuit_alerts or [])
+
+    coordinator._refresh_ux_state = fake_refresh_ux_state
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert retained_events.iterations == 1
+    assert {
+        circuit_id: [event.circuit_id for event in events]
+        for circuit_id, events in captured_events.items()
+    } == {
+        "fridge": ["fridge"],
+        "hvac": ["hvac"],
+        "well_pump": [],
+    }
+    assert {
+        circuit_id: [alert.circuit_id for alert in alerts]
+        for circuit_id, alerts in captured_alerts.items()
+    } == {
+        "fridge": [],
+        "hvac": ["hvac"],
+        "well_pump": [],
+    }
 
 
 @pytest.mark.asyncio
@@ -2772,6 +2857,50 @@ async def test_source_dirty_store_save_is_throttled(
 
     assert saved == 2
     assert retention_calls == [now]
+    assert coordinator.store_persistence.dirty is False
+
+
+@pytest.mark.asyncio
+async def test_dirty_store_retries_when_data_changes_during_save() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    first_save_started = asyncio.Event()
+    release_first_save = asyncio.Event()
+    saved: list[dict[str, str]] = []
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved.append(dict(self.data.learning_started_at_by_circuit))
+            if len(saved) == 1:
+                first_save_started.set()
+                await release_first_save.wait()
+                raise RuntimeError("dictionary changed size during iteration")
+
+    store_data = FeatureStoreData()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        store=FakeStore(),
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+    coordinator.store_persistence.mark_dirty()
+    save_task = asyncio.create_task(
+        coordinator.store_persistence.async_save_if_dirty(now),
+    )
+    await first_save_started.wait()
+
+    store_data.learning_started_at_by_circuit["fridge"] = now.isoformat()
+    coordinator.store_persistence.mark_dirty()
+    release_first_save.set()
+    await save_task
+
+    assert saved == [{}, {"fridge": now.isoformat()}]
     assert coordinator.store_persistence.dirty is False
 
 
