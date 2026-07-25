@@ -392,7 +392,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       );
     }
 
-    _dashboardHistorySeries(payload, configuredEntities) {
+    _dashboardHistorySeries(payload, configuredEntities, rangeStart = Number.NEGATIVE_INFINITY) {
       const configs = new Map((configuredEntities || []).map((item) => [item.entity, item]));
       const parsed = [];
       for (const group of Array.isArray(payload) ? payload : []) {
@@ -405,7 +405,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           const value = normalized === "on" ? 1 : normalized === "off" ? 0 : Number.parseFloat(row.state);
           const time = Date.parse(row.last_changed || row.last_updated || "");
           if (Number.isFinite(time)) {
-            points.push({ time, value: Number.isFinite(value) ? value : null });
+            points.push({
+              time: Math.max(rangeStart, time),
+              value: Number.isFinite(value) ? value : null,
+            });
           }
         }
         const config = configs.get(entityId);
@@ -687,7 +690,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const range = validRange(this._dashboardRange);
       const currentSeries = this._groupDashboardHistorySeries(
         this._normalizedPowerSeries(
-          this._dashboardHistorySeries(this._history, entities),
+          this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
           config.y_axis_label,
         ),
       ).map((item, index) => ({ ...item, color_index: index }));
@@ -699,7 +702,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const comparisonSeries = range.compare
         ? this._groupDashboardHistorySeries(
           this._normalizedPowerSeries(
-            this._dashboardHistorySeries(this._comparisonHistory, entities),
+            this._dashboardHistorySeries(
+              this._comparisonHistory,
+              entities,
+              Date.parse(previousRange.start),
+            ),
             config.y_axis_label,
           ),
         ).map((item, index) => ({
@@ -827,7 +834,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _historyRequest(start, end, entityIds) {
-      const spanDays = (Date.parse(end) - Date.parse(start)) / 86_400_000;
+      const { days: spanDays } = this._calendarRange({ start, end });
       if (spanDays <= 31) {
         const ids = encodeURIComponent(entityIds.join(","));
         const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
@@ -849,7 +856,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }).then((result) => Object.entries(result || {}).map(([entityId, rows]) => (
         (rows || []).flatMap((row) => {
           const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
-          return Number.isFinite(Number(row.mean)) && Number.isFinite(time) ? [{
+          return row.mean !== null
+            && row.mean !== undefined
+            && Number.isFinite(Number(row.mean))
+            && Number.isFinite(time) ? [{
             entity_id: entityId,
             state: row.mean,
             last_changed: new Date(time).toISOString(),

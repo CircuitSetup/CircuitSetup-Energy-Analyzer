@@ -744,7 +744,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
         {
           entity_id: "sensor.fridge_power",
           state: "120",
-          last_changed: "2026-07-10T00:00:00.000Z",
+          last_changed: "2026-07-09T23:00:00.000Z",
         },
         { state: "160", last_changed: "2026-07-12T23:00:00.000Z" },
       ]],
@@ -797,6 +797,8 @@ test("dashboard date range is shared with graph history requests", async ({ page
       .find((apiPath) => apiPath.includes("2026-07-10T00:00:00.000Z"))
   ));
   expect(selectedRequest).toContain("end_time=2026-07-12T23%3A59%3A59.999Z");
+  await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-10T00:00:00.000Z")}"]`)).toHaveCount(1);
+  await expect(page.locator(`[data-chart-time="${Date.parse("2026-07-09T23:00:00.000Z")}"]`)).toHaveCount(0);
   await expect(selector).toContainText("Jul 10-12");
   await selector.locator("[data-range-previous]").click();
   await expect.poll(() => page.evaluate(() => (
@@ -921,6 +923,7 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
       window.__wsCalls.push(request);
       return {
         "sensor.fridge_power": [
+          { start: Date.parse("2026-01-02T00:00:00.000Z"), mean: null },
           { start: Date.parse("2026-01-01T00:00:00.000Z"), mean: 100 },
           { start: Date.parse("2026-06-30T00:00:00.000Z"), mean: 140 },
         ],
@@ -948,6 +951,25 @@ test("dashboard graphs use Recorder statistics for long ranges", async ({ page }
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/2026-01"))
   ))).toBe(false);
   await expect(card.locator(".legend")).toContainText("Fridge");
+  await expect(card.locator(`[data-chart-time="${Date.parse("2026-01-02T00:00:00.000Z")}"]`)).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.__apiCalls.length = 0;
+    window.__wsCalls.length = 0;
+    window.__dashboardHass.config.time_zone = "America/New_York";
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-10-10T04:00:00.000Z",
+        end: "2026-11-10T04:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("history/period/2026-10-10")) || ""
+  ))).toContain("end_time=2026-11-10T04%3A59%3A59.999Z");
+  expect(await page.evaluate(() => window.__wsCalls)).toEqual([]);
 });
 
 test("dashboard comparison overlays previous data and downloads CSV", async ({ page }) => {
