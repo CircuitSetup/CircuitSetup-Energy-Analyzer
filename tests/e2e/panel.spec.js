@@ -541,7 +541,7 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
           circuit_id: "mains",
           daily_totals: [
             { date: "2026-07-11", energy_kwh: 10, cost: 2 },
-            ...(insightCalls > 2
+            ...(insightCalls > 3
               ? [{ date: "2026-07-12", energy_kwh: 4, cost: 1 }]
               : []),
           ],
@@ -582,6 +582,8 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await expect.poll(() => insightCalls).toBe(2);
   await page.clock.fastForward(30_000);
   await expect.poll(() => insightCalls).toBe(3);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(4);
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
 });
 

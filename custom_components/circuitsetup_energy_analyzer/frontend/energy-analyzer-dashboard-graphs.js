@@ -1287,11 +1287,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
         (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
+      const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
       if (
         startKey <= completedDayKey
         && endKey >= completedDayKey
         && !completedDayReady
-        && !rolloverReload
+        && (!rolloverReload || rolloverWindowOpen)
       ) {
         this._rangeTotalsRolloverReloadKey = key;
         this._rangeTotalsReloadTimer = setTimeout(() => {
