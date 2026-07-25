@@ -1259,6 +1259,7 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
     window.__wsCalls = [];
     window.__dashboardHass.callWS = async (request) => {
       window.__wsCalls.push(request);
+      if (window.__wsCalls.length === 2) throw new Error("temporary statistics failure");
       return {
         "sensor.fridge_power": window.__wsCalls.length === 1
           ? [
@@ -1298,6 +1299,19 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
   expect(await page.evaluate(() => (
     window.__apiCalls.some(({ apiPath }) => apiPath.includes("history/period/"))
   ))).toBe(false);
+  await page.waitForFunction(() => window.__dashboardCard._historyRefreshInFlight === false);
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => page.evaluate(() => window.__wsCalls.length)).toBe(3);
+  expect(await page.evaluate(() => window.__wsCalls[2])).toEqual({
+    type: "recorder/statistics_during_period",
+    start_time: "2026-07-24T01:59:59.000Z",
+    end_time: "2026-07-24T23:59:59.999Z",
+    statistic_ids: ["sensor.fridge_power"],
+    period: "hour",
+    types: ["mean"],
+  });
 });
 
 test("multi-day graphs fall back only for missing statistic ids", async ({ page }) => {

@@ -849,12 +849,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           if (this._historyKey !== key) return;
           this._history = this._mergeHistory(this._history, tail);
           this._historyError = "";
+          this._historyLoadedAt = Date.now();
           this._render();
         })
-        .catch(() => {})
+        .catch(() => {
+          if (this._historyKey === key) this._historyRefreshDue = true;
+        })
         .finally(() => {
           this._historyRefreshInFlight = false;
-          if (this._historyKey === key) this._historyLoadedAt = Date.now();
         });
     }
 
