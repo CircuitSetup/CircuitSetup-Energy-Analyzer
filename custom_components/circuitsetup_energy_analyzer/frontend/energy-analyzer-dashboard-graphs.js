@@ -54,6 +54,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._historyKey = "";
         this._history = null;
         this._comparisonHistory = null;
+        this._historyRefreshDue = false;
         this._timelineKey = "";
         this._contributionLoadKey = "";
         this._rangeSummary = {};
@@ -500,6 +501,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     constructor() {
       super();
       this._datePickerLoading = false;
+      this._datePickerOpen = false;
+      this._datePickerRenderDue = false;
+      this._historyBoundsLoaded = false;
+      this._historyBoundsLoading = false;
+      this._historyStartKey = "";
       this._handleDashboardData = () => this._render();
     }
 
@@ -515,8 +521,23 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      if (this._datePickerOpen) {
+        this._datePickerRenderDue = true;
+        return;
+      }
+      this._datePickerRenderDue = false;
       this._ensureNativeDatePicker();
-      const range = validRange(this._dashboardRange);
+      this._loadHistoryBounds();
+      const range = this._boundedRange(validRange(this._dashboardRange));
+      if (
+        range.start !== this._dashboardRange.start
+        || range.end !== this._dashboardRange.end
+      ) {
+        setDashboardRange(range);
+        return;
+      }
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
       const hasData = [...dashboardSeries.values()].some((series) => series.length);
       this.shadowRoot.innerHTML = `
         <ha-card>
@@ -539,8 +560,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <strong class="sr-only" data-range-label>${this._escape(this._rangeLabel(range))}</strong>
             </div>
             <div class="range-actions">
-              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"))}
-              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"))}
+              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"), Boolean(this._historyStartKey && startKey <= this._historyStartKey))}
+              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"), endKey >= todayKey)}
               ${this._rangeAction("now", "mdi:home-clock", this._label("now", "Now"))}
               <ha-icon-button data-range-compare aria-label="${this._escape(this._label("compare", "Compare"))}" title="${this._escape(this._label("compare", "Compare"))}" aria-pressed="${range.compare}">
                 <ha-icon icon="${range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline"}"></ha-icon>
@@ -557,13 +578,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.endDate = new Date(range.end);
       picker.extendedPresets = true;
       picker.backdrop = true;
+      picker.addEventListener("click", () => {
+        this._datePickerOpen = true;
+      }, { capture: true });
+      picker.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") this._datePickerOpen = true;
+      }, { capture: true });
+      picker.addEventListener("picker-closed", () => this._closeDatePicker());
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
-        setDashboardRange({
+        this._datePickerOpen = false;
+        setDashboardRange(this._boundedRange(validRange({
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
-        });
+        })));
       });
       for (const action of ["previous", "next", "now"]) {
         this.shadowRoot.querySelector(`[data-range-${action}]`).addEventListener("click", () => {
@@ -578,31 +607,85 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       });
     }
 
-    _rangeAction(action, icon, label) {
-      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
+    _rangeAction(action, icon, label, disabled = false) {
+      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"${disabled ? " disabled" : ""}><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
     }
 
     _shiftRange(action) {
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
       if (action === "previous") {
-        setDashboardRange(this._previousRange(range));
+        setDashboardRange(this._boundedRange(this._previousRange(range)));
         return;
       }
       if (action === "next") {
-        setDashboardRange(this._rangeFromDateKeys(
+        setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
           this._shiftDateKey(endKey, 1),
           this._shiftDateKey(endKey, days),
           range.compare,
-        ));
+        )));
         return;
       }
       const todayKey = this._chartDateKey(Date.now());
-      setDashboardRange(this._rangeFromDateKeys(
+      setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
         this._shiftDateKey(todayKey, 1 - days),
         todayKey,
         range.compare,
-      ));
+      )));
+    }
+
+    _boundedRange(range) {
+      const { startKey: requestedStart, endKey: requestedEnd, days } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      const firstKey = this._historyStartKey && this._historyStartKey < todayKey
+        ? this._historyStartKey
+        : todayKey;
+      let startKey = requestedStart;
+      let endKey = requestedEnd;
+      if (endKey > todayKey) {
+        endKey = todayKey;
+        startKey = this._shiftDateKey(todayKey, 1 - days);
+      }
+      if (this._historyStartKey && startKey < firstKey) {
+        startKey = firstKey;
+        endKey = this._shiftDateKey(firstKey, days - 1);
+      }
+      if (endKey > todayKey) endKey = todayKey;
+      return this._rangeFromDateKeys(startKey, endKey, range.compare);
+    }
+
+    _closeDatePicker() {
+      this._datePickerOpen = false;
+      if (this._datePickerRenderDue) this._render();
+    }
+
+    async _loadHistoryBounds() {
+      if (
+        this._historyBoundsLoaded
+        || this._historyBoundsLoading
+        || !this._dashboardConfig.api_path
+      ) return;
+      this._historyBoundsLoading = true;
+      try {
+        const payload = await this._hass.callApi("GET", this._dashboardConfig.api_path);
+        const sources = [...(payload.items || []), ...(payload.whole_house || [])]
+          .filter((item) => (
+            !this._dashboardConfig.entry_id
+            || item.entry_id === this._dashboardConfig.entry_id
+          ));
+        const dates = sources.flatMap((item) => (
+          (item.daily_totals || []).map((row) => String(row.date || ""))
+        )).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+        this._historyStartKey = dates.length
+          ? dates.reduce((earliest, date) => date < earliest ? date : earliest)
+          : this._chartDateKey(Date.now());
+        this._historyBoundsLoaded = true;
+        this._render();
+      } catch (_error) {
+        return;
+      } finally {
+        this._historyBoundsLoading = false;
+      }
     }
 
     _downloadCsv(range) {
@@ -673,6 +756,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._historyKey = "";
       this._historyError = "";
       this._historyLoadedAt = 0;
+      this._historyRefreshDue = false;
+      this._historyRefreshInFlight = false;
     }
 
     _render() {
@@ -693,7 +778,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
           config.y_axis_label,
         ),
-      ).map((item, index) => ({ ...item, color_index: index }));
+      );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
       const currentDuration = Date.parse(range.end) - currentStart;
@@ -709,10 +794,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             ),
             config.y_axis_label,
           ),
-        ).map((item, index) => ({
+        ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
-          color_index: index,
           line_style: "dashed",
           points: item.points.map((point) => ({
             ...point,
@@ -795,8 +879,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _ensureHistory(entities) {
       const range = validRange(this._dashboardRange);
       const key = `${range.start}:${range.end}:${range.compare}:${entities.map((item) => item.entity).join(",")}`;
-      if (!entities.length || key === this._historyKey) return;
+      if (!entities.length) return;
+      if (key === this._historyKey) {
+        this._refreshHistoryTail(range, entities, key);
+        return;
+      }
       this._historyKey = key;
+      this._historyRefreshDue = false;
       this._historyLoadedAt = Date.now();
       const entityIds = entities.map((item) => item.entity);
       const previousRange = this._previousRange(range);
@@ -817,8 +906,72 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._historyError = history.status === "fulfilled"
           ? ""
           : this._label("no_history", "No history is available for this period.");
+        this._historyLoadedAt = Date.now();
         this._render();
       });
+    }
+
+    _refreshHistoryTail(range, entities, key) {
+      if (!this._historyRefreshDue || this._historyRefreshInFlight) return;
+      this._historyRefreshDue = false;
+      this._historyRefreshInFlight = true;
+      const statisticsLatest = this._latestHistoryTime(this._history, true);
+      const latest = Number.isFinite(statisticsLatest)
+        ? statisticsLatest
+        : this._latestHistoryTime(this._history);
+      const start = new Date(Math.max(
+        Date.parse(range.start),
+        Number.isFinite(latest) ? latest - 1_000 : Date.parse(range.start),
+      )).toISOString();
+      this._historyRequest(
+        start,
+        range.end,
+        entities.map((item) => item.entity),
+        this._calendarRange(range).days,
+      )
+        .then((tail) => {
+          if (this._historyKey !== key) return;
+          this._history = this._mergeHistory(this._history, tail);
+          this._historyError = "";
+          this._historyRefreshDue = false;
+          this._historyLoadedAt = Date.now();
+          this._render();
+        })
+        .catch(() => {
+          if (this._historyKey === key) this._historyRefreshDue = true;
+        })
+        .finally(() => {
+          this._historyRefreshInFlight = false;
+        });
+    }
+
+    _latestHistoryTime(payload, statisticsOnly = false) {
+      return Math.max(...(payload || []).flatMap((group) => (
+        (Array.isArray(group) ? group : [group])
+          .filter((row) => !statisticsOnly || row && row.statistics_period)
+          .map((row) => Date.parse(row && (row.last_changed || row.last_updated) || ""))
+      )).filter(Number.isFinite), Number.NEGATIVE_INFINITY);
+    }
+
+    _mergeHistory(current, tail) {
+      const byEntity = new Map();
+      for (const payload of [current, tail]) {
+        for (const group of payload || []) {
+          let entityId = "";
+          for (const row of (Array.isArray(group) ? group : [group]).filter(Boolean)) {
+            entityId = row.entity_id || entityId;
+            const time = Date.parse(row.last_changed || row.last_updated || "");
+            if (!entityId || !Number.isFinite(time)) continue;
+            if (!byEntity.has(entityId)) byEntity.set(entityId, new Map());
+            byEntity.get(entityId).set(time, { ...row, entity_id: entityId });
+          }
+        }
+      }
+      return [...byEntity.values()].map((rows) => (
+        [...rows.entries()]
+          .sort(([left], [right]) => left - right)
+          .map(([, row]) => row)
+      ));
     }
 
     _refreshLiveData() {
@@ -829,18 +982,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         && endKey >= todayKey
         && Date.now() - this._historyLoadedAt >= 60_000
       ) {
-        this._historyKey = "";
+        this._historyRefreshDue = true;
       }
     }
 
-    _historyRequest(start, end, entityIds) {
-      const { days: spanDays } = this._calendarRange({ start, end });
-      if (spanDays <= 31) {
-        const ids = encodeURIComponent(entityIds.join(","));
-        const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
-        return this._hass.callApi("GET", path);
+    _historyRequest(start, end, entityIds, rangeDays = null) {
+      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
+      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
+        return this._rawHistoryRequest(start, end, entityIds);
       }
-      if (typeof this._hass.callWS !== "function") return Promise.resolve([]);
       const period = spanDays <= 90
         ? "hour"
         : spanDays <= 730
@@ -853,19 +1003,38 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         statistic_ids: entityIds,
         period,
         types: ["mean"],
-      }).then((result) => Object.entries(result || {}).map(([entityId, rows]) => (
-        (rows || []).flatMap((row) => {
-          const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
-          return row.mean !== null
-            && row.mean !== undefined
-            && Number.isFinite(Number(row.mean))
-            && Number.isFinite(time) ? [{
-            entity_id: entityId,
-            state: row.mean,
-            last_changed: new Date(time).toISOString(),
-          }] : [];
-        })
-      )));
+      }).then(async (result) => {
+        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
+          (rows || []).flatMap((row) => {
+            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
+            return row.mean !== null
+              && row.mean !== undefined
+              && Number.isFinite(Number(row.mean))
+              && Number.isFinite(time) ? [{
+              entity_id: entityId,
+              state: row.mean,
+              last_changed: new Date(time).toISOString(),
+              statistics_period: period,
+            }] : [];
+          })
+        ));
+        const missing = entityIds.filter((entityId) => (
+          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
+        ));
+        if (!missing.length) return statistics;
+        try {
+          const fallback = await this._rawHistoryRequest(start, end, missing);
+          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
+        } catch (_error) {
+          return statistics;
+        }
+      });
+    }
+
+    _rawHistoryRequest(start, end, entityIds) {
+      const ids = encodeURIComponent(entityIds.join(","));
+      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      return this._hass.callApi("GET", path);
     }
   }
 
@@ -914,7 +1083,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rollingContributionByCircuit = {};
       this._rangeSummary = {};
       this._contributionLoadKey = "";
-      this._rangeTotalsLoadedAt = 0;
+      this._rangeTotalsDateKey = "";
+      this._rangeTotalsRolloverReloadKey = "";
+      this._rangeTotalsReloadTimer = 0;
+    }
+
+    disconnectedCallback() {
+      clearTimeout(this._rangeTotalsReloadTimer);
+      super.disconnectedCallback();
     }
 
     _render() {
@@ -936,8 +1112,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
       const issueCount = appliances.filter((item) => item.issue).length;
-      const energyToday = this._rangeSummary.energy ?? null;
-      const costToday = this._rangeSummary.cost ?? null;
+      const rangeSummary = this._mergeRangeTotals(
+        this._rangeSummary,
+        this._liveRangeTotals(
+          mains.daily_energy_usage_entity,
+          mains.cost_today_entity,
+        ),
+      );
+      const energyToday = rangeSummary.energy ?? null;
+      const costToday = rangeSummary.cost ?? null;
       const averageEnergy = config.primary_mains && mains.average_kwh_per_day_entity
         ? this._number(mains.average_kwh_per_day_entity)
         : null;
@@ -1041,7 +1224,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _contributionAppliances(appliances) {
       return appliances.map((appliance) => {
-        const rolling = this._rollingContributionByCircuit[appliance.circuit_id] || {};
+        const rolling = this._mergeRangeTotals(
+          this._rollingContributionByCircuit[appliance.circuit_id],
+          this._liveRangeTotals(
+            appliance.energy_today_entity,
+            appliance.cost_today_entity,
+          ),
+        );
         return {
           ...appliance,
           energy: rolling.energy ?? null,
@@ -1051,35 +1240,25 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadRangeTotals() {
+      clearTimeout(this._rangeTotalsReloadTimer);
+      this._rangeTotalsReloadTimer = 0;
       const appliances = this._dashboardConfig.appliances || [];
       const mains = this._dashboardConfig.primary_mains || {};
       const range = validRange(this._dashboardRange);
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
-      const entityIds = [...new Set([
-        ...appliances.flatMap((item) => [...(item.power_entities || []), item.cost_today_entity]),
-        ...(mains.power_entities || []),
-        mains.cost_today_entity,
-      ]
-        .filter(Boolean))];
-      const key = `${range.start}:${range.end}:${entityIds.join(",")}`;
+      const key = `${range.start}:${range.end}:${todayKey}`;
+      const rolloverReload = this._rangeTotalsRolloverReloadKey === key;
       this._contributionLoadKey = key;
-      this._rangeTotalsLoadedAt = Date.now();
-      const start = Date.parse(range.start);
-      const end = Math.max(start, Math.min(Date.parse(range.end), Date.now()));
-      const liveStart = Math.max(start, this._zonedTimestamp(todayKey));
-      const hasLiveWindow = startKey <= todayKey && endKey >= todayKey && end > liveStart;
-      const historyPath = `history/period/${new Date(liveStart).toISOString()}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(new Date(end).toISOString())}&minimal_response=1&no_attributes=1`;
-      const [insightsResult, historyResult] = await Promise.allSettled([
-        this._hass.callApi("GET", this._dashboardConfig.api_path),
-        entityIds.length && hasLiveWindow
-          ? this._hass.callApi("GET", historyPath)
-          : Promise.resolve([]),
-      ]);
+      this._rangeTotalsDateKey = todayKey;
+      let insights;
+      try {
+        insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
+      } catch (_error) {
+        if (this._contributionLoadKey === key) this._contributionLoadKey = "";
+        return;
+      }
       if (this._contributionLoadKey !== key) return;
-      const insights = insightsResult.status === "fulfilled" ? insightsResult.value || {} : {};
-      const payload = historyResult.status === "fulfilled" ? historyResult.value : [];
-      const liveAppliances = this._rollingTotals(payload, appliances, liveStart, end);
       const retainedItems = (insights.items || []).filter((item) => (
         !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
       ));
@@ -1089,35 +1268,63 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ));
         return [appliance.circuit_id, this._mergeRangeTotals(
           this._retainedRangeTotals(retained, startKey, endKey, todayKey),
-          liveAppliances[appliance.circuit_id],
         )];
       }));
-      const liveSummary = this._rollingTotals(payload, [{
-        circuit_id: "mains",
-        power_entities: mains.power_entities || [],
-        cost_today_entity: mains.cost_today_entity,
-      }], liveStart, end).mains;
       const retainedMains = (insights.whole_house || []).find((item) => (
         (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
         && (!mains.circuit_id || item.circuit_id === mains.circuit_id)
       ));
       this._rangeSummary = this._mergeRangeTotals(
         this._retainedRangeTotals(retainedMains, startKey, endKey, todayKey),
-        liveSummary,
       );
+      const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const retainedSources = [
+        retainedMains,
+        ...appliances.map((appliance) => retainedItems.find((item) => (
+          item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
+        ))),
+      ].filter(Boolean);
+      const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
+        (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
+      ));
+      const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
+      if (
+        startKey <= completedDayKey
+        && endKey >= completedDayKey
+        && !completedDayReady
+        && (!rolloverReload || rolloverWindowOpen)
+      ) {
+        this._rangeTotalsRolloverReloadKey = key;
+        this._rangeTotalsReloadTimer = setTimeout(() => {
+          this._rangeTotalsReloadTimer = 0;
+          if (!this.isConnected) return;
+          this._contributionLoadKey = "";
+          this._render();
+        }, 30_000);
+      } else {
+        this._rangeTotalsRolloverReloadKey = "";
+      }
       this._render();
     }
 
     _refreshLiveData() {
+      const todayKey = this._chartDateKey(Date.now());
+      if (this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey) {
+        this._contributionLoadKey = "";
+        this._rollingContributionByCircuit = {};
+        this._rangeSummary = {};
+      }
+    }
+
+    _liveRangeTotals(energyEntity, costEntity) {
       const { startKey, endKey } = this._calendarRange();
       const todayKey = this._chartDateKey(Date.now());
-      if (
-        startKey <= todayKey
-        && endKey >= todayKey
-        && Date.now() - this._rangeTotalsLoadedAt >= 60_000
-      ) {
-        this._contributionLoadKey = "";
-      }
+      return startKey <= todayKey && endKey >= todayKey
+        ? {
+          energy: energyEntity ? this._number(energyEntity) : null,
+          cost: costEntity ? this._number(costEntity) : null,
+        }
+        : {};
     }
 
     _retainedRangeTotals(item, startKey, endKey, todayKey) {
@@ -1139,7 +1346,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _mergeRangeTotals(retained = {}, live = {}) {
       const combined = (stored, current) => {
-        if (stored === null) return null;
+        if (stored === null || current === null) return null;
         const values = [stored, current].filter(Number.isFinite);
         return values.length ? values.reduce((total, value) => total + value, 0) : null;
       };
@@ -1147,90 +1354,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         energy: combined(retained.energy, live && live.energy),
         cost: combined(retained.cost, live && live.cost),
       };
-    }
-
-    _rollingTotals(payload, appliances, start, end) {
-      if (!Array.isArray(payload)) return {};
-      const history = {};
-      for (const group of payload) {
-        const rows = Array.isArray(group) ? group : [group];
-        let entityId = "";
-        for (const row of rows.filter(Boolean)) {
-          entityId = row.entity_id || entityId;
-          if (!entityId) continue;
-          (history[entityId] ||= []).push(row);
-        }
-      }
-      return Object.fromEntries(appliances.map((appliance) => {
-        const powerEntities = appliance.power_entities || [];
-        const energyValues = powerEntities.map((entityId) => (
-          this._integratedEnergy(
-            history[entityId],
-            start,
-            end,
-            this._unit(entityId) === "kW" ? 1000 : 1,
-          )
-        ));
-        const energy = powerEntities.length && energyValues.every(Number.isFinite)
-          ? energyValues.reduce((total, value) => total + value, 0)
-          : null;
-        const cost = appliance.cost_today_entity
-          ? this._counterIncrease(history[appliance.cost_today_entity])
-          : null;
-        return [appliance.circuit_id, { energy, cost }];
-      }));
-    }
-
-    _integratedEnergy(rows, start, end, wattsPerUnit = 1) {
-      const points = (rows || []).map((row) => ({
-        time: Date.parse(row.last_changed || row.last_updated || ""),
-        value: Number(row.state),
-      })).filter((point) => Number.isFinite(point.time) && point.time <= end)
-        .sort((left, right) => left.time - right.time);
-      let energy = 0;
-      let previous = null;
-      let sawValue = false;
-      for (const point of points) {
-        const time = Math.max(start, point.time);
-        if (!Number.isFinite(point.value) || point.value < 0) {
-          if (previous && time > previous.time) {
-            energy += previous.value * wattsPerUnit * (time - previous.time) / 3_600_000 / 1_000;
-          }
-          previous = null;
-          continue;
-        }
-        const value = point.value;
-        sawValue = true;
-        if (previous && time > previous.time) {
-          energy += previous.value * wattsPerUnit * (time - previous.time) / 3_600_000 / 1_000;
-        }
-        previous = { time, value };
-      }
-      if (previous && end > previous.time) {
-        energy += previous.value * wattsPerUnit * (end - previous.time) / 3_600_000 / 1_000;
-      }
-      return sawValue ? energy : null;
-    }
-
-    _counterIncrease(rows) {
-      const values = (rows || []).map((row) => ({
-        time: Date.parse(row.last_changed || row.last_updated || ""),
-        value: Number(row.state),
-      })).filter((point) => Number.isFinite(point.time))
-        .sort((left, right) => left.time - right.time);
-      let previous = null;
-      let total = 0;
-      for (const point of values) {
-        if (!Number.isFinite(point.value) || point.value < 0) {
-          previous = null;
-          continue;
-        }
-        if (previous !== null) {
-          total += point.value >= previous ? point.value - previous : point.value;
-        }
-        previous = point.value;
-      }
-      return previous === null ? null : total;
     }
 
   }
@@ -1352,7 +1475,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const selected = this._selectedTimelineAppliances(appliances).filter((item) => item.activity_entity);
       const ids = selected.map((item) => item.activity_entity);
       const range = this._timelineRange();
-      const key = `${range.start}:${range.end}:${ids.join(",")}`;
+      const key = `${range.start}:${range.end}:${selected.map((item) => (
+        `${item.activity_entity}@${(this._state(item.activity_entity) || {}).last_changed || ""}`
+      )).join(",")}`;
       if (!ids.length || key === this._timelineKey) return;
       this._timelineKey = key;
       const path = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(ids.join(","))}&end_time=${encodeURIComponent(range.end)}&minimal_response=1&no_attributes=1`;
@@ -1497,10 +1622,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const hasEnergy = energyPoints.length || previousEnergy.length;
       const hasCost = costPoints.length || previousCost.length;
       const series = [
-        energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", color_index: 0, points: energyPoints },
-        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: hasEnergy ? "right" : "left", color_index: 1, points: costPoints },
-        previousEnergy.length && { name: `${this._label("energy", "Energy")} (${this._label("previous", "previous")})`, unit: "kWh", line_style: "dashed", color_index: 0, points: previousEnergy },
-        previousCost.length && { name: `${this._label("cost", "Cost")} (${this._label("previous", "previous")})`, unit: "currency", axis: hasEnergy ? "right" : "left", line_style: "dashed", color_index: 1, points: previousCost },
+        energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", points: energyPoints },
+        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: hasEnergy ? "right" : "left", points: costPoints },
+        previousEnergy.length && { name: `${this._label("energy", "Energy")} (${this._label("previous", "previous")})`, unit: "kWh", line_style: "dashed", points: previousEnergy },
+        previousCost.length && { name: `${this._label("cost", "Cost")} (${this._label("previous", "previous")})`, unit: "currency", axis: hasEnergy ? "right" : "left", line_style: "dashed", points: previousCost },
       ].filter(Boolean);
       const chart = series.length ? this._chartSvg(series, {
         graph_window_start: range.start,

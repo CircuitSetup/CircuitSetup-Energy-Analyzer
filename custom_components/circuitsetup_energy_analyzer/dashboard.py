@@ -290,6 +290,8 @@ def build_recommended_dashboard(
             0,
             {
                 "type": DATE_RANGE_CARD,
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/appliance_insights",
                 "labels": dict(translation_section("dashboard", "live_cards")),
                 "grid_options": {"columns": DASHBOARD_COLUMNS * 12},
             },
