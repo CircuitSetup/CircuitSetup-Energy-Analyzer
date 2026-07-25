@@ -1212,6 +1212,138 @@ test("multi-day graph refresh keeps Recorder statistics granularity", async ({ p
   ))).toBe(false);
 });
 
+test("multi-day graphs fall back only for missing statistic ids", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    const ids = url.searchParams.get("filter_entity_id");
+    await route.fulfill({
+      json: ids === "sensor.legacy_power" ? [[
+        {
+          entity_id: "sensor.legacy_power",
+          state: "40",
+          last_changed: "2026-07-10T00:00:00.000Z",
+        },
+        { state: "60", last_changed: "2026-07-12T23:00:00.000Z" },
+      ]] : [],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "Mixed statistics support",
+      entities: [
+        { entity: "sensor.fridge_power", name: "Fridge", axis: "left" },
+        { entity: "sensor.legacy_power", name: "Legacy", axis: "left" },
+      ],
+    },
+    {
+      "sensor.fridge_power": {
+        state: "120",
+        attributes: { unit_of_measurement: "W" },
+      },
+      "sensor.legacy_power": {
+        state: "60",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+  );
+  await page.evaluate(() => {
+    window.__apiCalls.length = 0;
+    window.__wsCalls = [];
+    window.__dashboardHass.callWS = async (request) => {
+      window.__wsCalls.push(request);
+      return {
+        "sensor.fridge_power": [
+          { start: Date.parse("2026-07-10T00:00:00.000Z"), mean: 100 },
+          { start: Date.parse("2026-07-12T23:00:00.000Z"), mean: 120 },
+        ],
+      };
+    };
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-10T00:00:00.000Z",
+        end: "2026-07-12T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__apiCalls.map(({ apiPath }) => apiPath)
+      .find((apiPath) => apiPath.includes("filter_entity_id=sensor.legacy_power")) || ""
+  ))).toContain("history/period/2026-07-10T00:00:00.000Z");
+  expect(await page.evaluate(() => (
+    window.__apiCalls.some(({ apiPath }) => (
+      apiPath.includes("filter_entity_id=sensor.fridge_power")
+    ))
+  ))).toBe(false);
+  await expect(card.locator(".legend")).toContainText("Fridge");
+  await expect(card.locator(".legend")).toContainText("Legacy");
+});
+
+test("state updates do not duplicate a pending graph history load", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.includes("/history/period")) return false;
+    await route.fulfill({
+      json: [[{
+        entity_id: "sensor.fridge_power",
+        state: "120",
+        last_changed: new Date().toISOString(),
+      }]],
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "All appliance power",
+      entities: [{
+        entity: "sensor.fridge_power",
+        name: "Fridge",
+        axis: "left",
+      }],
+    },
+    {
+      "sensor.fridge_power": {
+        state: "120",
+        attributes: { unit_of_measurement: "W" },
+      },
+    },
+  );
+  await expect(card.locator("svg.chart")).toBeVisible();
+  await page.evaluate(() => {
+    window.__pendingHistoryCalls = 0;
+    window.__dashboardHass.callApi = async () => {
+      window.__pendingHistoryCalls += 1;
+      return new Promise((resolve) => {
+        window.__resolvePendingHistory = resolve;
+      });
+    };
+    window.__dashboardCard._historyKey = "";
+    window.__dashboardCard._historyLoadedAt = 0;
+    window.__dashboardCard._render();
+  });
+  await expect.poll(() => page.evaluate(() => window.__pendingHistoryCalls)).toBe(1);
+
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(() => window.__pendingHistoryCalls)).toBe(1);
+  await page.evaluate(() => {
+    window.__resolvePendingHistory([[
+      {
+        entity_id: "sensor.fridge_power",
+        state: "120",
+        last_changed: new Date().toISOString(),
+      },
+    ]]);
+  });
+});
+
 test("dashboard comparison overlays previous data and downloads CSV", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;

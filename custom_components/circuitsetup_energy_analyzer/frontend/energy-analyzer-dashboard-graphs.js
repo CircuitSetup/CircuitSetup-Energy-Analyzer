@@ -805,6 +805,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       this._historyKey = key;
       this._historyRefreshDue = false;
+      this._historyLoadedAt = Date.now();
       const entityIds = entities.map((item) => item.entity);
       const previousRange = this._previousRange(range);
       const requests = [
@@ -900,12 +901,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _historyRequest(start, end, entityIds, rangeDays = null) {
       const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
-      if (spanDays <= 1) {
-        const ids = encodeURIComponent(entityIds.join(","));
-        const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
-        return this._hass.callApi("GET", path);
+      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
+        return this._rawHistoryRequest(start, end, entityIds);
       }
-      if (typeof this._hass.callWS !== "function") return Promise.resolve([]);
       const period = spanDays <= 90
         ? "hour"
         : spanDays <= 730
@@ -918,19 +916,37 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         statistic_ids: entityIds,
         period,
         types: ["mean"],
-      }).then((result) => Object.entries(result || {}).map(([entityId, rows]) => (
-        (rows || []).flatMap((row) => {
-          const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
-          return row.mean !== null
-            && row.mean !== undefined
-            && Number.isFinite(Number(row.mean))
-            && Number.isFinite(time) ? [{
-            entity_id: entityId,
-            state: row.mean,
-            last_changed: new Date(time).toISOString(),
-          }] : [];
-        })
-      )));
+      }).then(async (result) => {
+        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
+          (rows || []).flatMap((row) => {
+            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
+            return row.mean !== null
+              && row.mean !== undefined
+              && Number.isFinite(Number(row.mean))
+              && Number.isFinite(time) ? [{
+              entity_id: entityId,
+              state: row.mean,
+              last_changed: new Date(time).toISOString(),
+            }] : [];
+          })
+        ));
+        const missing = entityIds.filter((entityId) => (
+          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
+        ));
+        if (!missing.length) return statistics;
+        try {
+          const fallback = await this._rawHistoryRequest(start, end, missing);
+          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
+        } catch (_error) {
+          return statistics;
+        }
+      });
+    }
+
+    _rawHistoryRequest(start, end, entityIds) {
+      const ids = encodeURIComponent(entityIds.join(","));
+      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      return this._hass.callApi("GET", path);
     }
   }
 
