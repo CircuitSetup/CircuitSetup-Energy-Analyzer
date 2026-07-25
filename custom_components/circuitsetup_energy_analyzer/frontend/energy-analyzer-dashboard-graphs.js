@@ -1251,13 +1251,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const rolloverReload = this._rangeTotalsRolloverReloadKey === key;
       this._contributionLoadKey = key;
       this._rangeTotalsDateKey = todayKey;
-      const insightsResult = await Promise.allSettled([
-        this._hass.callApi("GET", this._dashboardConfig.api_path),
-      ]);
+      let insights;
+      try {
+        insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
+      } catch (_error) {
+        if (this._contributionLoadKey === key) this._contributionLoadKey = "";
+        return;
+      }
       if (this._contributionLoadKey !== key) return;
-      const insights = insightsResult[0].status === "fulfilled"
-        ? insightsResult[0].value || {}
-        : {};
       const retainedItems = (insights.items || []).filter((item) => (
         !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
       ));

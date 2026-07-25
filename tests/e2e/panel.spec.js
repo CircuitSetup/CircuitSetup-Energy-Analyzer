@@ -358,8 +358,19 @@ test("home energy card omits Active now and separates contribution", async ({ pa
 });
 
 test("home totals use retained completed days without Recorder history", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/appliance_insights" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "appliance_insights: net::ERR_ABORTED" },
+  );
+  let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    if (insightCalls === 1) {
+      await route.fulfill({ status: 503, body: "" });
+      return true;
+    }
     await route.fulfill({
       json: {
         status: "ok",
@@ -394,18 +405,16 @@ test("home totals use retained completed days without Recorder history", async (
       primary_mains: { circuit_id: "mains" },
       appliances: [{ circuit_id: "current-only", name: "Current-only appliance" }],
     },
+    {},
+    {},
+    {
+      start: "2026-05-01T00:00:00.000Z",
+      end: "2026-05-02T23:59:59.999Z",
+      compare: false,
+    },
   );
 
-  await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
-      detail: {
-        start: "2026-05-01T00:00:00.000Z",
-        end: "2026-05-02T23:59:59.999Z",
-        compare: false,
-      },
-    }));
-  });
-
+  await expect.poll(() => insightCalls).toBe(2);
   await expect(card.locator(".metric").filter({ hasText: "Energy (May 1-2)" })).toContainText("18 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (May 1-2)" })).toContainText("$3.60");
   await expect(card.locator(".bar-row").filter({ hasText: "Current-only appliance" })).toContainText("5 kWh");
