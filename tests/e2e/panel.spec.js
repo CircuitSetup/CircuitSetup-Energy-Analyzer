@@ -1619,6 +1619,146 @@ test("dashboard date navigation uses calendar days across DST", async ({ page })
   });
 });
 
+test("dashboard date picker stays mounted while it is open", async ({ page }) => {
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {});
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+  await page.waitForFunction(() => window.__dashboardCard._loading === false);
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.tabIndex = 0;
+    picker.focus();
+    window.__openDatePicker = picker;
+    picker.click();
+  });
+  expect(await page.evaluate(() => window.__dashboardCard._datePickerOpen)).toBe(true);
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("circuitsetup-dashboard-data-changed"));
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  expect(await page.evaluate(() => (
+    window.__openDatePicker.isConnected
+    && window.__dashboardCard.shadowRoot.querySelector("ha-date-range-picker")
+      === window.__openDatePicker
+  ))).toBe(true);
+});
+
+test("dashboard date range is bounded by retained history and today", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          daily_totals: [
+            { date: "2026-07-10", energy_kwh: 1 },
+            { date: "2026-07-11", energy_kwh: 2 },
+          ],
+        }],
+        whole_house: [{
+          entry_id: "entry-1",
+          daily_totals: [{ date: "2026-07-12", energy_kwh: 10 }],
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      entry_id: "entry-1",
+    },
+    {},
+    { time_zone: "UTC" },
+  );
+  await expect.poll(() => card.locator("[data-range-previous]").getAttribute("disabled"))
+    .toBeNull();
+
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        value: {
+          startDate: new Date("2026-07-01T00:00:00.000Z"),
+          endDate: new Date("2026-07-03T23:59:59.999Z"),
+        },
+      },
+    }));
+  });
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-10T00:00:00.000Z",
+    end: "2026-07-12T23:59:59.999Z",
+    compare: false,
+  });
+
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        value: {
+          startDate: new Date("2026-08-01T00:00:00.000Z"),
+          endDate: new Date("2026-08-03T23:59:59.999Z"),
+        },
+      },
+    }));
+  });
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-22T00:00:00.000Z",
+    end: "2026-07-24T23:59:59.999Z",
+    compare: false,
+  });
+  await expect(card.locator("[data-range-next]")).toHaveAttribute("disabled", "");
+});
+
+test("dashboard chart legend colors stay distinct", async ({ page }) => {
+  await mockPanelApi(page);
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+
+  const colors = await page.evaluate(() => {
+    const container = document.createElement("div");
+    container.innerHTML = window.__dashboardCard._chartSvg(
+      Array.from({ length: 8 }, (_, index) => ({
+        name: `Series ${index + 1}`,
+        points: [
+          { time: Date.parse("2026-07-24T00:00:00.000Z"), value: index },
+          { time: Date.parse("2026-07-24T01:00:00.000Z"), value: index + 1 },
+        ],
+      })),
+      {
+        graph_window_start: "2026-07-24T00:00:00.000Z",
+        graph_window_end: "2026-07-24T01:00:00.000Z",
+      },
+    );
+    return [...container.querySelectorAll(".legend-marker")]
+      .map((marker) => marker.getAttribute("style"));
+  });
+
+  expect(new Set(colors).size).toBe(colors.length);
+});
+
 test("dashboard initializes today in the Home Assistant timezone", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-24T20:00:00.000Z") });
   await mockPanelApi(page);

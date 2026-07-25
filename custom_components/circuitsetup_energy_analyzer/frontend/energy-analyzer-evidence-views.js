@@ -3,6 +3,9 @@ export function createEvidenceViewMethods({
   MAX_CHART_POINTS_PER_SERIES,
   CHART_COLORS,
 }) {
+  const chartColor = (index) => CHART_COLORS[index]
+    || `hsl(${(index * 137.508) % 360} 65% 45%)`;
+
   return class EvidenceViewMethods {
   async _loadHistory(alert, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     this._historyLoading = true;
@@ -527,7 +530,7 @@ export function createEvidenceViewMethods({
     const maxPointCount = Math.max(...series.map((item) => item.points.length), 1);
     const barWidth = Math.max(4, Math.min(36, ((width - padLeft - padRight) / maxPointCount) * 0.6));
     const lines = series.map((item, index) => {
-      const color = CHART_COLORS[(item.color_index ?? index) % CHART_COLORS.length];
+      const color = chartColor(index);
       const axis = rightAxis && item.axis === "right" ? "right" : "left";
       const itemUnit = rightAxis
         ? (item.unit || unitLabel)
@@ -556,7 +559,7 @@ export function createEvidenceViewMethods({
       return `<polyline fill="none" stroke="${color}" stroke-width="2"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
-      const color = CHART_COLORS[(item.color_index ?? index) % CHART_COLORS.length];
+      const color = chartColor(index);
       return `<div class="legend-item"><ha-icon class="legend-marker" icon="mdi:check-circle" style="color:${color}"></ha-icon><span>${this._escape(item.name)}</span></div>`;
     }).join("");
     const minLabel = leftAxisCurrency ? this._formatCost(minValue) : this._formatNumber(minValue);

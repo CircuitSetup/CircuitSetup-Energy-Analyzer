@@ -501,6 +501,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     constructor() {
       super();
       this._datePickerLoading = false;
+      this._datePickerOpen = false;
+      this._datePickerRenderDue = false;
+      this._historyBoundsLoaded = false;
+      this._historyBoundsLoading = false;
+      this._historyStartKey = "";
       this._handleDashboardData = () => this._render();
     }
 
@@ -516,8 +521,23 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      if (this._datePickerOpen) {
+        this._datePickerRenderDue = true;
+        return;
+      }
+      this._datePickerRenderDue = false;
       this._ensureNativeDatePicker();
-      const range = validRange(this._dashboardRange);
+      this._loadHistoryBounds();
+      const range = this._boundedRange(validRange(this._dashboardRange));
+      if (
+        range.start !== this._dashboardRange.start
+        || range.end !== this._dashboardRange.end
+      ) {
+        setDashboardRange(range);
+        return;
+      }
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
       const hasData = [...dashboardSeries.values()].some((series) => series.length);
       this.shadowRoot.innerHTML = `
         <ha-card>
@@ -540,8 +560,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <strong class="sr-only" data-range-label>${this._escape(this._rangeLabel(range))}</strong>
             </div>
             <div class="range-actions">
-              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"))}
-              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"))}
+              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"), Boolean(this._historyStartKey && startKey <= this._historyStartKey))}
+              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"), endKey >= todayKey)}
               ${this._rangeAction("now", "mdi:home-clock", this._label("now", "Now"))}
               <ha-icon-button data-range-compare aria-label="${this._escape(this._label("compare", "Compare"))}" title="${this._escape(this._label("compare", "Compare"))}" aria-pressed="${range.compare}">
                 <ha-icon icon="${range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline"}"></ha-icon>
@@ -558,13 +578,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.endDate = new Date(range.end);
       picker.extendedPresets = true;
       picker.backdrop = true;
+      picker.addEventListener("click", () => {
+        this._datePickerOpen = true;
+      }, { capture: true });
+      picker.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") this._datePickerOpen = true;
+      }, { capture: true });
+      picker.addEventListener("picker-closed", () => this._closeDatePicker());
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
-        setDashboardRange({
+        this._datePickerOpen = false;
+        setDashboardRange(this._boundedRange(validRange({
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
-        });
+        })));
       });
       for (const action of ["previous", "next", "now"]) {
         this.shadowRoot.querySelector(`[data-range-${action}]`).addEventListener("click", () => {
@@ -579,31 +607,85 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       });
     }
 
-    _rangeAction(action, icon, label) {
-      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
+    _rangeAction(action, icon, label, disabled = false) {
+      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"${disabled ? " disabled" : ""}><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
     }
 
     _shiftRange(action) {
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
       if (action === "previous") {
-        setDashboardRange(this._previousRange(range));
+        setDashboardRange(this._boundedRange(this._previousRange(range)));
         return;
       }
       if (action === "next") {
-        setDashboardRange(this._rangeFromDateKeys(
+        setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
           this._shiftDateKey(endKey, 1),
           this._shiftDateKey(endKey, days),
           range.compare,
-        ));
+        )));
         return;
       }
       const todayKey = this._chartDateKey(Date.now());
-      setDashboardRange(this._rangeFromDateKeys(
+      setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
         this._shiftDateKey(todayKey, 1 - days),
         todayKey,
         range.compare,
-      ));
+      )));
+    }
+
+    _boundedRange(range) {
+      const { startKey: requestedStart, endKey: requestedEnd, days } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      const firstKey = this._historyStartKey && this._historyStartKey < todayKey
+        ? this._historyStartKey
+        : todayKey;
+      let startKey = requestedStart;
+      let endKey = requestedEnd;
+      if (endKey > todayKey) {
+        endKey = todayKey;
+        startKey = this._shiftDateKey(todayKey, 1 - days);
+      }
+      if (this._historyStartKey && startKey < firstKey) {
+        startKey = firstKey;
+        endKey = this._shiftDateKey(firstKey, days - 1);
+      }
+      if (endKey > todayKey) endKey = todayKey;
+      return this._rangeFromDateKeys(startKey, endKey, range.compare);
+    }
+
+    _closeDatePicker() {
+      this._datePickerOpen = false;
+      if (this._datePickerRenderDue) this._render();
+    }
+
+    async _loadHistoryBounds() {
+      if (
+        this._historyBoundsLoaded
+        || this._historyBoundsLoading
+        || !this._dashboardConfig.api_path
+      ) return;
+      this._historyBoundsLoading = true;
+      try {
+        const payload = await this._hass.callApi("GET", this._dashboardConfig.api_path);
+        const sources = [...(payload.items || []), ...(payload.whole_house || [])]
+          .filter((item) => (
+            !this._dashboardConfig.entry_id
+            || item.entry_id === this._dashboardConfig.entry_id
+          ));
+        const dates = sources.flatMap((item) => (
+          (item.daily_totals || []).map((row) => String(row.date || ""))
+        )).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+        this._historyStartKey = dates.length
+          ? dates.reduce((earliest, date) => date < earliest ? date : earliest)
+          : this._chartDateKey(Date.now());
+        this._historyBoundsLoaded = true;
+        this._render();
+      } catch (_error) {
+        this._historyBoundsLoaded = true;
+      } finally {
+        this._historyBoundsLoading = false;
+      }
     }
 
     _downloadCsv(range) {
@@ -696,7 +778,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
           config.y_axis_label,
         ),
-      ).map((item, index) => ({ ...item, color_index: index }));
+      );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
       const currentDuration = Date.parse(range.end) - currentStart;
@@ -712,10 +794,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             ),
             config.y_axis_label,
           ),
-        ).map((item, index) => ({
+        ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
-          color_index: index,
           line_style: "dashed",
           points: item.points.map((point) => ({
             ...point,
@@ -1539,10 +1620,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const hasEnergy = energyPoints.length || previousEnergy.length;
       const hasCost = costPoints.length || previousCost.length;
       const series = [
-        energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", color_index: 0, points: energyPoints },
-        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: hasEnergy ? "right" : "left", color_index: 1, points: costPoints },
-        previousEnergy.length && { name: `${this._label("energy", "Energy")} (${this._label("previous", "previous")})`, unit: "kWh", line_style: "dashed", color_index: 0, points: previousEnergy },
-        previousCost.length && { name: `${this._label("cost", "Cost")} (${this._label("previous", "previous")})`, unit: "currency", axis: hasEnergy ? "right" : "left", line_style: "dashed", color_index: 1, points: previousCost },
+        energyPoints.length && { name: this._label("energy", "Energy"), unit: "kWh", kind: "bar", points: energyPoints },
+        costPoints.length && { name: this._label("cost", "Cost"), unit: "currency", axis: hasEnergy ? "right" : "left", points: costPoints },
+        previousEnergy.length && { name: `${this._label("energy", "Energy")} (${this._label("previous", "previous")})`, unit: "kWh", line_style: "dashed", points: previousEnergy },
+        previousCost.length && { name: `${this._label("cost", "Cost")} (${this._label("previous", "previous")})`, unit: "currency", axis: hasEnergy ? "right" : "left", line_style: "dashed", points: previousCost },
       ].filter(Boolean);
       const chart = series.length ? this._chartSvg(series, {
         graph_window_start: range.start,
