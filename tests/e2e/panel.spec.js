@@ -527,7 +527,7 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
           circuit_id: "mains",
           daily_totals: [
             { date: "2026-07-11", energy_kwh: 10, cost: 2 },
-            ...(insightCalls > 1
+            ...(insightCalls > 2
               ? [{ date: "2026-07-12", energy_kwh: 4, cost: 1 }]
               : []),
           ],
@@ -556,9 +556,19 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   );
 
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("10 kWh");
-  await page.clock.fastForward(30_000);
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-10T00:00:00.000Z",
+        end: "2026-07-12T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
   await expect.poll(() => insightCalls).toBe(2);
-  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 11-12)" })).toContainText("14 kWh");
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(3);
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
 });
 
 test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {

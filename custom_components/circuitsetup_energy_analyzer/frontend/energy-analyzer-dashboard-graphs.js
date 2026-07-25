@@ -996,7 +996,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeSummary = {};
       this._contributionLoadKey = "";
       this._rangeTotalsDateKey = "";
-      this._rangeTotalsRolloverReload = false;
+      this._rangeTotalsRolloverReloadKey = "";
       this._rangeTotalsReloadTimer = 0;
     }
 
@@ -1160,8 +1160,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
       const key = `${range.start}:${range.end}`;
-      const previousDateKey = this._rangeTotalsDateKey;
-      const rolloverReload = this._rangeTotalsRolloverReload;
+      const rolloverReload = this._rangeTotalsRolloverReloadKey === key;
       this._contributionLoadKey = key;
       this._rangeTotalsDateKey = todayKey;
       const insightsResult = await Promise.allSettled([
@@ -1200,13 +1199,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
       if (
-        (!previousDateKey || previousDateKey !== todayKey)
-        && startKey <= completedDayKey
+        startKey <= completedDayKey
         && endKey >= completedDayKey
         && !completedDayReady
         && !rolloverReload
       ) {
-        this._rangeTotalsRolloverReload = true;
+        this._rangeTotalsRolloverReloadKey = key;
         this._rangeTotalsReloadTimer = setTimeout(() => {
           this._rangeTotalsReloadTimer = 0;
           if (!this.isConnected) return;
@@ -1214,7 +1212,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._render();
         }, 30_000);
       } else {
-        this._rangeTotalsRolloverReload = false;
+        this._rangeTotalsRolloverReloadKey = "";
       }
       this._render();
     }
