@@ -995,6 +995,7 @@
         "setup_health": "Setup Health",
         "home_summary": "Home energy summary",
         "appliances": "Appliances",
+        "all_appliance_power": "All appliance power",
         "energy_and_costs": "Energy and costs",
         "billing_cycle": "Billing Cycle",
         "mains_and_nilm": "Mains and NILM",
@@ -1058,6 +1059,11 @@
         "period": "Period",
         "temperature": "Temperature",
         "flow": "Flow",
+        "previous": "Previous",
+        "next": "Next",
+        "now": "Now",
+        "compare": "Compare",
+        "download_data": "Download data",
         "twenty_four_hours": "24 hours",
         "seven_days": "7 days",
         "thirty_days": "30 days",
@@ -1081,9 +1087,9 @@
         "missing": "Missing entities: {labels}\nNext step: reload the integration or review Entity Detail Level."
       },
       "expert": {
-        "heading": "Analyzer evidence links",
-        "description": "Open these views when you want alert evidence, analyzer actions, and troubleshooting context without adding more diagnostic rows to every appliance card.",
-        "link_label": "{name} evidence"
+        "heading": "Detail links",
+        "description": "Open an appliance detail page for history, comparisons, analyzer findings, and available actions.",
+        "link_label": "{name} details"
       }
     },
     "panel": {
@@ -1666,6 +1672,7 @@
           "accessible_right_axis": "Right axis ranges from {min}{unit} to {max}{unit}.",
         "loading_history": "Loading history samples...",
         "no_history": "No history samples were available for this graph window.",
+        "reset_zoom": "Reset zoom",
         "graph_times": "Graph times shown in {time_zone}.",
         "point_title": "{name}: {value}{unit} at {time}",
         "session_title": "{label} ({session_id})",

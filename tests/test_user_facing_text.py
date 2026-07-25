@@ -6973,9 +6973,13 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "HVAC overlays outdoor temperature on a second axis" in readme_text
     assert "Water flow context overlays correlated appliance power" in readme_text
     assert "daily averages on a second line without percentage comparisons" in readme_text
-    assert "completed-day Energy and costs card in the left column" in readme_text
+    assert "shared Home Assistant-style date range control" in readme_text
+    assert "combining both phases of a dual-phase appliance into one line" in readme_text
+    assert "previous, next, now, compare, and CSV download actions" in readme_text
     assert "without repeating a separate Active Now list" in readme_text
-    assert "segmented Running intervals against a labeled 24-hour scale" in readme_text
+    assert "segmented Running intervals against the selected range" in readme_text
+    assert "restore icon resets an individual graph" in readme_text
+    assert "Detail links open appliance detail pages directly" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text
     assert "first configured mains circuit is the primary whole-house source" in (

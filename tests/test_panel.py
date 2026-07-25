@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -3294,6 +3294,34 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
             "cost_source": "recorded",
         }
     ]
+
+
+def test_appliance_insights_payload_retains_all_available_daily_totals() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+
+    coordinator = _coordinator(config=_config("hvac"))
+    coordinator.entry_id = "entry-hvac"
+    coordinator.current_time = lambda: datetime(2026, 7, 23, 12, tzinfo=UTC)
+    coordinator.store_data.energy_usage_by_circuit = {
+        "hvac": {
+            "days": [
+                {
+                    "date": (date(2026, 7, 22) - timedelta(days=day)).isoformat(),
+                    "usage_kwh": 1.0,
+                    "complete": True,
+                }
+                for day in range(61)
+            ]
+        }
+    }
+
+    (item,) = appliance_insights_payload([coordinator])["items"]
+
+    assert len(item["daily_totals"]) == 61
+    assert item["daily_totals"][0]["date"] == "2026-05-23"
+    assert item["daily_totals"][-1]["date"] == "2026-07-22"
 
 
 def test_appliance_insights_payload_exposes_primary_mains_daily_totals() -> None:

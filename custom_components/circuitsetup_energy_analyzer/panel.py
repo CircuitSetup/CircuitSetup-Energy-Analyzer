@@ -442,7 +442,7 @@ def appliance_insights_payload(
             )
         )
         payload_item["daily_totals"] = (
-            _appliance_daily_totals(coordinator, detail)
+            _appliance_daily_totals(coordinator, detail, limit=None)
             if coordinator is not None and detail is not None
             else []
         )
@@ -461,7 +461,11 @@ def appliance_insights_payload(
                     "entry_id": str(getattr(coordinator, "entry_id", "") or ""),
                     "circuit_id": detail.circuit_id,
                     "display_name": detail.display_name,
-                    "daily_totals": _appliance_daily_totals(coordinator, detail),
+                    "daily_totals": _appliance_daily_totals(
+                        coordinator,
+                        detail,
+                        limit=None,
+                    ),
                 }
             )
             break
@@ -768,6 +772,8 @@ def _appliance_detail_payload(
 def _appliance_daily_totals(
     coordinator: Any,
     detail: ApplianceDetail,
+    *,
+    limit: int | None = 30,
 ) -> list[dict[str, Any]]:
     if detail.source_type == "nilm_estimate":
         return []
@@ -859,7 +865,8 @@ def _appliance_daily_totals(
                 ),
             }
         )
-    return sorted(complete, key=lambda item: item["date"])[-30:]
+    complete = sorted(complete, key=lambda item: item["date"])
+    return complete if limit is None else complete[-limit:]
 
 
 def _schedule_entity_options(coordinator: Any) -> list[dict[str, str]]:
