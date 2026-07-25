@@ -423,6 +423,11 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards() -> None:
         == "custom:circuitsetup-energy-analyzer-date-range"
         for view in _dashboard_views(dashboard)
     )
+    assert all(
+        view["sections"][0]["cards"][0]["api_path"]
+        == "circuitsetup_energy_analyzer/appliance_insights"
+        for view in _dashboard_views(dashboard)
+    )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
