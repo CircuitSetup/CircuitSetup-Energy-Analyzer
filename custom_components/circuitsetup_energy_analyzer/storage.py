@@ -806,8 +806,11 @@ class FeatureStore:
         return self.data
 
     async def async_save(self: Self) -> None:
-        """Persist the current in-memory payload."""
-        await self._store.async_save(feature_store_data_to_dict(self.data))
+        """Schedule persistence without serializing on the event loop."""
+        self._store.async_delay_save(
+            lambda: feature_store_data_to_dict(self.data),
+            delay=0,
+        )
 
 
 def _features_to_dict(features: Any) -> dict[str, Any]:
