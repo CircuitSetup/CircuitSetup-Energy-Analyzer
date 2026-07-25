@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta
 from typing import Any
 
 from ..models import ApplianceProfile, PowerFlowMode, SensorRole
 from ..usage import derive_cumulative_energy_from_power
-
-UTILITY_COMPARISON_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
 class ProcessingPipeline:
@@ -17,8 +13,6 @@ class ProcessingPipeline:
 
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
-        self._utility_comparison_refreshed_at: dict[str, datetime] = {}
-        self._utility_comparison_settings: dict[str, Any] = {}
 
     def configure_processors(
         self,
@@ -222,31 +216,10 @@ class ProcessingPipeline:
         _, solar_alerts = await self._async_apply_feature_result(solar_result)
         alerts.extend(solar_alerts)
 
-        settings_by_circuit = (
-            coordinator.store_data.utility_comparison_settings_by_circuit
-        )
-        configured_circuit_ids = set(settings_by_circuit)
-        for tracked in (
-            self._utility_comparison_refreshed_at,
-            self._utility_comparison_settings,
-        ):
-            for circuit_id in tracked.keys() - configured_circuit_ids:
-                tracked.pop(circuit_id, None)
-
-        for circuit_id, settings in settings_by_circuit.items():
+        for circuit_id in coordinator.store_data.utility_comparison_settings_by_circuit:
             config = coordinator.circuit_registry.config_for_circuit(circuit_id)
             if config is None:
                 continue
-            refreshed_at = self._utility_comparison_refreshed_at.get(circuit_id)
-            if (
-                self._utility_comparison_settings.get(circuit_id) == settings
-                and refreshed_at is not None
-                and refreshed_at <= context.now
-                and context.now - refreshed_at < UTILITY_COMPARISON_REFRESH_INTERVAL
-            ):
-                continue
-            self._utility_comparison_settings[circuit_id] = deepcopy(settings)
-            self._utility_comparison_refreshed_at[circuit_id] = context.now
             result = await self._utility_comparison_processor.process(
                 config,
                 context,

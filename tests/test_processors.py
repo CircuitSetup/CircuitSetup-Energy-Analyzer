@@ -293,7 +293,6 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
         StateUpdate,
     )
 
-    now = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
     applied: list[FeatureResult] = []
     balance_result = FeatureResult(
         state_updates=[
@@ -381,10 +380,7 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
         sync_setup_health_repairs=sync_setup_health_repairs,
     )
 
-    alerts = await pipeline.async_process_cross_circuit(
-        [],
-        SimpleNamespace(now=now),
-    )
+    alerts = await pipeline.async_process_cross_circuit([], SimpleNamespace())
 
     assert alerts == []
     assert applied == [
@@ -394,27 +390,6 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
     ]
     assert coordinator.cost_estimate_refreshes == 1
     assert any(result.store_dirty for result in applied)
-
-    await pipeline.async_process_cross_circuit(
-        [],
-        SimpleNamespace(now=now + timedelta(minutes=5)),
-    )
-    assert applied.count(pipeline._utility_comparison_processor.result) == 1
-
-    coordinator.store_data.utility_comparison_settings_by_circuit["mains"] = {
-        "tolerance_percent": 12.0
-    }
-    await pipeline.async_process_cross_circuit(
-        [],
-        SimpleNamespace(now=now + timedelta(minutes=6)),
-    )
-    assert applied.count(pipeline._utility_comparison_processor.result) == 2
-
-    await pipeline.async_process_cross_circuit(
-        [],
-        SimpleNamespace(now=now + timedelta(minutes=21)),
-    )
-    assert applied.count(pipeline._utility_comparison_processor.result) == 3
 
 
 @pytest.mark.asyncio

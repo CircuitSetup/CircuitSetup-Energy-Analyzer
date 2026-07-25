@@ -19,6 +19,7 @@ from ..utility_comparison import (
 
 _LOGGER = logging.getLogger(__name__)
 _UNSET = object()
+UTILITY_STATISTICS_CACHE_INTERVAL = timedelta(minutes=15)
 
 try:
     from homeassistant.components.recorder import (
@@ -53,6 +54,10 @@ class UtilityEnergySourceManager:
             if recorder_get_instance is _UNSET
             else recorder_get_instance
         )
+        self._statistics_cache: dict[
+            tuple[Any, ...],
+            tuple[datetime, Any],
+        ] = {}
 
     @property
     def hass(self) -> Any:
@@ -112,14 +117,27 @@ class UtilityEnergySourceManager:
     ) -> Any:
         if not statistic_id:
             return select_latest_statistics_energy("", {}, now)
+        normalized_period = _utility_statistic_period_value(period)
+        cache_key = (
+            "single",
+            statistic_id,
+            normalized_period,
+            start_time,
+            end_time,
+        )
+        cached = self._cached_statistics_value(cache_key, now)
+        if cached is not _UNSET:
+            return cached
         statistics = await self.recorder_statistics_during_period(
             statistic_ids={statistic_id},
             start_time=start_time
-            or _statistics_lookback_start(now, _utility_statistic_period_value(period)),
+            or _statistics_lookback_start(now, normalized_period),
             end_time=end_time or now,
-            period=period,
+            period=normalized_period,
         )
-        return select_latest_statistics_energy(statistic_id, statistics, now)
+        reading = select_latest_statistics_energy(statistic_id, statistics, now)
+        self._statistics_cache[cache_key] = (now, reading)
+        return reading
 
     async def statistics_kwh_sum_for_entities(
         self,
@@ -132,11 +150,22 @@ class UtilityEnergySourceManager:
         ids = tuple(entity_id for entity_id in entity_ids if entity_id)
         if not ids:
             return None, ()
+        normalized_period = _utility_statistic_period_value(period)
+        cache_key = (
+            "sum",
+            tuple(sorted(ids)),
+            normalized_period,
+            start_time,
+            end_time,
+        )
+        cached = self._cached_statistics_value(cache_key, now)
+        if cached is not _UNSET:
+            return cached
         statistics = await self.recorder_statistics_during_period(
             statistic_ids=set(ids),
             start_time=start_time,
             end_time=end_time,
-            period=period,
+            period=normalized_period,
         )
         values: list[float] = []
         valid_entity_ids: list[str] = []
@@ -153,8 +182,11 @@ class UtilityEnergySourceManager:
             values.append(reading.energy_kwh)
             valid_entity_ids.append(entity_id)
         if not values:
-            return None, ()
-        return round(sum(values), 3), tuple(valid_entity_ids)
+            result = (None, ())
+        else:
+            result = (round(sum(values), 3), tuple(valid_entity_ids))
+        self._statistics_cache[cache_key] = (now, result)
+        return result
 
     async def recorder_statistics_during_period(
         self,
@@ -211,6 +243,23 @@ class UtilityEnergySourceManager:
                 if sensor.role is SensorRole.ENERGY
             )
         return tuple(entity_ids)
+
+    def _cached_statistics_value(
+        self,
+        key: tuple[Any, ...],
+        now: datetime,
+    ) -> Any:
+        cached = self._statistics_cache.get(key)
+        if cached is None:
+            return _UNSET
+        cached_at, value = cached
+        if (
+            cached_at <= now
+            and now - cached_at < UTILITY_STATISTICS_CACHE_INTERVAL
+        ):
+            return value
+        self._statistics_cache.pop(key, None)
+        return _UNSET
 
 
 def _utility_statistic_period_value(value: Any) -> str:
