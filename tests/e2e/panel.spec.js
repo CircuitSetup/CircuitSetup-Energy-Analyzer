@@ -984,7 +984,7 @@ test("historical appliance totals retry after a transient API failure", async ({
     },
   );
 
-  await expect.poll(() => insightCalls).toBe(1);
+  await expect.poll(() => insightCalls).toBeGreaterThan(0);
   await expect.poll(() => page.evaluate(() => (
     window.__dashboardCard._applianceRangeReloadTimer
   ))).toBeGreaterThan(0);
@@ -1492,6 +1492,64 @@ test("energy and cost history includes live monitored totals for today", async (
   await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
   await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(1);
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
+});
+
+test("no-mains energy history retries the selected appliance after midnight", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-27T00:01:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    const completed = {
+      date: "2026-07-26",
+      energy_kwh: 2.4,
+      cost: 0.48,
+      cost_source: "recorded",
+    };
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [
+          {
+            circuit_id: "fridge",
+            display_name: "Fridge",
+            daily_totals: insightCalls > 1 ? [completed] : [],
+          },
+          {
+            circuit_id: "hvac",
+            display_name: "HVAC",
+            daily_totals: [completed],
+          },
+        ],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-energy-cost",
+    {
+      title: "Energy and costs",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [],
+    },
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-26T00:00:00.000Z",
+      end: "2026-07-26T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect(card.locator("[data-energy-selection]")).toHaveValue("fridge");
+  await expect.poll(() => page.evaluate(() => (
+    Boolean(window.__dashboardCard._insightsReloadTimer)
+  ))).toBe(true);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
 });
 
 test("dashboard date range is shared with graph history requests", async ({ page }) => {

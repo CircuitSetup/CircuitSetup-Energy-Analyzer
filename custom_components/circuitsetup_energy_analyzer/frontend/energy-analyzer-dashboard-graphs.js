@@ -2227,9 +2227,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const items = (this._insights || []).filter((item) => (
         !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
       ));
-      if (!this._dashboardConfig.primary_mains && this._selection === "whole" && items.length) {
-        this._selection = items[0].circuit_id || items[0].appliance_key;
-      }
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
       const currentRow = this._currentHistoryRow();
@@ -2347,6 +2344,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       } catch (_error) {
         this._insights = [];
         this._wholeHouse = [];
+      }
+      if (
+        !this._dashboardConfig.primary_mains
+        && this._selection === "whole"
+        && this._insights.length
+      ) {
+        this._selection = this._insights[0].circuit_id || this._insights[0].appliance_key;
       }
       const range = validRange(this._dashboardRange);
       const { startKey, endKey } = this._calendarRange(range);
