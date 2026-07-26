@@ -55,6 +55,7 @@ async def async_setup_entry(
         if first_entry:
             await async_setup_services(hass)
             await async_setup_panel(hass)
+            await coordinator.dashboard_controller.async_refresh_lovelace_resource()
         await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
         hass.data[DOMAIN][entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

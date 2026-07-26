@@ -91,6 +91,20 @@ class _FakeDashboardCollection:
             await dashboard_store.async_delete()
 
 
+class _FakeLovelaceResources:
+    loaded = True
+
+    def __init__(self, items: list[dict[str, object]]) -> None:
+        self.items = list(items)
+        self.created: list[dict[str, object]] = []
+
+    def async_items(self) -> list[dict[str, object]]:
+        return list(self.items)
+
+    async def async_create_item(self, data: dict[str, object]) -> None:
+        self.created.append(data)
+
+
 class _StorageDashboardCoordinator:
     def __init__(self) -> None:
         self.entry_id = "entry-1"
@@ -153,6 +167,19 @@ class _StorageDashboardCoordinator:
 
     def async_set_updated_data(self, state: object) -> None:
         self.updated_data.append(state)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_controller_refresh_does_not_create_resource() -> None:
+    coordinator = _StorageDashboardCoordinator()
+    resources = _FakeLovelaceResources([])
+    coordinator.hass.data["lovelace"]["resources"] = resources
+    controller = dashboard_controller.DashboardController(coordinator)
+
+    refreshed = await controller.async_refresh_lovelace_resource()
+
+    assert refreshed is True
+    assert resources.created == []
 
 
 @pytest.mark.asyncio
