@@ -433,6 +433,18 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : {};
     }
 
+    _applianceLiveTotals(appliances = []) {
+      if (!this._rangeIncludesToday()) return {};
+      const total = (key) => {
+        const values = appliances.map((item) => this._number(item[key])).filter(Number.isFinite);
+        return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+      };
+      return {
+        energy: total("energy_today_entity"),
+        cost: total("cost_today_entity"),
+      };
+    }
+
     _retainedRangeTotals(item, startKey, endKey, todayKey) {
       const rows = (item && item.daily_totals || []).filter((row) => (
         String(row.date) >= startKey
@@ -1629,13 +1641,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
       const issueCount = appliances.filter((item) => item.issue).length;
-      const rangeSummary = this._mergeRangeTotals(
-        this._rangeSummary,
-        this._liveRangeTotals(
-          mains.daily_energy_usage_entity,
-          mains.cost_today_entity,
-        ),
+      const applianceLiveTotals = this._applianceLiveTotals(config.appliances);
+      const mainsLiveTotals = this._liveRangeTotals(
+        mains.daily_energy_usage_entity,
+        mains.cost_today_entity,
       );
+      const rangeSummary = this._mergeRangeTotals(this._rangeSummary, {
+        energy: mainsLiveTotals.energy ?? applianceLiveTotals.energy,
+        cost: mainsLiveTotals.cost ?? applianceLiveTotals.cost,
+      });
       const energyToday = rangeSummary.energy ?? null;
       const costToday = rangeSummary.cost ?? null;
       const averageEnergy = config.primary_mains && mains.average_kwh_per_day_entity
@@ -1790,16 +1804,20 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const retained = retainedItems.find((item) => (
           item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
         ));
-        return [appliance.circuit_id, this._mergeRangeTotals(
+        return [
+          appliance.circuit_id,
           this._retainedRangeTotals(retained, startKey, endKey, todayKey),
-        )];
+        ];
       }));
       const retainedMains = (insights.whole_house || []).find((item) => (
         (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
         && (!mains.circuit_id || item.circuit_id === mains.circuit_id)
       ));
-      this._rangeSummary = this._mergeRangeTotals(
-        this._retainedRangeTotals(retainedMains, startKey, endKey, todayKey),
+      this._rangeSummary = this._retainedRangeTotals(
+        retainedMains,
+        startKey,
+        endKey,
+        todayKey,
       );
       const completedDayKey = this._shiftDateKey(todayKey, -1);
       const retainedSources = [
@@ -2204,7 +2222,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
-      const historyRows = this._historyRows(items);
+      const currentRow = this._currentHistoryRow();
+      const historyRows = [
+        ...this._historyRows(items).filter((row) => row.date !== currentRow?.date),
+        ...(currentRow ? [currentRow] : []),
+      ];
       const rows = historyRows.filter((row) => (
         String(row.date) >= startKey && String(row.date) <= endKey
       ));
@@ -2257,7 +2279,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         graph_window_end: range.end,
         y_axis_label: hasEnergy ? "kWh" : currency,
         ...(hasEnergy && hasCost ? { right_y_axis_label: currency } : {}),
-      }) : `<p class="muted">${this._escape(this._label("no_history", "No completed-day history is available."))}</p>`;
+      }) : `<p class="muted">${this._escape(this._label("no_energy_history", "No energy or cost data is available for this period."))}</p>`;
       const unavailable = rows.some((row) => row.cost === null || row.cost === undefined);
       const selectedOptions = [
         ...(this._dashboardConfig.primary_mains
@@ -2272,8 +2294,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             <h2>${this._escape(this._dashboardConfig.title || "Energy and costs")}</h2>
             <section>
               <div class="controls">
-                <h3>${this._escape(this._label("completed_history", "Completed-day history"))}</h3>
-                <select data-energy-selection aria-label="${this._escape(this._label("completed_history", "Completed-day history"))}">${selectedOptions}</select>
+                <h3>${this._escape(this._label("energy_cost_history", "Energy and cost history"))}</h3>
+                <select data-energy-selection aria-label="${this._escape(this._label("energy_cost_history", "Energy and cost history"))}">${selectedOptions}</select>
               </div>
               ${chart}
               ${unavailable ? `<p class="muted">${this._escape(this._label("unavailable", "Unavailable"))}</p>` : ""}
@@ -2301,6 +2323,37 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._wholeHouse = [];
       }
       this._render();
+    }
+
+    _currentHistoryRow() {
+      const primaryMains = this._dashboardConfig.primary_mains || {};
+      let totals;
+      if (this._selection === "whole") {
+        const applianceTotals = this._applianceLiveTotals(
+          this._dashboardConfig.appliances,
+        );
+        totals = {
+          energy: this._number(primaryMains.daily_energy_usage_entity)
+            ?? applianceTotals.energy,
+          cost: this._number(primaryMains.cost_today_entity)
+            ?? applianceTotals.cost,
+        };
+      } else {
+        const appliance = (this._dashboardConfig.appliances || []).find((item) => (
+          item.circuit_id === this._selection
+        )) || {};
+        totals = {
+          energy: this._number(appliance.energy_today_entity),
+          cost: this._number(appliance.cost_today_entity),
+        };
+      }
+      if (!Number.isFinite(totals.energy) && !Number.isFinite(totals.cost)) return null;
+      return {
+        date: this._chartDateKey(Date.now()),
+        energy_kwh: totals.energy,
+        cost: totals.cost,
+        cost_source: "current",
+      };
     }
 
     _historyRows(items) {

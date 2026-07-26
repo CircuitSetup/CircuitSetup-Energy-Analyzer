@@ -315,7 +315,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60.4 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
-  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Unavailable");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$2.92");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $2.16");
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
@@ -372,6 +372,50 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     root.setProperty("--warning-color", "#fbbf24");
   });
   await toHaveNoViolations(page);
+});
+
+test("home summary totals monitored appliances when mains today totals are unavailable", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T18:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        daily_energy_usage_entity: "sensor.mains_energy_today",
+        cost_today_entity: "sensor.mains_cost_today",
+      },
+      appliances: [
+        {
+          circuit_id: "fridge",
+          name: "Fridge",
+          energy_today_entity: "sensor.fridge_energy",
+          cost_today_entity: "sensor.fridge_cost",
+        },
+        {
+          circuit_id: "hvac",
+          name: "HVAC",
+          energy_today_entity: "sensor.hvac_energy",
+          cost_today_entity: "sensor.hvac_cost",
+        },
+      ],
+    },
+    {
+      "sensor.mains_energy_today": { state: "unavailable", attributes: {} },
+      "sensor.mains_cost_today": { state: "unavailable", attributes: {} },
+      "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.28", attributes: {} },
+      "sensor.hvac_energy": { state: "2.2", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.hvac_cost": { state: "0.5", attributes: {} },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 26)" }))
+    .toContainText("3.6 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 26)" }))
+    .toContainText("$0.78");
 });
 
 test("home totals use retained completed days without Recorder history", async ({ page }) => {
@@ -1186,7 +1230,7 @@ test("energy and cost card follows the dashboard range and preserves cost source
         seven_days: "7 days",
         thirty_days: "30 days",
         whole_house: "Whole house",
-        completed_history: "Completed-day history",
+        energy_cost_history: "Energy and cost history",
         unavailable: "Unavailable",
       },
     },
@@ -1195,7 +1239,7 @@ test("energy and cost card follows the dashboard range and preserves cost source
 
   await expect(card).not.toContainText("Today versus normal");
   await expect(card.locator(".metric")).toHaveCount(0);
-  await expect(card).toContainText("Completed-day history");
+  await expect(card).toContainText("Energy and cost history");
   await page.evaluate(() => {
     window.__dashboardHass.config.time_zone = "Pacific/Auckland";
     window.__dashboardCard.hass = window.__dashboardHass;
@@ -1338,6 +1382,63 @@ test("water context graph combines paired appliance watts with one flow series",
     });
   });
   await expect(card).toBeHidden();
+});
+
+test("energy and cost history includes live monitored totals for today", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T18:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-energy-cost",
+    {
+      title: "Energy and costs",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        circuit_id: "mains",
+        daily_energy_usage_entity: "sensor.mains_energy_today",
+        cost_today_entity: "sensor.mains_cost_today",
+      },
+      appliances: [
+        {
+          circuit_id: "fridge",
+          energy_today_entity: "sensor.fridge_energy",
+          cost_today_entity: "sensor.fridge_cost",
+        },
+        {
+          circuit_id: "hvac",
+          energy_today_entity: "sensor.hvac_energy",
+          cost_today_entity: "sensor.hvac_cost",
+        },
+      ],
+      labels: {
+        no_history: "No running history is available for this period.",
+      },
+    },
+    {
+      "sensor.mains_energy_today": { state: "unavailable", attributes: {} },
+      "sensor.mains_cost_today": { state: "unavailable", attributes: {} },
+      "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.28", attributes: {} },
+      "sensor.hvac_energy": { state: "2.2", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.hvac_cost": { state: "0.5", attributes: {} },
+    },
+  );
+
+  await expect(card).toContainText("Energy and cost history");
+  await expect(card).not.toContainText("No running history");
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
+  await expect(card.locator('[data-cost-source="current"]')).toHaveCount(1);
 });
 
 test("dashboard date range is shared with graph history requests", async ({ page }) => {

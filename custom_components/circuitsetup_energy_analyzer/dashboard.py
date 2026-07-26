@@ -224,8 +224,11 @@ def build_recommended_dashboard(
                 "api_path": f"{DOMAIN}/appliance_insights",
                 "primary_mains": _dashboard_circuit_payload(
                     context.primary_mains,
-                    (),
+                    ("daily_energy_usage", "cost_today"),
                 ),
+                "appliances": [
+                    _appliance_card_payload(circuit) for circuit in context.appliances
+                ],
                 "labels": dict(translation_section("dashboard", "live_cards")),
                 "grid_options": {"columns": 12},
             }
