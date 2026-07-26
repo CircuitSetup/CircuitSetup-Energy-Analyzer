@@ -2008,6 +2008,33 @@ test("dashboard date picker stays mounted while it is open", async ({ page }) =>
   ))).toBe(true);
 });
 
+test("dashboard date picker receives Home Assistant before connecting", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__datePickerConnectedWithoutHass = false;
+    customElements.define("ha-date-range-picker", class extends HTMLElement {
+      connectedCallback() {
+        if (!this.hass) window.__datePickerConnectedWithoutHass = true;
+      }
+    });
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+
+  await expect(card.locator("ha-date-range-picker")).toHaveCount(1);
+  expect(await card.locator("ha-date-range-picker").evaluate((picker) => ({
+    connectedWithoutHass: window.__datePickerConnectedWithoutHass,
+    receivedHass: picker.hass === window.__dashboardHass,
+  }))).toEqual({
+    connectedWithoutHass: false,
+    receivedHass: true,
+  });
+});
+
 test("dashboard date selector loads every stock Energy control", async ({ page }) => {
   await page.addInitScript(() => {
     customElements.define("ha-date-range-picker", class extends HTMLElement {});
