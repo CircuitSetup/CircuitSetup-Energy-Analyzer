@@ -1532,6 +1532,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
 
   class CircuitSetupEnergyAnalyzerSummary extends DashboardCardBase {
+    _shouldRenderForHassUpdate() {
+      return true;
+    }
+
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
@@ -1584,6 +1588,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
       super.disconnectedCallback();
+    }
+
+    _shouldRenderForHassUpdate() {
+      return true;
     }
 
     _render() {

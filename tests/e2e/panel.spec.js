@@ -2570,6 +2570,68 @@ test("dashboard summary cards use the shared header style", async ({ page }) => 
   await toHaveNoViolations(page);
 });
 
+test("historical dashboard keeps live summary and house status current", async ({ page }) => {
+  await mockPanelApi(page);
+  await openDashboardCards(
+    page,
+    [
+      {
+        tagName: "circuitsetup-energy-analyzer-summary",
+        config: {
+          title: "Billing Cycle",
+          entities: [{ entity: "sensor.billing_cost", name: "Cost so far" }],
+        },
+      },
+      {
+        tagName: "circuitsetup-energy-analyzer-house-flow",
+        config: {
+          title: "Live status",
+          mode: "mains",
+          setup_health_entity: "sensor.setup_health",
+          primary_mains: {
+            power_entities: ["sensor.mains_power"],
+          },
+        },
+      },
+    ],
+    {
+      "sensor.billing_cost": { state: "42.10", attributes: { unit_of_measurement: "USD" } },
+      "sensor.mains_power": { state: "100", attributes: { unit_of_measurement: "W" } },
+      "sensor.setup_health": { state: "Ready", attributes: {} },
+    },
+  );
+  const summary = page.locator("circuitsetup-energy-analyzer-summary");
+  const house = page.locator("circuitsetup-energy-analyzer-house-flow");
+  await expect(summary).toContainText("$42.10");
+  await expect(house).toContainText("House power: 100 W");
+  await expect(house).toContainText("Ready");
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-10T00:00:00.000Z",
+        end: "2026-07-10T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+    const hass = window.__dashboardCards[0]._hass;
+    hass.states["sensor.billing_cost"] = {
+      state: "43.20",
+      attributes: { unit_of_measurement: "USD" },
+    };
+    hass.states["sensor.mains_power"] = {
+      state: "250",
+      attributes: { unit_of_measurement: "W" },
+    };
+    hass.states["sensor.setup_health"] = { state: "Needs attention", attributes: {} };
+    for (const card of window.__dashboardCards) card.hass = hass;
+  });
+
+  await expect(summary).toContainText("$43.20");
+  await expect(house).toContainText("House power: 250 W");
+  await expect(house).toContainText("Needs attention");
+});
+
 test("analyzer detail links render as a tight vertical list", async ({ page }) => {
   await mockPanelApi(page);
   const card = await openDashboardCard(
