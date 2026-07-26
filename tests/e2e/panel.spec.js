@@ -682,6 +682,9 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await expect.poll(() => insightCalls).toBe(2);
   await page.clock.fastForward(30_000);
   await expect.poll(() => insightCalls).toBe(3);
+  await expect.poll(() => page.evaluate(() => (
+    Boolean(window.__dashboardCard._rangeTotalsReloadTimer)
+  ))).toBe(true);
   await page.clock.fastForward(30_000);
   await expect.poll(() => insightCalls).toBe(4);
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
