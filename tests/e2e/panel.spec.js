@@ -1404,19 +1404,33 @@ test("energy and cost history includes live monitored totals for today", async (
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
     insightCalls += 1;
+    const completed = {
+      date: "2026-07-26",
+      energy_kwh: 3.6,
+      cost: 0.78,
+      cost_source: "recorded",
+    };
     await route.fulfill({
       json: {
         status: "ok",
-        items: [],
-        whole_house: insightCalls > 2 ? [{
+        items: insightCalls > 1 ? [
+          {
+            entry_id: "entry-1",
+            circuit_id: "fridge",
+            display_name: "Fridge",
+            daily_totals: insightCalls > 2 ? [completed] : [],
+          },
+          {
+            entry_id: "entry-1",
+            circuit_id: "hvac",
+            display_name: "HVAC",
+            daily_totals: [completed],
+          },
+        ] : [],
+        whole_house: insightCalls > 1 ? [{
           entry_id: "entry-1",
           circuit_id: "mains",
-          daily_totals: [{
-            date: "2026-07-26",
-            energy_kwh: 3.6,
-            cost: 0.78,
-            cost_source: "recorded",
-          }],
+          daily_totals: [completed],
         }] : [],
       },
     });
@@ -1559,6 +1573,38 @@ test("no-mains energy history retries the selected appliance after midnight", as
   await page.clock.fastForward(30_000);
   await expect.poll(() => insightCalls).toBe(2);
   await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
+});
+
+test("no-mains energy history waits for an appliance selection", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({
+      json: { status: "ok", items: [], whole_house: [] },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-energy-cost",
+    {
+      title: "Energy and costs",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{
+        circuit_id: "fridge",
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+      }],
+    },
+    {
+      "sensor.fridge_energy": { state: "1.4", attributes: {} },
+      "sensor.fridge_cost": { state: "0.28", attributes: {} },
+    },
+  );
+
+  await expect(card.locator("[data-energy-selection] option")).toHaveCount(0);
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(0);
+  await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
 });
 
 test("dashboard date range is shared with graph history requests", async ({ page }) => {

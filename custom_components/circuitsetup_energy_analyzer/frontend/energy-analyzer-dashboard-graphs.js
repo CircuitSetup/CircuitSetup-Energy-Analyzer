@@ -2359,8 +2359,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
       const completedDayKey = this._shiftDateKey(todayKey, -1);
-      const completedDayReady = this._historyRows(items).some((row) => (
-        String(row.date) === completedDayKey
+      const mains = this._wholeHouse.find((item) => (
+        !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
+      ));
+      const retainedSources = [
+        ...(this._dashboardConfig.primary_mains ? [mains] : []),
+        ...items,
+      ];
+      const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
+        (item?.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
       if (
         startKey <= completedDayKey
@@ -2382,6 +2389,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const primaryMains = this._dashboardConfig.primary_mains || {};
       let totals;
       if (this._selection === "whole") {
+        if (!this._dashboardConfig.primary_mains) return null;
         const applianceTotals = this._applianceLiveTotals(
           this._dashboardConfig.appliances,
         );
