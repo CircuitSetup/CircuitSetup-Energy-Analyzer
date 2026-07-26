@@ -744,12 +744,23 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.extendedPresets = false;
       picker.backdrop = true;
       picker.popoverPlacement = "top-start";
+      let trackedWrapper = null;
       let trackedCalendar = null;
       let pendingSingleDate = null;
       const trackSingleDate = async () => {
         await picker.updateComplete;
         const inner = picker.shadowRoot && picker.shadowRoot.querySelector("date-range-picker");
-        if (!inner) return;
+        if (!inner) {
+          const wrapper = picker.shadowRoot
+            && picker.shadowRoot.querySelector("wa-popover, ha-bottom-sheet");
+          if (wrapper && wrapper !== trackedWrapper) {
+            trackedWrapper = wrapper;
+            wrapper.addEventListener("wa-after-show", () => void trackSingleDate(), {
+              once: true,
+            });
+          }
+          return;
+        }
         await inner.updateComplete;
         const calendar = inner.shadowRoot && inner.shadowRoot.querySelector("calendar-range");
         if (!calendar || calendar === trackedCalendar) return;

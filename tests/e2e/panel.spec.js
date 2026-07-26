@@ -2084,16 +2084,24 @@ test("dashboard date picker applies one calendar click as a single day", async (
     customElements.define("ha-date-range-picker", class extends HTMLElement {
       constructor() {
         super();
+        this.attachShadow({ mode: "open" });
+        this.updateComplete = Promise.resolve();
+      }
+
+      open() {
+        this._wrapper = document.createElement("wa-popover");
+        this.shadowRoot.replaceChildren(this._wrapper);
+      }
+
+      show() {
         const inner = document.createElement("date-range-picker");
         inner.attachShadow({ mode: "open" });
         this._calendar = document.createElement("calendar-range");
         inner.shadowRoot.append(this._calendar);
         inner.updateComplete = Promise.resolve();
-        this.attachShadow({ mode: "open" }).append(inner);
-        this.updateComplete = Promise.resolve();
+        this._wrapper.dispatchEvent(new CustomEvent("wa-after-show"));
+        this.shadowRoot.append(inner);
       }
-
-      open() {}
 
       selectSingle(date) {
         this._calendar.dispatchEvent(new CustomEvent("rangestart", {
@@ -2125,6 +2133,9 @@ test("dashboard date picker applies one calendar click as a single day", async (
   );
 
   await card.locator("[data-range-open]").click();
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.show();
+  });
   await card.locator("ha-date-range-picker").evaluate((picker) => {
     picker.selectSingle("2026-07-24T00:00:00.000Z");
   });
