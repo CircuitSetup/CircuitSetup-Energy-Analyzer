@@ -764,6 +764,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       });
       this.shadowRoot.querySelector("[data-range-picker-host]").append(picker);
       const openPicker = () => {
+        this._datePickerOpen = true;
         picker.open();
       };
       const rangeOpen = this.shadowRoot.querySelector("[data-range-open]");
