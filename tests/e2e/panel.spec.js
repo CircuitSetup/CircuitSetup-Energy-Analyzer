@@ -423,6 +423,45 @@ test("home totals use retained completed days without Recorder history", async (
   ))).toBe(false);
 });
 
+test("historical home totals retry after an API failure", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/appliance_insights" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "appliance_insights: net::ERR_ABORTED" },
+  );
+  await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    await route.fulfill({ status: 503, body: "" });
+    return true;
+  });
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { circuit_id: "mains" },
+    },
+    {},
+    {},
+    {
+      start: "2026-07-10T00:00:00.000Z",
+      end: "2026-07-10T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect.poll(() => page.evaluate(() => (
+    window.__dashboardCard._rangeTotalsReloadTimer
+  ))).toBeGreaterThan(0);
+  const callsBeforeRetry = insightCalls;
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => insightCalls).toBeGreaterThan(callsBeforeRetry);
+});
+
 test("home totals retry when the first midnight payload is stale", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
   let afterMidnight = false;
@@ -817,10 +856,11 @@ test("historical appliance totals retry after a transient API failure", async ({
   );
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   let insightCalls = 0;
+  let allowSuccess = false;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
     insightCalls += 1;
-    if (insightCalls === 1) {
+    if (!allowSuccess) {
       await route.fulfill({ status: 503, body: "" });
       return true;
     }
@@ -856,8 +896,13 @@ test("historical appliance totals retry after a transient API failure", async ({
   );
 
   await expect.poll(() => insightCalls).toBe(1);
-  await page.evaluate(() => window.__dashboardCard._render());
-  await expect.poll(() => insightCalls).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    window.__dashboardCard._applianceRangeReloadTimer
+  ))).toBeGreaterThan(0);
+  const callsBeforeRetry = insightCalls;
+  allowSuccess = true;
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => insightCalls).toBeGreaterThan(callsBeforeRetry);
   await expect(card.locator('[data-appliance-id="fridge"]'))
     .toContainText("Energy Jul 10: 2.5 kWh · $0.75");
 });

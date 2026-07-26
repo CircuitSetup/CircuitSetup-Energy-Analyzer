@@ -1745,7 +1745,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       try {
         insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
       } catch (_error) {
-        if (this._contributionLoadKey === key) this._contributionLoadKey = "";
+        if (this._contributionLoadKey === key) {
+          this._contributionLoadKey = "";
+          this._rangeTotalsReloadTimer = setTimeout(() => {
+            this._rangeTotalsReloadTimer = 0;
+            if (this.isConnected && !this._contributionLoadKey) this._render();
+          }, 5_000);
+        }
         return;
       }
       if (this._contributionLoadKey !== key) return;
@@ -1820,7 +1826,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._timelineRows = [];
       this._applianceRangeTotals = {};
       this._applianceRangeKey = "";
+      this._applianceRangeReloadTimer = 0;
       this._liveApplianceTotalsKey = "";
+    }
+
+    disconnectedCallback() {
+      clearTimeout(this._applianceRangeReloadTimer);
+      super.disconnectedCallback();
     }
 
     _refreshLiveData() {
@@ -1977,13 +1989,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const todayKey = this._chartDateKey(Date.now());
       const key = `${range.start}:${range.end}:${todayKey}`;
       if (this._applianceRangeKey === key) return;
+      clearTimeout(this._applianceRangeReloadTimer);
+      this._applianceRangeReloadTimer = 0;
       this._applianceRangeKey = key;
       this._applianceRangeTotals = {};
       let insights;
       try {
         insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
       } catch (_error) {
-        if (this._applianceRangeKey === key) this._applianceRangeKey = "";
+        if (this._applianceRangeKey === key) {
+          this._applianceRangeKey = "";
+          this._applianceRangeReloadTimer = setTimeout(() => {
+            this._applianceRangeReloadTimer = 0;
+            if (this.isConnected && !this._applianceRangeKey) this._render();
+          }, 5_000);
+        }
         return;
       }
       if (this._applianceRangeKey !== key) return;
