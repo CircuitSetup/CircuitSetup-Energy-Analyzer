@@ -744,9 +744,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.extendedPresets = false;
       picker.backdrop = true;
       picker.popoverPlacement = "top-start";
-      picker.addEventListener("toggle", (event) => {
-        this._datePickerOpen = Boolean(event.detail && event.detail.open);
-        if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
+      picker.addEventListener("click", () => {
+        this._datePickerOpen = true;
+      });
+      picker.addEventListener("picker-closed", () => {
+        this._datePickerOpen = false;
+        if (this._datePickerRenderDue) this._render();
       });
       let pendingRange = null;
       picker.addEventListener("value-changed", (event) => {
