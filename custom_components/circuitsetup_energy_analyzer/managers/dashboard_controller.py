@@ -25,6 +25,13 @@ class DashboardController:
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
 
+    async def async_refresh_lovelace_resource(self) -> bool:
+        """Update an existing dashboard resource to the current module version."""
+        return await _async_ensure_lovelace_dashboard_graph_resource(
+            _lovelace_data_from_hass(self._coordinator.hass),
+            create=False,
+        )
+
     async def async_create_dashboard(self) -> dict[str, Any]:
         """Create or update the recommended Home Assistant dashboard."""
         coordinator = self._coordinator
@@ -343,9 +350,9 @@ async def _async_save_lovelace_dashboard_config(
     if not callable(save):
         return False
     save_config = dict(config)
-    if not await _async_ensure_lovelace_dashboard_graph_resource(
-        lovelace_data,
-        save_config,
+    if (
+        dashboard_includes_nilm_graph_card(save_config)
+        and not await _async_ensure_lovelace_dashboard_graph_resource(lovelace_data)
     ):
         for card_type in DASHBOARD_CUSTOM_CARD_TYPES:
             save_config = _lovelace_config_without_card_type(save_config, card_type)
@@ -356,11 +363,9 @@ async def _async_save_lovelace_dashboard_config(
 
 async def _async_ensure_lovelace_dashboard_graph_resource(
     lovelace_data: Any,
-    config: Mapping[str, Any],
+    *,
+    create: bool = True,
 ) -> bool:
-    if not dashboard_includes_nilm_graph_card(config):
-        return True
-
     resources = _lovelace_dashboard_item_value(lovelace_data, "resources")
     if resources is None:
         return False
@@ -387,6 +392,8 @@ async def _async_ensure_lovelace_dashboard_graph_resource(
     )
     resource_payload = _lovelace_resource_update_payload(resource)
     if existing is None:
+        if not create:
+            return True
         create_method = getattr(resources, "async_create_item", None)
         if not callable(create_method):
             return False

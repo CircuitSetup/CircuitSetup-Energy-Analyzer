@@ -3555,6 +3555,37 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
         async_unload_entry,
     )
     from custom_components.circuitsetup_energy_analyzer.panel import PANEL_URL_PATH
+    from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
+        PANEL_MODULE_NAME,
+        PANEL_MODULE_VERSION,
+        STATIC_URL_PATH,
+    )
+
+    resource_url = (
+        f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
+    )
+    resource_items = [
+        {
+            "id": "dashboard-graph-module",
+            "type": "module",
+            "url": f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v=old",
+        }
+    ]
+    resource_updates: list[tuple[str, dict[str, str]]] = []
+
+    async def async_update_item(item_id: str, data: dict[str, str]) -> None:
+        resource_updates.append((item_id, data))
+        resource_items[0] = {
+            "id": item_id,
+            "type": data["res_type"],
+            "url": data["url"],
+        }
+
+    resources = SimpleNamespace(
+        loaded=True,
+        async_items=lambda: list(resource_items),
+        async_update_item=async_update_item,
+    )
 
     class FakeConfigEntries:
         async def async_forward_entry_setups(self, entry, platforms) -> None:
@@ -3592,7 +3623,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
     panel_custom = FakePanelCustom()
     frontend = FakeFrontend()
     hass = SimpleNamespace(
-        data={},
+        data={"lovelace": {"resources": resources}},
         http=http,
         components=SimpleNamespace(panel_custom=panel_custom, frontend=frontend),
         config_entries=FakeConfigEntries(),
@@ -3608,6 +3639,12 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
     assert len(http.views) == 6
+    assert resource_updates == [
+        (
+            "dashboard-graph-module",
+            {"res_type": "module", "url": resource_url},
+        )
+    ]
 
     hass.data[DOMAIN][DATA_RELOAD_COUNT] = 1
     assert await async_unload_entry(hass, entry) is True
@@ -3617,6 +3654,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
     hass.data[DOMAIN].pop(DATA_RELOAD_COUNT)
     assert await async_setup_entry(hass, entry) is True
     assert len(panel_custom.panels) == 1
+    assert len(resource_updates) == 1
     assert await async_unload_entry(hass, entry) is True
 
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
