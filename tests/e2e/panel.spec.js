@@ -2124,10 +2124,10 @@ test("dashboard date picker applies one calendar click as a single day", async (
     "circuitsetup-energy-analyzer-date-range",
     {},
     {},
-    { time_zone: "UTC" },
+    { time_zone: "America/New_York" },
     {
-      start: "2026-07-22T00:00:00.000Z",
-      end: "2026-07-23T23:59:59.999Z",
+      start: "2026-07-22T04:00:00.000Z",
+      end: "2026-07-24T03:59:59.999Z",
       compare: false,
     },
   );
@@ -2142,8 +2142,8 @@ test("dashboard date picker applies one calendar click as a single day", async (
   await expect.poll(() => page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ))).toEqual({
-    start: "2026-07-24T00:00:00.000Z",
-    end: "2026-07-24T23:59:59.999Z",
+    start: "2026-07-24T04:00:00.000Z",
+    end: "2026-07-25T03:59:59.999Z",
     compare: false,
   });
 });

@@ -793,7 +793,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         pendingSingleDate = null;
         queueMicrotask(() => {
           if (!pendingRange) return;
-          const dateKey = singleDate && this._chartDateKey(singleDate);
+          const dateKey = singleDate instanceof Date && !Number.isNaN(singleDate.getTime())
+            ? singleDate.toISOString().slice(0, 10)
+            : "";
           const selectedRange = dateKey
             ? this._boundedPresetRange(dateKey, dateKey, range.compare)
             : pendingRange;
