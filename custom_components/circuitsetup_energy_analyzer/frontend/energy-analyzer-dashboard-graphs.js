@@ -748,19 +748,28 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._datePickerOpen = Boolean(event.detail && event.detail.open);
         if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
       });
-      let selectedPresetKey = "";
+      let pendingRange = null;
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
         this._datePickerOpen = false;
-        const selectedRange = {
+        pendingRange = {
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
         };
-        queueMicrotask(() => this._selectRange(selectedRange, selectedPresetKey));
+        queueMicrotask(() => {
+          if (!pendingRange) return;
+          const selectedRange = pendingRange;
+          pendingRange = null;
+          this._selectRange(selectedRange, "");
+        });
       });
       picker.addEventListener("preset-selected", (event) => {
-        selectedPresetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
+        if (!pendingRange) return;
+        const selectedRange = pendingRange;
+        pendingRange = null;
+        const presetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
+        this._selectRange(selectedRange, presetKey);
       });
       this.shadowRoot.querySelector("[data-range-picker-host]").append(picker);
       const openPicker = () => {

@@ -2134,6 +2134,48 @@ test("dashboard date selector mirrors stock Energy controls and presets", async 
   ]);
 });
 
+test("dashboard date preset applies before the picker closes", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {});
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-24T00:00:00.000Z",
+      end: "2026-07-24T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    const [startDate, endDate] = picker.ranges.Yesterday;
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      detail: { value: { startDate, endDate } },
+    }));
+    picker.dispatchEvent(new CustomEvent("preset-selected", {
+      detail: { index: 1 },
+    }));
+    window.__rangeWhenPresetCloses = JSON.parse(
+      localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"),
+    );
+  });
+
+  expect(await page.evaluate(() => window.__rangeWhenPresetCloses)).toEqual({
+    start: "2026-07-23T00:00:00.000Z",
+    end: "2026-07-23T23:59:59.999Z",
+    compare: false,
+  });
+  expect(await page.evaluate(() => (
+    localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range-preset")
+  ))).toBe("yesterday");
+});
+
 test("dashboard date selector shows the stock delayed loading indicator", async ({ page }) => {
   await mockPanelApi(page);
   const card = await openDashboardCard(
