@@ -36,6 +36,7 @@ ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
 CONTEXT_GRAPH_CARD = "custom:circuitsetup-energy-analyzer-context-graph"
 DATE_RANGE_CARD = "custom:circuitsetup-energy-analyzer-date-range"
 SUMMARY_CARD = "custom:circuitsetup-energy-analyzer-summary"
+SECTIONS_FOOTER_MIN_VERSION = (2026, 3)
 DASHBOARD_CUSTOM_CARD_TYPES = (
     HOUSE_FLOW_CARD,
     APPLIANCE_GRID_CARD,
@@ -286,16 +287,27 @@ def build_recommended_dashboard(
     for view in views:
         cards = view["sections"][0]["cards"]
         content_card_count = len(cards)
-        cards.insert(
-            0,
-            {
-                "type": DATE_RANGE_CARD,
-                "entry_id": context.entry_id,
-                "api_path": f"{DOMAIN}/appliance_insights",
-                "labels": dict(translation_section("dashboard", "live_cards")),
-                "grid_options": {"columns": DASHBOARD_COLUMNS * 12},
-            },
-        )
+        date_card = {
+            "type": DATE_RANGE_CARD,
+            "entry_id": context.entry_id,
+            "api_path": f"{DOMAIN}/appliance_insights",
+            "labels": dict(translation_section("dashboard", "live_cards")),
+        }
+        if _sections_footer_supported():
+            view["footer"] = {"card": date_card}
+        else:
+            view["sections"].append(
+                {
+                    "type": "grid",
+                    "column_span": DASHBOARD_COLUMNS,
+                    "cards": [
+                        {
+                            **date_card,
+                            "grid_options": {"columns": "full"},
+                        }
+                    ],
+                }
+            )
         # A full-width section has 12 card cells for each spanned view column.
         card_columns = (
             24
@@ -308,15 +320,21 @@ def build_recommended_dashboard(
             )
         )
         for card in cards:
-            card["grid_options"]["columns"] = (
-                DASHBOARD_COLUMNS * 12
-                if card["type"] == DATE_RANGE_CARD
-                else card_columns
-            )
+            card["grid_options"]["columns"] = card_columns
     return {
         "title": DASHBOARD_TITLE,
         "views": views,
     }
+
+
+def _sections_footer_supported() -> bool:
+    try:
+        from homeassistant.const import __version__
+
+        year, month = (int(part) for part in str(__version__).split(".")[:2])
+    except (ImportError, TypeError, ValueError):
+        return False
+    return (year, month) >= SECTIONS_FOOTER_MIN_VERSION
 
 
 def _dashboard_context(
@@ -517,6 +535,8 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
             {
                 "type": APPLIANCE_GRID_CARD,
                 "title": _dashboard_text("cards", "appliances"),
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/appliance_insights",
                 "appliances": [
                     _appliance_card_payload(circuit)
                     for circuit in context.appliances

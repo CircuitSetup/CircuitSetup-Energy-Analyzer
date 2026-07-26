@@ -2,6 +2,19 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   const RANGE_EVENT = "circuitsetup-dashboard-range-changed";
   const DATA_EVENT = "circuitsetup-dashboard-data-changed";
   const RANGE_KEY = "circuitsetup-energy-analyzer-dashboard-range";
+  const RANGE_PRESET_KEY = "circuitsetup-energy-analyzer-dashboard-range-preset";
+  const STOCK_RANGE_KEYS = [
+    "today",
+    "yesterday",
+    "this_week",
+    "this_month",
+    "this_quarter",
+    "this_year",
+    "now-7d",
+    "now-30d",
+    "now-365d",
+    "now-12m",
+  ];
   const dashboardSeries = new Map();
 
   const defaultRange = () => {
@@ -59,6 +72,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._contributionLoadKey = "";
         this._rangeSummary = {};
         this._rollingContributionByCircuit = {};
+        this._applianceRangeTotals = {};
+        this._applianceRangeKey = "";
         this._chartZoomWindows && this._chartZoomWindows.clear();
         this._render();
       };
@@ -87,12 +102,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     set hass(value) {
+      const initial = !this._hass;
       this._hass = value;
-      if (typeof this._refreshLiveData === "function") this._refreshLiveData();
       if (!localStorage.getItem(RANGE_KEY)) {
         const todayKey = this._chartDateKey(Date.now());
         this._dashboardRange = this._rangeFromDateKeys(todayKey, todayKey);
         setDashboardRange(this._dashboardRange);
+      }
+      const liveRange = this._rangeIncludesToday();
+      const liveDataChanged = typeof this._refreshLiveData === "function"
+        && Boolean(this._refreshLiveData());
+      if (!initial) {
+        const shouldRender = typeof this._shouldRenderForHassUpdate === "function"
+          ? this._shouldRenderForHassUpdate({ liveRange, liveDataChanged })
+          : liveRange || liveDataChanged;
+        if (!shouldRender) return;
       }
       const active = this.shadowRoot && this.shadowRoot.activeElement;
       if (active && active.matches("input, select, textarea")) {
@@ -177,7 +201,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return this._formatValue(this._number(entityId), this._unit(entityId, fallbackUnit));
     }
 
-    _applianceState(appliance) {
+    _applianceState(appliance, rangeTotals = null) {
       const healthState = this._state(appliance.health_entity) || {};
       const electrical = String((healthState.attributes || {}).electrical_summary || "");
       const electricalIssue = Boolean(
@@ -190,8 +214,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return {
         ...appliance,
         power: this._sum(appliance.power_entities),
-        energy: this._number(appliance.energy_today_entity),
-        cost: this._number(appliance.cost_today_entity),
+        energy: rangeTotals
+          ? rangeTotals.energy ?? null
+          : this._number(appliance.energy_today_entity),
+        cost: rangeTotals
+          ? rangeTotals.cost ?? null
+          : this._number(appliance.cost_today_entity),
         health,
         running,
         issue: electricalIssue || /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
@@ -384,6 +412,56 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       };
     }
 
+    _rangeIncludesToday(range = this._dashboardRange) {
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      return startKey <= todayKey && endKey >= todayKey;
+    }
+
+    _isTodayRange(range = this._dashboardRange) {
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      return startKey === todayKey && endKey === todayKey;
+    }
+
+    _liveRangeTotals(energyEntity, costEntity) {
+      return this._rangeIncludesToday()
+        ? {
+          energy: energyEntity ? this._number(energyEntity) : null,
+          cost: costEntity ? this._number(costEntity) : null,
+        }
+        : {};
+    }
+
+    _retainedRangeTotals(item, startKey, endKey, todayKey) {
+      const rows = (item && item.daily_totals || []).filter((row) => (
+        String(row.date) >= startKey
+        && String(row.date) <= endKey
+        && String(row.date) < todayKey
+      ));
+      if (!rows.length) return startKey < todayKey ? { energy: null, cost: null } : {};
+      const energy = rows.map((row) => Number(row.energy_kwh));
+      const cost = rows.map((row) => (
+        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost)
+      ));
+      const sum = (values) => values.every(Number.isFinite)
+        ? values.reduce((total, value) => total + value, 0)
+        : null;
+      return { energy: sum(energy), cost: sum(cost) };
+    }
+
+    _mergeRangeTotals(retained = {}, live = {}) {
+      const combined = (stored, current) => {
+        if (stored === null || current === null) return null;
+        const values = [stored, current].filter(Number.isFinite);
+        return values.length ? values.reduce((total, value) => total + value, 0) : null;
+      };
+      return {
+        energy: combined(retained.energy, live && live.energy),
+        cost: combined(retained.cost, live && live.cost),
+      };
+    }
+
     _previousRange(range = this._dashboardRange) {
       const { startKey, days } = this._calendarRange(range);
       return this._rangeFromDateKeys(
@@ -505,17 +583,37 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._datePickerRenderDue = false;
       this._historyBoundsLoaded = false;
       this._historyBoundsLoading = false;
+      this._historyBoundsReloadTimer = 0;
       this._historyStartKey = "";
-      this._handleDashboardData = () => this._render();
+      this._narrow = false;
+      this._collapseButtons = false;
+      this._resizeObserver = null;
+      this._rangeLoading = false;
+      this._rangeLoadingTimer = 0;
+      this._rangeLoadingStopTimer = 0;
+      this._rangeCanComplete = false;
+      this._rangePresetKey = localStorage.getItem(RANGE_PRESET_KEY) || "";
+      this._handleDashboardData = () => {
+        if (this._rangeCanComplete) this._finishRangeLoading();
+        this._render();
+      };
     }
 
     connectedCallback() {
       super.connectedCallback();
       window.addEventListener(DATA_EVENT, this._handleDashboardData);
+      this._attachResizeObserver();
     }
 
     disconnectedCallback() {
       window.removeEventListener(DATA_EVENT, this._handleDashboardData);
+      if (this._resizeObserver) {
+        this._resizeObserver.disconnect();
+        this._resizeObserver = null;
+      }
+      clearTimeout(this._rangeLoadingTimer);
+      clearTimeout(this._rangeLoadingStopTimer);
+      clearTimeout(this._historyBoundsReloadTimer);
       super.disconnectedCallback();
     }
 
@@ -539,36 +637,101 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const { startKey, endKey } = this._calendarRange(range);
       const todayKey = this._chartDateKey(Date.now());
       const hasData = [...dashboardSeries.values()].some((series) => series.length);
+      const display = this._stockRangeDisplay(range);
+      const actions = [
+        {
+          action: "previous",
+          icon: document.dir === "rtl" ? "mdi:chevron-right" : "mdi:chevron-left",
+          label: this._stockLabel("previous", "Previous"),
+          disabled: Boolean(this._historyStartKey && startKey <= this._historyStartKey),
+        },
+        {
+          action: "next",
+          icon: document.dir === "rtl" ? "mdi:chevron-left" : "mdi:chevron-right",
+          label: this._stockLabel("next", "Next"),
+          disabled: endKey >= todayKey,
+        },
+        {
+          action: "now",
+          icon: "mdi:home-clock",
+          label: this._stockLabel("now", "Now"),
+          alwaysCollapse: true,
+          hidden: !this._narrow,
+        },
+        {
+          action: "compare",
+          icon: range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline",
+          label: this._stockLabel("compare", "Compare"),
+          alwaysCollapse: true,
+        },
+        {
+          action: "download",
+          icon: "mdi:download",
+          label: this._stockLabel("download_data", "Download data"),
+          alwaysCollapse: true,
+          disabled: !hasData,
+        },
+      ];
+      const inlineActions = actions.filter((item) => (
+        !this._collapseButtons && !item.alwaysCollapse
+      ));
+      const menuActions = actions.filter((item) => (
+        (this._collapseButtons || item.alwaysCollapse) && !item.hidden
+      ));
       this.shadowRoot.innerHTML = `
         <ha-card>
           <style>
-            ${this._styles()}
-            .range-card { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
-            .range-picker { align-items: center; display: flex; min-width: 0; }
-            .range-picker ha-date-range-picker { max-width: 100%; }
-            .range-actions { align-items: center; display: flex; flex: 0 0 auto; }
-            .range-actions ha-icon-button { align-items: center; cursor: pointer; display: inline-flex; height: 40px; justify-content: center; width: 40px; }
-            .range-actions ha-icon-button[aria-pressed="true"] { color: var(--primary-color, #0b6bcb); }
-            @media (max-width: 520px) {
-              .range-card { align-items: stretch; flex-direction: column; }
-              .range-actions { justify-content: flex-end; }
+            :host { display: block; }
+            ha-card { display: flex; flex-direction: column; height: 100%; justify-content: center; }
+            .row { container-type: inline-size; justify-content: space-between; }
+            .content { align-items: center; box-sizing: border-box; display: flex; flex-direction: row; }
+            .date-picker-icon { display: flex; flex: none; flex-direction: row; height: 100%; min-width: var(--ha-space-2, 8px); }
+            .date-range { cursor: pointer; display: flex; flex: 1; flex-direction: column; justify-content: center; min-height: var(--ha-space-10, 40px); min-width: 0; overflow: hidden; padding: 2px var(--ha-space-2, 8px) 2px 0; position: relative; text-overflow: ellipsis; white-space: nowrap; }
+            .header-title { color: var(--primary-text-color, #111827); font-size: var(--ha-font-size-xl, 20px); font-weight: var(--ha-font-weight-medium, 500); line-height: var(--ha-line-height-condensed, 1.2); }
+            .header-subtitle { color: var(--secondary-text-color, #5b6470); font-size: var(--ha-font-size-m, 14px); line-height: var(--ha-line-height-condensed, 1.2); }
+            :host([narrow]) .header-title { font-size: var(--ha-font-size-m, 14px); }
+            :host([narrow]) .header-subtitle { font-size: var(--ha-font-size-s, 12px); }
+            .date-actions { align-items: center; display: flex; flex: none; flex-direction: row; height: 100%; min-width: var(--ha-space-2, 8px); }
+            .date-actions .overflow { align-items: center; display: flex; }
+            .loading-indicator { align-items: center; display: flex; opacity: 0; position: absolute; right: var(--ha-space-2, 8px); transition: opacity var(--ha-animation-duration-normal, 180ms) ease-in-out; }
+            .loading-indicator.is-loading { opacity: 1; }
+            ha-button { flex-shrink: 0; margin-inline-end: initial; margin-inline-start: var(--ha-space-2, 8px); --ha-button-theme-color: currentColor; }
+            ha-ripple { border-radius: var(--ha-card-border-radius, var(--ha-border-radius-lg, 12px)); }
+            :host([narrow]) ha-date-range-picker { --ha-icon-button-size: 24px; --mdc-icon-size: 16px; }
+            .backdrop { backdrop-filter: var(--ha-dialog-scrim-backdrop-filter, var(--dialog-backdrop-filter)); bottom: 0; left: 0; opacity: 0; pointer-events: none; position: fixed; right: 0; top: 0; transition: opacity var(--ha-animation-duration-slow, 250ms) ease-in-out; z-index: var(--dialog-z-index, 8); }
+            .datepicker-open .backdrop { opacity: 1; pointer-events: auto; }
+            ha-icon-button { align-items: center; cursor: pointer; display: inline-flex; height: 40px; justify-content: center; width: 40px; }
+            ha-dropdown-item[disabled] { opacity: 0.5; pointer-events: none; }
+            [aria-pressed="true"] { color: var(--primary-color, #0b6bcb); }
+            .date-range:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 2px; }
+            @media (prefers-reduced-motion: reduce) {
+              .backdrop, .loading-indicator { transition: none; }
             }
           </style>
-          <div class="dashboard-card range-card">
-            <div class="range-picker">
-              <ha-date-range-picker data-range-picker extended-presets backdrop></ha-date-range-picker>
-              <strong class="sr-only" data-range-label>${this._escape(this._rangeLabel(range))}</strong>
-            </div>
-            <div class="range-actions">
-              ${this._rangeAction("previous", "mdi:chevron-left", this._label("previous", "Previous"), Boolean(this._historyStartKey && startKey <= this._historyStartKey))}
-              ${this._rangeAction("next", "mdi:chevron-right", this._label("next", "Next"), endKey >= todayKey)}
-              ${this._rangeAction("now", "mdi:home-clock", this._label("now", "Now"))}
-              <ha-icon-button data-range-compare aria-label="${this._escape(this._label("compare", "Compare"))}" title="${this._escape(this._label("compare", "Compare"))}" aria-pressed="${range.compare}">
-                <ha-icon icon="${range.compare ? "mdi:checkbox-marked-outline" : "mdi:checkbox-blank-outline"}"></ha-icon>
-              </ha-icon-button>
-              <ha-icon-button data-range-download aria-label="${this._escape(this._label("download_data", "Download data"))}" title="${this._escape(this._label("download_data", "Download data"))}"${hasData ? "" : " disabled"}>
-                <ha-icon icon="mdi:download"></ha-icon>
-              </ha-icon-button>
+          <div class="row${this._datePickerOpen ? " datepicker-open" : ""}">
+            <div class="backdrop"></div>
+            <div class="content">
+              <section class="date-picker-icon">
+              <ha-date-range-picker data-range-picker minimal backdrop></ha-date-range-picker>
+              </section>
+              <section class="date-range" data-range-open role="button" tabindex="0">
+                <ha-ripple></ha-ripple>
+                <div class="header-title" data-range-label>${this._escape(display.title)}</div>
+                ${display.subtitle ? `<div class="header-subtitle" data-range-subtitle>${this._escape(display.subtitle)}</div>` : ""}
+                <ha-spinner class="loading-indicator${this._rangeLoading ? " is-loading" : ""}" size="small"></ha-spinner>
+              </section>
+              <section class="date-actions">
+                <div class="overflow">
+                  ${!this._narrow ? `<ha-button data-range-now data-range-action="now" appearance="filled" size="s">${this._escape(this._stockLabel("now", "Now"))}</ha-button>` : ""}
+                  ${inlineActions.map((item) => this._rangeAction(item)).join("")}
+                  <ha-dropdown data-range-menu>
+                    <ha-icon-button slot="trigger" aria-label="${this._escape(this._commonLabel("overflow_menu", "More"))}" title="${this._escape(this._commonLabel("overflow_menu", "More"))}">
+                      <ha-icon icon="mdi:dots-vertical"></ha-icon>
+                    </ha-icon-button>
+                    ${menuActions.map((item) => this._rangeMenuItem(item)).join("")}
+                  </ha-dropdown>
+                </div>
+              </section>
             </div>
           </div>
         </ha-card>
@@ -576,62 +739,373 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const picker = this.shadowRoot.querySelector("[data-range-picker]");
       picker.startDate = new Date(range.start);
       picker.endDate = new Date(range.end);
-      picker.extendedPresets = true;
+      picker.ranges = this._stockRanges();
+      picker.minimal = true;
+      picker.extendedPresets = false;
       picker.backdrop = true;
-      picker.addEventListener("click", () => {
-        this._datePickerOpen = true;
-      }, { capture: true });
-      picker.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") this._datePickerOpen = true;
-      }, { capture: true });
-      picker.addEventListener("picker-closed", () => this._closeDatePicker());
+      picker.popoverPlacement = "top-start";
+      picker.addEventListener("toggle", (event) => {
+        this._datePickerOpen = Boolean(event.detail && event.detail.open);
+        if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
+      });
+      let selectedPresetKey = "";
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
         this._datePickerOpen = false;
-        setDashboardRange(this._boundedRange(validRange({
+        const selectedRange = {
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
-        })));
+        };
+        queueMicrotask(() => this._selectRange(selectedRange, selectedPresetKey));
       });
-      for (const action of ["previous", "next", "now"]) {
-        this.shadowRoot.querySelector(`[data-range-${action}]`).addEventListener("click", () => {
-          this._shiftRange(action);
+      picker.addEventListener("preset-selected", (event) => {
+        selectedPresetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
+      });
+      const openPicker = () => {
+        picker.open();
+      };
+      const rangeOpen = this.shadowRoot.querySelector("[data-range-open]");
+      rangeOpen.addEventListener("click", openPicker);
+      rangeOpen.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openPicker();
+        }
+      });
+      for (const element of this.shadowRoot.querySelectorAll("[data-range-action]")) {
+        element.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (element.hasAttribute("disabled")) return;
+          const action = element.dataset.rangeAction;
+          if (action === "compare") {
+            this._selectRange({ ...range, compare: !range.compare });
+          } else if (action === "download") {
+            if (hasData) this._downloadCsv(range);
+          } else {
+            this._shiftRange(action);
+          }
         });
       }
-      this.shadowRoot.querySelector("[data-range-compare]").addEventListener("click", () => {
-        setDashboardRange({ ...range, compare: !range.compare });
-      });
-      this.shadowRoot.querySelector("[data-range-download]").addEventListener("click", () => {
-        if (hasData) this._downloadCsv(range);
+    }
+
+    _rangeAction({ action, icon, label, disabled = false }) {
+      return `<ha-icon-button data-range-${action} data-range-action="${action}" aria-label="${this._escape(label)}" title="${this._escape(label)}"${disabled ? " disabled" : ""}><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
+    }
+
+    _rangeMenuItem({ action, icon, label, disabled = false }) {
+      return `<ha-dropdown-item data-range-${action} data-range-action="${action}"${disabled ? " disabled" : ""}>
+        <ha-icon slot="icon" icon="${icon}"></ha-icon>
+        ${this._escape(label)}
+      </ha-dropdown-item>`;
+    }
+
+    _selectRange(range, presetKey = this._rangePresetKey) {
+      this._rangePresetKey = presetKey;
+      if (presetKey) {
+        localStorage.setItem(RANGE_PRESET_KEY, presetKey);
+      } else {
+        localStorage.removeItem(RANGE_PRESET_KEY);
+      }
+      this._scheduleLoadingIndicator();
+      setDashboardRange(this._boundedRange(validRange(range)));
+    }
+
+    _scheduleLoadingIndicator() {
+      this._finishRangeLoading();
+      this._rangeLoadingTimer = setTimeout(() => {
+        this._rangeLoadingTimer = 0;
+        this._rangeLoading = true;
+        this._render();
+      }, 200);
+      this._rangeLoadingStopTimer = setTimeout(() => {
+        this._finishRangeLoading();
+        this._render();
+      }, 5_000);
+      queueMicrotask(() => {
+        this._rangeCanComplete = true;
       });
     }
 
-    _rangeAction(action, icon, label, disabled = false) {
-      return `<ha-icon-button data-range-${action} aria-label="${this._escape(label)}" title="${this._escape(label)}"${disabled ? " disabled" : ""}><ha-icon icon="${icon}"></ha-icon></ha-icon-button>`;
+    _finishRangeLoading() {
+      clearTimeout(this._rangeLoadingTimer);
+      clearTimeout(this._rangeLoadingStopTimer);
+      this._rangeLoadingTimer = 0;
+      this._rangeLoadingStopTimer = 0;
+      this._rangeLoading = false;
+      this._rangeCanComplete = false;
     }
 
     _shiftRange(action) {
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
+      const type = this._selectedRangeType(range);
       if (action === "previous") {
-        setDashboardRange(this._boundedRange(this._previousRange(range)));
+        this._selectRange(type.wholeMonths
+          ? this._shiftWholeMonthRange(range, -type.months)
+          : type.name === "week"
+            ? this._shiftWeekRange(range, -1)
+          : this._previousRange(range));
         return;
       }
       if (action === "next") {
-        setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
-          this._shiftDateKey(endKey, 1),
-          this._shiftDateKey(endKey, days),
-          range.compare,
-        )));
+        this._selectRange(type.wholeMonths
+          ? this._shiftWholeMonthRange(range, type.months)
+          : type.name === "week"
+            ? this._shiftWeekRange(range, 1)
+          : this._rangeFromDateKeys(
+            this._shiftDateKey(endKey, 1),
+            this._shiftDateKey(endKey, days),
+            range.compare,
+          ));
         return;
       }
+      this._selectRange(this._nowRange(range, type));
+    }
+
+    _shiftWholeMonthRange(range, months) {
+      const { startKey } = this._calendarRange(range);
+      const shiftedStart = this._shiftMonthKey(startKey, months);
+      return this._boundedPresetRange(
+        shiftedStart,
+        this._shiftMonthKey(shiftedStart, Math.abs(months) - 1, true),
+        range.compare,
+      );
+    }
+
+    _shiftWeekRange(range, weeks) {
+      const { startKey } = this._calendarRange(range);
+      const shiftedStart = this._shiftDateKey(startKey, weeks * 7);
+      return this._boundedPresetRange(
+        shiftedStart,
+        this._shiftDateKey(shiftedStart, 6),
+        range.compare,
+      );
+    }
+
+    _selectedRangeType(range) {
+      const presetTypes = {
+        this_week: { name: "week", wholeMonths: false, months: 0 },
+        this_month: { name: "month", wholeMonths: true, months: 1 },
+        this_quarter: { name: "quarter", wholeMonths: true, months: 3 },
+        this_year: { name: "year", wholeMonths: true, months: 12 },
+        "now-12m": { name: "12month", wholeMonths: true, months: 12 },
+      };
+      return presetTypes[this._rangePresetKey] || this._stockRangeType(range);
+    }
+
+    _nowRange(range, type = this._stockRangeType(range)) {
       const todayKey = this._chartDateKey(Date.now());
-      setDashboardRange(this._boundedRange(this._rangeFromDateKeys(
+      const today = this._dateKeyParts(todayKey);
+      if (type.name === "month") {
+        return this._boundedPresetRange(this._monthStartKey(todayKey), this._monthEndKey(todayKey), range.compare);
+      }
+      if (type.name === "quarter") {
+        const startMonth = Math.floor((today.month - 1) / 3) * 3 + 1;
+        const startKey = `${today.year}-${String(startMonth).padStart(2, "0")}-01`;
+        return this._boundedPresetRange(startKey, this._shiftMonthKey(startKey, 2, true), range.compare);
+      }
+      if (type.name === "year") {
+        return this._boundedPresetRange(`${today.year}-01-01`, `${today.year}-12-31`, range.compare);
+      }
+      if (type.wholeMonths) {
+        const endKey = this._monthEndKey(todayKey);
+        const startKey = this._shiftMonthKey(this._monthStartKey(todayKey), 1 - type.months);
+        return this._boundedPresetRange(startKey, endKey, range.compare);
+      }
+      if (type.name === "week") {
+        const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
+        const startKey = this._shiftDateKey(
+          todayKey,
+          -((weekday - this._firstWeekdayIndex() + 7) % 7),
+        );
+        return this._boundedPresetRange(startKey, this._shiftDateKey(startKey, 6), range.compare);
+      }
+      const { days } = this._calendarRange(range);
+      return this._boundedPresetRange(
         this._shiftDateKey(todayKey, 1 - days),
         todayKey,
         range.compare,
-      )));
+      );
+    }
+
+    _stockRangeType(range) {
+      const { startKey, endKey, days } = this._calendarRange(range);
+      const start = this._dateKeyParts(startKey);
+      const end = this._dateKeyParts(endKey);
+      const wholeMonths = start.day === 1
+        && end.day === this._daysInMonth(end.year, end.month);
+      if (wholeMonths) {
+        const months = (end.year - start.year) * 12 + end.month - start.month + 1;
+        if (months === 1) return { name: "month", wholeMonths: true, months };
+        if (months === 3 && (start.month - 1) % 3 === 0) {
+          return { name: "quarter", wholeMonths: true, months };
+        }
+        if (months === 12 && start.month === 1 && start.year === end.year) {
+          return { name: "year", wholeMonths: true, months };
+        }
+        return { name: months === 12 ? "12month" : "months", wholeMonths: true, months };
+      }
+      const weekday = new Date(`${startKey}T00:00:00Z`).getUTCDay();
+      return {
+        name: days === 7 && weekday === this._firstWeekdayIndex() ? "week" : days === 1 ? "day" : "other",
+        wholeMonths: false,
+        months: 0,
+      };
+    }
+
+    _stockRangeDisplay(range) {
+      const { startKey, endKey } = this._calendarRange(range);
+      const type = this._stockRangeType(range);
+      const locale = this._locale();
+      const format = (key, options) => new Intl.DateTimeFormat(locale, {
+        timeZone: this._timeZone(),
+        ...options,
+      }).format(new Date(this._zonedTimestamp(key, 12)));
+      let title;
+      if (type.name === "year") {
+        title = format(startKey, { year: "numeric" });
+      } else if (type.name === "month") {
+        title = format(startKey, { month: "long" });
+      } else if (type.wholeMonths) {
+        title = `${format(startKey, { month: "short" })}–${format(endKey, { month: "short" })}`;
+      } else if (startKey === endKey) {
+        title = format(startKey, { month: "short", day: "numeric" });
+      } else {
+        title = `${format(startKey, { month: "short", day: "numeric" })}–${format(endKey, { month: "short", day: "numeric" })}`;
+      }
+      const startYear = this._dateKeyParts(startKey).year;
+      const endYear = this._dateKeyParts(endKey).year;
+      const currentYear = this._dateKeyParts(this._chartDateKey(Date.now())).year;
+      const subtitle = type.name !== "year" && (startYear !== currentYear || endYear !== startYear)
+        ? startYear === endYear ? String(startYear) : `${startYear}–${endYear}`
+        : "";
+      return { title, subtitle };
+    }
+
+    _stockRanges() {
+      const todayKey = this._chartDateKey(Date.now());
+      const today = this._dateKeyParts(todayKey);
+      const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
+      const weekStart = this._shiftDateKey(
+        todayKey,
+        -((weekday - this._firstWeekdayIndex() + 7) % 7),
+      );
+      const quarterMonth = Math.floor((today.month - 1) / 3) * 3 + 1;
+      const quarterStart = `${today.year}-${String(quarterMonth).padStart(2, "0")}-01`;
+      const presets = [
+        ["today", "Today", todayKey, todayKey],
+        ["yesterday", "Yesterday", this._shiftDateKey(todayKey, -1), this._shiftDateKey(todayKey, -1)],
+        ["this_week", "This week", weekStart, this._shiftDateKey(weekStart, 6)],
+        ["this_month", "This month", this._monthStartKey(todayKey), this._monthEndKey(todayKey)],
+        ["this_quarter", "This quarter", quarterStart, this._shiftMonthKey(quarterStart, 2, true)],
+        ["this_year", "This year", `${today.year}-01-01`, `${today.year}-12-31`],
+        ["now-7d", "Last 7 days", this._shiftDateKey(todayKey, -7), todayKey],
+        ["now-30d", "Last 30 days", this._shiftDateKey(todayKey, -30), todayKey],
+        ["now-365d", "Last 365 days", this._shiftDateKey(todayKey, -365), todayKey],
+        ["now-12m", "Last 12 months", this._shiftMonthKey(this._monthStartKey(todayKey), -11), this._monthEndKey(todayKey)],
+      ];
+      return Object.fromEntries(presets.map(([key, fallback, startKey, endKey]) => {
+        const bounded = this._boundedPresetRange(startKey, endKey);
+        return [
+          this._presetLabel(key, fallback),
+          [new Date(bounded.start), new Date(bounded.end)],
+        ];
+      }));
+    }
+
+    _boundedPresetRange(startKey, endKey, compare = false) {
+      const todayKey = this._chartDateKey(Date.now());
+      let start = this._historyStartKey && startKey < this._historyStartKey
+        ? this._historyStartKey
+        : startKey;
+      const end = endKey > todayKey ? todayKey : endKey;
+      if (start > end) start = end;
+      return this._rangeFromDateKeys(start, end, compare);
+    }
+
+    _dateKeyParts(value) {
+      const [year, month, day] = String(value).split("-").map(Number);
+      return { year, month, day };
+    }
+
+    _daysInMonth(year, month) {
+      return new Date(Date.UTC(year, month, 0)).getUTCDate();
+    }
+
+    _monthStartKey(value) {
+      const { year, month } = this._dateKeyParts(value);
+      return `${year}-${String(month).padStart(2, "0")}-01`;
+    }
+
+    _monthEndKey(value) {
+      const { year, month } = this._dateKeyParts(value);
+      return `${year}-${String(month).padStart(2, "0")}-${String(this._daysInMonth(year, month)).padStart(2, "0")}`;
+    }
+
+    _shiftMonthKey(value, months, end = false) {
+      const { year, month } = this._dateKeyParts(value);
+      const date = new Date(Date.UTC(year, month - 1 + months, 1));
+      const shiftedYear = date.getUTCFullYear();
+      const shiftedMonth = date.getUTCMonth() + 1;
+      const day = end ? this._daysInMonth(shiftedYear, shiftedMonth) : 1;
+      return `${shiftedYear}-${String(shiftedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+
+    _firstWeekdayIndex() {
+      const configured = this._hass && this._hass.locale && this._hass.locale.first_weekday;
+      const weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+      if (weekdays.includes(configured)) return weekdays.indexOf(configured);
+      if (configured === "language" && typeof Intl.Locale === "function") {
+        try {
+          return new Intl.Locale(this._locale()).weekInfo.firstDay % 7;
+        } catch (_error) {
+          return 1;
+        }
+      }
+      return 1;
+    }
+
+    _locale() {
+      return this._hass && this._hass.locale && this._hass.locale.language
+        || navigator.language
+        || "en";
+    }
+
+    _stockLabel(key, fallback) {
+      const path = `ui.panel.lovelace.components.energy_period_selector.${key}`;
+      return String(this._hass && this._hass.localize && this._hass.localize(path)
+        || this._label(key, fallback));
+    }
+
+    _commonLabel(key, fallback) {
+      const path = `ui.common.${key}`;
+      return String(this._hass && this._hass.localize && this._hass.localize(path)
+        || fallback);
+    }
+
+    _presetLabel(key, fallback) {
+      const path = `ui.components.date-range-picker.ranges.${key}`;
+      return String(this._hass && this._hass.localize && this._hass.localize(path)
+        || fallback);
+    }
+
+    _attachResizeObserver() {
+      if (this._resizeObserver || typeof ResizeObserver !== "function") return;
+      this._resizeObserver = new ResizeObserver(() => this._measure());
+      this._resizeObserver.observe(this);
+      queueMicrotask(() => this._measure());
+    }
+
+    _measure() {
+      const width = this.offsetWidth || document.documentElement.clientWidth;
+      const narrow = width < 425;
+      const collapseButtons = width < 275;
+      this.toggleAttribute("narrow", narrow);
+      if (narrow === this._narrow && collapseButtons === this._collapseButtons) return;
+      this._narrow = narrow;
+      this._collapseButtons = collapseButtons;
+      this._render();
     }
 
     _boundedRange(range) {
@@ -644,7 +1118,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       let endKey = requestedEnd;
       if (endKey > todayKey) {
         endKey = todayKey;
-        startKey = this._shiftDateKey(todayKey, 1 - days);
+        if (!["this_week", "this_month", "this_quarter", "this_year", "now-12m"]
+          .includes(this._rangePresetKey)) {
+          startKey = this._shiftDateKey(todayKey, 1 - days);
+        }
       }
       if (this._historyStartKey && startKey < firstKey) {
         startKey = firstKey;
@@ -654,17 +1131,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return this._rangeFromDateKeys(startKey, endKey, range.compare);
     }
 
-    _closeDatePicker() {
-      this._datePickerOpen = false;
-      if (this._datePickerRenderDue) this._render();
-    }
-
     async _loadHistoryBounds() {
       if (
         this._historyBoundsLoaded
         || this._historyBoundsLoading
         || !this._dashboardConfig.api_path
       ) return;
+      clearTimeout(this._historyBoundsReloadTimer);
+      this._historyBoundsReloadTimer = 0;
       this._historyBoundsLoading = true;
       try {
         const payload = await this._hass.callApi("GET", this._dashboardConfig.api_path);
@@ -682,6 +1156,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._historyBoundsLoaded = true;
         this._render();
       } catch (_error) {
+        this._historyBoundsReloadTimer = setTimeout(() => {
+          this._historyBoundsReloadTimer = 0;
+          if (this.isConnected && !this._historyBoundsLoaded) this._render();
+        }, 5_000);
         return;
       } finally {
         this._historyBoundsLoading = false;
@@ -735,12 +1213,23 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _ensureNativeDatePicker() {
-      if (customElements.get("ha-date-range-picker") || this._datePickerLoading || !window.loadCardHelpers) return;
+      const required = [
+        "ha-date-range-picker",
+        "ha-dropdown",
+        "ha-dropdown-item",
+        "ha-ripple",
+        "ha-spinner",
+      ];
+      if (
+        required.every((tag) => customElements.get(tag))
+        || this._datePickerLoading
+        || !window.loadCardHelpers
+      ) return;
       this._datePickerLoading = true;
       try {
         const helpers = await window.loadCardHelpers();
         helpers.createCardElement({ type: "energy-date-selection" });
-        await customElements.whenDefined("ha-date-range-picker");
+        await Promise.all(required.map((tag) => customElements.whenDefined(tag)));
         this._render();
       } catch (_error) {
         this._datePickerLoading = false;
@@ -764,6 +1253,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
       const entities = this._resolvedEntities(config);
+      this._resolvedEntityKey = entities.map((item) => item.entity).join(",");
       if ((config.water_contexts || []).length && !entities.some((item) => item.axis === "right")) {
         this.style.display = "none";
         this.shadowRoot.innerHTML = "";
@@ -984,6 +1474,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ) {
         this._historyRefreshDue = true;
       }
+      return this._historyRefreshDue;
+    }
+
+    _shouldRenderForHassUpdate({ liveRange, liveDataChanged }) {
+      const entityKey = this._resolvedEntities(this._dashboardConfig)
+        .map((item) => item.entity)
+        .join(",");
+      return entityKey !== this._resolvedEntityKey
+        || liveRange
+          && liveDataChanged
+          && !this.shadowRoot.querySelector('[data-chart-tooltip][aria-hidden="false"]');
     }
 
     _historyRequest(start, end, entityIds, rangeDays = null) {
@@ -1039,6 +1540,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
 
   class CircuitSetupEnergyAnalyzerSummary extends DashboardCardBase {
+    _shouldRenderForHassUpdate() {
+      return true;
+    }
+
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const config = this._dashboardConfig;
@@ -1091,6 +1596,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
       super.disconnectedCallback();
+    }
+
+    _shouldRenderForHassUpdate() {
+      return true;
     }
 
     _render() {
@@ -1255,7 +1764,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       try {
         insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
       } catch (_error) {
-        if (this._contributionLoadKey === key) this._contributionLoadKey = "";
+        if (this._contributionLoadKey === key) {
+          this._contributionLoadKey = "";
+          this._rangeTotalsReloadTimer = setTimeout(() => {
+            this._rangeTotalsReloadTimer = 0;
+            if (this.isConnected && !this._contributionLoadKey) this._render();
+          }, 5_000);
+        }
         return;
       }
       if (this._contributionLoadKey !== key) return;
@@ -1309,51 +1824,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _refreshLiveData() {
       const todayKey = this._chartDateKey(Date.now());
-      if (this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey) {
+      const changed = this._rangeTotalsDateKey && this._rangeTotalsDateKey !== todayKey;
+      if (changed) {
         this._contributionLoadKey = "";
         this._rollingContributionByCircuit = {};
         this._rangeSummary = {};
       }
-    }
-
-    _liveRangeTotals(energyEntity, costEntity) {
-      const { startKey, endKey } = this._calendarRange();
-      const todayKey = this._chartDateKey(Date.now());
-      return startKey <= todayKey && endKey >= todayKey
-        ? {
-          energy: energyEntity ? this._number(energyEntity) : null,
-          cost: costEntity ? this._number(costEntity) : null,
-        }
-        : {};
-    }
-
-    _retainedRangeTotals(item, startKey, endKey, todayKey) {
-      const rows = (item && item.daily_totals || []).filter((row) => (
-        String(row.date) >= startKey
-        && String(row.date) <= endKey
-        && String(row.date) < todayKey
-      ));
-      if (!rows.length) return startKey < todayKey ? { energy: null, cost: null } : {};
-      const energy = rows.map((row) => Number(row.energy_kwh));
-      const cost = rows.map((row) => (
-        row.cost === null || row.cost === undefined ? Number.NaN : Number(row.cost)
-      ));
-      const sum = (values) => values.every(Number.isFinite)
-        ? values.reduce((total, value) => total + value, 0)
-        : null;
-      return { energy: sum(energy), cost: sum(cost) };
-    }
-
-    _mergeRangeTotals(retained = {}, live = {}) {
-      const combined = (stored, current) => {
-        if (stored === null || current === null) return null;
-        const values = [stored, current].filter(Number.isFinite);
-        return values.length ? values.reduce((total, value) => total + value, 0) : null;
-      };
-      return {
-        energy: combined(retained.energy, live && live.energy),
-        cost: combined(retained.cost, live && live.cost),
-      };
+      return changed;
     }
 
   }
@@ -1366,11 +1843,71 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._timelineSelection = "running";
       this._timelineKey = "";
       this._timelineRows = [];
+      this._applianceRangeTotals = {};
+      this._applianceRangeKey = "";
+      this._applianceRangeRolloverReloadKey = "";
+      this._applianceRangeReloadTimer = 0;
+      this._liveApplianceTotalsKey = "";
+      this._applianceTodayKey = "";
+      this._applianceDateRolledOver = false;
+    }
+
+    disconnectedCallback() {
+      clearTimeout(this._applianceRangeReloadTimer);
+      super.disconnectedCallback();
+    }
+
+    _refreshLiveData() {
+      const todayKey = this._chartDateKey(Date.now());
+      this._applianceDateRolledOver = Boolean(
+        this._applianceTodayKey && this._applianceTodayKey !== todayKey,
+      );
+      this._applianceTodayKey = todayKey;
+      const key = (this._dashboardConfig.appliances || []).flatMap((item) => [
+        item.activity_entity,
+        item.energy_today_entity,
+        item.cost_today_entity,
+      ]).filter(Boolean).map((entityId) => {
+        const state = this._state(entityId);
+        return `${entityId}:${state && state.state}:${state && state.last_changed}:${state && state.attributes && state.attributes.unit_of_measurement || ""}`;
+      }).join("|");
+      const changed = Boolean(this._liveApplianceTotalsKey && key !== this._liveApplianceTotalsKey);
+      this._liveApplianceTotalsKey = key;
+      return changed;
+    }
+
+    _shouldRenderForHassUpdate({ liveDataChanged }) {
+      const dateRolledOver = this._applianceDateRolledOver;
+      this._applianceDateRolledOver = false;
+      return this._isTodayRange()
+        || dateRolledOver
+        || this._rangeIncludesToday() && liveDataChanged;
     }
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
-      const appliances = (this._dashboardConfig.appliances || []).map((item) => this._applianceState(item));
+      const historical = !this._isTodayRange();
+      if (historical) {
+        if (this._filter !== "all") this._filter = "all";
+        if (this._timelineSelection === "running") this._timelineSelection = "all";
+        this._loadApplianceRangeTotals();
+      } else if (this._timelineSelection === "all") {
+        this._timelineSelection = "running";
+      }
+      const appliances = (this._dashboardConfig.appliances || []).map((item) => (
+        this._applianceState(
+          item,
+          historical
+            ? this._mergeRangeTotals(
+              this._applianceRangeTotals[item.circuit_id] || { energy: null, cost: null },
+              this._liveRangeTotals(
+                item.energy_today_entity,
+                item.cost_today_entity,
+              ),
+            )
+            : null,
+        )
+      ));
       const visible = appliances.filter((item) => (
         this._filter === "all"
           || this._filter === "running" && item.running
@@ -1381,7 +1918,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           || (right.power || 0) - (left.power || 0)
           || String(left.name).localeCompare(String(right.name))
       ));
-      const filters = [
+      const filters = historical ? [] : [
         ["all", this._label("all", "All")],
         ["running", this._label("running", "Running")],
         ["attention", this._label("needs_attention", "Needs attention")],
@@ -1392,19 +1929,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <style>${this._styles()}</style>
           <div class="dashboard-card">
             <h2>${this._escape(this._dashboardConfig.title || "Appliances")}</h2>
-            <div class="controls" role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}">
+            <div class="controls"${historical ? "" : ` role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}"`}>
               ${filters.map(([key, label]) => `<button type="button" class="control" role="tab" data-filter="${key}" aria-selected="${key === this._filter}">${this._escape(label)}</button>`).join("")}
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid">
-              ${visible.map((item) => this._tile(item, !this._matchesSearch(item))).join("")}
+              ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical)).join("")}
             </div>
             <section class="timeline">
               <h3>${this._escape(this._label("run_timeline", "Run timeline"))}</h3>
               <div class="controls">
                 <label>${this._escape(this._label("timeline_selection", "Timeline selection"))}
                   <select data-timeline-selection>
-                    <option value="running">${this._escape(this._label("currently_running", "Currently running"))}</option>
+                    ${historical
+                      ? `<option value="all">${this._escape(this._label("all", "All"))}</option>`
+                      : `<option value="running">${this._escape(this._label("currently_running", "Currently running"))}</option>`}
                     ${areas.map((area) => `<option value="area:${this._escape(area)}">${this._escape(area)}</option>`).join("")}
                     ${appliances.map((item) => `<option value="${this._escape(item.circuit_id)}">${this._escape(item.name)}</option>`).join("")}
                   </select>
@@ -1449,26 +1988,98 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return !search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search);
     }
 
-    _tile(item, hidden = false) {
+    _tile(item, hidden = false, historical = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
+      const energyLabel = historical
+        ? `${this._label("energy", "Energy")} ${this._rangeLabel()}`
+        : this._label("energy_today", "Energy today");
       return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
         <span class="appliance-heading"><ha-icon icon="${this._escape(item.icon || "mdi:power-plug-outline")}"></ha-icon><strong>${this._escape(item.name)}</strong></span>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
-          <span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>
-          <span>${this._escape(this._label("energy_today", "Today"))}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
-          <span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>
+          ${historical ? "" : `<span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>`}
+          <span>${this._escape(energyLabel)}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
+          ${historical ? "" : `<span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>`}
         </div>
       </button>`;
     }
 
     _selectedTimelineAppliances(appliances) {
+      if (this._timelineSelection === "all") return appliances.slice(0, 5);
       if (this._timelineSelection === "running") return appliances.filter((item) => item.running).slice(0, 5);
       if (this._timelineSelection.startsWith("area:")) {
         const area = this._timelineSelection.slice(5);
         return appliances.filter((item) => item.area === area).slice(0, 5);
       }
       return appliances.filter((item) => item.circuit_id === this._timelineSelection).slice(0, 1);
+    }
+
+    async _loadApplianceRangeTotals() {
+      if (!this._dashboardConfig.api_path) return;
+      const range = validRange(this._dashboardRange);
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      const key = `${range.start}:${range.end}:${todayKey}`;
+      if (this._applianceRangeKey === key) return;
+      const rolloverReload = this._applianceRangeRolloverReloadKey === key;
+      clearTimeout(this._applianceRangeReloadTimer);
+      this._applianceRangeReloadTimer = 0;
+      this._applianceRangeKey = key;
+      this._applianceRangeTotals = {};
+      let insights;
+      try {
+        insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
+      } catch (_error) {
+        if (this._applianceRangeKey === key) {
+          this._applianceRangeKey = "";
+          this._applianceRangeReloadTimer = setTimeout(() => {
+            this._applianceRangeReloadTimer = 0;
+            if (this.isConnected && !this._applianceRangeKey) this._render();
+          }, 5_000);
+        }
+        return;
+      }
+      if (this._applianceRangeKey !== key) return;
+      const retainedItems = (insights.items || []).filter((item) => (
+        !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
+      ));
+      const retainedFor = (appliance) => retainedItems.find((item) => (
+        item.circuit_id === appliance.circuit_id
+        || item.appliance_key === appliance.circuit_id
+      ));
+      this._applianceRangeTotals = Object.fromEntries(
+        (this._dashboardConfig.appliances || []).map((appliance) => {
+          const retained = retainedFor(appliance);
+          return [
+            appliance.circuit_id,
+            this._retainedRangeTotals(retained, startKey, endKey, todayKey),
+          ];
+        }),
+      );
+      const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const completedDayReady = (this._dashboardConfig.appliances || []).length > 0
+        && (this._dashboardConfig.appliances || []).every((appliance) => (
+          (retainedFor(appliance)?.daily_totals || [])
+            .some((row) => String(row.date) === completedDayKey)
+        ));
+      const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
+      if (
+        startKey <= completedDayKey
+        && endKey >= completedDayKey
+        && !completedDayReady
+        && (!rolloverReload || rolloverWindowOpen)
+      ) {
+        this._applianceRangeRolloverReloadKey = key;
+        this._applianceRangeReloadTimer = setTimeout(() => {
+          this._applianceRangeReloadTimer = 0;
+          if (!this.isConnected) return;
+          this._applianceRangeKey = "";
+          this._render();
+        }, 30_000);
+      } else {
+        this._applianceRangeRolloverReloadKey = "";
+      }
+      this._render();
     }
 
     async _ensureTimeline(appliances) {
