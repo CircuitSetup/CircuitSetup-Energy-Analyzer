@@ -69,7 +69,7 @@ The integration works best when each important appliance or circuit has a clean 
 
 ## Installation
 
-This repository is structured as a HACS custom integration. The integration files live under:
+This repository is structured as a HACS integration. The integration files live under:
 
 ```text
 custom_components/circuitsetup_energy_analyzer
@@ -80,8 +80,8 @@ custom_components/circuitsetup_energy_analyzer
 ### Install with HACS
 
 1. Open **HACS**.
-2. Add this repository as a custom repository.
-3. Choose category **Integration**.
+2. Search for **CircuitSetup Energy Analyzer**.
+3. If it is not listed, add this repository as a custom repository with category **Integration**.
 4. Install **CircuitSetup Energy Analyzer**.
 5. Restart Home Assistant.
 6. Go to **Settings > Devices & services**.
