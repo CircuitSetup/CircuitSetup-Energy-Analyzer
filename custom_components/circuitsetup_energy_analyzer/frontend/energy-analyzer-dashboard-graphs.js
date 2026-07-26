@@ -1837,6 +1837,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._timelineRows = [];
       this._applianceRangeTotals = {};
       this._applianceRangeKey = "";
+      this._applianceRangeRolloverReloadKey = "";
       this._applianceRangeReloadTimer = 0;
       this._liveApplianceTotalsKey = "";
       this._applianceTodayKey = "";
@@ -1855,11 +1856,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       );
       this._applianceTodayKey = todayKey;
       const key = (this._dashboardConfig.appliances || []).flatMap((item) => [
+        item.activity_entity,
         item.energy_today_entity,
         item.cost_today_entity,
       ]).filter(Boolean).map((entityId) => {
         const state = this._state(entityId);
-        return `${entityId}:${state && state.state}:${state && state.attributes && state.attributes.unit_of_measurement || ""}`;
+        return `${entityId}:${state && state.state}:${state && state.last_changed}:${state && state.attributes && state.attributes.unit_of_measurement || ""}`;
       }).join("|");
       const changed = Boolean(this._liveApplianceTotalsKey && key !== this._liveApplianceTotalsKey);
       this._liveApplianceTotalsKey = key;
@@ -2011,6 +2013,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const todayKey = this._chartDateKey(Date.now());
       const key = `${range.start}:${range.end}:${todayKey}`;
       if (this._applianceRangeKey === key) return;
+      const rolloverReload = this._applianceRangeRolloverReloadKey === key;
       clearTimeout(this._applianceRangeReloadTimer);
       this._applianceRangeReloadTimer = 0;
       this._applianceRangeKey = key;
@@ -2032,18 +2035,42 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const retainedItems = (insights.items || []).filter((item) => (
         !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id
       ));
+      const retainedFor = (appliance) => retainedItems.find((item) => (
+        item.circuit_id === appliance.circuit_id
+        || item.appliance_key === appliance.circuit_id
+      ));
       this._applianceRangeTotals = Object.fromEntries(
         (this._dashboardConfig.appliances || []).map((appliance) => {
-          const retained = retainedItems.find((item) => (
-            item.circuit_id === appliance.circuit_id
-            || item.appliance_key === appliance.circuit_id
-          ));
+          const retained = retainedFor(appliance);
           return [
             appliance.circuit_id,
             this._retainedRangeTotals(retained, startKey, endKey, todayKey),
           ];
         }),
       );
+      const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const completedDayReady = (this._dashboardConfig.appliances || []).length > 0
+        && (this._dashboardConfig.appliances || []).every((appliance) => (
+          (retainedFor(appliance)?.daily_totals || [])
+            .some((row) => String(row.date) === completedDayKey)
+        ));
+      const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
+      if (
+        startKey <= completedDayKey
+        && endKey >= completedDayKey
+        && !completedDayReady
+        && (!rolloverReload || rolloverWindowOpen)
+      ) {
+        this._applianceRangeRolloverReloadKey = key;
+        this._applianceRangeReloadTimer = setTimeout(() => {
+          this._applianceRangeReloadTimer = 0;
+          if (!this.isConnected) return;
+          this._applianceRangeKey = "";
+          this._render();
+        }, 30_000);
+      } else {
+        this._applianceRangeRolloverReloadKey = "";
+      }
       this._render();
     }
 

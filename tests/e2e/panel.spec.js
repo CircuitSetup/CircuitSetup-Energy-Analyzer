@@ -767,7 +767,7 @@ test("appliance grid filters live state and loads Activity Summary history", asy
   });
   await expect.poll(() => page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("sensor.fridge_activity")).length
-  ))).toBe(timelineHistoryCalls);
+  ))).toBeGreaterThan(timelineHistoryCalls);
   await card.locator('[data-appliance-id="fridge"]').click();
   await expect(page).toHaveURL(/appliance_detail=1&circuit_id=fridge/);
 });
@@ -1010,6 +1010,63 @@ test("appliance grid switches today's selection to historical layout after midni
   await expect(card.getByRole("tab", { name: "Running", exact: true })).toHaveCount(0);
   await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("Energy Jul 12");
   await expect(card.locator('[data-appliance-id="fridge"]')).not.toContainText("Energy today");
+});
+
+test("appliance totals retry when the first post-midnight payload is stale", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          circuit_id: "fridge",
+          daily_totals: insightCalls > 1
+            ? [{ date: "2026-07-12", energy_kwh: 2.5, cost: 0.75 }]
+            : [],
+        }],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        energy_today_entity: "sensor.fridge_energy",
+      }],
+    },
+    {
+      "sensor.fridge_energy": {
+        state: "2.5",
+        attributes: { unit_of_measurement: "kWh" },
+      },
+    },
+    { time_zone: "UTC" },
+  );
+
+  await page.clock.fastForward(2 * 60_000);
+  await page.evaluate(() => {
+    window.__dashboardHass.states["sensor.fridge_energy"].state = "0";
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  await expect.poll(() => insightCalls).toBe(1);
+  await expect.poll(() => page.evaluate(() => (
+    window.__dashboardCard._applianceRangeReloadTimer
+  ))).toBeGreaterThan(0);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator('[data-appliance-id="fridge"]'))
+    .toContainText("Energy Jul 12: 2.5 kWh · $0.75");
 });
 
 test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
