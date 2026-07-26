@@ -711,9 +711,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <div class="row${this._datePickerOpen ? " datepicker-open" : ""}">
             <div class="backdrop"></div>
             <div class="content">
-              <section class="date-picker-icon">
-              <ha-date-range-picker data-range-picker minimal backdrop></ha-date-range-picker>
-              </section>
+              <section class="date-picker-icon" data-range-picker-host></section>
               <section class="date-range" data-range-open role="button" tabindex="0">
                 <ha-ripple></ha-ripple>
                 <div class="header-title" data-range-label>${this._escape(display.title)}</div>
@@ -736,7 +734,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           </div>
         </ha-card>
       `;
-      const picker = this.shadowRoot.querySelector("[data-range-picker]");
+      const picker = document.createElement("ha-date-range-picker");
+      picker.dataset.rangePicker = "";
+      picker.hass = this._hass;
       picker.startDate = new Date(range.start);
       picker.endDate = new Date(range.end);
       picker.ranges = this._stockRanges();
@@ -762,6 +762,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.addEventListener("preset-selected", (event) => {
         selectedPresetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
       });
+      this.shadowRoot.querySelector("[data-range-picker-host]").append(picker);
       const openPicker = () => {
         picker.open();
       };
