@@ -499,6 +499,10 @@ export function createEvidenceViewMethods({
     const zoomWindow = this._chartZoomWindows && this._chartZoomWindows.get(zoomKey);
     const minTime = zoomWindow ? zoomWindow.start : baseMinTime;
     const maxTime = zoomWindow ? zoomWindow.end : baseMaxTime;
+    const configuredHistoryEntities = alert.history_entities || alert.graph_entities;
+    const historyEntities = configuredHistoryEntities || series.flatMap((item) => (
+      item.history_entity_ids || [item.entity_id]
+    ));
     const leftPoints = series.filter((item) => !rightAxis || item.axis !== "right").flatMap((item) => item.points);
     const rightPoints = rightAxis ? series.filter((item) => item.axis === "right").flatMap((item) => item.points) : [];
     const leftSeries = series.filter((item) => !rightAxis || item.axis !== "right");
@@ -640,7 +644,8 @@ export function createEvidenceViewMethods({
 
     return `
       <div class="chart-frame" data-chart-frame>
-        ${zoomWindow ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:8px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
+        ${this._historyLink(historyEntities, new Date(minTime).toISOString(), new Date(maxTime).toISOString(), true)}
+        ${zoomWindow ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
         <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
           <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
           <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
@@ -666,6 +671,12 @@ export function createEvidenceViewMethods({
   }
 
   _attachChartInspectors() {
+    for (const link of this.shadowRoot.querySelectorAll("[data-chart-history]")) {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._navigate(link.getAttribute("href"));
+      });
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-chart-reset]")) {
       button.addEventListener("click", () => {
         this._chartZoomWindows && this._chartZoomWindows.delete(button.dataset.chartReset);
@@ -759,6 +770,20 @@ export function createEvidenceViewMethods({
         point.addEventListener("blur", hidePoint);
       }
     }
+  }
+
+  _historyLink(entities, start, end, overlay = false) {
+    const ids = [...new Set((entities || []).filter((entityId) => (
+      typeof entityId === "string" && /^[a-z0-9_]+\.[a-z0-9_]+$/i.test(entityId)
+    )))];
+    const query = new URLSearchParams();
+    if (ids.length) query.set("entity_id", ids.join(","));
+    query.set("back", "1");
+    if (start) query.set("start_date", start);
+    if (end) query.set("end_date", end);
+    const label = this._hass && this._hass.localize && this._hass.localize("panel.history") || "History";
+    const position = overlay ? "position:absolute;right:8px;top:8px;" : "";
+    return `<a data-chart-history href="/history?${this._escape(query.toString())}" aria-label="${this._escape(label)}" title="${this._escape(label)}" style="align-items:center;color:var(--primary-text-color);display:inline-flex;height:40px;justify-content:center;text-decoration:none;width:40px;z-index:1;${position}"><ha-icon icon="mdi:arrow-right"></ha-icon></a>`;
   }
 
   _chartTimeTicks(minTime, maxTime, x) {

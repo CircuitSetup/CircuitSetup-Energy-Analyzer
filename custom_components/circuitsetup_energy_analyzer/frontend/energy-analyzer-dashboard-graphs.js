@@ -262,7 +262,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         button.appliance-tile:focus-visible, button.control:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 2px; }
         .appliance-meta { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 13px; gap: 3px; margin-top: 6px; }
         .issue { color: var(--warning-color, #a15c00); font-weight: 600; }
-        .contribution { display: grid; gap: 8px; margin-top: 12px; }
+        .contribution { display: grid; gap: 8px; margin-top: 12px; position: relative; }
         .controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
         button.control, select, input { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #aeb7c2); border-radius: 4px; color: var(--primary-text-color, #111827); font: inherit; min-height: 36px; padding: 6px 10px; }
         button.control { cursor: pointer; }
@@ -272,7 +272,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .bar-row { display: grid; gap: 8px; grid-template-columns: minmax(90px, 1fr) minmax(100px, 3fr) auto; }
         .bar-track { background: var(--secondary-background-color, #e5e7eb); border-radius: 3px; overflow: hidden; }
         .bar-fill { background: var(--primary-color, #0b6bcb); height: 100%; min-height: 14px; }
-        .timeline { display: grid; gap: 8px; }
+        .timeline { display: grid; gap: 8px; position: relative; }
         .timeline-lane { display: grid; gap: 4px; grid-template-columns: minmax(90px, 1fr) minmax(160px, 4fr); }
         .timeline-track { background: var(--secondary-background-color, #e5e7eb); border-radius: 3px; height: 24px; overflow: hidden; position: relative; }
         .running-band { background: var(--success-color, #2e7d32); height: 100%; position: absolute; }
@@ -546,6 +546,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return {
           ...items[0],
           entity_id: seriesId,
+          history_entity_ids: items.map((item) => item.entity_id),
           series_id: seriesId,
           points: this._boundedChartPoints(points),
         };
@@ -565,7 +566,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       const max = Math.max(...top.map((item) => item[key]), 1);
       const unit = key === "energy" ? "kWh" : "currency";
+      const range = validRange(this._dashboardRange);
+      const historyEntities = appliances.map((item) => (
+        key === "energy" ? item.energy_today_entity : item.cost_today_entity
+      ));
       return `<section class="contribution">
+        ${this._historyLink(historyEntities, range.start, range.end, true)}
         <h3>${this._escape(this._label("appliance_energy_cost", "Appliance Energy/Cost"))}</h3>
         <div class="controls">
           ${["energy", "cost"].map((mode) => `<button type="button" class="control" data-contribution-mode="${mode}" aria-pressed="${mode === this._contributionMode}">${this._escape(this._label(mode, mode))}</button>`).join("")}
@@ -1719,6 +1725,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._render();
         });
       }
+      this._attachChartInspectors();
     }
 
     _metricHtml(label, value, unit, average = null) {
@@ -1926,6 +1933,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ["attention", this._label("needs_attention", "Needs attention")],
       ];
       const areas = [...new Set(appliances.map((item) => item.area).filter(Boolean))].sort();
+      const timelineRange = this._timelineRange();
+      const timelineEntities = this._selectedTimelineAppliances(appliances)
+        .map((item) => item.activity_entity);
       this.shadowRoot.innerHTML = `
         <ha-card>
           <style>${this._styles()}</style>
@@ -1939,6 +1949,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical)).join("")}
             </div>
             <section class="timeline">
+              ${this._historyLink(timelineEntities, timelineRange.start, timelineRange.end, true)}
               <h3>${this._escape(this._label("run_timeline", "Run timeline"))}</h3>
               <div class="controls">
                 <label>${this._escape(this._label("timeline_selection", "Timeline selection"))}
@@ -1982,6 +1993,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           this._navigate(item && item.detail_path);
         });
       }
+      this._attachChartInspectors();
       this._ensureTimeline(appliances);
     }
 

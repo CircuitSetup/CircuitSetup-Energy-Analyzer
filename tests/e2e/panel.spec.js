@@ -320,8 +320,25 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("6.7 kWh");
+  const contributionHistory = card.locator("[data-chart-history]");
+  await expect(contributionHistory).toBeVisible();
+  expect(await contributionHistory.evaluate((link) => {
+    const url = new URL(link.href);
+    return {
+      entities: url.searchParams.get("entity_id"),
+      start: url.searchParams.get("start_date"),
+      end: url.searchParams.get("end_date"),
+    };
+  })).toEqual({
+    entities: "sensor.fridge_energy,sensor.washer_energy,sensor.oven_energy",
+    start: "2026-07-10T00:00:00.000Z",
+    end: "2026-07-12T23:59:59.999Z",
+  });
   await card.locator('[data-contribution-mode="cost"]').click();
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("$0.74");
+  await expect.poll(() => contributionHistory.evaluate((link) => (
+    new URL(link.href).searchParams.get("entity_id")
+  ))).toBe("sensor.fridge_cost,sensor.washer_cost,sensor.oven_cost");
   const historyCalls = await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
   ));
@@ -754,6 +771,20 @@ test("appliance grid filters live state and loads Activity Summary history", asy
   await expect(card.locator("[data-timeline-tick]").first()).toHaveText("Jul 10");
   await expect(card.locator("[data-timeline-tick]").last()).toHaveText("Jul 12");
   await expect(card.locator(".timeline > h3 + .controls")).toBeVisible();
+  const timelineHistory = card.locator("[data-chart-history]");
+  await expect(timelineHistory).toBeVisible();
+  expect(await timelineHistory.evaluate((link) => {
+    const url = new URL(link.href);
+    return {
+      entities: url.searchParams.get("entity_id"),
+      start: url.searchParams.get("start_date"),
+      end: url.searchParams.get("end_date"),
+    };
+  })).toEqual({
+    entities: "sensor.fridge_activity",
+    start: "2026-07-10T00:00:00.000Z",
+    end: "2026-07-12T23:59:59.999Z",
+  });
   await expect(card.locator('[data-appliance-id="fridge"] .appliance-heading ha-icon')).toHaveAttribute("icon", "mdi:fridge-outline");
   const timelineHistoryCalls = await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("sensor.fridge_activity")).length
@@ -1177,6 +1208,20 @@ test("energy and cost card follows the dashboard range and preserves cost source
     }));
   });
   await expect(card.locator("svg.chart").first()).toBeVisible();
+  const completedHistoryLink = card.locator("[data-chart-history]");
+  await expect(completedHistoryLink).toBeVisible();
+  expect(await completedHistoryLink.evaluate((link) => {
+    const url = new URL(link.href);
+    return {
+      entities: url.searchParams.get("entity_id"),
+      start: url.searchParams.get("start_date"),
+      end: url.searchParams.get("end_date"),
+    };
+  })).toEqual({
+    entities: null,
+    start: "2026-07-03T12:00:00.000Z",
+    end: "2026-07-10T11:59:59.999Z",
+  });
   await expect(card.locator("[data-energy-bar]")).toHaveCount(7);
   await expect(card.locator("[data-history-days]")).toHaveCount(0);
   await expect(card.locator(".contribution")).toHaveCount(0);
@@ -1466,6 +1511,11 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
   await expect(card.locator(".legend-item").filter({ hasText: "Dryer" })).toHaveCount(1);
   await expect(card.locator(`[data-chart-time="${Date.parse("2026-07-24T01:00:00.000Z")}"]`)).toHaveAttribute("data-chart-value", "600");
   await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,200"]')).toHaveCount(1);
+  const historyLink = card.locator("[data-chart-history]");
+  await expect(historyLink).toBeVisible();
+  await expect.poll(() => historyLink.evaluate((link) => (
+    new URL(link.href).searchParams.get("entity_id")
+  ))).toBe("sensor.dryer_l1_power,sensor.dryer_l2_power");
   const historyCalls = await page.evaluate(() => (
     window.__apiCalls.filter(({ apiPath }) => apiPath.includes("history/period/")).length
   ));
@@ -1482,6 +1532,8 @@ test("dashboard graph combines dual-phase appliance power into one series", asyn
   ))).toBe(historyCalls + 1);
   await expect(card.locator(`[data-chart-time="${Date.parse("2026-07-24T02:00:00.000Z")}"]`)).toHaveCount(1);
   await expect(card.locator('[data-chart-name="Dryer"][data-chart-value="1,400"]')).toHaveCount(1);
+  await historyLink.click();
+  await expect(page).toHaveURL(/\/history\?.*back=1/);
 });
 
 test("dashboard graphs use Recorder statistics for long ranges", async ({ page }) => {
@@ -2643,6 +2695,11 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
   await expect.poll(() => chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
   ))).toBeLessThan(fullSpan * 0.6);
+  await expect.poll(() => card.locator("[data-chart-history]").evaluate((link) => {
+    const url = new URL(link.href);
+    return Number(new Date(url.searchParams.get("end_date")))
+      - Number(new Date(url.searchParams.get("start_date")));
+  })).toBeLessThan(fullSpan * 0.6);
   await expect(card.locator("[data-chart-reset]")).toBeVisible();
   await card.locator("[data-chart-reset]").click();
   await expect.poll(() => chart.evaluate((element) => (
