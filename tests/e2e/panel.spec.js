@@ -1511,11 +1511,19 @@ test("no-mains energy history retries the selected appliance after midnight", as
         status: "ok",
         items: [
           {
+            entry_id: "other-entry",
+            circuit_id: "other",
+            display_name: "Other entry",
+            daily_totals: [completed],
+          },
+          {
+            entry_id: "entry-1",
             circuit_id: "fridge",
             display_name: "Fridge",
             daily_totals: insightCalls > 1 ? [completed] : [],
           },
           {
+            entry_id: "entry-1",
             circuit_id: "hvac",
             display_name: "HVAC",
             daily_totals: [completed],
@@ -1531,6 +1539,7 @@ test("no-mains energy history retries the selected appliance after midnight", as
     "circuitsetup-energy-analyzer-energy-cost",
     {
       title: "Energy and costs",
+      entry_id: "entry-1",
       api_path: "circuitsetup_energy_analyzer/appliance_insights",
       appliances: [],
     },
