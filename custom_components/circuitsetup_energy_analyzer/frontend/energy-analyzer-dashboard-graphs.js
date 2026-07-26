@@ -2209,6 +2209,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._wholeHouse = [];
       this._loadRequested = false;
       this._insightsDateKey = "";
+      this._insightsReloadTimer = 0;
+    }
+
+    disconnectedCallback() {
+      clearTimeout(this._insightsReloadTimer);
+      super.disconnectedCallback();
     }
 
     _render() {
@@ -2332,6 +2338,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadInsights() {
+      clearTimeout(this._insightsReloadTimer);
+      this._insightsReloadTimer = 0;
       try {
         const payload = await this._hass.callApi("GET", this._dashboardConfig.api_path);
         this._insights = Array.isArray(payload && payload.items) ? payload.items : [];
@@ -2339,6 +2347,26 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       } catch (_error) {
         this._insights = [];
         this._wholeHouse = [];
+      }
+      const range = validRange(this._dashboardRange);
+      const { startKey, endKey } = this._calendarRange(range);
+      const todayKey = this._chartDateKey(Date.now());
+      const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const completedDayReady = this._historyRows(this._insights).some((row) => (
+        String(row.date) === completedDayKey
+      ));
+      if (
+        startKey <= completedDayKey
+        && endKey >= completedDayKey
+        && !completedDayReady
+        && Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000
+      ) {
+        this._insightsReloadTimer = setTimeout(() => {
+          this._insightsReloadTimer = 0;
+          if (!this.isConnected) return;
+          this._loadRequested = false;
+          this._render();
+        }, 30_000);
       }
       this._render();
     }

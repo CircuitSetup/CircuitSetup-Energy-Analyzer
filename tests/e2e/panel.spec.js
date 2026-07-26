@@ -1408,7 +1408,7 @@ test("energy and cost history includes live monitored totals for today", async (
       json: {
         status: "ok",
         items: [],
-        whole_house: insightCalls > 1 ? [{
+        whole_house: insightCalls > 2 ? [{
           entry_id: "entry-1",
           circuit_id: "mains",
           daily_totals: [{
@@ -1484,6 +1484,11 @@ test("energy and cost history includes live monitored totals for today", async (
     window.__dashboardCard.hass = window.__dashboardHass;
   });
   await expect.poll(() => insightCalls).toBe(2);
+  await expect.poll(() => page.evaluate(() => (
+    Boolean(window.__dashboardCard._insightsReloadTimer)
+  ))).toBe(true);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(3);
   await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
   await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(1);
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
