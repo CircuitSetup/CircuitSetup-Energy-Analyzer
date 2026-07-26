@@ -744,11 +744,30 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.extendedPresets = false;
       picker.backdrop = true;
       picker.popoverPlacement = "top-start";
+      let trackedCalendar = null;
+      let pendingSingleDate = null;
+      const trackSingleDate = async () => {
+        await picker.updateComplete;
+        const inner = picker.shadowRoot && picker.shadowRoot.querySelector("date-range-picker");
+        if (!inner) return;
+        await inner.updateComplete;
+        const calendar = inner.shadowRoot && inner.shadowRoot.querySelector("calendar-range");
+        if (!calendar || calendar === trackedCalendar) return;
+        trackedCalendar = calendar;
+        calendar.addEventListener("rangestart", (event) => {
+          pendingSingleDate = event.detail;
+        });
+        calendar.addEventListener("rangeend", () => {
+          pendingSingleDate = null;
+        });
+      };
       picker.addEventListener("click", () => {
         this._datePickerOpen = true;
+        void trackSingleDate();
       });
       picker.addEventListener("picker-closed", () => {
         this._datePickerOpen = false;
+        pendingSingleDate = null;
         if (this._datePickerRenderDue) this._render();
       });
       let pendingRange = null;
@@ -759,15 +778,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           end: value.endDate,
           compare: range.compare,
         };
+        const singleDate = pendingSingleDate;
+        pendingSingleDate = null;
         queueMicrotask(() => {
           if (!pendingRange) return;
-          const selectedRange = pendingRange;
+          const dateKey = singleDate && this._chartDateKey(singleDate);
+          const selectedRange = dateKey
+            ? this._boundedPresetRange(dateKey, dateKey, range.compare)
+            : pendingRange;
           pendingRange = null;
           this._selectRange(selectedRange, "");
         });
       });
       picker.addEventListener("preset-selected", (event) => {
         if (!pendingRange) return;
+        pendingSingleDate = null;
         const selectedRange = pendingRange;
         pendingRange = null;
         const presetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
@@ -777,6 +802,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const openPicker = () => {
         this._datePickerOpen = true;
         picker.open();
+        void trackSingleDate();
       };
       const rangeOpen = this.shadowRoot.querySelector("[data-range-open]");
       rangeOpen.addEventListener("click", openPicker);

@@ -2078,6 +2078,65 @@ test("dashboard date picker applies repeated ranges before the stock close finis
   }
 });
 
+test("dashboard date picker applies one calendar click as a single day", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {
+      constructor() {
+        super();
+        const inner = document.createElement("date-range-picker");
+        inner.attachShadow({ mode: "open" });
+        this._calendar = document.createElement("calendar-range");
+        inner.shadowRoot.append(this._calendar);
+        inner.updateComplete = Promise.resolve();
+        this.attachShadow({ mode: "open" }).append(inner);
+        this.updateComplete = Promise.resolve();
+      }
+
+      open() {}
+
+      selectSingle(date) {
+        this._calendar.dispatchEvent(new CustomEvent("rangestart", {
+          detail: new Date(date),
+        }));
+        this.dispatchEvent(new CustomEvent("value-changed", {
+          detail: {
+            value: {
+              startDate: this.startDate,
+              endDate: this.endDate,
+            },
+          },
+        }));
+      }
+    });
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-22T00:00:00.000Z",
+      end: "2026-07-23T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("[data-range-open]").click();
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.selectSingle("2026-07-24T00:00:00.000Z");
+  });
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-24T00:00:00.000Z",
+    end: "2026-07-24T23:59:59.999Z",
+    compare: false,
+  });
+});
+
 test("dashboard date picker survives a live refresh that races its open event", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
   await page.addInitScript(() => {
