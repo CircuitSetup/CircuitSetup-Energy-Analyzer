@@ -2289,10 +2289,12 @@ test("dashboard date range is bounded by retained history and today", async ({ p
   );
   await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
   let insightCalls = 0;
+  let failNext = false;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
     insightCalls += 1;
-    if (insightCalls === 1) {
+    if (failNext) {
+      failNext = false;
       await route.fulfill({ status: 503, body: "" });
       return true;
     }
@@ -2323,14 +2325,27 @@ test("dashboard date range is bounded by retained history and today", async ({ p
     },
     {},
     { time_zone: "UTC" },
+    {
+      start: "2026-07-11T00:00:00.000Z",
+      end: "2026-07-11T23:59:59.999Z",
+      compare: false,
+    },
   );
   await expect.poll(() => page.evaluate(() => (
-    window.__dashboardCard._historyBoundsLoading
-  ))).toBe(false);
+    window.__dashboardCard._historyBoundsLoaded
+  ))).toBe(true);
+  failNext = true;
+  const callsBeforeFailure = insightCalls;
   await page.evaluate(() => {
-    window.__dashboardCard.hass = window.__dashboardHass;
+    window.__dashboardCard._historyBoundsLoaded = false;
+    window.__dashboardCard._render();
   });
-  await expect.poll(() => insightCalls).toBe(2);
+  await expect.poll(() => insightCalls).toBe(callsBeforeFailure + 1);
+  await expect.poll(() => page.evaluate(() => (
+    window.__dashboardCard._historyBoundsReloadTimer
+  ))).toBeGreaterThan(0);
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => insightCalls).toBe(callsBeforeFailure + 2);
   await expect.poll(() => card.locator("[data-range-previous]").getAttribute("disabled"))
     .toBeNull();
 

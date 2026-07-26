@@ -583,6 +583,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._datePickerRenderDue = false;
       this._historyBoundsLoaded = false;
       this._historyBoundsLoading = false;
+      this._historyBoundsReloadTimer = 0;
       this._historyStartKey = "";
       this._narrow = false;
       this._collapseButtons = false;
@@ -612,6 +613,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }
       clearTimeout(this._rangeLoadingTimer);
       clearTimeout(this._rangeLoadingStopTimer);
+      clearTimeout(this._historyBoundsReloadTimer);
       super.disconnectedCallback();
     }
 
@@ -1135,6 +1137,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         || this._historyBoundsLoading
         || !this._dashboardConfig.api_path
       ) return;
+      clearTimeout(this._historyBoundsReloadTimer);
+      this._historyBoundsReloadTimer = 0;
       this._historyBoundsLoading = true;
       try {
         const payload = await this._hass.callApi("GET", this._dashboardConfig.api_path);
@@ -1152,6 +1156,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._historyBoundsLoaded = true;
         this._render();
       } catch (_error) {
+        this._historyBoundsReloadTimer = setTimeout(() => {
+          this._historyBoundsReloadTimer = 0;
+          if (this.isConnected && !this._historyBoundsLoaded) this._render();
+        }, 5_000);
         return;
       } finally {
         this._historyBoundsLoading = false;
