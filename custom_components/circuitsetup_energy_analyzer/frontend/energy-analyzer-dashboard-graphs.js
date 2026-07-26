@@ -436,8 +436,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _applianceLiveTotals(appliances = []) {
       if (!this._rangeIncludesToday()) return {};
       const total = (key) => {
-        const values = appliances.map((item) => this._number(item[key])).filter(Number.isFinite);
-        return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+        const values = appliances.map((item) => this._number(item[key]));
+        return values.length && values.every(Number.isFinite)
+          ? values.reduce((sum, value) => sum + value, 0)
+          : null;
       };
       return {
         energy: total("energy_today_entity"),
@@ -2232,7 +2234,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ));
       const energyPoints = rows.map((row) => ({
         time: this._dailyTimestamp(row.date),
-        value: Number(row.energy_kwh),
+        value: row.energy_kwh === null || row.energy_kwh === undefined
+          ? Number.NaN
+          : Number(row.energy_kwh),
       })).filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
       const costPoints = rows.map((row) => ({
         time: this._dailyTimestamp(row.date),
@@ -2260,7 +2264,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         Number.isFinite(point.time) && Number.isFinite(point.value)
       );
       const previousEnergy = previousRows.map((row) => (
-        shiftedPoint(row, Number(row.energy_kwh))
+        shiftedPoint(
+          row,
+          row.energy_kwh === null || row.energy_kwh === undefined
+            ? Number.NaN
+            : Number(row.energy_kwh),
+        )
       )).filter(validPoint);
       const previousCost = previousRows.map((row) => shiftedPoint(
         row,

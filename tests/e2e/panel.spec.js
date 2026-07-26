@@ -416,6 +416,17 @@ test("home summary totals monitored appliances when mains today totals are unava
     .toContainText("3.6 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 26)" }))
     .toContainText("$0.78");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.hvac_energy", {
+      state: "unavailable",
+      attributes: { unit_of_measurement: "kWh" },
+    });
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 26)" }))
+    .toContainText("Unavailable");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 26)" }))
+    .toContainText("$0.78");
 });
 
 test("home totals use retained completed days without Recorder history", async ({ page }) => {
@@ -1441,6 +1452,16 @@ test("energy and cost history includes live monitored totals for today", async (
   await expect(card).toContainText("Energy and cost history");
   await expect(card).not.toContainText("No running history");
   await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
+  await expect(card.locator('[data-cost-source="current"]')).toHaveCount(1);
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.mains_cost_today", { state: "1.23", attributes: {} });
+    window.__setDashboardState("sensor.hvac_energy", {
+      state: "unavailable",
+      attributes: { unit_of_measurement: "kWh" },
+    });
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(0);
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(1);
 });
 
