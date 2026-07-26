@@ -973,6 +973,45 @@ test("current-inclusive appliance totals update without reloading retained histo
   expect(insightCalls).toBe(1);
 });
 
+test("appliance grid switches today's selection to historical layout after midnight", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        activity_entity: "sensor.fridge_activity",
+        energy_today_entity: "sensor.fridge_energy",
+      }],
+    },
+    {
+      "sensor.fridge_activity": {
+        state: "Running",
+        attributes: { is_running: true },
+      },
+      "sensor.fridge_energy": {
+        state: "3",
+        attributes: { unit_of_measurement: "kWh" },
+      },
+    },
+  );
+  await expect(card.getByRole("tab", { name: "Running", exact: true })).toHaveCount(1);
+  await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("Energy today");
+
+  await page.clock.fastForward(2 * 60_000);
+  await page.evaluate(() => {
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  await expect(card.getByRole("tab", { name: "Running", exact: true })).toHaveCount(0);
+  await expect(card.locator('[data-appliance-id="fridge"]')).toContainText("Energy Jul 12");
+  await expect(card.locator('[data-appliance-id="fridge"]')).not.toContainText("Energy today");
+});
+
 test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
@@ -2016,6 +2055,36 @@ test("dashboard date selector uses stock responsive overflow", async ({ page }) 
   await expect.poll(() => card.evaluate((element) => element._collapseButtons)).toBe(true);
   await expect(card.locator(".overflow > ha-icon-button[data-range-previous]")).toHaveCount(0);
   await expect(card.locator("ha-dropdown-item[data-range-previous]")).toHaveCount(1);
+});
+
+test("dashboard date selector reattaches its resize observer", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__dateSelectorObserveCalls = 0;
+    window.ResizeObserver = class {
+      observe() {
+        window.__dateSelectorObserveCalls += 1;
+      }
+
+      disconnect() {}
+    };
+  });
+  await mockPanelApi(page);
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+  );
+  await expect.poll(() => page.evaluate(() => window.__dateSelectorObserveCalls)).toBe(1);
+
+  await page.evaluate(() => {
+    const card = window.__dashboardCard;
+    const parent = card.parentElement;
+    card.remove();
+    parent.append(card);
+  });
+
+  await expect.poll(() => page.evaluate(() => window.__dateSelectorObserveCalls)).toBe(2);
 });
 
 test("dashboard date selector uses stock month navigation within history bounds", async ({ page }) => {

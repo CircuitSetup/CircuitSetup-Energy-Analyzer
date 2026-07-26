@@ -606,7 +606,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     disconnectedCallback() {
       window.removeEventListener(DATA_EVENT, this._handleDashboardData);
-      if (this._resizeObserver) this._resizeObserver.disconnect();
+      if (this._resizeObserver) {
+        this._resizeObserver.disconnect();
+        this._resizeObserver = null;
+      }
       clearTimeout(this._rangeLoadingTimer);
       clearTimeout(this._rangeLoadingStopTimer);
       super.disconnectedCallback();
@@ -1828,6 +1831,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._applianceRangeKey = "";
       this._applianceRangeReloadTimer = 0;
       this._liveApplianceTotalsKey = "";
+      this._applianceTodayKey = "";
+      this._applianceDateRolledOver = false;
     }
 
     disconnectedCallback() {
@@ -1836,6 +1841,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _refreshLiveData() {
+      const todayKey = this._chartDateKey(Date.now());
+      this._applianceDateRolledOver = Boolean(
+        this._applianceTodayKey && this._applianceTodayKey !== todayKey,
+      );
+      this._applianceTodayKey = todayKey;
       const key = (this._dashboardConfig.appliances || []).flatMap((item) => [
         item.energy_today_entity,
         item.cost_today_entity,
@@ -1849,7 +1859,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _shouldRenderForHassUpdate({ liveDataChanged }) {
-      return this._isTodayRange() || this._rangeIncludesToday() && liveDataChanged;
+      const dateRolledOver = this._applianceDateRolledOver;
+      this._applianceDateRolledOver = false;
+      return this._isTodayRange()
+        || dateRolledOver
+        || this._rangeIncludesToday() && liveDataChanged;
     }
 
     _render() {
