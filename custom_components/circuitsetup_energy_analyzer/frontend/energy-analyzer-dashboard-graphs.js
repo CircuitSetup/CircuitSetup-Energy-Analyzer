@@ -1820,10 +1820,24 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._timelineRows = [];
       this._applianceRangeTotals = {};
       this._applianceRangeKey = "";
+      this._liveApplianceTotalsKey = "";
     }
 
-    _shouldRenderForHassUpdate() {
-      return this._isTodayRange();
+    _refreshLiveData() {
+      const key = (this._dashboardConfig.appliances || []).flatMap((item) => [
+        item.energy_today_entity,
+        item.cost_today_entity,
+      ]).filter(Boolean).map((entityId) => {
+        const state = this._state(entityId);
+        return `${entityId}:${state && state.state}:${state && state.attributes && state.attributes.unit_of_measurement || ""}`;
+      }).join("|");
+      const changed = Boolean(this._liveApplianceTotalsKey && key !== this._liveApplianceTotalsKey);
+      this._liveApplianceTotalsKey = key;
+      return changed;
+    }
+
+    _shouldRenderForHassUpdate({ liveDataChanged }) {
+      return this._isTodayRange() || this._rangeIncludesToday() && liveDataChanged;
     }
 
     _render() {
@@ -1840,7 +1854,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._applianceState(
           item,
           historical
-            ? this._applianceRangeTotals[item.circuit_id] || { energy: null, cost: null }
+            ? this._mergeRangeTotals(
+              this._applianceRangeTotals[item.circuit_id] || { energy: null, cost: null },
+              this._liveRangeTotals(
+                item.energy_today_entity,
+                item.cost_today_entity,
+              ),
+            )
             : null,
         )
       ));
@@ -1976,13 +1996,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             item.circuit_id === appliance.circuit_id
             || item.appliance_key === appliance.circuit_id
           ));
-          return [appliance.circuit_id, this._mergeRangeTotals(
+          return [
+            appliance.circuit_id,
             this._retainedRangeTotals(retained, startKey, endKey, todayKey),
-            this._liveRangeTotals(
-              appliance.energy_today_entity,
-              appliance.cost_today_entity,
-            ),
-          )];
+          ];
         }),
       );
       this._render();

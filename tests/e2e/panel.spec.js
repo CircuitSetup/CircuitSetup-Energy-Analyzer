@@ -862,6 +862,72 @@ test("historical appliance totals retry after a transient API failure", async ({
     .toContainText("Energy Jul 10: 2.5 kWh · $0.75");
 });
 
+test("current-inclusive appliance totals update without reloading retained history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "fridge",
+          daily_totals: [
+            { date: "2026-07-10", energy_kwh: 1, cost: 0.1 },
+            { date: "2026-07-11", energy_kwh: 2, cost: 0.2 },
+          ],
+        }],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+      }],
+    },
+    {
+      "sensor.fridge_energy": { state: "3", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.3", attributes: {} },
+    },
+    {},
+    {
+      start: "2026-07-10T00:00:00.000Z",
+      end: "2026-07-12T23:59:59.999Z",
+      compare: false,
+    },
+  );
+  const tile = card.locator('[data-appliance-id="fridge"]');
+  await expect(tile).toContainText("Energy Jul 10-12: 6 kWh · $0.60");
+
+  await page.evaluate(() => {
+    window.__dashboardHass.states["sensor.fridge_energy"] = {
+      state: "4",
+      attributes: { unit_of_measurement: "kWh" },
+    };
+    window.__dashboardHass.states["sensor.fridge_cost"] = {
+      state: "0.4",
+      attributes: {},
+    };
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+
+  await expect(tile).toContainText("Energy Jul 10-12: 7 kWh · $0.70");
+  expect(insightCalls).toBe(1);
+});
+
 test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
