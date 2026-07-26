@@ -809,6 +809,59 @@ test("historical appliance grid uses selected-date totals without live status", 
   await expect(tile).not.toContainText("Possible Imbalance");
 });
 
+test("historical appliance totals retry after a transient API failure", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/appliance_insights" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "appliance_insights: net::ERR_ABORTED" },
+  );
+  await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    if (insightCalls === 1) {
+      await route.fulfill({ status: 503, body: "" });
+      return true;
+    }
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [{
+          entry_id: "entry-1",
+          circuit_id: "fridge",
+          daily_totals: [{ date: "2026-07-10", energy_kwh: 2.5, cost: 0.75 }],
+        }],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{ circuit_id: "fridge", name: "Fridge" }],
+    },
+    {},
+    {},
+    {
+      start: "2026-07-10T00:00:00.000Z",
+      end: "2026-07-10T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect.poll(() => insightCalls).toBe(1);
+  await page.evaluate(() => window.__dashboardCard._render());
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator('[data-appliance-id="fridge"]'))
+    .toContainText("Energy Jul 10: 2.5 kWh · $0.75");
+});
+
 test("activity timeline caps long selections to the latest 31 days", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
@@ -1896,6 +1949,79 @@ test("dashboard date selector uses stock month navigation within history bounds"
     end: "2026-07-24T23:59:59.999Z",
     compare: false,
   });
+});
+
+test("dashboard date selector preserves partial current calendar preset navigation", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+  );
+  const cases = [
+    {
+      index: 2,
+      key: "this_week",
+      start: "2026-07-19T00:00:00.000Z",
+      end: "2026-07-25T23:59:59.999Z",
+      previous: ["2026-07-12T00:00:00.000Z", "2026-07-18T23:59:59.999Z"],
+    },
+    {
+      index: 3,
+      key: "this_month",
+      start: "2026-07-01T00:00:00.000Z",
+      end: "2026-07-31T23:59:59.999Z",
+      previous: ["2026-06-01T00:00:00.000Z", "2026-06-30T23:59:59.999Z"],
+    },
+    {
+      index: 4,
+      key: "this_quarter",
+      start: "2026-07-01T00:00:00.000Z",
+      end: "2026-09-30T23:59:59.999Z",
+      previous: ["2026-04-01T00:00:00.000Z", "2026-06-30T23:59:59.999Z"],
+    },
+    {
+      index: 5,
+      key: "this_year",
+      start: "2026-01-01T00:00:00.000Z",
+      end: "2026-12-31T23:59:59.999Z",
+      previous: ["2025-01-01T00:00:00.000Z", "2025-12-31T23:59:59.999Z"],
+    },
+  ];
+
+  for (const item of cases) {
+    await card.locator("ha-date-range-picker").evaluate((picker, preset) => {
+      picker.dispatchEvent(new CustomEvent("value-changed", {
+        bubbles: true,
+        composed: true,
+        detail: {
+          value: {
+            startDate: new Date(preset.start),
+            endDate: new Date(preset.end),
+          },
+        },
+      }));
+      picker.dispatchEvent(new CustomEvent("preset-selected", {
+        bubbles: true,
+        composed: true,
+        detail: { index: preset.index },
+      }));
+    }, item);
+    await expect.poll(() => page.evaluate(() => [
+      window.__dashboardCard._rangePresetKey,
+      localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range-preset"),
+    ])).toEqual([item.key, item.key]);
+    await card.locator("[data-range-previous]").click();
+    await expect.poll(() => page.evaluate(() => {
+      const range = JSON.parse(
+        localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"),
+      );
+      return [range.start, range.end];
+    })).toEqual(item.previous);
+  }
 });
 
 test("dashboard date selector matches stock cross-year date formatting", async ({ page }) => {

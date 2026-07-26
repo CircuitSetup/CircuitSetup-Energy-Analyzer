@@ -2,6 +2,19 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   const RANGE_EVENT = "circuitsetup-dashboard-range-changed";
   const DATA_EVENT = "circuitsetup-dashboard-data-changed";
   const RANGE_KEY = "circuitsetup-energy-analyzer-dashboard-range";
+  const RANGE_PRESET_KEY = "circuitsetup-energy-analyzer-dashboard-range-preset";
+  const STOCK_RANGE_KEYS = [
+    "today",
+    "yesterday",
+    "this_week",
+    "this_month",
+    "this_quarter",
+    "this_year",
+    "now-7d",
+    "now-30d",
+    "now-365d",
+    "now-12m",
+  ];
   const dashboardSeries = new Map();
 
   const defaultRange = () => {
@@ -578,6 +591,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeLoadingTimer = 0;
       this._rangeLoadingStopTimer = 0;
       this._rangeCanComplete = false;
+      this._rangePresetKey = localStorage.getItem(RANGE_PRESET_KEY) || "";
       this._handleDashboardData = () => {
         if (this._rangeCanComplete) this._finishRangeLoading();
         this._render();
@@ -729,14 +743,19 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._datePickerOpen = Boolean(event.detail && event.detail.open);
         if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
       });
+      let selectedPresetKey = "";
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
         this._datePickerOpen = false;
-        this._selectRange({
+        const selectedRange = {
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
-        });
+        };
+        queueMicrotask(() => this._selectRange(selectedRange, selectedPresetKey));
+      });
+      picker.addEventListener("preset-selected", (event) => {
+        selectedPresetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
       });
       const openPicker = () => {
         picker.open();
@@ -776,7 +795,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       </ha-dropdown-item>`;
     }
 
-    _selectRange(range) {
+    _selectRange(range, presetKey = this._rangePresetKey) {
+      this._rangePresetKey = presetKey;
+      if (presetKey) {
+        localStorage.setItem(RANGE_PRESET_KEY, presetKey);
+      } else {
+        localStorage.removeItem(RANGE_PRESET_KEY);
+      }
       this._scheduleLoadingIndicator();
       setDashboardRange(this._boundedRange(validRange(range)));
     }
@@ -809,16 +834,20 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     _shiftRange(action) {
       const range = validRange(this._dashboardRange);
       const { startKey, endKey, days } = this._calendarRange(range);
-      const type = this._stockRangeType(range);
+      const type = this._selectedRangeType(range);
       if (action === "previous") {
         this._selectRange(type.wholeMonths
           ? this._shiftWholeMonthRange(range, -type.months)
+          : type.name === "week"
+            ? this._shiftWeekRange(range, -1)
           : this._previousRange(range));
         return;
       }
       if (action === "next") {
         this._selectRange(type.wholeMonths
           ? this._shiftWholeMonthRange(range, type.months)
+          : type.name === "week"
+            ? this._shiftWeekRange(range, 1)
           : this._rangeFromDateKeys(
             this._shiftDateKey(endKey, 1),
             this._shiftDateKey(endKey, days),
@@ -830,12 +859,34 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _shiftWholeMonthRange(range, months) {
-      const { startKey, endKey } = this._calendarRange(range);
+      const { startKey } = this._calendarRange(range);
+      const shiftedStart = this._shiftMonthKey(startKey, months);
       return this._boundedPresetRange(
-        this._shiftMonthKey(startKey, months),
-        this._shiftMonthKey(endKey, months, true),
+        shiftedStart,
+        this._shiftMonthKey(shiftedStart, Math.abs(months) - 1, true),
         range.compare,
       );
+    }
+
+    _shiftWeekRange(range, weeks) {
+      const { startKey } = this._calendarRange(range);
+      const shiftedStart = this._shiftDateKey(startKey, weeks * 7);
+      return this._boundedPresetRange(
+        shiftedStart,
+        this._shiftDateKey(shiftedStart, 6),
+        range.compare,
+      );
+    }
+
+    _selectedRangeType(range) {
+      const presetTypes = {
+        this_week: { name: "week", wholeMonths: false, months: 0 },
+        this_month: { name: "month", wholeMonths: true, months: 1 },
+        this_quarter: { name: "quarter", wholeMonths: true, months: 3 },
+        this_year: { name: "year", wholeMonths: true, months: 12 },
+        "now-12m": { name: "12month", wholeMonths: true, months: 12 },
+      };
+      return presetTypes[this._rangePresetKey] || this._stockRangeType(range);
     }
 
     _nowRange(range, type = this._stockRangeType(range)) {
@@ -1062,7 +1113,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       let endKey = requestedEnd;
       if (endKey > todayKey) {
         endKey = todayKey;
-        startKey = this._shiftDateKey(todayKey, 1 - days);
+        if (!["this_week", "this_month", "this_quarter", "this_year", "now-12m"]
+          .includes(this._rangePresetKey)) {
+          startKey = this._shiftDateKey(todayKey, 1 - days);
+        }
       }
       if (this._historyStartKey && startKey < firstKey) {
         startKey = firstKey;
@@ -1909,6 +1963,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       try {
         insights = await this._hass.callApi("GET", this._dashboardConfig.api_path) || {};
       } catch (_error) {
+        if (this._applianceRangeKey === key) this._applianceRangeKey = "";
         return;
       }
       if (this._applianceRangeKey !== key) return;
