@@ -2208,10 +2208,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._insights = null;
       this._wholeHouse = [];
       this._loadRequested = false;
+      this._insightsDateKey = "";
     }
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      this._insightsDateKey = this._chartDateKey(Date.now());
       if (!this._loadRequested) {
         this._loadRequested = true;
         this._loadInsights();
@@ -2320,6 +2322,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       });
       this._publishDashboardSeries(series);
       this._attachChartInspectors();
+    }
+
+    _refreshLiveData() {
+      const changed = this._insightsDateKey
+        && this._insightsDateKey !== this._chartDateKey(Date.now());
+      if (changed) this._loadRequested = false;
+      return changed;
     }
 
     async _loadInsights() {

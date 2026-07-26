@@ -1400,13 +1400,24 @@ test("water context graph combines paired appliance watts with one flow series",
 
 test("energy and cost history includes live monitored totals for today", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-26T18:00:00.000Z") });
+  let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
     await route.fulfill({
       json: {
         status: "ok",
         items: [],
-        whole_house: [],
+        whole_house: insightCalls > 1 ? [{
+          entry_id: "entry-1",
+          circuit_id: "mains",
+          daily_totals: [{
+            date: "2026-07-26",
+            energy_kwh: 3.6,
+            cost: 0.78,
+            cost_source: "recorded",
+          }],
+        }] : [],
       },
     });
     return true;
@@ -1463,6 +1474,19 @@ test("energy and cost history includes live monitored totals for today", async (
   });
   await expect(card.locator("[data-energy-bar]")).toHaveCount(0);
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(1);
+  await page.clock.fastForward("06:01:00");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.mains_energy_today", {
+      state: "0.2",
+      attributes: { unit_of_measurement: "kWh" },
+    });
+    window.__setDashboardState("sensor.mains_cost_today", { state: "0.04", attributes: {} });
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator("[data-energy-bar]")).toHaveCount(1);
+  await expect(card.locator('[data-cost-source="recorded"]')).toHaveCount(1);
+  await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
 });
 
 test("dashboard date range is shared with graph history requests", async ({ page }) => {
