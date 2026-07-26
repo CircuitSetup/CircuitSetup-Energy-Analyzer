@@ -15,6 +15,7 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     CONTEXT_GRAPH_CARD,
     DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_URL_PATH,
+    DATE_RANGE_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
     SUMMARY_CARD,
     build_recommended_dashboard,
@@ -411,7 +412,14 @@ def test_dashboard_groups_related_cards_into_three_views() -> None:
     assert "history-graph" not in cards_by_view["insights"]
 
 
-def test_dashboard_adds_shared_date_control_and_orders_home_cards() -> None:
+def test_dashboard_adds_shared_date_control_and_orders_home_cards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.dashboard"
+        "._sections_footer_supported",
+        lambda: True,
+    )
     dashboard = build_recommended_dashboard(
         _example_circuits(),
         DASHBOARD_LAYOUT_EXPERT,
@@ -438,6 +446,29 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards() -> None:
         "custom:circuitsetup-energy-analyzer-appliance-grid",
     ]
     assert home["sections"][0]["cards"][0]["title"] == "All appliance power"
+
+
+def test_dashboard_keeps_date_control_on_older_home_assistant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.dashboard"
+        "._sections_footer_supported",
+        lambda: False,
+    )
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_EXPERT,
+    )
+
+    for view in _dashboard_views(dashboard):
+        assert "footer" not in view
+        (date_card,) = view["sections"][-1]["cards"]
+        assert date_card["type"] == DATE_RANGE_CARD
+        assert date_card["api_path"] == (
+            "circuitsetup_energy_analyzer/appliance_insights"
+        )
+        assert date_card["grid_options"] == {"columns": "full"}
 
 
 def test_appliance_power_graph_groups_dual_phase_entities() -> None:
@@ -851,6 +882,9 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
     for view in _dashboard_views(dashboard):
         for section in view["sections"]:
             content_cards = section["cards"]
+            if len(content_cards) == 1 and content_cards[0]["type"] == DATE_RANGE_CARD:
+                assert content_cards[0]["grid_options"]["columns"] == "full"
+                continue
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
