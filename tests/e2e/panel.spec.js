@@ -452,6 +452,67 @@ test("home summary uses the mains graph history for the amps average", async ({ 
   await expect(amps.locator("small")).toHaveText("Average: 5 A");
 });
 
+test("home summary rejects incomplete mains current history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-13T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          {
+            entity_id: "sensor.mains_l1_current",
+            state: "4",
+            last_changed: "2026-07-12T00:00:00.000Z",
+          },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  await openDashboardCards(page, [
+    {
+      tagName: "circuitsetup-energy-analyzer-context-graph",
+      config: {
+        title: "Mains total power and amps",
+        entities: [
+          { entity: "sensor.mains_l1_current", name: "Total Amps", series_id: "mains:current", axis: "left" },
+          { entity: "sensor.mains_l2_current", name: "Total Amps", series_id: "mains:current", axis: "left" },
+        ],
+      },
+    },
+    {
+      tagName: "circuitsetup-energy-analyzer-house-flow",
+      config: {
+        title: "Home energy summary",
+        api_path: "circuitsetup_energy_analyzer/appliance_insights",
+        primary_mains: {
+          current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
+        },
+      },
+    },
+  ], {
+    "sensor.mains_l1_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    "sensor.mains_l2_current": { state: "6", attributes: { unit_of_measurement: "A" } },
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-12T00:00:00.000Z",
+        end: "2026-07-12T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  const amps = page.locator("circuitsetup-energy-analyzer-house-flow")
+    .locator(".metric")
+    .filter({ hasText: "Total Amps (Jul 12)" });
+  await expect(amps).toContainText("Unavailable");
+  await expect(amps.locator("small")).toHaveCount(0);
+});
+
 test("home summary totals monitored appliances when mains today totals are unavailable", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-26T18:00:00.000Z") });
   await mockPanelApi(page);

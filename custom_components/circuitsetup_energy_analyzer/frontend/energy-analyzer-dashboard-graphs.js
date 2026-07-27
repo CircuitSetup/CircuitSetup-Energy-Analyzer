@@ -525,7 +525,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return parsed;
     }
 
-    _groupDashboardHistorySeries(series) {
+    _groupDashboardHistorySeries(series, configuredEntities = []) {
       const groups = new Map();
       for (const item of series) {
         const key = item.series_id || item.entity_id || item.name;
@@ -533,7 +533,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         groups.get(key).push(item);
       }
       return [...groups.entries()].map(([seriesId, items]) => {
-        if (items.length === 1) {
+        const expectedCount = seriesId === "mains:current"
+          ? configuredEntities.filter((item) => item.series_id === seriesId).length
+          : 0;
+        if (items.length === 1 && expectedCount <= 1) {
           return {
             ...items[0],
             series_id: seriesId,
@@ -556,7 +559,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             pointIndexes.set(item, index);
           }
           const values = [...latest.values()].filter(Number.isFinite);
-          if (values.length) {
+          if (values.length && (!expectedCount || values.length === expectedCount)) {
             points.push({
               time,
               value: values.reduce((total, value) => total + value, 0),
@@ -1348,6 +1351,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             config.y_axis_label,
           ),
         ),
+        entities,
       );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
@@ -1366,6 +1370,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               config.y_axis_label,
             ),
           ),
+          entities,
         ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
