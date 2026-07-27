@@ -111,6 +111,43 @@ views:
             primary_mains:
               circuit_id: mains
               name: Mains
+              power_entities:
+                - sensor.mains_power
+              daily_energy_usage_entity: sensor.mains_daily_energy_usage
+              cost_today_entity: sensor.mains_cost_today
+            appliances:
+              - circuit_id: refrigerator
+                name: Refrigerator
+                icon: mdi:fridge-outline
+                area: Kitchen
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=refrigerator
+                power_entities:
+                  - sensor.refrigerator_power
+                activity_entity: sensor.refrigerator_activity_summary
+                energy_today_entity: sensor.refrigerator_daily_energy_usage
+                cost_today_entity: sensor.refrigerator_cost_today
+                health_entity: sensor.refrigerator_health_summary
+              - circuit_id: hvac
+                name: HVAC
+                icon: mdi:hvac
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=hvac
+                power_entities:
+                  - sensor.hvac_power
+                activity_entity: sensor.hvac_activity_summary
+                energy_today_entity: sensor.hvac_daily_energy_usage
+                cost_today_entity: sensor.hvac_cost_today
+                health_entity: sensor.hvac_health_summary
+              - circuit_id: washer
+                name: Washer
+                icon: mdi:washing-machine
+                area: Laundry
+                detail_path: /circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=washer
+                power_entities:
+                  - sensor.washer_power
+                activity_entity: sensor.washer_activity_summary
+                energy_today_entity: sensor.washer_daily_energy_usage
+                cost_today_entity: sensor.washer_cost_today
+                health_entity: sensor.washer_health_summary
 
   - type: sections
     title: Energy & Costs

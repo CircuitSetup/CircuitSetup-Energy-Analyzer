@@ -850,7 +850,7 @@ def test_dashboard_example_prioritizes_summary_cards_over_sensor_lists() -> None
     assert "statistics-graph" not in card_types
 
 
-def test_dashboard_example_keeps_completed_history_on_home() -> None:
+def test_dashboard_example_keeps_energy_history_on_home() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     home = next(view for view in dashboard["views"] if view["path"] == "overview")
     home_cards = _dashboard_cards(home)
@@ -871,8 +871,13 @@ def test_dashboard_example_keeps_completed_history_on_home() -> None:
     assert energy_cards[0]["primary_mains"] == {
         "circuit_id": "mains",
         "name": "Mains",
+        "power_entities": ["sensor.mains_power"],
+        "daily_energy_usage_entity": "sensor.mains_daily_energy_usage",
+        "cost_today_entity": "sensor.mains_cost_today",
     }
-    assert "appliances" not in energy_cards[0]
+    assert {
+        appliance["circuit_id"] for appliance in energy_cards[0]["appliances"]
+    } == {"refrigerator", "hvac", "washer"}
     assert home_summary["primary_mains"]["average_kwh_per_day_entity"].endswith(
         "_average_kwh_per_day"
     )

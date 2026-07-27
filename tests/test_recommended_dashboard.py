@@ -560,7 +560,15 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         view["path"] for view in _dashboard_views(dashboard)
     }
     assert energy_card["grid_options"]["columns"] == 24
-    assert "appliances" not in energy_card
+    assert energy_card["primary_mains"]["daily_energy_usage_entity"] == (
+        "sensor.mains_daily_energy_usage"
+    )
+    assert energy_card["primary_mains"]["cost_today_entity"] == (
+        "sensor.mains_cost_today"
+    )
+    assert {
+        appliance["circuit_id"] for appliance in energy_card["appliances"]
+    } == {"fridge", "hvac"}
     assert home_summary["primary_mains"]["daily_energy_usage_entity"] == (
         "sensor.mains_daily_energy_usage"
     )
