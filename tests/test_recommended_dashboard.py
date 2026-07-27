@@ -444,8 +444,8 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards(
     assert [card["type"] for card in home["sections"][0]["cards"][:4]] == [
         CONTEXT_GRAPH_CARD,
         "custom:circuitsetup-energy-analyzer-house-flow",
-        "custom:circuitsetup-energy-analyzer-energy-cost",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
+        "custom:circuitsetup-energy-analyzer-energy-cost",
     ]
     assert home["sections"][0]["cards"][0]["title"] == "All appliance power"
 
@@ -505,43 +505,67 @@ def test_appliance_power_graph_groups_dual_phase_entities() -> None:
     assert {row["name"] for row in dryer_rows} == {"Dryer"}
 
 
-def test_home_mains_graph_precedes_appliance_power_when_sources_are_available() -> None:
+def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power(
+) -> None:
     mains = CircuitConfig(
         circuit_id="mains",
         name="Mains",
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(
-            SensorRef("sensor.mains_l1_power", SensorRole.REAL_POWER),
-            SensorRef("sensor.mains_l2_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_watts", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_active_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_voltage", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_frequency", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_power_harmonic", SensorRole.REAL_POWER),
             SensorRef("sensor.mains_l1_current", SensorRole.CURRENT),
             SensorRef("sensor.mains_l2_current", SensorRole.CURRENT),
         ),
     )
+    states = {
+        "sensor.mains_active_power": SimpleNamespace(
+            state="0",
+            attributes={"friendly_name": "Mains Active Power"},
+        ),
+        "sensor.mains_voltage": SimpleNamespace(
+            state="0",
+            attributes={"friendly_name": "Mains Voltage Power"},
+        ),
+    }
     dashboard = build_recommended_dashboard(
         (_circuits()[0], mains),
         DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
     cards = home["sections"][0]["cards"]
 
-    assert [card.get("title") for card in cards[:3]] == [
+    assert [card.get("title") for card in cards[:5]] == [
         "Mains total power and amps",
         "All appliance power",
         "Home energy summary",
+        "Appliances",
+        "Energy and costs",
     ]
     graph = cards[0]
     assert graph["entities"] == [
         {
-            "entity": "sensor.mains_l1_power",
+            "entity": "sensor.mains_watts",
             "name": "Mains total power",
             "series_id": "mains:power",
             "axis": "left",
         },
         {
-            "entity": "sensor.mains_l2_power",
+            "entity": "sensor.mains_active_power",
+            "name": "Mains total power",
+            "series_id": "mains:power",
+            "axis": "left",
+        },
+        {
+            "entity": "sensor.mains_power",
             "name": "Mains total power",
             "series_id": "mains:power",
             "axis": "left",
@@ -560,6 +584,14 @@ def test_home_mains_graph_precedes_appliance_power_when_sources_are_available() 
         },
     ]
     summary = cards[2]
+    assert summary["primary_mains"]["power_entities"] == [
+        "sensor.mains_watts",
+        "sensor.mains_active_power",
+        "sensor.mains_power",
+        "sensor.mains_voltage",
+        "sensor.mains_frequency",
+        "sensor.mains_power_harmonic",
+    ]
     assert summary["primary_mains"]["current_entities"] == [
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",

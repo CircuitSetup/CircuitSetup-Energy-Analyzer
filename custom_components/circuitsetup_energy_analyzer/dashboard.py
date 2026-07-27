@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -84,6 +85,7 @@ class DashboardCircuit:
     is_hvac: bool
     detail_path: str
     power_entities: tuple[str, ...]
+    chart_power_entities: tuple[str, ...]
     current_entities: tuple[str, ...]
     entities: Mapping[str, str]
 
@@ -216,6 +218,10 @@ def build_recommended_dashboard(
         outdoor_temperature_entity=outdoor_temperature_entity,
     )
     home_view = _build_home_view(context)
+    if context.appliances:
+        home_view["sections"][0]["cards"].extend(
+            _build_appliances_view(context)["sections"][0]["cards"]
+        )
     if context.appliances or context.primary_mains is not None:
         home_view["sections"][0]["cards"].append(
             {
@@ -235,10 +241,6 @@ def build_recommended_dashboard(
                 "labels": dict(translation_section("dashboard", "live_cards")),
                 "grid_options": {"columns": 12},
             }
-        )
-    if context.appliances:
-        home_view["sections"][0]["cards"].extend(
-            _build_appliances_view(context)["sections"][0]["cards"]
         )
     contextual_cards: list[dict[str, Any]] = []
     if (
@@ -409,6 +411,8 @@ def _dashboard_circuit(
     entry_id: str | None,
 ) -> DashboardCircuit:
     circuit_id = _circuit_id(circuit)
+    is_mains = _is_mains_circuit(circuit)
+    power_entities = _source_entities_for_role(circuit, "real_power", hass=hass)
     entities = {}
     for entity_key, entity_domain in _DASHBOARD_ENTITY_DOMAINS.items():
         entity_id = _resolved_entity_id(
@@ -425,16 +429,17 @@ def _dashboard_circuit(
         name=_circuit_name(circuit),
         profile=_circuit_profile(circuit),
         area=str(_circuit_value(circuit, "area") or "").strip() or None,
-        is_mains=_is_mains_circuit(circuit),
+        is_mains=is_mains,
         is_hvac=_is_hvac_circuit(circuit),
         detail_path=(
             f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
             f"{urlencode({'circuit_id': circuit_id, 'appliance_detail': '1'})}"
         ),
-        power_entities=_source_entities_for_role(
-            circuit,
-            "real_power",
-            hass=hass,
+        power_entities=power_entities,
+        chart_power_entities=(
+            _mains_chart_power_entities(power_entities, hass=hass)
+            if is_mains
+            else power_entities
         ),
         current_entities=_source_entities_for_role(
             circuit,
@@ -461,6 +466,36 @@ def _source_entities_for_role(
         if entity_id and not _entity_is_apparent_or_reactive_power(hass, entity_id):
             entity_ids.append(entity_id)
     return _dedupe(entity_ids)
+
+
+def _mains_chart_power_entities(
+    entity_ids: Iterable[str],
+    *,
+    hass: Any | None,
+) -> tuple[str, ...]:
+    excluded = ("harmonic", "voltage", "frequency")
+    included = ("watts", "active power", "power")
+    return tuple(
+        entity_id
+        for entity_id in entity_ids
+        if not any(
+            token in (label := _mains_chart_power_label(hass, entity_id))
+            for token in excluded
+        )
+        and any(token in label for token in included)
+    )
+
+
+def _mains_chart_power_label(hass: Any | None, entity_id: str) -> str:
+    friendly_name = ""
+    states = getattr(hass, "states", None)
+    get_state = getattr(states, "get", None)
+    if callable(get_state):
+        state = get_state(entity_id)
+        friendly_name = str(
+            (getattr(state, "attributes", {}) or {}).get("friendly_name", "")
+        )
+    return re.sub(r"[^a-z0-9]+", " ", f"{entity_id} {friendly_name}".lower())
 
 
 def _build_home_view(context: DashboardContext) -> dict[str, Any]:
@@ -501,7 +536,7 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
                 "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "mains_total_power_and_amps"),
                 "y_axis_label": (
-                    "W" if context.primary_mains.power_entities else "A"
+                    "W" if context.primary_mains.chart_power_entities else "A"
                 ),
                 "entities": mains_rows,
                 "labels": dict(translation_section("dashboard", "live_cards")),
@@ -532,7 +567,7 @@ def _mains_power_current_rows(
 ) -> list[dict[str, str]]:
     if mains is None:
         return []
-    current_axis = "right" if mains.power_entities else "left"
+    current_axis = "right" if mains.chart_power_entities else "left"
     return [
         *[
             {
@@ -541,7 +576,7 @@ def _mains_power_current_rows(
                 "series_id": "mains:power",
                 "axis": "left",
             }
-            for entity_id in mains.power_entities
+            for entity_id in mains.chart_power_entities
         ],
         *[
             {
