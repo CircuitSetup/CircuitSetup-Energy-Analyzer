@@ -598,6 +598,45 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
     ]
 
 
+def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_channel_a", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_channel_b", SensorRole.REAL_POWER),
+        ),
+    )
+    states = {
+        "sensor.mains_channel_a": SimpleNamespace(
+            state="0",
+            attributes={"friendly_name": "Mains Supply Watts"},
+        ),
+        "sensor.mains_channel_b": SimpleNamespace(
+            state="0",
+            attributes={"friendly_name": "Mains Voltage Power"},
+        ),
+    }
+    dashboard = build_recommended_dashboard(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+    )
+    home = _dashboard_views(dashboard)[0]
+    graph = _card_with_title(home, "Mains total power and amps")
+    summary = _card_with_title(home, "Home energy summary")
+
+    assert [row["entity"] for row in graph["entities"]] == [
+        "sensor.mains_channel_a"
+    ]
+    assert summary["primary_mains"]["power_entities"] == [
+        "sensor.mains_channel_a",
+        "sensor.mains_channel_b",
+    ]
+
+
 def test_home_mains_graph_uses_amps_axis_when_power_is_unavailable() -> None:
     mains = CircuitConfig(
         circuit_id="mains",
