@@ -160,6 +160,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return String((this._dashboardConfig.labels || {})[key] || fallback || "");
     }
 
+    _labelFormat(key, fallback, values) {
+      return this._label(key, fallback).replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ""));
+    }
+
     _state(entityId) {
       return entityId && this._hass && this._hass.states
         ? this._hass.states[entityId]
@@ -216,6 +220,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const health = electricalIssue
         ? electrical
         : String(healthState.state || "");
+      const { learning_days_complete: learningDaysComplete, learning_days_required: learningDaysRequired } = healthState.attributes || {};
       const running = String((this._state(appliance.activity_entity) || {}).state || "").toLowerCase() === "running";
       return {
         ...appliance,
@@ -227,6 +232,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           ? rangeTotals.cost ?? null
           : this._number(appliance.cost_today_entity),
         health,
+        learningDaysComplete: Number.isFinite(learningDaysComplete) ? learningDaysComplete : null,
+        learningDaysRequired: Number.isFinite(learningDaysRequired) ? learningDaysRequired : null,
         running,
         issue: electricalIssue || /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
       };
@@ -941,7 +948,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           ));
         return;
       }
-      this._selectRange(this._nowRange(range, type));
+      const todayKey = this._chartDateKey(Date.now());
+      this._selectRange(
+        this._boundedPresetRange(todayKey, todayKey, range.compare),
+        "today",
+      );
     }
 
     _shiftWholeMonthRange(range, months) {
@@ -973,41 +984,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         "now-12m": { name: "12month", wholeMonths: true, months: 12 },
       };
       return presetTypes[this._rangePresetKey] || this._stockRangeType(range);
-    }
-
-    _nowRange(range, type = this._stockRangeType(range)) {
-      const todayKey = this._chartDateKey(Date.now());
-      const today = this._dateKeyParts(todayKey);
-      if (type.name === "month") {
-        return this._boundedPresetRange(this._monthStartKey(todayKey), this._monthEndKey(todayKey), range.compare);
-      }
-      if (type.name === "quarter") {
-        const startMonth = Math.floor((today.month - 1) / 3) * 3 + 1;
-        const startKey = `${today.year}-${String(startMonth).padStart(2, "0")}-01`;
-        return this._boundedPresetRange(startKey, this._shiftMonthKey(startKey, 2, true), range.compare);
-      }
-      if (type.name === "year") {
-        return this._boundedPresetRange(`${today.year}-01-01`, `${today.year}-12-31`, range.compare);
-      }
-      if (type.wholeMonths) {
-        const endKey = this._monthEndKey(todayKey);
-        const startKey = this._shiftMonthKey(this._monthStartKey(todayKey), 1 - type.months);
-        return this._boundedPresetRange(startKey, endKey, range.compare);
-      }
-      if (type.name === "week") {
-        const weekday = new Date(`${todayKey}T00:00:00Z`).getUTCDay();
-        const startKey = this._shiftDateKey(
-          todayKey,
-          -((weekday - this._firstWeekdayIndex() + 7) % 7),
-        );
-        return this._boundedPresetRange(startKey, this._shiftDateKey(startKey, 6), range.compare);
-      }
-      const { days } = this._calendarRange(range);
-      return this._boundedPresetRange(
-        this._shiftDateKey(todayKey, 1 - days),
-        todayKey,
-        range.compare,
-      );
     }
 
     _stockRangeType(range) {
@@ -1775,7 +1751,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ? this._label("house_power", "House power")
         : this._label("known_monitored_load", "Known monitored load");
       const rangeLabel = this._rangeLabel();
-      const flow = `
+      const flow = days === 1 ? `
         <section class="flow">
           <h3>${this._escape(housePowerLabel)}: ${this._escape(this._formatValue(housePower, "W"))}</h3>
           <div class="flow-bar" role="img" aria-label="${this._escape(this._label("known_load_coverage", "Known load coverage"))} ${knownPercent.toFixed(0)}%">
@@ -1789,7 +1765,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             ${mains.solar_surplus_power_entity ? `<span>${this._escape(this._label("solar_surplus", "Solar surplus"))}: ${this._escape(this._formatEntity(mains.solar_surplus_power_entity, "W"))}</span>` : ""}
           </div>
         </section>
-      `;
+      ` : "";
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
           ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
@@ -2085,6 +2061,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ];
       const areas = [...new Set(appliances.map((item) => item.area).filter(Boolean))].sort();
       const timelineRange = this._timelineRange();
+      const singleDay = this._calendarRange().days === 1;
       const timelineEntities = this._selectedTimelineAppliances(appliances)
         .map((item) => item.activity_entity);
       this.shadowRoot.innerHTML = `
@@ -2097,7 +2074,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid">
-              ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical)).join("")}
+              ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical, singleDay)).join("")}
             </div>
             <section class="timeline">
               ${this._historyLink(timelineEntities, timelineRange.start, timelineRange.end, true)}
@@ -2153,18 +2130,29 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return !search || `${item.name} ${item.area || ""}`.toLowerCase().includes(search);
     }
 
-    _tile(item, hidden = false, historical = false) {
+    _tile(item, hidden = false, historical = false, singleDay = false) {
       const powerUnit = this._unit((item.power_entities || [])[0], "W");
       const energyLabel = historical
         ? `${this._label("energy", "Energy")} ${this._rangeLabel()}`
         : this._label("energy_today", "Energy today");
+      const learning = singleDay
+        && String(item.health).toLowerCase() === "learning"
+        && Number.isFinite(item.learningDaysComplete)
+        && item.learningDaysComplete >= 0
+        && Number.isFinite(item.learningDaysRequired)
+        && item.learningDaysRequired >= 0
+        ? ` · ${this._labelFormat("learning_days_left", "{remaining} of {required} days left", {
+          remaining: Math.max(0, Math.min(item.learningDaysRequired, item.learningDaysRequired - item.learningDaysComplete)),
+          required: item.learningDaysRequired,
+        })}`
+        : "";
       return `<button type="button" class="appliance-tile" data-appliance-id="${this._escape(item.circuit_id)}"${hidden ? " hidden" : ""}>
         <span class="appliance-heading"><ha-icon icon="${this._escape(item.icon || "mdi:power-plug-outline")}"></ha-icon><strong>${this._escape(item.name)}</strong></span>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
           ${historical ? "" : `<span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>`}
           <span>${this._escape(energyLabel)}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
-          ${historical ? "" : `<span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}</span>`}
+          ${singleDay ? `<span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}${this._escape(learning)}</span>` : ""}
         </div>
       </button>`;
     }
