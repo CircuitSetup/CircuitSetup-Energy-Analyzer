@@ -1721,7 +1721,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const averageScale = days > 1 ? days : 1;
       const ampsSeries = this._dashboardSeries("mains:current");
       const ampsPoints = ampsSeries && ampsSeries.points || [];
-      const liveAmps = this._sum(mains.current_entities);
+      const currentValues = (mains.current_entities || []).map((entityId) => this._number(entityId));
+      const liveAmps = currentValues.length && currentValues.every(Number.isFinite)
+        ? currentValues.reduce((total, value) => total + value, 0)
+        : null;
       const totalAmps = this._rangeIncludesToday()
         ? liveAmps
         : ampsPoints.length ? ampsPoints[ampsPoints.length - 1].value : null;
@@ -1827,7 +1830,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       if (!points.length) return null;
       const range = validRange(this._dashboardRange);
       const rangeStart = Date.parse(range.start);
-      const rangeEnd = Date.parse(range.end);
+      const rangeEnd = this._rangeIncludesToday(range)
+        ? Math.min(Date.parse(range.end), Date.now())
+        : Date.parse(range.end);
       let weightedTotal = 0;
       let duration = 0;
       for (let index = 0; index < points.length; index += 1) {

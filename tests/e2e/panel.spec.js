@@ -326,6 +326,14 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("6.7 kWh");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.mains_l2_current", {
+      state: "unavailable",
+      attributes: { unit_of_measurement: "A" },
+    });
+  });
+  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" }))
+    .toContainText("Unavailable");
   const contributionHistory = card.locator("[data-chart-history]");
   await expect(contributionHistory).toBeVisible();
   expect(await contributionHistory.evaluate((link) => {
@@ -438,7 +446,7 @@ test("home summary uses the mains graph history for the amps average", async ({ 
   const summary = page.locator("circuitsetup-energy-analyzer-house-flow");
   const amps = summary.locator(".metric").filter({ hasText: "Total Amps (Jul 12)" });
   await expect(amps).toContainText("10 A");
-  await expect(amps).toContainText("Average: 7.5 A");
+  await expect(amps).toContainText("Average: 5 A");
 });
 
 test("home summary totals monitored appliances when mains today totals are unavailable", async ({ page }) => {
