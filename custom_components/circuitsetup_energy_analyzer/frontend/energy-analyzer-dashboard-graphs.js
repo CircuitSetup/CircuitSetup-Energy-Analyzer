@@ -185,6 +185,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return String((state && state.attributes && state.attributes.unit_of_measurement) || fallback || "");
     }
 
+    _amps(entityId) {
+      const value = this._number(entityId);
+      const factor = { A: 1, mA: 0.001, kA: 1000 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
     _formatValue(value, unit = "") {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
@@ -519,7 +525,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return parsed;
     }
 
-    _groupDashboardHistorySeries(series) {
+    _groupDashboardHistorySeries(series, configuredEntities = []) {
       const groups = new Map();
       for (const item of series) {
         const key = item.series_id || item.entity_id || item.name;
@@ -527,7 +533,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         groups.get(key).push(item);
       }
       return [...groups.entries()].map(([seriesId, items]) => {
-        if (items.length === 1) {
+        const expectedCount = seriesId === "mains:current"
+          ? configuredEntities.filter((item) => item.series_id === seriesId).length
+          : 0;
+        if (items.length === 1 && expectedCount <= 1) {
           return {
             ...items[0],
             series_id: seriesId,
@@ -550,7 +559,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             pointIndexes.set(item, index);
           }
           const values = [...latest.values()].filter(Number.isFinite);
-          if (values.length) {
+          if (values.length && (!expectedCount || values.length === expectedCount)) {
             points.push({
               time,
               value: values.reduce((total, value) => total + value, 0),
@@ -1336,10 +1345,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._ensureHistory(entities);
       const range = validRange(this._dashboardRange);
       const currentSeries = this._groupDashboardHistorySeries(
-        this._normalizedPowerSeries(
-          this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
-          config.y_axis_label,
+        this._normalizedCurrentSeries(
+          this._normalizedPowerSeries(
+            this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
+            config.y_axis_label,
+          ),
         ),
+        entities,
       );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
@@ -1348,14 +1360,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const previousDuration = Date.parse(previousRange.end) - previousStart;
       const comparisonSeries = range.compare
         ? this._groupDashboardHistorySeries(
-          this._normalizedPowerSeries(
-            this._dashboardHistorySeries(
-              this._comparisonHistory,
-              entities,
-              Date.parse(previousRange.start),
+          this._normalizedCurrentSeries(
+            this._normalizedPowerSeries(
+              this._dashboardHistorySeries(
+                this._comparisonHistory,
+                entities,
+                Date.parse(previousRange.start),
+              ),
+              config.y_axis_label,
             ),
-            config.y_axis_label,
           ),
+          entities,
         ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
@@ -1404,6 +1419,22 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return factor === 1 ? item : {
           ...item,
           unit: normalizedUnit,
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) ? point.value * factor : point.value,
+          })),
+        };
+      });
+    }
+
+    _normalizedCurrentSeries(series) {
+      const ampsPerUnit = { A: 1, mA: 0.001, kA: 1000 };
+      return series.map((item) => {
+        const factor = item.series_id === "mains:current" && ampsPerUnit[item.unit];
+        if (!factor) return item;
+        return {
+          ...item,
+          unit: "A",
           points: item.points.map((point) => ({
             ...point,
             value: Number.isFinite(point.value) ? point.value * factor : point.value,
@@ -1663,10 +1694,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeTotalsDateKey = "";
       this._rangeTotalsRolloverReloadKey = "";
       this._rangeTotalsReloadTimer = 0;
+      this._handleDashboardData = () => this._render();
+    }
+
+    connectedCallback() {
+      super.connectedCallback();
+      window.addEventListener(DATA_EVENT, this._handleDashboardData);
     }
 
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
+      window.removeEventListener(DATA_EVENT, this._handleDashboardData);
       super.disconnectedCallback();
     }
 
@@ -1710,6 +1748,18 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const averageCost = config.primary_mains && mains.average_cost_per_day_entity
         ? this._number(mains.average_cost_per_day_entity)
         : null;
+      const { days } = this._calendarRange();
+      const averageScale = days > 1 ? days : 1;
+      const ampsSeries = this._dashboardSeries("mains:current");
+      const ampsPoints = ampsSeries && ampsSeries.points || [];
+      const currentValues = (mains.current_entities || []).map((entityId) => this._amps(entityId));
+      const liveAmps = currentValues.length && currentValues.every(Number.isFinite)
+        ? currentValues.reduce((total, value) => total + value, 0)
+        : null;
+      const totalAmps = this._rangeIncludesToday()
+        ? liveAmps
+        : ampsPoints.length ? ampsPoints[ampsPoints.length - 1].value : null;
+      const averageAmps = this._seriesAverage(ampsSeries) ?? totalAmps;
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -1742,9 +1792,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       `;
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
-          ${this._metricHtml(housePowerLabel, housePower, "W")}
-          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", averageEnergy)}
-          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", averageCost)}
+          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
+          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null, days)}
+          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null, days)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
@@ -1794,8 +1844,39 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._attachChartInspectors();
     }
 
-    _metricHtml(label, value, unit, average = null) {
-      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}</small>` : ""}</div>`;
+    _metricHtml(label, value, unit, average = null, averageDays = 1) {
+      const period = averageDays > 1
+        ? ` (${averageDays} ${this._label("days", "days")})`
+        : "";
+      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}${this._escape(period)}</small>` : ""}</div>`;
+    }
+
+    _dashboardSeries(seriesId) {
+      for (const series of dashboardSeries.values()) {
+        const match = series.find((item) => item.series_id === seriesId);
+        if (match) return match;
+      }
+      return null;
+    }
+
+    _seriesAverage(series) {
+      const points = series && series.points || [];
+      if (!points.length) return null;
+      const range = validRange(this._dashboardRange);
+      const rangeStart = Date.parse(range.start);
+      const rangeEnd = this._rangeIncludesToday(range)
+        ? Math.min(Date.parse(range.end), Date.now())
+        : Date.parse(range.end);
+      let weightedTotal = 0;
+      let duration = 0;
+      for (let index = 0; index < points.length; index += 1) {
+        const start = Math.max(rangeStart, points[index].time);
+        const end = Math.min(rangeEnd, points[index + 1]?.time ?? rangeEnd);
+        if (end <= start || !Number.isFinite(points[index].value)) continue;
+        weightedTotal += points[index].value * (end - start);
+        duration += end - start;
+      }
+      return duration ? weightedTotal / duration : null;
     }
 
     _statusMetric(label, entityId) {
@@ -2269,6 +2350,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      if (this._calendarRange().days <= 1) {
+        this.style.display = "none";
+        this.shadowRoot.innerHTML = "";
+        this._publishDashboardSeries([]);
+        return;
+      }
+      this.style.display = "";
       this._insightsDateKey = this._chartDateKey(Date.now());
       if (!this._loadRequested) {
         this._loadRequested = true;

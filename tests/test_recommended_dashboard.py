@@ -505,6 +505,83 @@ def test_appliance_power_graph_groups_dual_phase_entities() -> None:
     assert {row["name"] for row in dryer_rows} == {"Dryer"}
 
 
+def test_home_mains_graph_precedes_appliance_power_when_sources_are_available() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_l1_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_l2_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT),
+        ),
+    )
+    dashboard = build_recommended_dashboard(
+        (_circuits()[0], mains),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+    cards = home["sections"][0]["cards"]
+
+    assert [card.get("title") for card in cards[:3]] == [
+        "Mains total power and amps",
+        "All appliance power",
+        "Home energy summary",
+    ]
+    graph = cards[0]
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_l1_power",
+            "name": "Mains total power",
+            "series_id": "mains:power",
+            "axis": "left",
+        },
+        {
+            "entity": "sensor.mains_l2_power",
+            "name": "Mains total power",
+            "series_id": "mains:power",
+            "axis": "left",
+        },
+        {
+            "entity": "sensor.mains_l1_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+        {
+            "entity": "sensor.mains_l2_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+    ]
+    summary = cards[2]
+    assert summary["primary_mains"]["current_entities"] == [
+        "sensor.mains_l1_current",
+        "sensor.mains_l2_current",
+    ]
+
+
+def test_home_mains_graph_uses_amps_axis_when_power_is_unavailable() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_current", SensorRole.CURRENT),),
+    )
+    dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)
+    graph = _dashboard_views(dashboard)[0]["sections"][0]["cards"][0]
+
+    assert graph["title"] == "Mains total power and amps"
+    assert graph["y_axis_label"] == "A"
+    assert graph["entities"][0]["axis"] == "left"
+
+
 def test_home_card_receives_every_appliance_for_live_sorting() -> None:
     appliances = tuple(
         CircuitConfig(

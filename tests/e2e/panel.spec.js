@@ -236,6 +236,8 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     "sensor.mains_cost_today": { state: "unavailable", attributes: {} },
     "sensor.mains_average_energy": { state: "11.8", attributes: { unit_of_measurement: "kWh" } },
     "sensor.mains_average_cost": { state: "2.16", attributes: { unit_of_measurement: "USD" } },
+    "sensor.mains_l1_current": { state: "7", attributes: { unit_of_measurement: "A" } },
+    "sensor.mains_l2_current": { state: "9", attributes: { unit_of_measurement: "A" } },
     "sensor.mains_known": { state: "1450", attributes: { unit_of_measurement: "W" } },
     "sensor.mains_unassigned": { state: "370", attributes: { unit_of_measurement: "W" } },
     "sensor.mains_coverage": { state: "79.7", attributes: { unit_of_measurement: "%" } },
@@ -277,6 +279,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
       api_path: "circuitsetup_energy_analyzer/appliance_insights",
       primary_mains: {
         power_entities: ["sensor.mains_power"],
+        current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
         daily_energy_usage_entity: "sensor.mains_energy_today",
         cost_today_entity: "sensor.mains_cost_today",
         average_kwh_per_day_entity: "sensor.mains_average_energy",
@@ -314,12 +317,26 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   });
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60.4 kWh");
-  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 11.8 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: 35.4 kWh (3 days)");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$2.92");
-  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $2.16");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: $6.48 (3 days)");
+  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" })).toContainText("16 A");
+  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: 48 A (3 days)");
+  await expect(card.locator(".metric").filter({ hasText: "House power" })).toHaveCount(0);
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
   await expect(card.locator(".bar-row").filter({ hasText: "Oven" })).toContainText("6.7 kWh");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.mains_l2_current", {
+      state: "unavailable",
+      attributes: { unit_of_measurement: "A" },
+    });
+  });
+  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" }))
+    .toContainText("Unavailable");
   const contributionHistory = card.locator("[data-chart-history]");
   await expect(contributionHistory).toBeVisible();
   expect(await contributionHistory.evaluate((link) => {
@@ -372,6 +389,128 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     root.setProperty("--warning-color", "#fbbf24");
   });
   await toHaveNoViolations(page);
+});
+
+test("home summary uses the mains graph history for the amps average", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [
+            { entity_id: "sensor.mains_power", state: "1000", last_changed: "2026-07-12T00:00:00.000Z" },
+            { state: "2000", last_changed: "2026-07-12T12:00:00.000Z" },
+          ],
+          [
+            { entity_id: "sensor.mains_l1_current", state: "2000", last_changed: "2026-07-12T00:00:00.000Z" },
+            { state: "4000", last_changed: "2026-07-12T12:00:00.000Z" },
+          ],
+          [
+            { entity_id: "sensor.mains_l2_current", state: "0.003", last_changed: "2026-07-12T00:00:00.000Z" },
+            { state: "0.006", last_changed: "2026-07-12T12:00:00.000Z" },
+          ],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  await openDashboardCards(page, [
+    {
+      tagName: "circuitsetup-energy-analyzer-context-graph",
+      config: {
+        title: "Mains total power and amps",
+        entities: [
+          { entity: "sensor.mains_power", name: "Mains total power", series_id: "mains:power", axis: "left" },
+          { entity: "sensor.mains_l1_current", name: "Total Amps", series_id: "mains:current", axis: "right" },
+          { entity: "sensor.mains_l2_current", name: "Total Amps", series_id: "mains:current", axis: "right" },
+        ],
+      },
+    },
+    {
+      tagName: "circuitsetup-energy-analyzer-house-flow",
+      config: {
+        title: "Home energy summary",
+        api_path: "circuitsetup_energy_analyzer/appliance_insights",
+        primary_mains: {
+          power_entities: ["sensor.mains_power"],
+          current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
+        },
+      },
+    },
+  ], {
+    "sensor.mains_power": { state: "2000", attributes: { unit_of_measurement: "W" } },
+    "sensor.mains_l1_current": { state: "4000", attributes: { unit_of_measurement: "mA" } },
+    "sensor.mains_l2_current": { state: "0.006", attributes: { unit_of_measurement: "kA" } },
+  });
+
+  const summary = page.locator("circuitsetup-energy-analyzer-house-flow");
+  const amps = summary.locator(".metric").filter({ hasText: "Total Amps (Jul 12)" });
+  await expect(amps).toContainText("10 A");
+  await expect(amps.locator("small")).toHaveText("Average: 5 A");
+});
+
+test("home summary rejects incomplete mains current history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-13T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          {
+            entity_id: "sensor.mains_l1_current",
+            state: "4",
+            last_changed: "2026-07-12T00:00:00.000Z",
+          },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  await openDashboardCards(page, [
+    {
+      tagName: "circuitsetup-energy-analyzer-context-graph",
+      config: {
+        title: "Mains total power and amps",
+        entities: [
+          { entity: "sensor.mains_l1_current", name: "Total Amps", series_id: "mains:current", axis: "left" },
+          { entity: "sensor.mains_l2_current", name: "Total Amps", series_id: "mains:current", axis: "left" },
+        ],
+      },
+    },
+    {
+      tagName: "circuitsetup-energy-analyzer-house-flow",
+      config: {
+        title: "Home energy summary",
+        api_path: "circuitsetup_energy_analyzer/appliance_insights",
+        primary_mains: {
+          current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
+        },
+      },
+    },
+  ], {
+    "sensor.mains_l1_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    "sensor.mains_l2_current": { state: "6", attributes: { unit_of_measurement: "A" } },
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-12T00:00:00.000Z",
+        end: "2026-07-12T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  const amps = page.locator("circuitsetup-energy-analyzer-house-flow")
+    .locator(".metric")
+    .filter({ hasText: "Total Amps (Jul 12)" });
+  await expect(amps).toContainText("Unavailable");
+  await expect(amps.locator("small")).toHaveCount(0);
 });
 
 test("home summary totals monitored appliances when mains today totals are unavailable", async ({ page }) => {
@@ -1251,9 +1390,10 @@ test("energy and cost card follows the dashboard range and preserves cost source
     {},
   );
 
+  await expect(card).toBeHidden();
+  await expect(card).not.toContainText("Energy and costs");
   await expect(card).not.toContainText("Today versus normal");
   await expect(card.locator(".metric")).toHaveCount(0);
-  await expect(card).toContainText("Energy and cost history");
   await page.evaluate(() => {
     window.__dashboardHass.config.time_zone = "Pacific/Auckland";
     window.__dashboardCard.hass = window.__dashboardHass;
@@ -1265,6 +1405,9 @@ test("energy and cost card follows the dashboard range and preserves cost source
       },
     }));
   });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Energy and costs");
+  await expect(card).toContainText("Energy and cost history");
   await expect(card.locator("svg.chart").first()).toBeVisible();
   const completedHistoryLink = card.locator("[data-chart-history]");
   await expect(completedHistoryLink).toBeVisible();
@@ -1472,6 +1615,12 @@ test("energy and cost history includes live monitored totals for today", async (
       "sensor.hvac_energy": { state: "2.2", attributes: { unit_of_measurement: "kWh" } },
       "sensor.hvac_cost": { state: "0.5", attributes: {} },
     },
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-25T00:00:00.000Z",
+      end: "2026-07-26T23:59:59.999Z",
+      compare: false,
+    },
   );
 
   await expect(card).toContainText("Energy and cost history");
@@ -1560,7 +1709,7 @@ test("no-mains energy history retries the selected appliance after midnight", as
     {},
     { time_zone: "UTC" },
     {
-      start: "2026-07-26T00:00:00.000Z",
+      start: "2026-07-25T00:00:00.000Z",
       end: "2026-07-26T23:59:59.999Z",
       compare: false,
     },
