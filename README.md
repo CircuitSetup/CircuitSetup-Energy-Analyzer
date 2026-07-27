@@ -182,8 +182,9 @@ questions instead of raw diagnostic entity lists:
   index. It lists direct-meter and NILM appliances together, defaults to
   needs-attention and running appliances first, and supports running,
   attention, NILM, learning, and data-problem filters plus energy/change
-  sorting. Appliance and source links open Appliance Detail, source setup, or
-  the matching NILM assignment without losing the stable appliance identity.
+  sorting. Appliance and source links open Appliance Detail, integration
+  options, or the matching NILM assignment without losing the stable appliance
+  identity.
 - **Why Energy Changed** conservatively separates same-time energy change into
   runtime, running-power, and cycle-count contributions when those baselines
   are available. Contributions stay bounded to the observed change; missing
