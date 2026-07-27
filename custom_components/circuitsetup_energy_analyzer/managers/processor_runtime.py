@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -9,7 +10,7 @@ from ..capacity import CapacitySettings
 from ..cost import CostSettings
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
-from ..models import CircuitConfig, EventType
+from ..models import CircuitConfig, CircuitEvent, EventType
 from ..profiles import get_profile_definition
 from ..standby import StandbySettings
 from ..usage import EnergyUsageSettings
@@ -112,6 +113,26 @@ class ProcessorRuntimeManager:
 
     def learning_mature(self, config: CircuitConfig, now: datetime) -> bool:
         profile = get_profile_definition(config.appliance_profile)
+        circuit_events = self.learning_events_since_restart(config, now)
+        cycle_count = sum(
+            1 for event in circuit_events if event.event_type is EventType.START
+        )
+        if profile.minimum_cycles > 0 and cycle_count >= profile.minimum_cycles:
+            return True
+
+        if not circuit_events:
+            return False
+
+        first_seen = min(event.timestamp for event in circuit_events)
+        return now - first_seen >= timedelta(days=profile.minimum_learning_days)
+
+    def learning_events_since_restart(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+        events: Sequence[CircuitEvent] | None = None,
+    ) -> list[CircuitEvent]:
+        """Return circuit events retained for the current learning period."""
         raw_learning_started_at = (
             self._coordinator.store_data.learning_started_at_by_circuit.get(
                 config.circuit_id
@@ -125,23 +146,14 @@ class ProcessorRuntimeManager:
                 pass
             if learning_started_at is not None and learning_started_at.tzinfo is None:
                 learning_started_at = learning_started_at.replace(tzinfo=now.tzinfo)
-        circuit_events = [
+        return [
             event
-            for event in self._coordinator.store_data.events
+            for event in (
+                self._coordinator.store_data.events if events is None else events
+            )
             if event.circuit_id == config.circuit_id
             and (
                 learning_started_at is None
                 or event.timestamp >= learning_started_at
             )
         ]
-        cycle_count = sum(
-            1 for event in circuit_events if event.event_type is EventType.START
-        )
-        if profile.minimum_cycles > 0 and cycle_count >= profile.minimum_cycles:
-            return True
-
-        if not circuit_events:
-            return False
-
-        first_seen = min(event.timestamp for event in circuit_events)
-        return now - first_seen >= timedelta(days=profile.minimum_learning_days)

@@ -476,15 +476,17 @@ def _mains_chart_power_entities(
 ) -> tuple[str, ...]:
     excluded = ("harmonic", "voltage", "frequency")
     included = ("watts", "active power", "power")
-    return tuple(
-        entity_id
-        for entity_id in entity_ids
-        if not any(
-            token in (label := _mains_chart_power_label(hass, entity_id))
-            for token in excluded
-        )
-        and any(token in label for token in included)
-    )
+    accepted = []
+    for entity_id in entity_ids:
+        label = _mains_chart_power_label(hass, entity_id)
+        if any(token in label for token in excluded):
+            continue
+        if any(token in label for token in included) or _entity_is_real_power(
+            hass,
+            entity_id,
+        ):
+            accepted.append(entity_id)
+    return tuple(accepted)
 
 
 def _mains_chart_power_label(hass: Any | None, entity_id: str) -> str:
@@ -2288,19 +2290,32 @@ def _entity_is_apparent_or_reactive_power(
     hass: Any | None,
     entity_id: str,
 ) -> bool:
-    states = getattr(hass, "states", None)
-    get_state = getattr(states, "get", None)
-    if not callable(get_state):
-        return False
-    state = get_state(entity_id)
-    attributes = getattr(state, "attributes", {}) or {}
-    unit = str(attributes.get("unit_of_measurement", "")).strip().lower()
-    device_class = str(attributes.get("device_class", "")).strip().lower()
+    unit, device_class = _entity_power_metadata(hass, entity_id)
     return (
         unit.endswith("va")
         or unit.endswith("var")
         or device_class in {"apparent_power", "reactive_power"}
     )
+
+
+def _entity_is_real_power(hass: Any | None, entity_id: str) -> bool:
+    unit, device_class = _entity_power_metadata(hass, entity_id)
+    return unit == "w" or device_class == "power"
+
+
+def _entity_power_metadata(
+    hass: Any | None,
+    entity_id: str,
+) -> tuple[str, str]:
+    states = getattr(hass, "states", None)
+    get_state = getattr(states, "get", None)
+    if not callable(get_state):
+        return "", ""
+    state = get_state(entity_id)
+    attributes = getattr(state, "attributes", {}) or {}
+    unit = str(attributes.get("unit_of_measurement", "")).strip().lower()
+    device_class = str(attributes.get("device_class", "")).strip().lower()
+    return unit, device_class
 
 
 def _circuit_note(name: str, notes: Iterable[str]) -> str:
