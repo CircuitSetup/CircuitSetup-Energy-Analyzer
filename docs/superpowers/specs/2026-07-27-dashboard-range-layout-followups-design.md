@@ -8,6 +8,7 @@ Update the generated Home dashboard so that:
 - A single-day appliance tile whose health is **Learning** shows the remaining learning days, for example `Health: Learning · 4 of 7 days left`.
 - Multi-day ranges hide the live House power flow section, including its colored flow bar and labels.
 - The Appliances card is placed directly below All appliance power.
+- The Mains total power and amps chart only uses configured real-power sensors whose entity ID or Home Assistant friendly name identifies watts, active power, or power.
 
 The Mains total power and amps and All appliance power charts remain visible for multi-day ranges.
 
@@ -37,6 +38,14 @@ The generated card order will be:
 
 This places Appliances in the right column below All appliance power. Energy and costs keeps its existing multi-day-only visibility.
 
+Mains power-series selection will keep the configured `real_power` role as the first gate. It will then:
+
+- reject labels containing `harmonic`, `voltage`, or `frequency`;
+- accept labels containing `watts`, `active power`, or `power`; and
+- give the rejection list precedence when both sets appear.
+
+The searchable label is the normalized entity ID plus its Home Assistant friendly name. This filter applies only to the mains power series; the current series is unchanged.
+
 ## Error Handling
 
 Missing or invalid learning-day attributes fall back to the existing `Health: Learning` text. Remaining days are clamped between zero and the required count.
@@ -48,7 +57,8 @@ Focused tests will cover:
 - **Now** changing a multi-day selection to today;
 - Learning remaining-days text on single-day tiles and its absence for multi-day tiles;
 - the House power flow section hidden only for multi-day ranges;
-- generated Home card order; and
+- generated Home card order;
+- mains sensor rejection and inclusion keywords, including rejection precedence; and
 - the frontend module cache-buster update.
 
 The normal PR verification and Home Assistant contract suite will run before publication.
