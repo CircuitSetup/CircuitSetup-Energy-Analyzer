@@ -269,6 +269,7 @@ Supported profile values include:
 | `freezer` | Single phase | Load |
 | `hvac` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `hvac_compressor` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `mini_split` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `hvac_blower` | Single phase | Load |
 | `electric_heat` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `water_heater` | Dual phase when both legs are selected; otherwise single phase | Load |
@@ -583,7 +584,9 @@ HVAC runtime depends strongly on outdoor temperature. A compressor running longe
 
 Add an outdoor temperature entity during setup or later from **Configure**. Use a real outdoor sensor, weather-station sensor, or reliable outdoor helper. Indoor thermostat temperature is usually not a good source for this feature.
 
-This context applies only to HVAC, HVAC compressor, HVAC blower, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
+This context applies only to HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
+
+Mini-Split inverter operation can remain at low power; tune the default `100 W` on and `40 W` off thresholds in Advanced Circuit Settings when equipment or metering differs.
 
 ### Rain and pump correlation
 
