@@ -5470,3 +5470,35 @@ def test_health_summary_attributes_include_learning_day_progress() -> None:
 
     assert attributes["learning_days_complete"] == 3
     assert attributes["learning_days_required"] == 7
+
+
+@pytest.mark.parametrize(
+    ("progress_by_circuit", "expected"),
+    (
+        ({}, (0, 0)),
+        ({"fridge": "invalid"}, (0, 0)),
+        (
+            {"fridge": {"baseline_age_days": "invalid", "days_required": 7}},
+            (0, 0),
+        ),
+        ({"fridge": {"baseline_age_days": -1, "days_required": -7}}, (0, 0)),
+        ({"fridge": {"baseline_age_days": 12, "days_required": 7}}, (7, 7)),
+    ),
+)
+def test_health_summary_attributes_bound_learning_day_progress(
+    progress_by_circuit: dict[str, object],
+    expected: tuple[int, int],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        health_summary_attributes,
+    )
+
+    attributes = health_summary_attributes(
+        AnalyzerState(learning_progress_by_circuit=progress_by_circuit),
+        "fridge",
+    )
+
+    assert (
+        attributes["learning_days_complete"],
+        attributes["learning_days_required"],
+    ) == expected
