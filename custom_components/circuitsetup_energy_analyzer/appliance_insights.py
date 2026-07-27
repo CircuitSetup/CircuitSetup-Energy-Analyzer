@@ -385,7 +385,8 @@ def _explanation_confidence(
 
 
 def _has_weather_context(detail: Any) -> bool:
-    if "hvac" not in str(getattr(detail, "appliance_profile", "")).casefold():
+    profile = str(getattr(detail, "appliance_profile", "")).casefold()
+    if "hvac" not in profile and profile != "mini_split":
         return False
     for item in getattr(detail, "expectations", ()) or ():
         text = " ".join(

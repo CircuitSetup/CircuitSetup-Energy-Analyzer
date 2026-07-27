@@ -244,10 +244,13 @@ def test_lowest_factor_confidence_suppresses_causal_breakdown() -> None:
     )
 
 
-def test_hvac_weather_context_is_presented_as_context_not_precise_causality() -> None:
+@pytest.mark.parametrize("appliance_profile", ("hvac", "mini_split"))
+def test_weather_context_is_presented_as_context_not_precise_causality(
+    appliance_profile: str,
+) -> None:
     explanation = appliance_insights.energy_change_explanation(
         _detail(
-            appliance_profile="hvac",
+            appliance_profile=appliance_profile,
             expectations=(
                 SimpleNamespace(
                     expectation_id="weather_context",
