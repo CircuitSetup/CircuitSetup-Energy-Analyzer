@@ -11,6 +11,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 from custom_components.circuitsetup_energy_analyzer.power_quality import (
     MIN_RELATIONSHIP_SCORE,
+    MOTOR_PROFILES,
+    RESISTIVE_PROFILES,
     extract_power_quality_features,
     relationship_rms_score,
     score_power_quality_features,
@@ -26,6 +28,11 @@ RELATIONSHIP_EVIDENCE_FEATURES = {
     "split_phase_relationship_changed",
     "resistive_load_became_reactive",
 }
+
+
+def test_mini_split_is_a_motor_not_resistive_load() -> None:
+    assert ApplianceProfile.MINI_SPLIT in MOTOR_PROFILES
+    assert ApplianceProfile.MINI_SPLIT not in RESISTIVE_PROFILES
 
 
 def sample(

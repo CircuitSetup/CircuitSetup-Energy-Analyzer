@@ -589,6 +589,7 @@ def test_profile_specific_expectations_cover_remaining_named_appliances() -> Non
     cases = {
         ApplianceProfile.DISHWASHER: "bounded wash and dry cycle",
         ApplianceProfile.THREE_D_PRINTER: "preheat and heater cycling",
+        ApplianceProfile.MINI_SPLIT: "outdoor temperature",
         ApplianceProfile.WASHER: "bounded cycle",
         ApplianceProfile.DRYER: "high power",
         ApplianceProfile.WATER_HEATER: "water heating",
@@ -608,6 +609,16 @@ def test_profile_specific_expectations_cover_remaining_named_appliances() -> Non
         assert expectation["status"] == "ok"
         assert expected_text in expectation["expected"].lower()
         assert expectation["title"] != "Behavior looks normal"
+
+
+def test_mini_split_expectation_explains_inverter_and_defrost_behavior() -> None:
+    expectation = _detail(
+        _config("mini_split", ApplianceProfile.MINI_SPLIT),
+        AnalyzerState(),
+    )["expectations"][0]
+
+    assert "modulate" in expectation["expected"].lower()
+    assert "defrost" in expectation["why_it_matters"].lower()
 
 
 def test_maintenance_suppresses_issue_language() -> None:

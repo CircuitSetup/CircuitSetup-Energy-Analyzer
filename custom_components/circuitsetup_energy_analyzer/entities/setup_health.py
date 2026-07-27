@@ -25,6 +25,7 @@ SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
