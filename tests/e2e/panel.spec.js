@@ -1114,6 +1114,17 @@ test("appliance grid shows learning days only for a single-day range", async ({ 
   const tile = card.locator('[data-appliance-id="fridge"]');
   await expect(tile).toContainText("Health: Learning · 4 of 7 days left");
   await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_health", {
+      state: "Learning",
+      attributes: {
+        learning_days_complete: 0,
+        learning_days_required: 0,
+      },
+    });
+  });
+  await expect(tile).toContainText("Health: Learning");
+  await expect(tile).not.toContainText("days left");
+  await page.evaluate(() => {
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
       detail: {
         start: "2026-07-23T00:00:00.000Z",

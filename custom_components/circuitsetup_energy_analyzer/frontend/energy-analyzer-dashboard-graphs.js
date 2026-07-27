@@ -2140,7 +2140,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         && Number.isFinite(item.learningDaysComplete)
         && item.learningDaysComplete >= 0
         && Number.isFinite(item.learningDaysRequired)
-        && item.learningDaysRequired >= 0
+        && item.learningDaysRequired > 0
         ? ` · ${this._labelFormat("learning_days_left", "{remaining} of {required} days left", {
           remaining: Math.max(0, Math.min(item.learningDaysRequired, item.learningDaysRequired - item.learningDaysComplete)),
           required: item.learningDaysRequired,
