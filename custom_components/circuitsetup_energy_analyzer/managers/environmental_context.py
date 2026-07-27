@@ -43,6 +43,7 @@ HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
     }
@@ -549,6 +550,7 @@ class EnvironmentalContextManager:
             if config.appliance_profile not in {
                 ApplianceProfile.HVAC,
                 ApplianceProfile.HVAC_COMPRESSOR,
+                ApplianceProfile.MINI_SPLIT,
             }:
                 continue
             circuit_ids.append(config.circuit_id)

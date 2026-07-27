@@ -2154,6 +2154,7 @@ _WATER_FLOW_CONTEXT_SENSOR_KEYS = {
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.HVAC_BLOWER,
     ApplianceProfile.ELECTRIC_HEAT,
 }

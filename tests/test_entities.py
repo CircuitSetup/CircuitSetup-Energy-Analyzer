@@ -2938,6 +2938,7 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
     for profile in (
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
     ):
