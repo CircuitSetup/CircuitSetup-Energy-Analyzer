@@ -194,6 +194,16 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         isinstance(maintenance, Mapping) and maintenance.get("active") is True
     )
     active_alert_count = _active_alert_count(state, circuit_id)
+    progress = getattr(state, "learning_progress_by_circuit", {}).get(circuit_id, {})
+    if isinstance(progress, Mapping):
+        try:
+            learning_days_complete = max(int(progress.get("baseline_age_days", 0)), 0)
+            learning_days_required = max(int(progress.get("days_required", 0)), 0)
+        except (TypeError, ValueError, OverflowError):
+            learning_days_complete = learning_days_required = 0
+    else:
+        learning_days_complete = learning_days_required = 0
+    learning_days_complete = min(learning_days_complete, learning_days_required)
     return {
         "raw_status": _health_summary_raw_status(summary, readiness),
         "status_label": summary,
@@ -201,6 +211,8 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "alert_confirmed": _alert_confirmed(state, circuit_id),
         "learning": circuit_is_learning(state, circuit_id),
         "learning_progress": learning_progress_value(state, circuit_id),
+        "learning_days_complete": learning_days_complete,
+        "learning_days_required": learning_days_required,
         "readiness": readiness,
         "data_quality_problem": data_quality_problem,
         "maintenance_active": maintenance_active,

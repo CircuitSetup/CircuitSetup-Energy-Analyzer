@@ -515,6 +515,9 @@ def test_data_quality_checklist_flags_invalid_timestamp_as_not_fresh() -> None:
 
 def test_learning_progress_counts_age_cycles_and_baseline_confidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.models import BaselineStats
+    from custom_components.circuitsetup_energy_analyzer.profiles import (
+        get_profile_definition,
+    )
     from custom_components.circuitsetup_energy_analyzer.ux import learning_progress
 
     now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
@@ -568,6 +571,9 @@ def test_learning_progress_counts_age_cycles_and_baseline_confidence() -> None:
     assert progress["alert_ready"] is False
     assert progress["suppression_reason"] == "waiting_for_optional_metrics"
     assert progress["pending_feature_samples"] == {"reactive_power": 4}
+    assert progress["days_required"] == get_profile_definition(
+        config.appliance_profile
+    ).minimum_learning_days
 
 
 def test_health_status_priority_order_is_dashboard_friendly() -> None:
