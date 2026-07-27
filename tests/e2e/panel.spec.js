@@ -2289,9 +2289,14 @@ test("dashboard date navigation uses calendar days across DST", async ({ page })
   });
 });
 
-test("dashboard date picker stays mounted while it is open", async ({ page }) => {
+test("dashboard date picker calendar survives current-range refreshes", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
   await page.addInitScript(() => {
-    customElements.define("ha-date-range-picker", class extends HTMLElement {});
+    customElements.define("ha-date-range-picker", class extends HTMLElement {
+      connectedCallback() {
+        this.innerHTML = "<button type=\"button\">Calendar</button>";
+      }
+    });
   });
   await mockPanelApi(page);
   const card = await openDashboardCard(
@@ -2299,14 +2304,16 @@ test("dashboard date picker stays mounted while it is open", async ({ page }) =>
     "circuitsetup-energy-analyzer-date-range",
     {},
     {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-26T00:00:00.000Z",
+      end: "2026-07-26T23:59:59.999Z",
+      compare: false,
+    },
   );
   await page.waitForFunction(() => window.__dashboardCard._loading === false);
+  await card.locator("ha-date-range-picker button").click();
   await card.locator("ha-date-range-picker").evaluate((picker) => {
-    picker.dispatchEvent(new CustomEvent("toggle", {
-      bubbles: true,
-      composed: true,
-      detail: { open: true },
-    }));
     window.__openDatePicker = picker;
   });
   expect(await page.evaluate(() => window.__dashboardCard._datePickerOpen)).toBe(true);
