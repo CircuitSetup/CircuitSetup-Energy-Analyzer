@@ -1787,9 +1787,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       `;
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
-          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null) : ""}
-          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null)}
-          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null)}
+          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
+          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null, days)}
+          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null, days)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
@@ -1839,8 +1839,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._attachChartInspectors();
     }
 
-    _metricHtml(label, value, unit, average = null) {
-      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}</small>` : ""}</div>`;
+    _metricHtml(label, value, unit, average = null, averageDays = 1) {
+      const period = averageDays > 1
+        ? ` (${averageDays} ${this._label("days", "days")})`
+        : "";
+      return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}${this._escape(period)}</small>` : ""}</div>`;
     }
 
     _dashboardSeries(seriesId) {

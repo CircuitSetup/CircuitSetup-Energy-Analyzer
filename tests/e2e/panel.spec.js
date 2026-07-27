@@ -317,11 +317,14 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   });
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60.4 kWh");
-  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("Average: 35.4 kWh");
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: 35.4 kWh (3 days)");
   await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("$2.92");
-  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" })).toContainText("Average: $6.48");
+  await expect(card.locator(".metric").filter({ hasText: "Cost (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: $6.48 (3 days)");
   await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" })).toContainText("16 A");
-  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" })).toContainText("Average: 48 A");
+  await expect(card.locator(".metric").filter({ hasText: "Total Amps (Jul 10-12)" }).locator("small"))
+    .toHaveText("Average: 48 A (3 days)");
   await expect(card.locator(".metric").filter({ hasText: "House power" })).toHaveCount(0);
   await expect(card).not.toContainText("% more");
   await expect(card).not.toContainText("% less");
@@ -446,7 +449,7 @@ test("home summary uses the mains graph history for the amps average", async ({ 
   const summary = page.locator("circuitsetup-energy-analyzer-house-flow");
   const amps = summary.locator(".metric").filter({ hasText: "Total Amps (Jul 12)" });
   await expect(amps).toContainText("10 A");
-  await expect(amps).toContainText("Average: 5 A");
+  await expect(amps.locator("small")).toHaveText("Average: 5 A");
 });
 
 test("home summary totals monitored appliances when mains today totals are unavailable", async ({ page }) => {

@@ -1059,6 +1059,7 @@
         "no_energy_history": "No energy or cost data is available for this period.",
         "today_vs_normal": "Today versus normal",
         "average": "Average",
+        "days": "days",
         "completed_history": "Completed-day history",
         "energy_cost_history": "Energy and cost history",
         "period": "Period",
