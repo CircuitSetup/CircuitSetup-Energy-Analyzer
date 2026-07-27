@@ -5152,11 +5152,17 @@ def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
 
     assert options["dishwasher"] == "Dishwasher"
     assert options["3d_printer"] == "3D Printer"
+    assert options["mini_split"] == "Mini-Split"
     for profile in ("dishwasher", "3d_printer"):
         assert config_flow._default_mode_for_assignment_profile(profile) == (
             "single_phase"
         )
         assert config_flow._default_power_flow_for_assignment(profile) == "load"
+    assert (
+        config_flow._default_mode_for_assignment_profile("mini_split")
+        == "dual_phase"
+    )
+    assert config_flow._default_power_flow_for_assignment("mini_split") == "load"
 
 
 @pytest.mark.parametrize(
@@ -5171,6 +5177,24 @@ def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
             "workshop_3d_printer",
             ["sensor.workshop_3d_printer_power"],
             ("3d_printer", "single_phase"),
+        ),
+        (
+            "bedroom_mini_split",
+            ["sensor.bedroom_mini_split_power"],
+            ("mini_split", "single_phase"),
+        ),
+        (
+            "garage_ductless_heat_pump",
+            [
+                "sensor.garage_ductless_heat_pump_l1_power",
+                "sensor.garage_ductless_heat_pump_l2_power",
+            ],
+            ("mini_split", "dual_phase"),
+        ),
+        (
+            "office_ductless_ac",
+            ["sensor.office_ductless_ac_power"],
+            ("mini_split", "single_phase"),
         ),
         (
             "laundry_gas_dryer",
@@ -5200,6 +5224,17 @@ def test_assignment_profile_suggestion_uses_appliance_specific_topology(
     )
 
     assert _suggest_assignment_profile_mode(circuit_id, entity_ids) == expected
+
+
+def test_mini_split_inference_precedes_generic_heat_pump() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _suggest_assignment_profile_mode,
+    )
+
+    assert _suggest_assignment_profile_mode(
+        "bedroom_mini_split_heat_pump",
+        ["sensor.bedroom_mini_split_heat_pump_power"],
+    ) == ("mini_split", "single_phase")
 
 
 def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls(

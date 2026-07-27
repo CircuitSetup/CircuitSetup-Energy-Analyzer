@@ -614,6 +614,16 @@ def _appliance_profile_mode_from_circuit_id(
         (("_freezer_",), ApplianceProfile.FREEZER, CircuitMode.SINGLE_PHASE),
         (
             (
+                "_mini_split_",
+                "_minisplit_",
+                "_ductless_heat_pump_",
+                "_ductless_ac_",
+            ),
+            ApplianceProfile.MINI_SPLIT,
+            CircuitMode.DUAL_PHASE,
+        ),
+        (
+            (
                 "_ac_compressor_",
                 "_a_c_compressor_",
                 "_compressor_",
