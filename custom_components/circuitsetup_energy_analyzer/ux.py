@@ -28,6 +28,7 @@ from .notifications import (
 from .notifications import (
     format_alert_value as _format_alert_value,
 )
+from .profiles import get_profile_definition
 from .safety import feature_needs_electrical_safety_notice
 
 
@@ -424,6 +425,10 @@ def learning_progress(
         "alert_ready": not learning and suppression_reason is None,
         "suppression_reason": suppression_reason,
         "pending_feature_samples": pending_samples,
+        "days_required": max(
+            get_profile_definition(config.appliance_profile).minimum_learning_days,
+            1,
+        ),
     }
 
 

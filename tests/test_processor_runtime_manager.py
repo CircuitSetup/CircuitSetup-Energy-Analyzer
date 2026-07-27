@@ -23,7 +23,7 @@ def test_coordinator_exposes_processor_runtime_learning_maturity() -> None:
     store_data = FeatureStoreData(
         events=[
             CircuitEvent(
-                timestamp=now - timedelta(minutes=10 + index),
+                timestamp=now - timedelta(days=8, minutes=index),
                 circuit_id="fridge",
                 event_type=EventType.START,
             )
@@ -58,6 +58,10 @@ def test_coordinator_exposes_processor_runtime_learning_maturity() -> None:
         coordinator.circuit_configs[0],
         now,
     )
+    coordinator.refresh_ux_state_for_circuit("fridge", now)
+    progress = coordinator.state.learning_progress_by_circuit["fridge"]
+    assert progress["baseline_age_days"] == 0.0
+    assert progress["cycle_count"] == 0
 
     store_data.events.extend(
         CircuitEvent(

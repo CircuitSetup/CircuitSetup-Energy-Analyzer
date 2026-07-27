@@ -121,7 +121,11 @@ class UxStateManager:
         suppression_reason = self.suppression_reason(circuit_id, learning)
         progress = learning_progress(
             config,
-            events=events,
+            events=coordinator.processor_runtime.learning_events_since_restart(
+                config,
+                now,
+                events,
+            ),
             baselines=coordinator.store_data.baselines,
             baseline_buffer_counts={
                 key: len(values) for key, values in coordinator._baseline_values.items()

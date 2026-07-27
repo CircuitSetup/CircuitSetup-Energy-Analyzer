@@ -177,7 +177,7 @@ async function toHaveNoViolations(page) {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
-test("home energy card omits Active now and separates contribution", async ({ page }) => {
+test("House power flow omits Active now and separates contribution", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
@@ -300,6 +300,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
   await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
+  await expect(card.locator(".flow")).toHaveCount(1);
   await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
   const clearedTotals = await page.evaluate(() => {
     window.__apiCalls.length = 0;
@@ -316,6 +317,7 @@ test("home energy card omits Active now and separates contribution", async ({ pa
     };
   });
   expect(clearedTotals).toEqual({ contributions: {}, summary: {} });
+  await expect(card.locator(".flow")).toHaveCount(0);
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("60.4 kWh");
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" }).locator("small"))
     .toHaveText("Average: 35.4 kWh (3 days)");
@@ -1073,7 +1075,66 @@ test("historical appliance grid uses selected-date totals without live status", 
   const tile = card.locator('[data-appliance-id="fridge"]');
   await expect(tile).toContainText("Energy Jul 10: 2.5 kWh · $0.75");
   await expect(tile).not.toContainText("150 W");
-  await expect(tile).not.toContainText("Possible Imbalance");
+  await expect(tile).toContainText("Health: Possible Imbalance");
+});
+
+test("appliance grid shows learning days only for a single-day range", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-appliance-grid",
+    {
+      title: "Appliances",
+      appliances: [{
+        circuit_id: "fridge",
+        name: "Fridge",
+        activity_entity: "sensor.fridge_activity",
+        power_entities: ["sensor.fridge_power"],
+        energy_today_entity: "sensor.fridge_energy",
+        cost_today_entity: "sensor.fridge_cost",
+        health_entity: "sensor.fridge_health",
+      }],
+    },
+    {
+      "sensor.fridge_activity": { state: "Idle", attributes: {} },
+      "sensor.fridge_power": { state: "0", attributes: { unit_of_measurement: "W" } },
+      "sensor.fridge_energy": { state: "1.4", attributes: { unit_of_measurement: "kWh" } },
+      "sensor.fridge_cost": { state: "0.28", attributes: { unit_of_measurement: "USD" } },
+      "sensor.fridge_health": {
+        state: "Learning",
+        attributes: {
+          learning_days_complete: 3,
+          learning_days_required: 7,
+        },
+      },
+    },
+  );
+
+  const tile = card.locator('[data-appliance-id="fridge"]');
+  await expect(tile).toContainText("Health: Learning · 4 of 7 days left");
+  await page.evaluate(() => {
+    window.__setDashboardState("sensor.fridge_health", {
+      state: "Learning",
+      attributes: {
+        learning_days_complete: 0,
+        learning_days_required: 0,
+      },
+    });
+  });
+  await expect(tile).toContainText("Health: Learning");
+  await expect(tile).not.toContainText("days left");
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-23T00:00:00.000Z",
+        end: "2026-07-24T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+  await expect(tile).not.toContainText("4 of 7 days left");
+  await expect(tile).not.toContainText("Health:");
 });
 
 test("historical appliance totals retry after a transient API failure", async ({ page }) => {
@@ -1756,7 +1817,8 @@ test("no-mains energy history waits for an appliance selection", async ({ page }
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
 });
 
-test("dashboard date range is shared with graph history requests", async ({ page }) => {
+test("Now resets the dashboard date range shared with graph history requests", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
     await route.fulfill({
@@ -1844,9 +1906,14 @@ test("dashboard date range is shared with graph history requests", async ({ page
   const nowRange = await page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ));
-  expect(Date.parse(nowRange.end) - Date.parse(nowRange.start) + 1).toBe(3 * 24 * 60 * 60 * 1000);
-  expect(Date.parse(nowRange.end)).toBeGreaterThan(Date.now());
-  expect(Date.parse(nowRange.end)).toBeLessThan(Date.now() + 24 * 60 * 60 * 1000);
+  expect(nowRange).toEqual({
+    start: "2026-07-24T00:00:00.000Z",
+    end: "2026-07-24T23:59:59.999Z",
+    compare: false,
+  });
+  await expect.poll(() => page.evaluate(() => (
+    localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range-preset")
+  ))).toBe("today");
 });
 
 test("dashboard graph combines dual-phase appliance power into one series", async ({ page }) => {
@@ -2894,10 +2961,13 @@ test("dashboard date selector uses stock month navigation within history bounds"
   await expect.poll(() => page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ))).toEqual({
-    start: "2026-07-01T00:00:00.000Z",
+    start: "2026-07-24T00:00:00.000Z",
     end: "2026-07-24T23:59:59.999Z",
     compare: false,
   });
+  await expect.poll(() => page.evaluate(() => (
+    localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range-preset")
+  ))).toBe("today");
 });
 
 test("dashboard date selector preserves partial current calendar preset navigation", async ({ page }) => {
