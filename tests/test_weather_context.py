@@ -153,6 +153,18 @@ def test_weather_context_reports_missing_temperature_source() -> None:
     assert result["status"] == "no_temperature_source"
 
 
+def test_weather_context_preserves_neutral_mode() -> None:
+    result = evaluate_weather_context(
+        outdoor_temperature=65.0,
+        current_runtime_minutes=0.0,
+        current_duty_cycle_percent=0.0,
+        history=[],
+        mode="neutral",
+    )
+
+    assert result["mode"] == "neutral"
+
+
 def test_weather_context_uses_exact_temperature_season_baseline() -> None:
     result = evaluate_weather_context(
         outdoor_temperature=94.0,

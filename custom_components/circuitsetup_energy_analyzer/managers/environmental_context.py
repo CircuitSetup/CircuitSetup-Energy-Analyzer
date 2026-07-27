@@ -26,7 +26,7 @@ from ..context_sources import (
     has_rain_context_source_configured,
     strings_from_any,
 )
-from ..contextual_baseline import rain_context
+from ..contextual_baseline import rain_context, weather_mode_for_temperature
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
 from ..water_correlations import (
@@ -119,13 +119,22 @@ class EnvironmentalContextManager:
             now,
             outdoor_temperature=outdoor_temperature,
         )
-        history = self.weather_context_history_samples(circuit_id, now)
+        weather_mode = _weather_context_mode(config, outdoor_temperature)
+        history = self.weather_context_history_samples(
+            circuit_id,
+            now,
+            mode=(
+                weather_mode
+                if config.appliance_profile is ApplianceProfile.MINI_SPLIT
+                else None
+            ),
+        )
         evidence = evaluate_weather_context(
             outdoor_temperature=outdoor_temperature,
             current_runtime_minutes=runtime_minutes,
             current_duty_cycle_percent=duty_cycle_percent,
             history=history,
-            mode=_weather_context_mode(config),
+            mode=weather_mode,
             display_temperature=(
                 outdoor_temperature_reading["display_temperature"]
                 if outdoor_temperature_reading is not None
@@ -720,6 +729,8 @@ class EnvironmentalContextManager:
         self,
         circuit_id: str,
         now: datetime,
+        *,
+        mode: str | None = None,
     ) -> list[WeatherContextSample]:
         samples: list[WeatherContextSample] = []
         raw_samples = (
@@ -742,6 +753,11 @@ class EnvironmentalContextManager:
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
             duty = _float_or_none(raw_sample.get("duty_cycle_percent"))
             if temperature is None or runtime is None or duty is None:
+                continue
+            if (
+                mode is not None
+                and weather_mode_for_temperature(temperature) != mode
+            ):
                 continue
             samples.append(
                 WeatherContextSample(
@@ -842,9 +858,14 @@ def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
     return sample.get("rain_active") is False
 
 
-def _weather_context_mode(config: CircuitConfig) -> str:
+def _weather_context_mode(
+    config: CircuitConfig,
+    outdoor_temperature: float | None = None,
+) -> str:
     if config.appliance_profile is ApplianceProfile.ELECTRIC_HEAT:
         return "heating"
+    if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+        return weather_mode_for_temperature(outdoor_temperature)
     return "cooling"
 
 
