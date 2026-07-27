@@ -1106,7 +1106,7 @@
         "loading": "Loading Setup Health...",
         "checklist_heading": "Setup Checklist",
         "empty_checklist": "No setup checklist items are available yet.",
-        "open_setting": "Open setting",
+        "open_setting": "Open integration options",
         "labels": {
           "affected": "Affected",
           "circuit": "Circuit"

@@ -468,7 +468,7 @@ def test_appliance_index_deduplicates_conversion_and_uses_default_order(
     assert converted_items[0].display_name == "Converted Washer"
 
 
-def test_direct_source_path_opens_sources_step_for_the_circuit(
+def test_direct_source_path_opens_supported_integration_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     washer = _detail("washer", "Washer")
@@ -479,14 +479,9 @@ def test_direct_source_path_opens_sources_step_for_the_circuit(
     )
 
     item = appliance_insights.appliance_insights_for_coordinators((coordinator,))[0]
-    source_url = urlparse(item.source_path)
-
-    assert source_url.path == "/config/integrations/dashboard"
-    assert parse_qs(source_url.fragment) == {
-        "config_entry": ["entry-1"],
-        "options_step": ["sources"],
-        "circuit_id": ["washer"],
-    }
+    assert item.source_path == (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+    )
 
 
 def test_nilm_source_path_preserves_entry_id(

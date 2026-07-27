@@ -3215,7 +3215,7 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     assert payload["open_path"].startswith("/config/integrations/")
 
 
-def test_setup_health_payload_links_checklist_actions_to_option_steps() -> None:
+def test_setup_health_payload_links_actions_to_supported_integration_page() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         setup_health_payload,
     )
@@ -3230,17 +3230,14 @@ def test_setup_health_payload_links_checklist_actions_to_option_steps() -> None:
         for item in payload["issues"]
         if item["issue"] == "missing_capacity_setting"
     )
-    capacity = urlparse(capacity_issue["open_path"])
-    capacity_params = parse_qs(capacity.fragment)
-    assert capacity_params["config_entry"] == ["entry-hvac"]
-    assert capacity_params["options_step"] == ["advanced_settings"]
-    assert capacity_params["circuit_id"] == ["hvac"]
+    integration_path = (
+        "/config/integrations/integration/circuitsetup_energy_analyzer"
+    )
+    assert capacity_issue["open_path"] == integration_path
 
     checklist = {item["item_id"]: item for item in payload["checklist"]}
-    entity_detail = urlparse(checklist["entity_detail_level_selected"]["open_path"])
-    dashboard = urlparse(checklist["dashboard_created"]["open_path"])
-    assert parse_qs(entity_detail.fragment)["options_step"] == ["entity_detail"]
-    assert parse_qs(dashboard.fragment)["options_step"] == ["dashboard"]
+    assert checklist["entity_detail_level_selected"]["open_path"] == integration_path
+    assert checklist["dashboard_created"]["open_path"] == integration_path
 
 
 def test_setup_health_payload_uses_requested_entry_id() -> None:
