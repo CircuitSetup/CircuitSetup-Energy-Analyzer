@@ -185,6 +185,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return String((state && state.attributes && state.attributes.unit_of_measurement) || fallback || "");
     }
 
+    _amps(entityId) {
+      const value = this._number(entityId);
+      const factor = { A: 1, mA: 0.001, kA: 1000 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
     _formatValue(value, unit = "") {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
@@ -1336,9 +1342,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._ensureHistory(entities);
       const range = validRange(this._dashboardRange);
       const currentSeries = this._groupDashboardHistorySeries(
-        this._normalizedPowerSeries(
-          this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
-          config.y_axis_label,
+        this._normalizedCurrentSeries(
+          this._normalizedPowerSeries(
+            this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
+            config.y_axis_label,
+          ),
         ),
       );
       const previousRange = this._previousRange(range);
@@ -1348,13 +1356,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const previousDuration = Date.parse(previousRange.end) - previousStart;
       const comparisonSeries = range.compare
         ? this._groupDashboardHistorySeries(
-          this._normalizedPowerSeries(
-            this._dashboardHistorySeries(
-              this._comparisonHistory,
-              entities,
-              Date.parse(previousRange.start),
+          this._normalizedCurrentSeries(
+            this._normalizedPowerSeries(
+              this._dashboardHistorySeries(
+                this._comparisonHistory,
+                entities,
+                Date.parse(previousRange.start),
+              ),
+              config.y_axis_label,
             ),
-            config.y_axis_label,
           ),
         ).map((item) => ({
           ...item,
@@ -1404,6 +1414,22 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return factor === 1 ? item : {
           ...item,
           unit: normalizedUnit,
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) ? point.value * factor : point.value,
+          })),
+        };
+      });
+    }
+
+    _normalizedCurrentSeries(series) {
+      const ampsPerUnit = { A: 1, mA: 0.001, kA: 1000 };
+      return series.map((item) => {
+        const factor = item.series_id === "mains:current" && ampsPerUnit[item.unit];
+        if (!factor) return item;
+        return {
+          ...item,
+          unit: "A",
           points: item.points.map((point) => ({
             ...point,
             value: Number.isFinite(point.value) ? point.value * factor : point.value,
@@ -1721,7 +1747,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const averageScale = days > 1 ? days : 1;
       const ampsSeries = this._dashboardSeries("mains:current");
       const ampsPoints = ampsSeries && ampsSeries.points || [];
-      const currentValues = (mains.current_entities || []).map((entityId) => this._number(entityId));
+      const currentValues = (mains.current_entities || []).map((entityId) => this._amps(entityId));
       const liveAmps = currentValues.length && currentValues.every(Number.isFinite)
         ? currentValues.reduce((total, value) => total + value, 0)
         : null;

@@ -399,12 +399,12 @@ test("home summary uses the mains graph history for the amps average", async ({ 
             { state: "2000", last_changed: "2026-07-12T12:00:00.000Z" },
           ],
           [
-            { entity_id: "sensor.mains_l1_current", state: "2", last_changed: "2026-07-12T00:00:00.000Z" },
-            { state: "4", last_changed: "2026-07-12T12:00:00.000Z" },
+            { entity_id: "sensor.mains_l1_current", state: "2000", last_changed: "2026-07-12T00:00:00.000Z" },
+            { state: "4000", last_changed: "2026-07-12T12:00:00.000Z" },
           ],
           [
-            { entity_id: "sensor.mains_l2_current", state: "3", last_changed: "2026-07-12T00:00:00.000Z" },
-            { state: "6", last_changed: "2026-07-12T12:00:00.000Z" },
+            { entity_id: "sensor.mains_l2_current", state: "0.003", last_changed: "2026-07-12T00:00:00.000Z" },
+            { state: "0.006", last_changed: "2026-07-12T12:00:00.000Z" },
           ],
         ],
       });
@@ -439,8 +439,8 @@ test("home summary uses the mains graph history for the amps average", async ({ 
     },
   ], {
     "sensor.mains_power": { state: "2000", attributes: { unit_of_measurement: "W" } },
-    "sensor.mains_l1_current": { state: "4", attributes: { unit_of_measurement: "A" } },
-    "sensor.mains_l2_current": { state: "6", attributes: { unit_of_measurement: "A" } },
+    "sensor.mains_l1_current": { state: "4000", attributes: { unit_of_measurement: "mA" } },
+    "sensor.mains_l2_current": { state: "0.006", attributes: { unit_of_measurement: "kA" } },
   });
 
   const summary = page.locator("circuitsetup-energy-analyzer-house-flow");
