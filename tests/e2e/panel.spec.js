@@ -177,7 +177,7 @@ async function toHaveNoViolations(page) {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
-test("home energy card omits Active now and separates contribution", async ({ page }) => {
+test("House power flow omits Active now and separates contribution", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
@@ -1806,7 +1806,7 @@ test("no-mains energy history waits for an appliance selection", async ({ page }
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
 });
 
-test("dashboard date range is shared with graph history requests", async ({ page }) => {
+test("Now resets the dashboard date range shared with graph history requests", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
