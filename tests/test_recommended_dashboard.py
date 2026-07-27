@@ -1818,7 +1818,7 @@ def test_dashboard_omits_control_entities_for_mains_only_dashboard() -> None:
     assert "button.mains_pause_alerts" not in refs
 
 
-def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
+def test_dashboard_omits_disabled_and_unused_summaries() -> None:
     class FakeStates:
         def get(self, entity_id: str) -> SimpleNamespace | None:
             if entity_id == "sensor.fridge_daily":
@@ -1859,8 +1859,8 @@ def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
     refs = _entity_refs(dashboard)
 
     assert "sensor.fridge_activity" not in refs
-    assert "sensor.fridge_electrical" not in refs
-    assert "sensor.fridge_daily" not in refs
+    assert "sensor.fridge_electrical" in refs
+    assert "sensor.fridge_daily" in refs
     assert "sensor.fridge_energy" not in refs
 
 

@@ -1695,7 +1695,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
   const nowRange = await page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ));
-  expect(Date.parse(nowRange.end) - Date.parse(nowRange.start) + 1).toBe(3 * 24 * 60 * 60 * 1000);
+  expect(Date.parse(nowRange.end) - Date.parse(nowRange.start) + 1).toBe(24 * 60 * 60 * 1000);
   expect(Date.parse(nowRange.end)).toBeGreaterThan(Date.now());
   expect(Date.parse(nowRange.end)).toBeLessThan(Date.now() + 24 * 60 * 60 * 1000);
 });
@@ -2332,6 +2332,139 @@ test("dashboard date picker calendar survives current-range refreshes", async ({
     && window.__dashboardCard.shadowRoot.querySelector("ha-date-range-picker")
       === window.__openDatePicker
   ))).toBe(true);
+  await page.evaluate(() => {
+    window.__openDatePicker.dispatchEvent(new CustomEvent("picker-closed"));
+  });
+  expect(await page.evaluate(() => window.__dashboardCard._datePickerOpen)).toBe(false);
+});
+
+test("dashboard date picker applies repeated ranges before the stock close finishes", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {
+      connectedCallback() {
+        this.innerHTML = "<button type=\"button\">Calendar</button>";
+      }
+    });
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-26T00:00:00.000Z",
+      end: "2026-07-26T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  for (const range of [
+    ["2026-07-23T00:00:00.000Z", "2026-07-24T23:59:59.999Z"],
+    ["2026-07-24T00:00:00.000Z", "2026-07-26T23:59:59.999Z"],
+  ]) {
+    await card.locator("ha-date-range-picker button").click();
+    await card.locator("ha-date-range-picker").evaluate((picker, selected) => {
+      window.__openDatePicker = picker;
+      picker.dispatchEvent(new CustomEvent("value-changed", {
+        detail: {
+          value: {
+            startDate: new Date(selected[0]),
+            endDate: new Date(selected[1]),
+          },
+        },
+      }));
+    }, range);
+    await expect.poll(() => page.evaluate(() => (
+      JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+    ))).toEqual({
+      start: range[0],
+      end: range[1],
+      compare: false,
+    });
+    expect(await page.evaluate(() => ({
+      connected: window.__openDatePicker.isConnected,
+      open: window.__dashboardCard._datePickerOpen,
+    }))).toEqual({ connected: true, open: true });
+    await page.evaluate(() => {
+      window.__openDatePicker.dispatchEvent(new CustomEvent("picker-closed"));
+    });
+    await expect.poll(() => page.evaluate(() => (
+      window.__dashboardCard._datePickerOpen
+    ))).toBe(false);
+  }
+});
+
+test("dashboard date picker applies one calendar click as a single day", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: "open" });
+        this.updateComplete = Promise.resolve();
+      }
+
+      open() {
+        this._wrapper = document.createElement("wa-popover");
+        this.shadowRoot.replaceChildren(this._wrapper);
+      }
+
+      show() {
+        const inner = document.createElement("date-range-picker");
+        inner.attachShadow({ mode: "open" });
+        this._calendar = document.createElement("calendar-range");
+        inner.shadowRoot.append(this._calendar);
+        inner.updateComplete = Promise.resolve();
+        this._wrapper.dispatchEvent(new CustomEvent("wa-after-show"));
+        this.shadowRoot.append(inner);
+      }
+
+      selectSingle(date) {
+        this._calendar.dispatchEvent(new CustomEvent("rangestart", {
+          detail: new Date(date),
+        }));
+        this.dispatchEvent(new CustomEvent("value-changed", {
+          detail: {
+            value: {
+              startDate: this.startDate,
+              endDate: this.endDate,
+            },
+          },
+        }));
+      }
+    });
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "America/New_York" },
+    {
+      start: "2026-07-22T04:00:00.000Z",
+      end: "2026-07-24T03:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("[data-range-open]").click();
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.show();
+  });
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    picker.selectSingle("2026-07-24T00:00:00.000Z");
+  });
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-24T04:00:00.000Z",
+    end: "2026-07-25T03:59:59.999Z",
+    compare: false,
+  });
 });
 
 test("dashboard date picker survives a live refresh that races its open event", async ({ page }) => {
@@ -2460,6 +2593,48 @@ test("dashboard date selector mirrors stock Energy controls and presets", async 
   ]);
 });
 
+test("dashboard date preset applies before the picker closes", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
+  await page.addInitScript(() => {
+    customElements.define("ha-date-range-picker", class extends HTMLElement {});
+  });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-24T00:00:00.000Z",
+      end: "2026-07-24T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("ha-date-range-picker").evaluate((picker) => {
+    const [startDate, endDate] = picker.ranges.Yesterday;
+    picker.dispatchEvent(new CustomEvent("value-changed", {
+      detail: { value: { startDate, endDate } },
+    }));
+    picker.dispatchEvent(new CustomEvent("preset-selected", {
+      detail: { index: 1 },
+    }));
+    window.__rangeWhenPresetCloses = JSON.parse(
+      localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"),
+    );
+  });
+
+  expect(await page.evaluate(() => window.__rangeWhenPresetCloses)).toEqual({
+    start: "2026-07-23T00:00:00.000Z",
+    end: "2026-07-23T23:59:59.999Z",
+    compare: false,
+  });
+  expect(await page.evaluate(() => (
+    localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range-preset")
+  ))).toBe("yesterday");
+});
+
 test("dashboard date selector shows the stock delayed loading indicator", async ({ page }) => {
   await mockPanelApi(page);
   const card = await openDashboardCard(
@@ -2572,6 +2747,32 @@ test("dashboard date selector uses stock month navigation within history bounds"
   ))).toEqual({
     start: "2026-07-01T00:00:00.000Z",
     end: "2026-07-24T23:59:59.999Z",
+    compare: false,
+  });
+});
+
+test("dashboard Now selects today after a custom date range", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    {
+      start: "2026-07-23T00:00:00.000Z",
+      end: "2026-07-24T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await card.locator("[data-range-now]").click();
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual({
+    start: "2026-07-26T00:00:00.000Z",
+    end: "2026-07-26T23:59:59.999Z",
     compare: false,
   });
 });
