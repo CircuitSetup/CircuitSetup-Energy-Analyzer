@@ -479,14 +479,17 @@ def _mains_chart_power_entities(
     accepted = []
     for entity_id in entity_ids:
         label = _mains_chart_power_label(hass, entity_id)
+        unit, device_class = _entity_power_metadata(hass, entity_id)
         if "harmonic" in label:
+            continue
+        if unit and unit not in {"w", "kw"}:
             continue
         if any(token in label for token in included):
             accepted.append(entity_id)
             continue
         if any(token in label for token in excluded):
             continue
-        if "power" in label or _entity_is_real_power(hass, entity_id):
+        if "power" in label or unit in {"w", "kw"} or device_class == "power":
             accepted.append(entity_id)
     return tuple(accepted)
 
@@ -2298,11 +2301,6 @@ def _entity_is_apparent_or_reactive_power(
         or unit.endswith("var")
         or device_class in {"apparent_power", "reactive_power"}
     )
-
-
-def _entity_is_real_power(hass: Any | None, entity_id: str) -> bool:
-    unit, device_class = _entity_power_metadata(hass, entity_id)
-    return unit in {"mw", "w", "kw", "gw", "tw", "btu/h"} or device_class == "power"
 
 
 def _entity_power_metadata(

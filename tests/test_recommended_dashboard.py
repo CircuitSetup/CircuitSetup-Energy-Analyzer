@@ -609,6 +609,7 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
             SensorRef("sensor.mains_channel_b", SensorRole.REAL_POWER),
             SensorRef("sensor.main_panel_channel_1", SensorRole.REAL_POWER),
             SensorRef("sensor.main_panel_channel_2", SensorRole.REAL_POWER),
+            SensorRef("sensor.main_panel_channel_3", SensorRole.REAL_POWER),
             SensorRef(
                 "sensor.high_voltage_panel_active_power",
                 SensorRole.REAL_POWER,
@@ -634,6 +635,13 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
         "sensor.main_panel_channel_2": SimpleNamespace(
             state="0",
             attributes={"unit_of_measurement": "kW"},
+        ),
+        "sensor.main_panel_channel_3": SimpleNamespace(
+            state="0",
+            attributes={
+                "device_class": "power",
+                "unit_of_measurement": "MW",
+            },
         ),
         "sensor.high_voltage_panel_active_power": SimpleNamespace(
             state="0",
@@ -663,6 +671,7 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
         "sensor.mains_channel_b",
         "sensor.main_panel_channel_1",
         "sensor.main_panel_channel_2",
+        "sensor.main_panel_channel_3",
         "sensor.high_voltage_panel_active_power",
     ]
 
