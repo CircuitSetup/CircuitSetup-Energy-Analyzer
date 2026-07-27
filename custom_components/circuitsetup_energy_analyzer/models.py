@@ -21,6 +21,8 @@ class ApplianceProfile(StrEnum):
     WATER_HEATER = "water_heater"
     OVEN = "oven"
     MICROWAVE = "microwave"
+    DISHWASHER = "dishwasher"
+    THREE_D_PRINTER = "3d_printer"
     WASHER = "washer"
     DRYER = "dryer"
     POOL_PUMP = "pool_pump"

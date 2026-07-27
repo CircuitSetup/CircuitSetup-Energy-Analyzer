@@ -89,6 +89,43 @@ def test_resolve_operating_detection_profiles_are_valid() -> None:
         assert resolved.profile.max_sample_gap_seconds > 0.0
 
 
+@pytest.mark.parametrize(
+    ("profile", "expected"),
+    [
+        (ApplianceProfile.DISHWASHER, (20.0, 8.0, 15.0, 90.0, 300.0, 600.0)),
+        (
+            ApplianceProfile.THREE_D_PRINTER,
+            (35.0, 20.0, 10.0, 90.0, 180.0, 600.0),
+        ),
+    ],
+)
+def test_signature_specific_operating_defaults(
+    profile: ApplianceProfile,
+    expected: tuple[float, float, float, float, float, float],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        resolve_operating_detection,
+    )
+
+    resolved = resolve_operating_detection(
+        CircuitConfig(
+            circuit_id=profile.value,
+            name=profile.value,
+            appliance_profile=profile,
+            mode=CircuitMode.SINGLE_PHASE,
+        )
+    ).profile
+
+    assert (
+        resolved.on_threshold_w,
+        resolved.off_threshold_w,
+        resolved.on_dwell_seconds,
+        resolved.off_dwell_seconds,
+        resolved.merge_gap_seconds,
+        resolved.max_sample_gap_seconds,
+    ) == expected
+
+
 def test_resolve_operating_detection_user_override_wins() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         OperatingThresholdSource,

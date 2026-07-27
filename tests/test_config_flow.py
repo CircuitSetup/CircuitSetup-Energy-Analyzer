@@ -5121,6 +5121,86 @@ def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> 
         "binary_sensor.water_flow"
     ]
 
+    dishwasher_schema = _advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "dishwasher",
+            "name": "Dishwasher",
+            "appliance_profile": ApplianceProfile.DISHWASHER.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+
+    assert "water_context_settings" in _schema_section_keys(dishwasher_schema)
+    assert _schema_default(
+        dishwasher_schema, "water_flow_correlation_enabled"
+    ) is True
+    assert _schema_default(dishwasher_schema, "expects_water_flow") is True
+    assert (
+        _schema_default(dishwasher_schema, "flow_mismatch_threshold_minutes") == 5
+    )
+
+
+def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    options = {
+        option["value"]: option["label"]
+        for option in config_flow.appliance_profile_options()
+    }
+
+    assert options["dishwasher"] == "Dishwasher"
+    assert options["3d_printer"] == "3D Printer"
+    for profile in ("dishwasher", "3d_printer"):
+        assert config_flow._default_mode_for_assignment_profile(profile) == (
+            "single_phase"
+        )
+        assert config_flow._default_power_flow_for_assignment(profile) == "load"
+
+
+@pytest.mark.parametrize(
+    ("circuit_id", "entity_ids", "expected"),
+    [
+        (
+            "kitchen_dish_washer",
+            ["sensor.kitchen_dish_washer_power"],
+            ("dishwasher", "single_phase"),
+        ),
+        (
+            "workshop_3d_printer",
+            ["sensor.workshop_3d_printer_power"],
+            ("3d_printer", "single_phase"),
+        ),
+        (
+            "laundry_gas_dryer",
+            [
+                "sensor.laundry_gas_dryer_l1_power",
+                "sensor.laundry_gas_dryer_l2_power",
+            ],
+            ("dryer", "single_phase"),
+        ),
+        (
+            "laundry_electric_dryer",
+            [
+                "sensor.laundry_electric_dryer_l1_power",
+                "sensor.laundry_electric_dryer_l2_power",
+            ],
+            ("dryer", "dual_phase"),
+        ),
+    ],
+)
+def test_assignment_profile_suggestion_uses_appliance_specific_topology(
+    circuit_id: str,
+    entity_ids: list[str],
+    expected: tuple[str, str],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _suggest_assignment_profile_mode,
+    )
+
+    assert _suggest_assignment_profile_mode(circuit_id, entity_ids) == expected
+
 
 def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_controls(
 ) -> None:

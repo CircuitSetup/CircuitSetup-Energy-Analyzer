@@ -220,6 +220,25 @@ def test_flow_without_any_water_load_is_possible_leak_candidate() -> None:
     assert evidence["contextual_baseline_confidence"] == evidence["confidence"]
 
 
+def test_dishwasher_participates_in_water_flow_correlation() -> None:
+    evidence = evaluate_flow_correlation(
+        FlowCorrelationInput(
+            circuit_id="dishwasher",
+            appliance_profile="dishwasher",
+            flow_active_minutes=14.0,
+            appliance_runtime_minutes=0.0,
+            recent_related_runtime_minutes=0.0,
+            mapped_appliance_count=1,
+            threshold_minutes=5,
+            expects_water_flow=True,
+            comparable_window_count=12,
+        )
+    )
+
+    assert evidence["status"] == "possible_flow_without_load"
+    assert evidence["mismatch_minutes"] == 14.0
+
+
 def test_flow_confidence_does_not_increase_for_problem_status() -> None:
     normal = evaluate_flow_correlation(
         FlowCorrelationInput(

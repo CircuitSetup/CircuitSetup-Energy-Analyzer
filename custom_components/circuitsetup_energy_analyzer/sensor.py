@@ -2167,6 +2167,7 @@ _WATER_FLOW_CONTEXT_PROFILES = {
     ApplianceProfile.WELL_PUMP,
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.WASHER,
+    ApplianceProfile.DISHWASHER,
 }
 _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.REFRIGERATOR,
@@ -2178,6 +2179,8 @@ _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
     ApplianceProfile.MICROWAVE,
+    ApplianceProfile.DISHWASHER,
+    ApplianceProfile.THREE_D_PRINTER,
     ApplianceProfile.WASHER,
     ApplianceProfile.DRYER,
     ApplianceProfile.POOL_PUMP,
@@ -2194,6 +2197,7 @@ _HIGH_POWER_PROFILES = {
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
     ApplianceProfile.MICROWAVE,
+    ApplianceProfile.DISHWASHER,
     ApplianceProfile.DRYER,
     ApplianceProfile.POOL_PUMP,
     ApplianceProfile.WATER_PUMP,

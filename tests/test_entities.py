@@ -3006,6 +3006,54 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     )
 
 
+def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+        binary_sensor_description_applies,
+    )
+    from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
+        _setup_health_needs_capacity_settings,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    sensors = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    binary_sensors = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    circuit = CircuitConfig(
+        circuit_id="dishwasher",
+        name="Dishwasher",
+        appliance_profile=ApplianceProfile.DISHWASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.dishwasher_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.dishwasher_current", SensorRole.CURRENT),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"]},
+        entry_data={},
+        store_data=FeatureStoreData(),
+    )
+
+    assert sensor_description_applies(
+        sensors["run_cycle_count"], circuit, coordinator
+    )
+    assert sensor_description_applies(
+        sensors["current_demand"], circuit, coordinator
+    )
+    assert sensor_description_applies(
+        sensors["water_flow_correlation"], circuit, coordinator
+    )
+    assert binary_sensor_description_applies(
+        binary_sensors["water_flow_mismatch"], circuit, coordinator
+    )
+    assert _setup_health_needs_capacity_settings(coordinator, circuit)
+
+
 def test_shared_mains_voltage_enables_appliance_voltage_calculations() -> None:
     from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
         _setup_health_needs_capacity_settings,
@@ -3579,10 +3627,11 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
     assert estimated_power.device_info == {
         "identifiers": {(DOMAIN, "entry-1_nilm_assignment-dishwasher")},
         "name": "Dishwasher",
-        "manufacturer": "CircuitSetup",
-        "model": "NILM Estimated Appliance",
-        "via_device": (DOMAIN, "entry-1_mains"),
-    }
+            "manufacturer": "CircuitSetup",
+            "model": "NILM Estimated Appliance",
+            "suggested_area": "Kitchen",
+            "via_device": (DOMAIN, "entry-1_mains"),
+        }
     assert "icon" not in estimated_power.device_info
     assert "entry-1_dishwasher_active_power" not in sensor_by_id
     assert "entry-1_dishwasher_running" not in binary_by_id

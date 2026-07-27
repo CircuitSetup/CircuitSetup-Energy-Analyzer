@@ -651,12 +651,23 @@ def _appliance_profile_mode_from_circuit_id(
         ),
         (("_oven_", "_range_"), ApplianceProfile.OVEN, CircuitMode.DUAL_PHASE),
         (
+            ("_dishwasher_", "_dish_washer_"),
+            ApplianceProfile.DISHWASHER,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
+            ("_3d_printer_", "_3dprinter_", "_3_d_printer_"),
+            ApplianceProfile.THREE_D_PRINTER,
+            CircuitMode.SINGLE_PHASE,
+        ),
+        (
             ("_washer_", "_clothes_washer_", "_laundry_washer_", "_washing_machine_"),
             ApplianceProfile.WASHER,
             CircuitMode.SINGLE_PHASE,
         ),
+        (("_gas_dryer_",), ApplianceProfile.DRYER, CircuitMode.SINGLE_PHASE),
         (
-            ("_dryer_", "_clothes_dryer_", "_electric_dryer_", "_gas_dryer_"),
+            ("_dryer_", "_clothes_dryer_", "_electric_dryer_"),
             ApplianceProfile.DRYER,
             CircuitMode.DUAL_PHASE,
         ),

@@ -29,6 +29,7 @@ _HIGH_POWER_PROFILES = {
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,
     ApplianceProfile.MICROWAVE,
+    ApplianceProfile.DISHWASHER,
     ApplianceProfile.DRYER,
     ApplianceProfile.POOL_PUMP,
     ApplianceProfile.WATER_PUMP,

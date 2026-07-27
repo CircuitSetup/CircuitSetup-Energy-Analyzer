@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     BaselineStats,
@@ -537,7 +539,13 @@ def test_select_evidence_treats_hvac_compressor_as_motor_load() -> None:
     assert evidence.feature == "motor_relationship_changed"
 
 
-def test_select_evidence_treats_washer_as_motor_load() -> None:
+@pytest.mark.parametrize(
+    "profile",
+    [ApplianceProfile.WASHER, ApplianceProfile.DISHWASHER],
+)
+def test_select_evidence_treats_washing_appliances_as_motor_load(
+    profile: ApplianceProfile,
+) -> None:
     scores = score_power_quality_features(
         extract_power_quality_features(
             sample(
@@ -559,7 +567,7 @@ def test_select_evidence_treats_washer_as_motor_load() -> None:
     )
 
     evidence = select_power_quality_evidence(
-        config(ApplianceProfile.WASHER, CircuitMode.SINGLE_PHASE),
+        config(profile, CircuitMode.SINGLE_PHASE),
         scores,
     )
 

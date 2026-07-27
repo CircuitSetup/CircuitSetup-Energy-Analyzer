@@ -49,6 +49,24 @@ ComparisonBaseline = tuple[float | None, float | None, float | None, float | Non
 ProfileExpectationRecipe = tuple[str, str, str, tuple[str, ...]]
 
 _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] = {
+    ApplianceProfile.DISHWASHER: (
+        "Dishwasher cycle check",
+        "Dishwasher activity should stay within a bounded wash and dry cycle.",
+        "Unexpected runtime can point to a paused cycle, water problem, or "
+        "heating issue.",
+        ("Check cycle completion, water flow, and the dishwasher filter.",),
+    ),
+    ApplianceProfile.THREE_D_PRINTER: (
+        "3D printer session check",
+        "3D printer sessions should show preheat and heater cycling, then "
+        "return to idle.",
+        "Unexpected power loss or extended heating can interrupt a print or "
+        "waste energy.",
+        (
+            "Check print status, heater state, and whether the printer returned "
+            "to idle.",
+        ),
+    ),
     ApplianceProfile.WASHER: (
         "Washer cycle check",
         "Washer activity should stay within a bounded cycle duration.",

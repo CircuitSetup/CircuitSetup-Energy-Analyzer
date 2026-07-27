@@ -181,6 +181,7 @@ TODAYS_COST_ENTITY_SPECS = (
 WATER_FLOW_PROFILES = {
     "sump_pump",
     "washer",
+    "dishwasher",
     "water_heater",
     "water_pump",
     "well_pump",

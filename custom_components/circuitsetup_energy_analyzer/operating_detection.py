@@ -113,6 +113,22 @@ _PROFILE_DEFAULTS: dict[ApplianceProfile, dict[str, float]] = {
         "merge_gap_seconds": 10.0,
         "max_sample_gap_seconds": 600.0,
     },
+    ApplianceProfile.DISHWASHER: {
+        "on_threshold_w": 20.0,
+        "off_threshold_w": 8.0,
+        "on_dwell_seconds": 15.0,
+        "off_dwell_seconds": 90.0,
+        "merge_gap_seconds": 300.0,
+        "max_sample_gap_seconds": 600.0,
+    },
+    ApplianceProfile.THREE_D_PRINTER: {
+        "on_threshold_w": 35.0,
+        "off_threshold_w": 20.0,
+        "on_dwell_seconds": 10.0,
+        "off_dwell_seconds": 90.0,
+        "merge_gap_seconds": 180.0,
+        "max_sample_gap_seconds": 600.0,
+    },
     ApplianceProfile.WASHER: {
         "on_threshold_w": 20.0,
         "off_threshold_w": 8.0,

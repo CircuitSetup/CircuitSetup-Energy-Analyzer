@@ -1495,22 +1495,33 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     assert "sensor.compressor_var" not in refs
 
 
-def test_water_context_is_a_separate_dual_axis_graph() -> None:
-    washer = CircuitConfig(
-        circuit_id="washer",
-        name="Washer",
-        appliance_profile=ApplianceProfile.WASHER,
+@pytest.mark.parametrize(
+    ("profile", "circuit_id", "name"),
+    [
+        (ApplianceProfile.WASHER, "washer", "Washer"),
+        (ApplianceProfile.DISHWASHER, "dishwasher", "Dishwasher"),
+    ],
+)
+def test_water_context_is_a_separate_dual_axis_graph(
+    profile: ApplianceProfile,
+    circuit_id: str,
+    name: str,
+) -> None:
+    appliance = CircuitConfig(
+        circuit_id=circuit_id,
+        name=name,
+        appliance_profile=profile,
         mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef("sensor.washer_power", SensorRole.REAL_POWER),),
+        sensors=(SensorRef(f"sensor.{circuit_id}_power", SensorRole.REAL_POWER),),
     )
     registry = {
-        "sensor.washer_water_context": _registry_entry(
-            "sensor.washer_water_context",
-            "entry-1_washer_water_flow_correlation",
+        f"sensor.{circuit_id}_water_context": _registry_entry(
+            f"sensor.{circuit_id}_water_context",
+            f"entry-1_{circuit_id}_water_flow_correlation",
         )
     }
     dashboard = build_recommended_dashboard(
-        (washer,),
+        (appliance,),
         DASHBOARD_LAYOUT_STANDARD,
         hass=SimpleNamespace(
             entity_registry=SimpleNamespace(entities=registry),
@@ -1538,10 +1549,10 @@ def test_water_context_is_a_separate_dual_axis_graph() -> None:
     assert "y_axis_label" not in water_card
     assert water_card["water_contexts"] == [
         {
-            "name": "Washer",
-            "series_id": "circuit:washer",
-            "correlation_entity": "sensor.washer_water_context",
-            "power_entities": ["sensor.washer_power"],
+            "name": name,
+            "series_id": f"circuit:{circuit_id}",
+            "correlation_entity": f"sensor.{circuit_id}_water_context",
+            "power_entities": [f"sensor.{circuit_id}_power"],
         }
     ]
 

@@ -21,6 +21,12 @@ def test_environmental_context_profile_boundaries_are_explicit() -> None:
     assert ApplianceProfile.WATER_HEATER in (
         environmental_context.FLOW_WATER_CONTEXT_PROFILES
     )
+    assert ApplianceProfile.DISHWASHER in (
+        environmental_context.FLOW_WATER_CONTEXT_PROFILES
+    )
+    assert ApplianceProfile.THREE_D_PRINTER not in (
+        environmental_context.FLOW_WATER_CONTEXT_PROFILES
+    )
 
 
 def test_coordinator_wires_environmental_context_manager() -> None:

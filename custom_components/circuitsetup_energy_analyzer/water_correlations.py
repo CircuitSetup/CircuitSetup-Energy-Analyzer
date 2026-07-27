@@ -15,6 +15,7 @@ SUPPORTED_FLOW_PROFILES = {
     "well_pump",
     "water_heater",
     "washer",
+    "dishwasher",
 }
 RAIN_THRESHOLD_PCT = 25.0
 MIN_COMPARABLE_WINDOWS = 10
