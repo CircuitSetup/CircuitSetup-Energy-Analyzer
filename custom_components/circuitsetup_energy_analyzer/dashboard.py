@@ -225,9 +225,11 @@ def build_recommended_dashboard(
                 "primary_mains": _dashboard_circuit_payload(
                     context.primary_mains,
                     ("daily_energy_usage", "cost_today"),
+                    live_context=context,
                 ),
                 "appliances": [
-                    _appliance_card_payload(circuit) for circuit in context.appliances
+                    _appliance_card_payload(circuit, live_context=context)
+                    for circuit in context.appliances
                 ],
                 "labels": dict(translation_section("dashboard", "live_cards")),
                 "grid_options": {"columns": 12},
@@ -477,9 +479,11 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
                 "solar_flow_status",
                 "solar_surplus_power",
             ),
+            live_context=context,
         ),
         "appliances": [
-            _appliance_card_payload(circuit) for circuit in context.appliances
+            _appliance_card_payload(circuit, live_context=context)
+            for circuit in context.appliances
         ],
         "labels": dict(translation_section("dashboard", "live_cards")),
     }
@@ -541,7 +545,7 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
                 "entry_id": context.entry_id,
                 "api_path": f"{DOMAIN}/appliance_insights",
                 "appliances": [
-                    _appliance_card_payload(circuit)
+                    _appliance_card_payload(circuit, live_context=context)
                     for circuit in context.appliances
                 ],
                 "labels": dict(translation_section("dashboard", "live_cards")),
@@ -767,8 +771,12 @@ def _dashboard_view(
     }
 
 
-def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
-    return {
+def _appliance_card_payload(
+    circuit: DashboardCircuit,
+    *,
+    live_context: DashboardContext | None = None,
+) -> dict[str, Any]:
+    payload = {
         "circuit_id": circuit.circuit_id,
         "name": circuit.name,
         "profile": circuit.profile,
@@ -786,6 +794,9 @@ def _appliance_card_payload(circuit: DashboardCircuit) -> dict[str, Any]:
             },
         ),
     }
+    if live_context is not None:
+        payload.update(_live_today_entity_payload(live_context, circuit))
+    return payload
 
 
 def _summary_card(
@@ -807,15 +818,41 @@ def _summary_card(
 def _dashboard_circuit_payload(
     circuit: DashboardCircuit | None,
     keys: Sequence[str],
+    *,
+    live_context: DashboardContext | None = None,
 ) -> dict[str, Any] | None:
     if circuit is None:
         return None
-    return {
+    payload = {
         "circuit_id": circuit.circuit_id,
         "name": circuit.name,
         "power_entities": list(circuit.power_entities),
         **_named_entities(circuit, {key: f"{key}_entity" for key in keys}),
     }
+    if live_context is not None:
+        payload.update(_live_today_entity_payload(live_context, circuit))
+    return payload
+
+
+def _live_today_entity_payload(
+    context: DashboardContext,
+    circuit: DashboardCircuit,
+) -> dict[str, str]:
+    payload: dict[str, str] = {}
+    for entity_key, output_name in (
+        ("daily_energy_usage", "energy_today_entity"),
+        ("cost_today", "cost_today_entity"),
+    ):
+        entity_id = circuit.entities.get(entity_key) or _resolved_entity_id(
+            circuit.circuit_id,
+            ("sensor", entity_key, entity_key),
+            registry_lookup=context.registry_lookup,
+            hass=None,
+            entry_id=context.entry_id,
+        )
+        if entity_id:
+            payload[output_name] = entity_id
+    return payload
 
 
 def _named_entities(
@@ -1884,7 +1921,7 @@ def _resolved_entity_id(
     circuit_id: str,
     spec: tuple[str, str, str],
     *,
-    registry_lookup: dict[str, Any] | None,
+    registry_lookup: Mapping[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
 ) -> str | None:
@@ -1981,7 +2018,7 @@ def _resolved_entity_rows(
     circuit_id: str,
     specs: Iterable[tuple[str, str, str]],
     *,
-    registry_lookup: dict[str, Any] | None,
+    registry_lookup: Mapping[str, Any] | None,
     hass: Any | None,
     entry_id: str | None,
     include_names: bool = True,

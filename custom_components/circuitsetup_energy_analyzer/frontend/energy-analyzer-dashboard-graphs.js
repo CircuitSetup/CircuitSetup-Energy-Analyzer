@@ -764,28 +764,78 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       picker.extendedPresets = false;
       picker.backdrop = true;
       picker.popoverPlacement = "top-start";
-      picker.addEventListener("toggle", (event) => {
-        this._datePickerOpen = Boolean(event.detail && event.detail.open);
-        if (!this._datePickerOpen && this._datePickerRenderDue) this._render();
+      let trackedWrapper = null;
+      let trackedCalendar = null;
+      let pendingSingleDate = null;
+      const trackSingleDate = async () => {
+        await picker.updateComplete;
+        const inner = picker.shadowRoot && picker.shadowRoot.querySelector("date-range-picker");
+        if (!inner) {
+          const wrapper = picker.shadowRoot
+            && picker.shadowRoot.querySelector("wa-popover, ha-bottom-sheet");
+          if (wrapper && wrapper !== trackedWrapper) {
+            trackedWrapper = wrapper;
+            wrapper.addEventListener("wa-after-show", () => void trackSingleDate(), {
+              once: true,
+            });
+          }
+          return;
+        }
+        await inner.updateComplete;
+        const calendar = inner.shadowRoot && inner.shadowRoot.querySelector("calendar-range");
+        if (!calendar || calendar === trackedCalendar) return;
+        trackedCalendar = calendar;
+        calendar.addEventListener("rangestart", (event) => {
+          pendingSingleDate = event.detail;
+        });
+        calendar.addEventListener("rangeend", () => {
+          pendingSingleDate = null;
+        });
+      };
+      picker.addEventListener("click", () => {
+        this._datePickerOpen = true;
+        void trackSingleDate();
       });
-      let selectedPresetKey = "";
+      picker.addEventListener("picker-closed", () => {
+        this._datePickerOpen = false;
+        pendingSingleDate = null;
+        if (this._datePickerRenderDue) this._render();
+      });
+      let pendingRange = null;
       picker.addEventListener("value-changed", (event) => {
         const value = event.detail && event.detail.value || {};
-        this._datePickerOpen = false;
-        const selectedRange = {
+        pendingRange = {
           start: value.startDate,
           end: value.endDate,
           compare: range.compare,
         };
-        queueMicrotask(() => this._selectRange(selectedRange, selectedPresetKey));
+        const singleDate = pendingSingleDate;
+        pendingSingleDate = null;
+        queueMicrotask(() => {
+          if (!pendingRange) return;
+          const dateKey = singleDate instanceof Date && !Number.isNaN(singleDate.getTime())
+            ? singleDate.toISOString().slice(0, 10)
+            : "";
+          const selectedRange = dateKey
+            ? this._boundedPresetRange(dateKey, dateKey, range.compare)
+            : pendingRange;
+          pendingRange = null;
+          this._selectRange(selectedRange, "");
+        });
       });
       picker.addEventListener("preset-selected", (event) => {
-        selectedPresetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
+        if (!pendingRange) return;
+        pendingSingleDate = null;
+        const selectedRange = pendingRange;
+        pendingRange = null;
+        const presetKey = STOCK_RANGE_KEYS[event.detail && event.detail.index] || "";
+        this._selectRange(selectedRange, presetKey);
       });
       this.shadowRoot.querySelector("[data-range-picker-host]").append(picker);
       const openPicker = () => {
         this._datePickerOpen = true;
         picker.open();
+        void trackSingleDate();
       };
       const rangeOpen = this.shadowRoot.querySelector("[data-range-open]");
       rangeOpen.addEventListener("click", openPicker);

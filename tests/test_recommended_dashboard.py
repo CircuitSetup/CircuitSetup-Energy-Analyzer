@@ -16,6 +16,8 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_URL_PATH,
     DATE_RANGE_CARD,
+    ENERGY_COST_CARD,
+    HOUSE_FLOW_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
     SUMMARY_CARD,
     build_recommended_dashboard,
@@ -1816,7 +1818,7 @@ def test_dashboard_omits_control_entities_for_mains_only_dashboard() -> None:
     assert "button.mains_pause_alerts" not in refs
 
 
-def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
+def test_dashboard_omits_disabled_and_unused_summaries() -> None:
     class FakeStates:
         def get(self, entity_id: str) -> SimpleNamespace | None:
             if entity_id == "sensor.fridge_daily":
@@ -1857,9 +1859,47 @@ def test_dashboard_omits_disabled_and_unavailable_summaries() -> None:
     refs = _entity_refs(dashboard)
 
     assert "sensor.fridge_activity" not in refs
-    assert "sensor.fridge_electrical" not in refs
-    assert "sensor.fridge_daily" not in refs
+    assert "sensor.fridge_electrical" in refs
+    assert "sensor.fridge_daily" in refs
     assert "sensor.fridge_energy" not in refs
+
+
+def test_dashboard_keeps_unavailable_today_entities_for_live_totals() -> None:
+    class FakeStates:
+        def get(self, entity_id: str) -> SimpleNamespace:
+            return SimpleNamespace(state="unavailable")
+
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_SIMPLE,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.fridge_daily": _registry_entry(
+                        "sensor.fridge_daily",
+                        "entry-1_fridge_daily_energy_usage",
+                    ),
+                    "sensor.fridge_cost": _registry_entry(
+                        "sensor.fridge_cost",
+                        "entry-1_fridge_cost_today",
+                    ),
+                }
+            ),
+            states=FakeStates(),
+        ),
+        entry_id="entry-1",
+    )
+    home_card = _card_of_type(dashboard, HOUSE_FLOW_CARD)
+    energy_card = _card_of_type(dashboard, ENERGY_COST_CARD)
+
+    for card in (home_card, energy_card):
+        fridge = next(
+            appliance
+            for appliance in card["appliances"]
+            if appliance["circuit_id"] == "fridge"
+        )
+        assert fridge["energy_today_entity"] == "sensor.fridge_daily"
+        assert fridge["cost_today_entity"] == "sensor.fridge_cost"
 
 
 class _FakeDashboardsCollection:
