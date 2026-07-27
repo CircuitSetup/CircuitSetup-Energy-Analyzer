@@ -60,6 +60,7 @@ FLOW_WATER_CONTEXT_PROFILES = frozenset(
         ApplianceProfile.WELL_PUMP,
         ApplianceProfile.WATER_HEATER,
         ApplianceProfile.WASHER,
+        ApplianceProfile.DISHWASHER,
     }
 )
 

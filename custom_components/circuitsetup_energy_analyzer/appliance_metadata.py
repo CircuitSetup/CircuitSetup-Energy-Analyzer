@@ -66,6 +66,14 @@ APPLIANCE_METADATA: dict[ApplianceProfile, ApplianceMetadata] = {
         icon="mdi:microwave",
         area_candidates=("Kitchen",),
     ),
+    ApplianceProfile.DISHWASHER: ApplianceMetadata(
+        icon="mdi:dishwasher",
+        area_candidates=("Kitchen",),
+    ),
+    ApplianceProfile.THREE_D_PRINTER: ApplianceMetadata(
+        icon="mdi:printer-3d",
+        area_candidates=("Workshop", "Office", "Craft Room", "Garage"),
+    ),
     ApplianceProfile.WASHER: ApplianceMetadata(
         icon="mdi:washing-machine",
         area_candidates=("Laundry", "Laundry Room", "Basement", "Utility Room"),

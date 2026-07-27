@@ -374,6 +374,7 @@ def binary_sensor_description_applies(
                 ApplianceProfile.WELL_PUMP,
                 ApplianceProfile.WATER_HEATER,
                 ApplianceProfile.WASHER,
+                ApplianceProfile.DISHWASHER,
             }
             and _has_water_flow_source(coordinator, circuit)
         )

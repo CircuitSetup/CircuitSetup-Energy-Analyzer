@@ -587,6 +587,8 @@ def test_dryer_leg_imbalance_produces_first_check_guidance() -> None:
 
 def test_profile_specific_expectations_cover_remaining_named_appliances() -> None:
     cases = {
+        ApplianceProfile.DISHWASHER: "bounded wash and dry cycle",
+        ApplianceProfile.THREE_D_PRINTER: "preheat and heater cycling",
         ApplianceProfile.WASHER: "bounded cycle",
         ApplianceProfile.DRYER: "high power",
         ApplianceProfile.WATER_HEATER: "water heating",

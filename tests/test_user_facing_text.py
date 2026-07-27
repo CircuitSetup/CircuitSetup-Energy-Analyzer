@@ -6929,6 +6929,8 @@ def test_readme_documents_assignment_defaults() -> None:
         "derives circuit mode and power-flow mode",
         "| Profile | Default phase/topology | Default power flow |",
         "| `refrigerator` | Single phase | Load |",
+        "| `dishwasher` | Single phase | Load |",
+        "| `3d_printer` | Single phase | Load |",
         "| `hvac` | Dual phase when both legs are selected; "
         "otherwise single phase | Load |",
         "| `solar_inverter` | Dual phase | Generation |",
@@ -6936,6 +6938,17 @@ def test_readme_documents_assignment_defaults() -> None:
         "| `mixed` | Mixed | Load |",
     ):
         assert expected in readme_text
+    normalized_readme = " ".join(readme_text.split())
+    assert (
+        "Water-flow correlation applies to `water_pump`, `well_pump`, "
+        "`water_heater`, `washer`, and `dishwasher` circuits"
+        in normalized_readme
+    )
+    assert (
+        "Automatic source parsing treats explicit `gas_dryer` names as single "
+        "phase and explicit `electric_dryer` names as dual phase."
+        in normalized_readme
+    )
 
 
 def test_readme_explains_notification_evidence_workflow() -> None:
