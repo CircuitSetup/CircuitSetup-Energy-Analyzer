@@ -499,6 +499,8 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.WATER_HEATER.value,
     ApplianceProfile.OVEN.value,
     ApplianceProfile.MICROWAVE.value,
+    ApplianceProfile.DISHWASHER.value,
+    ApplianceProfile.THREE_D_PRINTER.value,
     ApplianceProfile.WASHER.value,
     ApplianceProfile.DRYER.value,
     ApplianceProfile.POOL_PUMP.value,
@@ -520,6 +522,7 @@ _APPLIANCE_PROFILE_LABELS = {
     ApplianceProfile.HVAC_COMPRESSOR.value: "HVAC Compressor",
     ApplianceProfile.HVAC_BLOWER.value: "HVAC Blower",
     ApplianceProfile.EV_CHARGER.value: "EV Charger",
+    ApplianceProfile.THREE_D_PRINTER.value: "3D Printer",
     ApplianceProfile.MAINS_NILM.value: "Mains NILM",
 }
 _ASSIGNMENT_MODE_OPTIONS = {
@@ -1937,6 +1940,7 @@ def _water_context_fields(
         ApplianceProfile.WELL_PUMP.value,
         ApplianceProfile.WATER_HEATER.value,
         ApplianceProfile.WASHER.value,
+        ApplianceProfile.DISHWASHER.value,
     }
     fields: dict[Any, Any] = {
         vol.Optional(
@@ -1972,6 +1976,7 @@ def _water_context_fields(
         ApplianceProfile.WELL_PUMP.value,
         ApplianceProfile.WATER_HEATER.value,
         ApplianceProfile.WASHER.value,
+        ApplianceProfile.DISHWASHER.value,
     }:
         fields.update(
             {
@@ -2188,6 +2193,7 @@ def _advanced_show_water_context_settings(context: Mapping[str, str]) -> bool:
         ApplianceProfile.WELL_PUMP.value,
         ApplianceProfile.WATER_HEATER.value,
         ApplianceProfile.WASHER.value,
+        ApplianceProfile.DISHWASHER.value,
     }
 
 
@@ -3380,6 +3386,20 @@ def _suggest_assignment_profile_mode(
             profile,
             entity_id_list,
         )
+    if any(token in text for token in ("_dishwasher_", "_dish_washer_")):
+        return (
+            ApplianceProfile.DISHWASHER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        )
+    if any(
+        token in text for token in ("_3d_printer_", "_3dprinter_", "_3_d_printer_")
+    ):
+        return (
+            ApplianceProfile.THREE_D_PRINTER.value,
+            CircuitMode.SINGLE_PHASE.value,
+        )
+    if "_gas_dryer_" in text:
+        return ApplianceProfile.DRYER.value, CircuitMode.SINGLE_PHASE.value
     for token, profile, _mode in (
         (
             "_fridge_",
@@ -3431,11 +3451,6 @@ def _suggest_assignment_profile_mode(
         ),
         (
             "_electric_dryer_",
-            ApplianceProfile.DRYER.value,
-            CircuitMode.DUAL_PHASE.value,
-        ),
-        (
-            "_gas_dryer_",
             ApplianceProfile.DRYER.value,
             CircuitMode.DUAL_PHASE.value,
         ),

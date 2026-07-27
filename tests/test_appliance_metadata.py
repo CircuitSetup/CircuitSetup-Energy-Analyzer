@@ -36,6 +36,11 @@ def test_area_suggestion_uses_default_when_no_existing_area_matches() -> None:
     """Unknown or absent HA areas should fall back to the profile's best default."""
     assert suggested_area_for_profile(ApplianceProfile.WASHER, []) == "Laundry"
     assert suggested_area_for_profile(ApplianceProfile.REFRIGERATOR, []) == "Kitchen"
+    assert suggested_area_for_profile(ApplianceProfile.DISHWASHER, []) == "Kitchen"
+    assert (
+        suggested_area_for_profile(ApplianceProfile.THREE_D_PRINTER, [])
+        == "Workshop"
+    )
     assert suggested_area_for_profile(ApplianceProfile.MIXED, []) is None
 
 
@@ -44,4 +49,9 @@ def test_appliance_icons_are_profile_specific() -> None:
     assert appliance_icon_for_profile(ApplianceProfile.WASHER) == "mdi:washing-machine"
     assert appliance_icon_for_profile(ApplianceProfile.DRYER) == "mdi:tumble-dryer"
     assert appliance_icon_for_profile(ApplianceProfile.EV_CHARGER) == "mdi:ev-station"
+    assert appliance_icon_for_profile(ApplianceProfile.DISHWASHER) == "mdi:dishwasher"
+    assert (
+        appliance_icon_for_profile(ApplianceProfile.THREE_D_PRINTER)
+        == "mdi:printer-3d"
+    )
     assert appliance_icon_for_profile(ApplianceProfile.MIXED) is None

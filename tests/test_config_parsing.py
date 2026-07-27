@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
@@ -163,3 +165,57 @@ def test_config_parser_coerces_raw_solar_inverter_to_dual_phase() -> None:
     )
 
     assert configs[0].mode is CircuitMode.DUAL_PHASE
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "expected_profile"),
+    [
+        ("sensor.kitchen_dishwasher_active_power", ApplianceProfile.DISHWASHER),
+        ("sensor.kitchen_dish_washer_active_power", ApplianceProfile.DISHWASHER),
+        (
+            "sensor.workshop_3d_printer_active_power",
+            ApplianceProfile.THREE_D_PRINTER,
+        ),
+        (
+            "sensor.workshop_3dprinter_active_power",
+            ApplianceProfile.THREE_D_PRINTER,
+        ),
+        (
+            "sensor.workshop_3_d_printer_active_power",
+            ApplianceProfile.THREE_D_PRINTER,
+        ),
+    ],
+)
+def test_config_parser_infers_new_appliance_profiles(
+    entity_id: str,
+    expected_profile: ApplianceProfile,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    config = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: [entity_id]})[0]
+
+    assert config.appliance_profile is expected_profile
+    assert config.mode is CircuitMode.SINGLE_PHASE
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "expected_mode"),
+    [
+        ("sensor.laundry_gas_dryer_active_power", CircuitMode.SINGLE_PHASE),
+        ("sensor.laundry_electric_dryer_active_power", CircuitMode.DUAL_PHASE),
+    ],
+)
+def test_config_parser_distinguishes_dryer_topology(
+    entity_id: str,
+    expected_mode: CircuitMode,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    config = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: [entity_id]})[0]
+
+    assert config.appliance_profile is ApplianceProfile.DRYER
+    assert config.mode is expected_mode

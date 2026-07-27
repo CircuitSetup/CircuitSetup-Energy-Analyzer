@@ -146,6 +146,22 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         }),
         minimum_cycles=8,
     ),
+    ApplianceProfile.DISHWASHER: ProfileDefinition(
+        appliance_profile=ApplianceProfile.DISHWASHER,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=_BASIC_POWER_ROLES,
+        recommended_roles=_POWER_CONTEXT,
+        features=frozenset({"wash_cycle"}),
+        minimum_cycles=8,
+    ),
+    ApplianceProfile.THREE_D_PRINTER: ProfileDefinition(
+        appliance_profile=ApplianceProfile.THREE_D_PRINTER,
+        supported_modes=_SINGLE_PHASE_POWER,
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=_POWER_CONTEXT | frozenset({SensorRole.CURRENT}),
+        features=frozenset({"print_session"}),
+        minimum_cycles=5,
+    ),
     ApplianceProfile.WASHER: ProfileDefinition(
         appliance_profile=ApplianceProfile.WASHER,
         supported_modes=_SINGLE_PHASE_POWER,
@@ -181,7 +197,10 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
     ),
     ApplianceProfile.WATER_PUMP: ProfileDefinition(
         appliance_profile=ApplianceProfile.WATER_PUMP,
-        supported_modes=_SINGLE_PHASE_POWER,
+        supported_modes=frozenset({
+            CircuitMode.SINGLE_PHASE,
+            CircuitMode.DUAL_PHASE,
+        }),
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
         features=_MOTOR_FEATURES | frozenset({"pressure_cycle_hint"}),
@@ -189,7 +208,10 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
     ),
     ApplianceProfile.WELL_PUMP: ProfileDefinition(
         appliance_profile=ApplianceProfile.WELL_PUMP,
-        supported_modes=_SINGLE_PHASE_POWER,
+        supported_modes=frozenset({
+            CircuitMode.SINGLE_PHASE,
+            CircuitMode.DUAL_PHASE,
+        }),
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
         features=_MOTOR_FEATURES | frozenset({"pressure_cycle_hint"}),
@@ -197,7 +219,10 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
     ),
     ApplianceProfile.SUMP_PUMP: ProfileDefinition(
         appliance_profile=ApplianceProfile.SUMP_PUMP,
-        supported_modes=_SINGLE_PHASE_POWER,
+        supported_modes=frozenset({
+            CircuitMode.SINGLE_PHASE,
+            CircuitMode.DUAL_PHASE,
+        }),
         required_roles=_BASIC_POWER_ROLES,
         recommended_roles=_POWER_CONTEXT,
         features=_MOTOR_FEATURES | frozenset({"storm_frequency_hint"}),

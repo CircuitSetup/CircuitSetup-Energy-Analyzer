@@ -274,6 +274,8 @@ Supported profile values include:
 | `water_heater` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `oven` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `microwave` | Single phase | Load |
+| `dishwasher` | Single phase | Load |
+| `3d_printer` | Single phase | Load |
 | `washer` | Single phase | Load |
 | `dryer` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `pool_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
@@ -287,7 +289,7 @@ Supported profile values include:
 | `resistive_load` | Single phase | Load |
 | `mixed` | Mixed | Load |
 
-Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
+Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. `3d_printer` targets consumer FDM printers. Automatic source parsing treats explicit `gas_dryer` names as single phase and explicit `electric_dryer` names as dual phase. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
 
 ## Summary-First Diagnostics
 
@@ -599,7 +601,7 @@ The analyzer can report weather-explained pump activity, possible excess pump ac
 
 ### Water-flow correlation
 
-Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, and `washer` circuits when at least one global or circuit-linked binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
+Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, `washer`, and `dishwasher` circuits when at least one global or circuit-linked binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
 
 The analyzer compares how long the water-flow sensor has been active with recent mapped appliance runtime. It can report:
 

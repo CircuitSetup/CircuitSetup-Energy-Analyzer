@@ -71,6 +71,18 @@ def test_recommended_v1_appliance_profiles_have_distinct_analysis_contexts() -> 
     assert "large_persistent_change" in electric_heat.features
 
     assert water_pump.appliance_profile is ApplianceProfile.WATER_PUMP
+    assert water_pump.supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
+    assert get_profile_definition(ApplianceProfile.WELL_PUMP).supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
+    assert sump_pump.supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
     assert "pressure_cycle_hint" in water_pump.features
     assert "schedule_adherence" in pool_pump.features
     assert "storm_frequency_hint" in sump_pump.features
@@ -108,6 +120,42 @@ def test_microwave_profile_supports_short_single_phase_cycles() -> None:
     assert "cook_cycle" in definition.features
     assert "short_cycle" in definition.features
     assert definition.minimum_cycles >= 8
+
+
+def test_dishwasher_profile_models_a_water_using_cycle() -> None:
+    definition = get_profile_definition(ApplianceProfile.DISHWASHER)
+
+    assert definition.supported_modes == {CircuitMode.SINGLE_PHASE}
+    assert definition.required_roles == {
+        SensorRole.REAL_POWER,
+        SensorRole.CURRENT,
+    }
+    assert definition.recommended_roles == {
+        SensorRole.VOLTAGE,
+        SensorRole.REACTIVE_POWER,
+        SensorRole.APPARENT_POWER,
+        SensorRole.POWER_FACTOR,
+        SensorRole.ENERGY,
+    }
+    assert definition.features == {"wash_cycle"}
+    assert definition.minimum_cycles == 8
+
+
+def test_3d_printer_profile_models_a_consumer_fdm_session() -> None:
+    definition = get_profile_definition(ApplianceProfile.THREE_D_PRINTER)
+
+    assert definition.supported_modes == {CircuitMode.SINGLE_PHASE}
+    assert definition.required_roles == {SensorRole.REAL_POWER}
+    assert definition.recommended_roles == {
+        SensorRole.CURRENT,
+        SensorRole.VOLTAGE,
+        SensorRole.REACTIVE_POWER,
+        SensorRole.APPARENT_POWER,
+        SensorRole.POWER_FACTOR,
+        SensorRole.ENERGY,
+    }
+    assert definition.features == {"print_session"}
+    assert definition.minimum_cycles == 5
 
 
 def test_ev_charger_profile_supports_car_charger_analysis_context() -> None:
