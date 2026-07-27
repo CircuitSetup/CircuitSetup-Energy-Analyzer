@@ -97,6 +97,10 @@ def test_resolve_operating_detection_profiles_are_valid() -> None:
             ApplianceProfile.THREE_D_PRINTER,
             (35.0, 20.0, 10.0, 90.0, 180.0, 600.0),
         ),
+        (
+            ApplianceProfile.MINI_SPLIT,
+            (100.0, 40.0, 30.0, 180.0, 300.0, 600.0),
+        ),
     ],
 )
 def test_signature_specific_operating_defaults(

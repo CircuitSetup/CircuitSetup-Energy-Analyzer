@@ -40,6 +40,10 @@ APPLIANCE_METADATA: dict[ApplianceProfile, ApplianceMetadata] = {
         icon="mdi:fan",
         area_candidates=("Outside", "HVAC", "Exterior", "Side Yard", "Backyard"),
     ),
+    ApplianceProfile.MINI_SPLIT: ApplianceMetadata(
+        icon="mdi:heat-pump",
+        area_candidates=("HVAC", "Outside", "Living Room", "Bedroom", "Garage"),
+    ),
     ApplianceProfile.HVAC_BLOWER: ApplianceMetadata(
         icon="mdi:fan",
         area_candidates=(

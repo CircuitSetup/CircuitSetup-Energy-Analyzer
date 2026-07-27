@@ -158,6 +158,26 @@ def test_3d_printer_profile_models_a_consumer_fdm_session() -> None:
     assert definition.minimum_cycles == 5
 
 
+def test_mini_split_profile_models_an_inverter_heat_pump() -> None:
+    definition = get_profile_definition(ApplianceProfile.MINI_SPLIT)
+
+    assert definition.supported_modes == {
+        CircuitMode.SINGLE_PHASE,
+        CircuitMode.DUAL_PHASE,
+    }
+    assert definition.required_roles == {SensorRole.REAL_POWER}
+    assert definition.recommended_roles == {
+        SensorRole.CURRENT,
+        SensorRole.VOLTAGE,
+        SensorRole.REACTIVE_POWER,
+        SensorRole.APPARENT_POWER,
+        SensorRole.POWER_FACTOR,
+        SensorRole.ENERGY,
+    }
+    assert definition.features == {"inverter_cycle"}
+    assert definition.minimum_cycles == 12
+
+
 def test_ev_charger_profile_supports_car_charger_analysis_context() -> None:
     definition = get_profile_definition(ApplianceProfile.EV_CHARGER)
 

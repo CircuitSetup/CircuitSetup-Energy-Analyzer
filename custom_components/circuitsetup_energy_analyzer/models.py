@@ -16,6 +16,7 @@ class ApplianceProfile(StrEnum):
     HVAC = "hvac"
     HVAC_SYSTEM = "hvac"
     HVAC_COMPRESSOR = "hvac_compressor"
+    MINI_SPLIT = "mini_split"
     HVAC_BLOWER = "hvac_blower"
     ELECTRIC_HEAT = "electric_heat"
     WATER_HEATER = "water_heater"

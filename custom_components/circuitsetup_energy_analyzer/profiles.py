@@ -94,6 +94,14 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
         | frozenset({"compressor_start", "leg_imbalance", "short_cycle"}),
         minimum_cycles=12,
     ),
+    ApplianceProfile.MINI_SPLIT: ProfileDefinition(
+        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        supported_modes=frozenset({CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE}),
+        required_roles=frozenset({SensorRole.REAL_POWER}),
+        recommended_roles=_POWER_CONTEXT | frozenset({SensorRole.CURRENT}),
+        features=frozenset({"inverter_cycle"}),
+        minimum_cycles=12,
+    ),
     ApplianceProfile.HVAC_BLOWER: ProfileDefinition(
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         supported_modes=_SINGLE_PHASE_POWER,
