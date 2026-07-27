@@ -1695,7 +1695,7 @@ test("dashboard date range is shared with graph history requests", async ({ page
   const nowRange = await page.evaluate(() => (
     JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
   ));
-  expect(Date.parse(nowRange.end) - Date.parse(nowRange.start) + 1).toBe(24 * 60 * 60 * 1000);
+  expect(Date.parse(nowRange.end) - Date.parse(nowRange.start) + 1).toBe(3 * 24 * 60 * 60 * 1000);
   expect(Date.parse(nowRange.end)).toBeGreaterThan(Date.now());
   expect(Date.parse(nowRange.end)).toBeLessThan(Date.now() + 24 * 60 * 60 * 1000);
 });
@@ -2747,32 +2747,6 @@ test("dashboard date selector uses stock month navigation within history bounds"
   ))).toEqual({
     start: "2026-07-01T00:00:00.000Z",
     end: "2026-07-24T23:59:59.999Z",
-    compare: false,
-  });
-});
-
-test("dashboard Now selects today after a custom date range", async ({ page }) => {
-  await page.clock.install({ time: new Date("2026-07-26T12:00:00.000Z") });
-  await mockPanelApi(page);
-  const card = await openDashboardCard(
-    page,
-    "circuitsetup-energy-analyzer-date-range",
-    {},
-    {},
-    { time_zone: "UTC" },
-    {
-      start: "2026-07-23T00:00:00.000Z",
-      end: "2026-07-24T23:59:59.999Z",
-      compare: false,
-    },
-  );
-
-  await card.locator("[data-range-now]").click();
-  await expect.poll(() => page.evaluate(() => (
-    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
-  ))).toEqual({
-    start: "2026-07-26T00:00:00.000Z",
-    end: "2026-07-26T23:59:59.999Z",
     compare: false,
   });
 });

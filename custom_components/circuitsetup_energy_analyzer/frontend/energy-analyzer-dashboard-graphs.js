@@ -993,7 +993,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         );
         return this._boundedPresetRange(startKey, this._shiftDateKey(startKey, 6), range.compare);
       }
-      return this._boundedPresetRange(todayKey, todayKey, range.compare);
+      const { days } = this._calendarRange(range);
+      return this._boundedPresetRange(
+        this._shiftDateKey(todayKey, 1 - days),
+        todayKey,
+        range.compare,
+      );
     }
 
     _stockRangeType(range) {
