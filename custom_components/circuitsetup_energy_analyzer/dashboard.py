@@ -2300,7 +2300,7 @@ def _entity_is_apparent_or_reactive_power(
 
 def _entity_is_real_power(hass: Any | None, entity_id: str) -> bool:
     unit, device_class = _entity_power_metadata(hass, entity_id)
-    return unit == "w" or device_class == "power"
+    return unit in {"mw", "w", "kw", "gw", "tw", "btu/h"} or device_class == "power"
 
 
 def _entity_power_metadata(

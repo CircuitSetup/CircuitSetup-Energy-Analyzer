@@ -608,6 +608,7 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
             SensorRef("sensor.mains_channel_a", SensorRole.REAL_POWER),
             SensorRef("sensor.mains_channel_b", SensorRole.REAL_POWER),
             SensorRef("sensor.main_panel_channel_1", SensorRole.REAL_POWER),
+            SensorRef("sensor.main_panel_channel_2", SensorRole.REAL_POWER),
         ),
     )
     states = {
@@ -617,11 +618,18 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
         ),
         "sensor.mains_channel_b": SimpleNamespace(
             state="0",
-            attributes={"friendly_name": "Mains Voltage Power"},
+            attributes={
+                "friendly_name": "Mains Voltage Power",
+                "unit_of_measurement": "W",
+            },
         ),
         "sensor.main_panel_channel_1": SimpleNamespace(
             state="0",
             attributes={"unit_of_measurement": "W"},
+        ),
+        "sensor.main_panel_channel_2": SimpleNamespace(
+            state="0",
+            attributes={"unit_of_measurement": "kW"},
         ),
     }
     dashboard = build_recommended_dashboard(
@@ -636,11 +644,13 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
     assert [row["entity"] for row in graph["entities"]] == [
         "sensor.mains_channel_a",
         "sensor.main_panel_channel_1",
+        "sensor.main_panel_channel_2",
     ]
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_channel_a",
         "sensor.mains_channel_b",
         "sensor.main_panel_channel_1",
+        "sensor.main_panel_channel_2",
     ]
 
 
