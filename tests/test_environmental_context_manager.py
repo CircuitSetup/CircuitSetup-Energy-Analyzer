@@ -136,3 +136,30 @@ def test_mini_split_weather_history_keeps_per_mode_runtime() -> None:
         duty_cycle_percent=50.0,
     )
     assert runtime == 40.0
+
+
+def test_mini_split_weather_history_keeps_zero_runtime_elapsed_time() -> None:
+    coordinator = SimpleNamespace(
+        store_data=SimpleNamespace(weather_context_history_by_circuit={}),
+        context_builder=SimpleNamespace(time_zone=lambda: None),
+        state=SimpleNamespace(run_cycle_count_by_circuit={"mini_split": 0}),
+    )
+    manager = EnvironmentalContextManager(coordinator)
+
+    for hour, temperature, runtime, duty, mode in (
+        (9, 45.0, 0.0, 0.0, "heating"),
+        (10, 45.0, 0.0, 0.0, "heating"),
+        (11, 80.0, 10.0, 1.0, "cooling"),
+    ):
+        manager.append_weather_context_history(
+            "mini_split",
+            datetime(2026, 1, 1, hour, tzinfo=UTC),
+            temperature=temperature,
+            runtime_minutes=runtime,
+            duty_cycle_percent=duty,
+            mode=mode,
+        )
+
+    history = coordinator.store_data.weather_context_history_by_circuit["mini_split"]
+    heating = next(sample for sample in history if sample["mode"] == "heating")
+    assert heating["_mode_elapsed_minutes"] == 60.0

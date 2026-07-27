@@ -962,15 +962,19 @@ def _weather_context_mode_metrics(
     runtime_minutes: float,
     duty_cycle_percent: float,
 ) -> tuple[float, float, float]:
-    other_samples = [
-        sample
+    same_day = [
+        (sample, sample_time)
         for sample in history
         if (
             (sample_time := _datetime_or_none(sample.get("timestamp"))) is not None
             and _ha_local_date(sample_time, time_zone)
             == _ha_local_date(now, time_zone)
-            and _weather_context_sample_mode(sample) != mode
         )
+    ]
+    other_samples = [
+        sample
+        for sample, _ in same_day
+        if _weather_context_sample_mode(sample) != mode
     ]
     mode_runtime = max(
         float(runtime_minutes)
@@ -980,15 +984,24 @@ def _weather_context_mode_metrics(
         ),
         0.0,
     )
-    total_elapsed = (
-        float(runtime_minutes) * 100.0 / duty_cycle_percent
-        if duty_cycle_percent > 0.0
-        else 0.0
+    existing = next(
+        (
+            sample
+            for sample, _ in same_day
+            if _weather_context_sample_mode(sample) == mode
+        ),
+        None,
     )
-    mode_elapsed = max(
-        total_elapsed
-        - sum(_weather_context_sample_elapsed(sample) for sample in other_samples),
-        0.0,
+    latest_time = max(
+        (sample_time for _, sample_time in same_day),
+        default=None,
+    )
+    mode_elapsed = (
+        _weather_context_sample_elapsed(existing) if existing is not None else 0.0
+    ) + (
+        max((now - latest_time).total_seconds() / 60.0, 0.0)
+        if latest_time is not None
+        else 0.0
     )
     mode_duty = (
         mode_runtime * 100.0 / mode_elapsed
