@@ -129,10 +129,28 @@ class EnvironmentalContextManager:
                 else None
             ),
         )
+        weather_runtime_minutes = runtime_minutes
+        weather_duty_cycle_percent = duty_cycle_percent
+        if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+            (
+                weather_runtime_minutes,
+                weather_duty_cycle_percent,
+                _,
+            ) = _weather_context_mode_metrics(
+                coordinator.store_data.weather_context_history_by_circuit.get(
+                    circuit_id,
+                    [],
+                ),
+                now,
+                coordinator.context_builder.time_zone(),
+                mode=weather_mode,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
+            )
         evidence = evaluate_weather_context(
             outdoor_temperature=outdoor_temperature,
-            current_runtime_minutes=runtime_minutes,
-            current_duty_cycle_percent=duty_cycle_percent,
+            current_runtime_minutes=weather_runtime_minutes,
+            current_duty_cycle_percent=weather_duty_cycle_percent,
             history=history,
             mode=weather_mode,
             display_temperature=(
@@ -815,37 +833,13 @@ class EnvironmentalContextManager:
                 ),
                 None,
             )
-            current_runtime = float(runtime_minutes)
-            other_samples = [
-                item
-                for item in same_day
-                if _weather_context_sample_mode(item) != mode
-            ]
-            mode_runtime = max(
-                current_runtime
-                - sum(
-                    _float_or_none(item.get("runtime_minutes")) or 0.0
-                    for item in other_samples
-                ),
-                0.0,
-            )
-            total_elapsed = (
-                current_runtime * 100.0 / duty_cycle_percent
-                if duty_cycle_percent > 0.0
-                else 0.0
-            )
-            mode_elapsed = max(
-                total_elapsed
-                - sum(
-                    _weather_context_sample_elapsed(item)
-                    for item in other_samples
-                ),
-                0.0,
-            )
-            mode_duty = (
-                mode_runtime * 100.0 / mode_elapsed
-                if mode_elapsed > 0.0
-                else float(duty_cycle_percent)
+            mode_runtime, mode_duty, mode_elapsed = _weather_context_mode_metrics(
+                history,
+                now,
+                time_zone,
+                mode=mode,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
             )
             sample = {
                 "timestamp": now.isoformat(),
@@ -957,6 +951,51 @@ def _weather_context_sample_elapsed(sample: Mapping[str, Any]) -> float:
     runtime = _float_or_none(sample.get("runtime_minutes")) or 0.0
     duty = _float_or_none(sample.get("duty_cycle_percent")) or 0.0
     return runtime * 100.0 / duty if duty > 0.0 else 0.0
+
+
+def _weather_context_mode_metrics(
+    history: Iterable[Mapping[str, Any]],
+    now: datetime,
+    time_zone: str | None,
+    *,
+    mode: str,
+    runtime_minutes: float,
+    duty_cycle_percent: float,
+) -> tuple[float, float, float]:
+    other_samples = [
+        sample
+        for sample in history
+        if (
+            (sample_time := _datetime_or_none(sample.get("timestamp"))) is not None
+            and _ha_local_date(sample_time, time_zone)
+            == _ha_local_date(now, time_zone)
+            and _weather_context_sample_mode(sample) != mode
+        )
+    ]
+    mode_runtime = max(
+        float(runtime_minutes)
+        - sum(
+            _float_or_none(sample.get("runtime_minutes")) or 0.0
+            for sample in other_samples
+        ),
+        0.0,
+    )
+    total_elapsed = (
+        float(runtime_minutes) * 100.0 / duty_cycle_percent
+        if duty_cycle_percent > 0.0
+        else 0.0
+    )
+    mode_elapsed = max(
+        total_elapsed
+        - sum(_weather_context_sample_elapsed(sample) for sample in other_samples),
+        0.0,
+    )
+    mode_duty = (
+        mode_runtime * 100.0 / mode_elapsed
+        if mode_elapsed > 0.0
+        else float(duty_cycle_percent)
+    )
+    return mode_runtime, mode_duty, mode_elapsed
 
 
 def _float_or_none(value: Any) -> float | None:

@@ -127,3 +127,12 @@ def test_mini_split_weather_history_keeps_per_mode_runtime() -> None:
         ("cooling", 15.0),
         ("heating", 40.0),
     ]
+    runtime, _, _ = environmental_context._weather_context_mode_metrics(
+        history,
+        datetime(2026, 1, 1, 11, tzinfo=UTC),
+        None,
+        mode="heating",
+        runtime_minutes=55.0,
+        duty_cycle_percent=50.0,
+    )
+    assert runtime == 40.0

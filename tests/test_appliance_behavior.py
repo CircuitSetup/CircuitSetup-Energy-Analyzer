@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -503,11 +505,18 @@ def test_unavailable_cost_is_not_presented_as_valid() -> None:
     }
 
 
-def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() -> None:
-    config = _config("hvac", ApplianceProfile.HVAC)
+@pytest.mark.parametrize(
+    "profile",
+    (ApplianceProfile.HVAC, ApplianceProfile.MINI_SPLIT),
+)
+def test_weather_aware_long_runtime_uses_weather_context(
+    profile: ApplianceProfile,
+) -> None:
+    circuit_id = profile.value
+    config = _config(circuit_id, profile)
     store_data = FeatureStoreData(
         baselines={
-            "hvac:runtime_today_seconds": _baseline(
+            f"{circuit_id}:runtime_today_seconds": _baseline(
                 "runtime_today_seconds",
                 18_000.0,
                 14_400.0,
@@ -516,17 +525,17 @@ def test_hvac_long_runtime_is_expected_on_hot_weather_and_watch_on_mild_day() ->
         }
     )
     hot = AnalyzerState()
-    hot.run_cycle_runtime_seconds_by_circuit["hvac"] = 25_200.0
-    hot.run_cycle_evidence_by_circuit["hvac"] = {
+    hot.run_cycle_runtime_seconds_by_circuit[circuit_id] = 25_200.0
+    hot.run_cycle_evidence_by_circuit[circuit_id] = {
         "runtime_today_contextual_expected_range_seconds": [14_400.0, 21_600.0],
         "runtime_today_contextual_baseline_median_seconds": 18_000.0,
         "runtime_today_contextual_baseline_confidence": 0.9,
     }
-    hot.weather_context_by_circuit["hvac"] = {"status": "weather_correlated"}
+    hot.weather_context_by_circuit[circuit_id] = {"status": "weather_correlated"}
     mild = AnalyzerState()
-    mild.run_cycle_runtime_seconds_by_circuit["hvac"] = 25_200.0
-    mild.run_cycle_evidence_by_circuit["hvac"] = dict(
-        hot.run_cycle_evidence_by_circuit["hvac"]
+    mild.run_cycle_runtime_seconds_by_circuit[circuit_id] = 25_200.0
+    mild.run_cycle_evidence_by_circuit[circuit_id] = dict(
+        hot.run_cycle_evidence_by_circuit[circuit_id]
     )
 
     hot_expectation = _detail(config, hot, store_data)["expectations"][0]

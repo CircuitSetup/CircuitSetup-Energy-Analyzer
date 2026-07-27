@@ -270,6 +270,25 @@ def test_weather_context_is_presented_as_context_not_precise_causality(
     assert explanation.usage_event_contribution_percent is None
 
 
+def test_mini_split_recipe_does_not_claim_weather_context() -> None:
+    explanation = appliance_insights.energy_change_explanation(
+        _detail(
+            appliance_profile="mini_split",
+            expectations=(
+                SimpleNamespace(
+                    expectation_id="mini_split:operation_check",
+                    title="Mini-Split operation check",
+                    observed="Runtime is above normal.",
+                    expected="Power should modulate with outdoor temperature.",
+                ),
+            ),
+        )
+    )
+
+    assert explanation is not None
+    assert "outdoor-temperature context" not in explanation.explanation.casefold()
+
+
 def _install_index_sources(
     monkeypatch: pytest.MonkeyPatch,
     *,
