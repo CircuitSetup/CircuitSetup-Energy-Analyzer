@@ -474,17 +474,19 @@ def _mains_chart_power_entities(
     *,
     hass: Any | None,
 ) -> tuple[str, ...]:
-    excluded = ("harmonic", "voltage", "frequency")
-    included = ("watts", "active power", "power")
+    excluded = ("voltage", "frequency")
+    included = ("watts", "active power")
     accepted = []
     for entity_id in entity_ids:
         label = _mains_chart_power_label(hass, entity_id)
+        if "harmonic" in label:
+            continue
+        if any(token in label for token in included):
+            accepted.append(entity_id)
+            continue
         if any(token in label for token in excluded):
             continue
-        if any(token in label for token in included) or _entity_is_real_power(
-            hass,
-            entity_id,
-        ):
+        if "power" in label or _entity_is_real_power(hass, entity_id):
             accepted.append(entity_id)
     return tuple(accepted)
 
