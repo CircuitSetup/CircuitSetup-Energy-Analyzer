@@ -1663,10 +1663,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeTotalsDateKey = "";
       this._rangeTotalsRolloverReloadKey = "";
       this._rangeTotalsReloadTimer = 0;
+      this._handleDashboardData = () => this._render();
+    }
+
+    connectedCallback() {
+      super.connectedCallback();
+      window.addEventListener(DATA_EVENT, this._handleDashboardData);
     }
 
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
+      window.removeEventListener(DATA_EVENT, this._handleDashboardData);
       super.disconnectedCallback();
     }
 
@@ -1710,6 +1717,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const averageCost = config.primary_mains && mains.average_cost_per_day_entity
         ? this._number(mains.average_cost_per_day_entity)
         : null;
+      const { days } = this._calendarRange();
+      const averageScale = days > 1 ? days : 1;
+      const ampsSeries = this._dashboardSeries("mains:current");
+      const ampsPoints = ampsSeries && ampsSeries.points || [];
+      const liveAmps = this._sum(mains.current_entities);
+      const totalAmps = this._rangeIncludesToday()
+        ? liveAmps
+        : ampsPoints.length ? ampsPoints[ampsPoints.length - 1].value : null;
+      const averageAmps = this._seriesAverage(ampsSeries) ?? totalAmps;
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -1742,9 +1758,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       `;
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
-          ${this._metricHtml(housePowerLabel, housePower, "W")}
-          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", averageEnergy)}
-          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", averageCost)}
+          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null) : ""}
+          ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null)}
+          ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
           ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
         </div>
@@ -1796,6 +1812,32 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _metricHtml(label, value, unit, average = null) {
       return `<div class="metric"><span>${this._escape(label)}</span><strong>${this._escape(this._formatValue(value, unit))}</strong>${Number.isFinite(average) ? `<small>${this._escape(this._label("average", "Average"))}: ${this._escape(this._formatValue(average, unit))}</small>` : ""}</div>`;
+    }
+
+    _dashboardSeries(seriesId) {
+      for (const series of dashboardSeries.values()) {
+        const match = series.find((item) => item.series_id === seriesId);
+        if (match) return match;
+      }
+      return null;
+    }
+
+    _seriesAverage(series) {
+      const points = series && series.points || [];
+      if (!points.length) return null;
+      const range = validRange(this._dashboardRange);
+      const rangeStart = Date.parse(range.start);
+      const rangeEnd = Date.parse(range.end);
+      let weightedTotal = 0;
+      let duration = 0;
+      for (let index = 0; index < points.length; index += 1) {
+        const start = Math.max(rangeStart, points[index].time);
+        const end = Math.min(rangeEnd, points[index + 1]?.time ?? rangeEnd);
+        if (end <= start || !Number.isFinite(points[index].value)) continue;
+        weightedTotal += points[index].value * (end - start);
+        duration += end - start;
+      }
+      return duration ? weightedTotal / duration : null;
     }
 
     _statusMetric(label, entityId) {
@@ -2269,6 +2311,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      if (this._calendarRange().days <= 1) {
+        this.style.display = "none";
+        this.shadowRoot.innerHTML = "";
+        this._publishDashboardSeries([]);
+        return;
+      }
+      this.style.display = "";
       this._insightsDateKey = this._chartDateKey(Date.now());
       if (!this._loadRequested) {
         this._loadRequested = true;

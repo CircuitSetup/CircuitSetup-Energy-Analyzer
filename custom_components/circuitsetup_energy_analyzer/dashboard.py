@@ -84,6 +84,7 @@ class DashboardCircuit:
     is_hvac: bool
     detail_path: str
     power_entities: tuple[str, ...]
+    current_entities: tuple[str, ...]
     entities: Mapping[str, str]
 
 
@@ -435,6 +436,11 @@ def _dashboard_circuit(
             "real_power",
             hass=hass,
         ),
+        current_entities=_source_entities_for_role(
+            circuit,
+            "current",
+            hass=hass,
+        ),
         entities=entities,
     )
 
@@ -487,8 +493,21 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
         ],
         "labels": dict(translation_section("dashboard", "live_cards")),
     }
-    power_rows = _appliance_power_rows(context)
     cards = []
+    mains_rows = _mains_power_current_rows(context.primary_mains)
+    if mains_rows:
+        cards.append(
+            {
+                "type": CONTEXT_GRAPH_CARD,
+                "title": _dashboard_text("cards", "mains_total_power_and_amps"),
+                "y_axis_label": (
+                    "W" if context.primary_mains.power_entities else "A"
+                ),
+                "entities": mains_rows,
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
+        )
+    power_rows = _appliance_power_rows(context)
     if power_rows:
         cards.append(
             {
@@ -506,6 +525,34 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
         icon=DASHBOARD_ICON,
         cards=cards,
     )
+
+
+def _mains_power_current_rows(
+    mains: DashboardCircuit | None,
+) -> list[dict[str, str]]:
+    if mains is None:
+        return []
+    current_axis = "right" if mains.power_entities else "left"
+    return [
+        *[
+            {
+                "entity": entity_id,
+                "name": _dashboard_text("live_cards", "mains_total_power"),
+                "series_id": "mains:power",
+                "axis": "left",
+            }
+            for entity_id in mains.power_entities
+        ],
+        *[
+            {
+                "entity": entity_id,
+                "name": _dashboard_text("live_cards", "total_amps"),
+                "series_id": "mains:current",
+                "axis": current_axis,
+            }
+            for entity_id in mains.current_entities
+        ],
+    ]
 
 
 def _appliance_power_rows(context: DashboardContext) -> list[dict[str, str]]:
@@ -827,6 +874,7 @@ def _dashboard_circuit_payload(
         "circuit_id": circuit.circuit_id,
         "name": circuit.name,
         "power_entities": list(circuit.power_entities),
+        "current_entities": list(circuit.current_entities),
         **_named_entities(circuit, {key: f"{key}_entity" for key in keys}),
     }
     if live_context is not None:
