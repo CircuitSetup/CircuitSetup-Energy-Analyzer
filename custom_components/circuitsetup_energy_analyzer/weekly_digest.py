@@ -26,6 +26,7 @@ class WeeklyApplianceDigest:
     week_end: date
     biggest_changes: tuple[DigestItem, ...]
     top_energy_users: tuple[DigestItem, ...]
+    observed_alerts: tuple[DigestItem, ...]
     unresolved_items: tuple[DigestItem, ...]
     nilm_review_items: tuple[DigestItem, ...]
     load_shift_opportunities: tuple[DigestItem, ...]
@@ -36,6 +37,7 @@ class WeeklyApplianceDigest:
             "week_end": self.week_end.isoformat(),
             "biggest_changes": [item.as_dict() for item in self.biggest_changes],
             "top_energy_users": [item.as_dict() for item in self.top_energy_users],
+            "observed_alerts": [item.as_dict() for item in self.observed_alerts],
             "unresolved_items": [item.as_dict() for item in self.unresolved_items],
             "nilm_review_items": [item.as_dict() for item in self.nilm_review_items],
             "load_shift_opportunities": [
@@ -83,6 +85,7 @@ def build_weekly_digest(
         top_energy_users=tuple(
             sorted(active, key=lambda item: item.energy_kwh, reverse=True)[:5]
         ),
+        observed_alerts=tuple(item for item in active if item.status == "observed")[:5],
         unresolved_items=tuple(item for item in active if item.status == "unresolved")[
             :5
         ],

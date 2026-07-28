@@ -295,12 +295,13 @@ class NotificationController:
                 ready.append(item)
             elif isinstance(item, dict):
                 pending.append(item)
-        alerts = [
-            alerts_by_id[alert_id]
+        alerts_by_ready_id = {
+            alert_id: alerts_by_id[alert_id]
             for item in ready
             if (alert_id := str(item.get("alert_id") or "")) in alerts_by_id
             and self.learning_allows_alert(alerts_by_id[alert_id])
-        ]
+        }
+        alerts = list(alerts_by_ready_id.values())
         if alerts:
             await notifications.async_create_daily_summary_notification(
                 self._coordinator.hass,
@@ -660,12 +661,11 @@ def _items_with_weekly_queue(
         if not appliance_key:
             continue
         category = str(queued.get("category") or "")
-        status = (
-            "nilm_review_needed" if category.startswith("nilm") else "unresolved"
-        )
+        status = "nilm_review_needed" if category.startswith("nilm") else "observed"
         item = by_key.get(appliance_key)
         if item is not None:
-            item["status"] = status
+            if str(item.get("status") or "normal") == "normal":
+                item["status"] = status
             continue
         item = {
             "appliance_key": appliance_key,

@@ -355,6 +355,56 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
     assert "Observed value (Demand monthly peak): 4100 W" in message
 
 
+@pytest.mark.asyncio
+async def test_daily_summary_describes_historical_observed_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    calls: list[dict[str, object]] = []
+
+    def fake_create(hass, message, *, title, notification_id):
+        calls.append(
+            {
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            }
+        )
+
+    homeassistant = ModuleType("homeassistant")
+    components = ModuleType("homeassistant.components")
+    persistent_notification = ModuleType(
+        "homeassistant.components.persistent_notification",
+    )
+    persistent_notification.async_create = fake_create
+    components.persistent_notification = persistent_notification
+    homeassistant.components = components
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.persistent_notification",
+        persistent_notification,
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 13, 12, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Dryer energy changed",
+        feature="daily_energy_spike",
+    )
+
+    await notifications.async_create_daily_summary_notification(
+        SimpleNamespace(),
+        [alert],
+        summary_date="2026-07-13",
+    )
+
+    assert calls[0]["title"] == "Daily Appliance Summary"
+    assert "Alerts observed on 2026-07-13." in str(calls[0]["message"])
+
+
 def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,
@@ -3891,10 +3941,10 @@ async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
+async def test_service_handlers_mutate_loaded_coordinator_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import coordinator
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         notification_id_for_alert,
     )
@@ -3909,6 +3959,9 @@ async def test_service_handlers_mutate_loaded_coordinator_state() -> None:
         SERVICE_RUN_MAPPING_CHECKS,
         async_setup_services,
     )
+
+    monkeypatch.setattr(coordinator, "async_track_point_in_time", None)
+    EnergyAnalyzerCoordinator = coordinator.EnergyAnalyzerCoordinator
 
     class FakeServices:
         def __init__(self) -> None:

@@ -890,7 +890,7 @@
       },
       "daily_summary": {
         "title": "Daily Appliance Summary",
-        "intro": "Appliance notifications queued for {summary_date}.",
+        "intro": "Alerts observed on {summary_date}.",
         "alert_item": "- {message}"
       }
     },

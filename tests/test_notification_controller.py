@@ -657,6 +657,23 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
         message="Runtime changed",
         feature="run_cycle_duration_s",
     )
+    active_alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 9, 12, tzinfo=UTC),
+        circuit_id="washer",
+        severity=Severity.WARNING,
+        message="Washer energy changed",
+        feature="daily_energy_spike",
+    )
+    completed_days = [
+        {
+            "date": (
+                datetime(2026, 6, 29, tzinfo=UTC) + timedelta(days=offset)
+            ).date().isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(14)
+    ]
     store_data = SimpleNamespace(
         settings_recommendation_notification_episode_key=(),
         appliance_notification_preferences={},
@@ -667,21 +684,23 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
                     "appliance_key": "circuit:dryer",
                     "category": "unusual_runtime",
                     "queued_at": "2026-07-08T12:00:00+00:00",
+                },
+                {
+                    "alert_id": notification_id_for_alert(active_alert),
+                    "appliance_key": "circuit:washer",
+                    "category": "unusual_energy",
+                    "queued_at": "2026-07-09T12:00:00+00:00",
                 }
             ]
         },
         weekly_digest_settings={"enabled": False, "delivery": "panel_only"},
         energy_usage_by_circuit={
-            "dryer": {
-                "days": [
-                    {"date": f"2026-07-{day:02d}", "usage_kwh": 1.0}
-                    for day in range(6, 13)
-                ]
-            }
+            "dryer": {"days": completed_days},
+            "washer": {"days": completed_days},
         },
         nilm_appliance_assignments_by_circuit={},
         nilm_session_history_by_circuit={},
-        alerts=[alert],
+        alerts=[alert, active_alert],
     )
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
@@ -691,11 +710,19 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
                 name="Dryer",
                 mode=SimpleNamespace(value="single_phase"),
             ),
+            SimpleNamespace(
+                circuit_id="washer",
+                name="Washer",
+                mode=SimpleNamespace(value="single_phase"),
+            ),
         ),
         state=SimpleNamespace(
-            active_alerts_by_circuit={},
-            learning_by_circuit={"dryer": False},
-            learning_progress_by_circuit={"dryer": {"alert_ready": True}},
+            active_alerts_by_circuit={"washer": [active_alert]},
+            learning_by_circuit={"dryer": False, "washer": False},
+            learning_progress_by_circuit={
+                "dryer": {"alert_ready": True},
+                "washer": {"alert_ready": True},
+            },
         ),
         store_data=store_data,
         store_persistence=SimpleNamespace(mark_dirty=lambda: None),
@@ -711,9 +738,13 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
     assert store_data.weekly_digest_settings["latest_report"]["week_start"] == (
         "2026-07-06"
     )
-    assert store_data.weekly_digest_settings["latest_report"]["unresolved_items"][
-        0
-    ]["appliance_key"] == "circuit:dryer"
+    report = store_data.weekly_digest_settings["latest_report"]
+    assert [item["appliance_key"] for item in report["observed_alerts"]] == [
+        "circuit:dryer"
+    ]
+    assert [item["appliance_key"] for item in report["unresolved_items"]] == [
+        "circuit:washer"
+    ]
     assert store_data.notification_delivery_state["weekly"] == []
 
 
@@ -869,6 +900,59 @@ async def test_daily_queue_waits_for_next_home_assistant_local_day(monkeypatch) 
 
     assert summaries == []
     assert store_data.notification_delivery_state["daily"]
+
+
+@pytest.mark.asyncio
+async def test_daily_queue_deduplicates_observed_alerts_by_id(monkeypatch) -> None:
+    created_summaries: list[list[AlertEvidence]] = []
+
+    async def create_summary(hass, alerts, *, summary_date) -> None:
+        del hass
+        assert summary_date == "2026-07-13"
+        created_summaries.append(list(alerts))
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_daily_summary_notification",
+        create_summary,
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 13, 12, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Dryer energy changed",
+        feature="daily_energy_spike",
+    )
+    alert_id = notification_id_for_alert(alert)
+    queued = {
+        "alert_id": alert_id,
+        "queued_at": "2026-07-13T12:00:00+00:00",
+    }
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        notification_delivery_state={"daily": [queued, dict(queued)]},
+        alerts=[alert],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_by_circuit={"dryer": False},
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+
+    await notification_controller.NotificationController(
+        coordinator
+    ).async_dispatch_due(datetime(2026, 7, 14, 1, tzinfo=UTC))
+
+    assert len(created_summaries) == 1
+    assert [alert.feature for alert in created_summaries[0]] == [
+        "daily_energy_spike"
+    ]
+    assert store_data.notification_delivery_state["daily"] == []
 
 
 @pytest.mark.asyncio
