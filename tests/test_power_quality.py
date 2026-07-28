@@ -341,30 +341,13 @@ def test_select_evidence_counts_reactive_family_once() -> None:
     assert evidence is None or evidence.feature not in RELATIONSHIP_EVIDENCE_FEATURES
 
 
-def test_select_evidence_still_allows_real_power_fallback() -> None:
+def test_select_evidence_ignores_real_power_only_change() -> None:
     scores = score_power_quality_features(
         {"real_power": 700.0},
         {"real_power": baseline("real_power", 500.0, 20.0)},
     )
 
     evidence = select_power_quality_evidence(config(), scores)
-
-    assert relationship_rms_score(scores) == 0.0
-    assert evidence is not None
-    assert evidence.feature == "real_power"
-
-
-def test_real_power_fallback_uses_active_threshold() -> None:
-    scores = score_power_quality_features(
-        {"real_power": 560.0},
-        {"real_power": baseline("real_power", 500.0, 20.0)},
-    )
-
-    evidence = select_power_quality_evidence(
-        config(),
-        scores,
-        min_relationship_score=3.0,
-    )
 
     assert relationship_rms_score(scores) == 0.0
     assert evidence is None
@@ -604,8 +587,7 @@ def test_select_evidence_ignores_raw_var_when_real_power_changed() -> None:
         scores,
     )
 
-    assert evidence is not None
-    assert evidence.feature != "resistive_load_became_reactive"
+    assert evidence is None
 
 
 def test_select_evidence_suppresses_proportional_motor_load_scaling() -> None:
@@ -634,8 +616,7 @@ def test_select_evidence_suppresses_proportional_motor_load_scaling() -> None:
         scores,
     )
 
-    assert evidence is not None
-    assert evidence.feature == "real_power"
+    assert evidence is None
 
 
 def test_select_evidence_suppresses_mixed_circuit_appliance_alerts() -> None:

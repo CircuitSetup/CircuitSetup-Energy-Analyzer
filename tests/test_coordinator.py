@@ -3345,7 +3345,7 @@ def test_coordinator_clears_store_advanced_settings_after_full_reset() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
+async def test_runtime_update_tracks_mature_real_power_without_alert(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -3438,11 +3438,10 @@ async def test_runtime_update_processes_states_and_notifies_mature_anomaly(
     assert "fridge" not in coordinator.state.last_event_by_circuit
     assert coordinator.state.operating_state_by_circuit["fridge"] == "running"
     assert coordinator.state.learning_by_circuit["fridge"] is False
-    assert coordinator.state.anomaly_score_by_circuit["fridge"] > 0.5
-    assert coordinator.state.active_alerts_by_circuit["fridge"]
-    assert notifications
-    assert notifications[0].message.startswith("Possible issue")
-    assert notification_kwargs[0].get("config").circuit_id == "fridge"
+    assert coordinator.state.anomaly_score_by_circuit.get("fridge", 0.0) == 0.0
+    assert coordinator.state.active_alerts_by_circuit.get("fridge", []) == []
+    assert notifications == []
+    assert notification_kwargs == []
 
 
 @pytest.mark.asyncio
@@ -11021,9 +11020,14 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
 
     class FakeStates:
         def get(self, entity_id: str):
+            value, unit = {
+                "sensor.fridge_power": ("100", "W"),
+                "sensor.fridge_var": ("22.1", "var"),
+                "sensor.fridge_va": ("109", "VA"),
+            }[entity_id]
             return SimpleNamespace(
-                state="110",
-                attributes={"unit_of_measurement": "W"},
+                state=value,
+                attributes={"unit_of_measurement": unit},
                 last_updated=now,
             )
 
@@ -11049,7 +11053,15 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
                             {
                                 "entity_id": "sensor.fridge_power",
                                 "role": "real_power",
-                            }
+                            },
+                            {
+                                "entity_id": "sensor.fridge_var",
+                                "role": "reactive_power",
+                            },
+                            {
+                                "entity_id": "sensor.fridge_va",
+                                "role": "apparent_power",
+                            },
                         ],
                     }
                 ],
@@ -11073,7 +11085,52 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
                         90.0,
                         110.0,
                         1.0,
-                    )
+                    ),
+                    "fridge:reactive_power": BaselineStats(
+                        "reactive_power",
+                        20,
+                        20.0,
+                        1.0,
+                        18.0,
+                        22.0,
+                        1.0,
+                    ),
+                    "fridge:apparent_power": BaselineStats(
+                        "apparent_power",
+                        20,
+                        102.0,
+                        1.0,
+                        100.0,
+                        104.0,
+                        1.0,
+                    ),
+                    "fridge:reactive_to_real_ratio": BaselineStats(
+                        "reactive_to_real_ratio",
+                        20,
+                        0.2,
+                        0.01,
+                        0.18,
+                        0.22,
+                        1.0,
+                    ),
+                    "fridge:apparent_to_real_ratio": BaselineStats(
+                        "apparent_to_real_ratio",
+                        20,
+                        1.02,
+                        0.01,
+                        1.0,
+                        1.04,
+                        1.0,
+                    ),
+                    "fridge:apparent_power_residual": BaselineStats(
+                        "apparent_power_residual",
+                        20,
+                        0.02,
+                        1.0,
+                        -1.0,
+                        1.0,
+                        1.0,
+                    ),
                 },
                 energy_usage_by_circuit=_completed_energy_learning_history(
                     "fridge", now
@@ -11090,7 +11147,7 @@ async def test_runtime_sensitivity_option_changes_alert_thresholds(
 
 
 @pytest.mark.asyncio
-async def test_runtime_real_power_fallback_waits_while_optional_metrics_learn(
+async def test_runtime_power_quality_waits_while_optional_metrics_learn(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -11276,7 +11333,7 @@ async def test_runtime_no_feature_sample_clears_power_quality_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_real_power_fallback_preserves_policy_window(
+async def test_runtime_real_power_state_change_does_not_create_alert(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -11284,7 +11341,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
     )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
-    holder = {"time": now, "power": 108.0}
+    holder = {"time": now, "power": 5.869}
     notifications: list[AlertEvidence] = []
 
     async def fake_notification(hass, alert, **kwargs) -> None:
@@ -11329,7 +11386,7 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
             ],
             baselines={
                 "fridge:real_power": BaselineStats(
-                    "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+                    "real_power", 20, 5.869, 0.1, 5.7, 6.0, 1.0
                 )
             },
             energy_usage_by_circuit=_completed_energy_learning_history("fridge", now),
@@ -11337,13 +11394,14 @@ async def test_runtime_real_power_fallback_preserves_policy_window(
         now_fn=lambda: holder["time"],
     )
 
-    for offset, power in enumerate((108.0, 110.0, 110.0)):
+    for offset, power in enumerate((5.869, 218.612, 5.869)):
         holder["time"] = now + timedelta(minutes=offset)
         holder["power"] = power
         await coordinator.async_process_update()
 
-    assert notifications
-    assert notifications[0].feature == "real_power"
+    assert notifications == []
+    assert coordinator.state.active_alerts_by_circuit.get("fridge", []) == []
+    assert coordinator.store_data.alerts == []
 
 
 @pytest.mark.asyncio
@@ -16510,7 +16568,7 @@ async def test_runtime_persists_cost_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runtime_mixed_circuit_suppresses_real_power_fallback_notification(
+async def test_runtime_mixed_circuit_suppresses_power_quality_notification(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
