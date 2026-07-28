@@ -169,6 +169,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
+        await self.evidence_actions.async_expire_maintenance_if_due(
+            self.current_time()
+        )
         entities = [
             str(entity_id)
             for entity_id in source_entities
@@ -235,6 +238,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
         """Evaluate local schedule boundaries without a source state change."""
+        await self.evidence_actions.async_expire_maintenance_if_due(now)
         alerts = await self._async_apply_expected_schedule_contexts(now)
         if alerts:
             process_events_into_state(self.state, (), alerts)

@@ -339,6 +339,28 @@ def test_alert_feedback_fingerprint_tolerates_small_high_scale_changes() -> None
     assert "metric=power_w" in alert_feedback_fingerprint(alert(1000.0))
 
 
+def test_alert_feedback_fingerprint_tolerates_small_zero_baseline_changes() -> None:
+    def alert(observed: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="pump",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="unexpected_runtime",
+            value_metric="runtime_minutes",
+            observed_value=observed,
+            baseline_value=0.0,
+            change_ratio=0.0,
+        )
+
+    assert alert_feedback_fingerprint(alert(100.0)) == (
+        alert_feedback_fingerprint(alert(101.0))
+    )
+    assert alert_feedback_fingerprint(alert(100.0)) != (
+        alert_feedback_fingerprint(alert(112.0))
+    )
+
+
 def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     config = CircuitConfig(
         circuit_id="fridge",

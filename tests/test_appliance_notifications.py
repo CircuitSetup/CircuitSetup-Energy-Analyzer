@@ -140,6 +140,8 @@ def test_nilm_alert_categories_remain_independent() -> None:
         ("billing_cycle_budget", "high_daily_energy"),
         ("utility_energy_mismatch", "data_quality_issue"),
         ("always_on_power", "high_daily_energy"),
+        ("activity_left_on", "unusual_runtime"),
+        ("activity_inactive_too_long", "unusual_runtime"),
         ("run_cycle_duration_s", "unusual_runtime"),
         ("breaker_capacity", "capacity_demand_issue"),
         ("future_feature", "other_issue"),

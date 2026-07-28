@@ -585,6 +585,50 @@ def test_event_processor_returns_events_after_dwell(
     assert third.store_dirty is True
 
 
+def test_event_processor_excludes_run_overlapping_completed_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CircuitEventProcessor()
+
+    processor.process(_sample(0, 5.0), config, context)
+    processor.process(_sample(10, 210.0), config, context)
+    started = processor.process(_sample(21, 210.0), config, context)
+    assert started.events[0].features["baseline_eligible"] is True
+
+    context.store_data.maintenance_by_circuit["fridge"] = {
+        "active": False,
+        "started_at": _sample(25, 210.0).timestamp.isoformat(),
+        "ended_at": _sample(35, 210.0).timestamp.isoformat(),
+    }
+    processor.process(_sample(40, 5.0), config, context)
+    stopped = processor.process(_sample(90, 5.0), config, context)
+
+    assert [event.event_type for event in stopped.events] == [EventType.STOP]
+    assert stopped.events[0].features["baseline_eligible"] is False
+
+
 def test_event_processor_uses_profile_thresholds_and_dwell() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (

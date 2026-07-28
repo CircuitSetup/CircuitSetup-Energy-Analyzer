@@ -22,6 +22,8 @@ NOTIFICATION_CATEGORIES = (
 )
 
 _NOTIFICATION_CATEGORY_BY_FEATURE = {
+    "activity_inactive_too_long": "unusual_runtime",
+    "activity_left_on": "unusual_runtime",
     "always_on_power": "high_daily_energy",
     "billing_cycle_budget": "high_daily_energy",
     "daily_energy_spike": "high_daily_energy",

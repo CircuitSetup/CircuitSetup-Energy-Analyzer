@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from math import floor
+from math import floor, log10
 from types import MappingProxyType
 from typing import Any, Self
 
@@ -241,7 +241,8 @@ def _alert_feedback_fingerprint(
         reference = (
             alert.baseline_value
             if alert.baseline_value != 0.0
-            else max(abs(alert.observed_value), 1.0)
+            else 10.0
+            ** floor(log10(max(abs(alert.observed_value), 1.0)) + 0.5)
         )
         observed_bucket = _relative_value_bucket(alert.observed_value, reference)
         baseline_bucket = _relative_value_bucket(alert.baseline_value, reference)

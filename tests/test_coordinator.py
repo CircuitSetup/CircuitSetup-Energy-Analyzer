@@ -11704,6 +11704,48 @@ async def test_timed_maintenance_expires_before_processing_context_is_built() ->
     coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["startup", "schedule_refresh"])
+async def test_timed_maintenance_expires_without_a_source_update(trigger: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            maintenance_by_circuit={
+                "fridge": {
+                    "active": True,
+                    "started_at": (now - timedelta(hours=2)).isoformat(),
+                    "expires_at": (now - timedelta(minutes=30)).isoformat(),
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    if trigger == "startup":
+        await coordinator.async_start(())
+    else:
+        await coordinator.async_refresh_expected_schedules(now)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+
+
 def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
