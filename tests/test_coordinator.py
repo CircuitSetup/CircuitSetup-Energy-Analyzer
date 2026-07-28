@@ -8252,17 +8252,14 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
         (
             "fridge",
             "unexpected_negative_real_power",
-            ("sensor.fridge_power", "sensor.fridge_current"),
+            ("sensor.fridge_power",),
             {
                 "circuit_name": "Fridge",
                 "reason": "A load circuit is reporting sustained negative real power.",
                 "recommended_action": (
                     "Check CT direction or power-flow mode for Fridge"
                 ),
-                "source_entities": [
-                    "sensor.fridge_power",
-                    "sensor.fridge_current",
-                ],
+                "source_entities": ["sensor.fridge_power"],
             },
         )
     ]
