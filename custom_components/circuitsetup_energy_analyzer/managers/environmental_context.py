@@ -997,7 +997,13 @@ def _weather_context_mode_metrics(
         default=None,
     )
     mode_elapsed = (
-        _weather_context_sample_elapsed(existing) if existing is not None else 0.0
+        _weather_context_sample_elapsed(existing)
+        if existing is not None
+        else (
+            float(runtime_minutes) * 100.0 / duty_cycle_percent
+            if not same_day and duty_cycle_percent > 0.0
+            else 0.0
+        )
     ) + (
         max((now - latest_time).total_seconds() / 60.0, 0.0)
         if latest_time is not None
