@@ -588,8 +588,10 @@ def _live_source_checklist(
         ),
         None,
     )
-    source_samples = getattr(coordinator, "source_samples", None)
-    sample_for_config = getattr(source_samples, "sample_for_config", None)
+    sample_for_config = getattr(coordinator, "_sample_for_config", None)
+    if not callable(sample_for_config):
+        source_samples = getattr(coordinator, "source_samples", None)
+        sample_for_config = getattr(source_samples, "sample_for_config", None)
     if config is None or not callable(sample_for_config):
         return None
     return data_quality_checklist(config, sample_for_config(config, now))

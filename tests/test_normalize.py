@@ -104,6 +104,65 @@ def test_build_circuit_sample_treats_stale_numeric_power_as_unavailable() -> Non
     assert "sensor.fridge_power stale" in sample.quality_issues
 
 
+def test_build_circuit_sample_suppresses_stale_current_only_while_inactive() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="dryer",
+        name="Dryer",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.DRYER,
+        sensors=(
+            SensorRef("sensor.dryer_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.dryer_current", SensorRole.CURRENT),
+            SensorRef("sensor.dryer_voltage", SensorRole.VOLTAGE),
+        ),
+    )
+    states = {
+        "sensor.dryer_power": SourceState(
+            "sensor.dryer_power",
+            "10",
+            "W",
+            now,
+        ),
+        "sensor.dryer_current": SourceState(
+            "sensor.dryer_current",
+            "0.001",
+            "A",
+            now - timedelta(minutes=30),
+        ),
+        "sensor.dryer_voltage": SourceState(
+            "sensor.dryer_voltage",
+            "240",
+            "V",
+            now - timedelta(minutes=30),
+        ),
+    }
+
+    inactive = build_circuit_sample(
+        config,
+        states,
+        now,
+        inactive_power_threshold_w=10.0,
+    )
+    states["sensor.dryer_power"] = SourceState(
+        "sensor.dryer_power",
+        "11",
+        "W",
+        now,
+    )
+    active = build_circuit_sample(
+        config,
+        states,
+        now,
+        inactive_power_threshold_w=10.0,
+    )
+
+    assert inactive.current is None
+    assert "sensor.dryer_current stale" not in inactive.quality_issues
+    assert "sensor.dryer_voltage stale" in inactive.quality_issues
+    assert "sensor.dryer_current stale" in active.quality_issues
+
+
 @pytest.mark.parametrize(
     ("role", "raw_state", "attribute"),
     (

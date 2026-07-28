@@ -784,6 +784,10 @@ The analyzer uses two different Home Assistant surfaces:
 
 Routine alert evidence, alert notifications, blueprint follow-up actions, suggested settings, and stale-source repair issues wait until that appliance or mains circuit finishes both its shared baseline and any active rolling energy-use baseline. Configuration and missing-source repairs remain immediate.
 
+An unchanged optional current source is not reported as stale while a fresh
+real-power source remains at or below that circuit's configured turn-off
+threshold. The warning returns when the load becomes active.
+
 When an alert appears:
 
 1. Read the notification and related summary entity first.

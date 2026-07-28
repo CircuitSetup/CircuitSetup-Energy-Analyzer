@@ -35,6 +35,7 @@ from .models import (
     SensorRole,
 )
 from .normalize import NormalizedCircuitSample, SourceState
+from .operating_detection import resolve_operating_detection_from_settings
 from .processors import (
     FeatureResult,
 )
@@ -1234,7 +1235,18 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         *,
         mains_context_sample: NormalizedCircuitSample | None = None,
     ) -> NormalizedCircuitSample:
-        sample = self.source_samples.sample_for_config(config, now)
+        off_threshold_w = resolve_operating_detection_from_settings(
+            config,
+            self.store_data.operating_detection_settings_by_circuit.get(
+                config.circuit_id,
+                {},
+            ),
+        ).profile.off_threshold_w
+        sample = self.source_samples.sample_for_config(
+            config,
+            now,
+            inactive_power_threshold_w=off_threshold_w,
+        )
         if config.mode is CircuitMode.MAINS_NILM:
             return sample
         mains_sample = mains_context_sample or self._mains_context_sample(now)
