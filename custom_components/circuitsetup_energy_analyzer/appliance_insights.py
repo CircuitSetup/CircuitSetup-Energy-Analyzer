@@ -15,6 +15,7 @@ from .appliance_detail import (
     appliance_detail_for_circuit,
 )
 from .attention import attention_items_for_coordinators
+from .const import DOMAIN
 from .models import CircuitMode
 from .nilm_virtual import nilm_virtual_appliance_states
 
@@ -432,12 +433,7 @@ def _source_path(coordinator: Any, detail: Any) -> str:
             "assignment_id": assignment_id,
         }
         return f"{PANEL_PATH}?{urlencode(query)}"
-    query = {
-        "config_entry": str(getattr(coordinator, "entry_id", "") or ""),
-        "options_step": "sources",
-        "circuit_id": str(getattr(detail, "circuit_id", "") or ""),
-    }
-    return f"/config/integrations/dashboard#{urlencode(query)}"
+    return f"/config/integrations/integration/{DOMAIN}"
 
 
 def _mapping_copy(value: Any) -> dict[str, Any]:

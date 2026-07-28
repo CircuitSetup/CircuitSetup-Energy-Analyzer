@@ -163,7 +163,9 @@ questions instead of raw diagnostic entity lists:
   **Needs Attention** view shows only actionable setup/data problems, direct
   appliance findings, and NILM validation work. Findings are ranked, limited
   to three per appliance, and semantically deduplicated so repeated energy
-  wording does not crowd out electrical or data-quality issues.
+  wording does not crowd out electrical or data-quality issues. Setup actions
+  open the integration options page because Home Assistant does not provide a
+  stable URL for an individual options-flow setting.
 - **Advanced setting suggestions** show current value, default value, suggested
   value with units, what the setting controls, why the suggestion exists,
   expected effect, and reset/apply/dismiss actions. **Review Evidence** opens a
@@ -180,8 +182,9 @@ questions instead of raw diagnostic entity lists:
   index. It lists direct-meter and NILM appliances together, defaults to
   needs-attention and running appliances first, and supports running,
   attention, NILM, learning, and data-problem filters plus energy/change
-  sorting. Appliance and source links open Appliance Detail, source setup, or
-  the matching NILM assignment without losing the stable appliance identity.
+  sorting. Appliance and source links open Appliance Detail, integration
+  options, or the matching NILM assignment without losing the stable appliance
+  identity.
 - **Why Energy Changed** conservatively separates same-time energy change into
   runtime, running-power, and cycle-count contributions when those baselines
   are available. Contributions stay bounded to the observed change; missing

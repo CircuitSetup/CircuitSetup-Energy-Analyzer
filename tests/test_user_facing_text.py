@@ -4430,12 +4430,8 @@ def test_appliance_detail_panel_renders_why_energy_changed() -> None:
 def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
     body = """
 const panel = new context.Panel();
-const basePath = "/config/integrations/dashboard#config_entry=entry-hvac";
-const escapedBasePath = basePath;
-const advancedPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
-const advancedHref = 'href="' + advancedPath + '"';
-const entityDetailHref = 'href="' + escapedBasePath
-  + "&amp;options_step=entity_detail" + '"';
+const integrationPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
+const integrationHref = 'href="' + integrationPath + '"';
 panel._setupHealthLoading = false;
 panel._setupHealthError = "";
 panel._setupHealth = {
@@ -4444,7 +4440,7 @@ panel._setupHealth = {
   state: "Configure breaker amps",
   next_step: "Configure breaker amps for HVAC",
   message: "Configure breaker amps for HVAC",
-  open_path: `${basePath}&options_step=sources`,
+  open_path: integrationPath,
   issue_count: 1,
   checklist_ready_count: 1,
   checklist_total_count: 3,
@@ -4456,7 +4452,7 @@ panel._setupHealth = {
       title: "Entity detail level selected",
       why_it_matters: "Choose how much setup detail Home Assistant should create.",
       fix: "Choose entity detail level",
-      open_path: `${basePath}&options_step=entity_detail`,
+      open_path: integrationPath,
     },
     {
       item_id: "learning_progress",
@@ -4473,7 +4469,7 @@ panel._setupHealth = {
       fix: "Configure breaker amps for HVAC",
       reason: "Capacity tracking needs the circuit breaker size.",
       affected_circuit_name: "HVAC",
-      open_path: advancedPath,
+      open_path: integrationPath,
     },
   ],
 };
@@ -4506,9 +4502,8 @@ for (const expected of [
   "Confirms Home Assistant is receiving live readings for each circuit.",
   "Entity detail level selected",
   "Capacity tracking needs the circuit breaker size.",
-  "Open setting",
-  advancedHref,
-  entityDetailHref,
+  "Open integration options",
+  integrationHref,
 ]) {
   if (!rendered.includes(expected)) {
     throw new Error(`missing setup health checklist content: ${expected}`);
@@ -4572,7 +4567,7 @@ def test_setup_health_user_text_lives_in_translations() -> None:
         "Keeps alert notifications linked to the evidence that caused them.",
         "Optional mains NILM can discover unknown loads from aggregate sensors.",
         "Recent history is needed before comparisons and alerts become reliable.",
-        "Open setting",
+        "Open integration options",
         "No setup checklist items are available yet.",
         "Setup Health is not available because the integration is not loaded.",
         "Reload the integration, then open Setup Health again.",
@@ -4904,7 +4899,7 @@ assert.equal(Object.prototype.hasOwnProperty.call(panel, "hass"), false);
     )
 
 
-def test_panel_opens_the_requested_options_flow_step() -> None:
+def test_panel_options_actions_use_supported_integration_page() -> None:
     _run_panel_node_script(
         r"""
 (async () => {
@@ -4913,13 +4908,7 @@ def test_panel_opens_the_requested_options_flow_step() -> None:
   panel._hass = {
     callApi: async (method, path, data) => {
       calls.push({ method, path, data });
-      if (path === "config/config_entries/options/flow") {
-        return { type: "menu", flow_id: "flow-1" };
-      }
-      if (data.next_step_id) {
-        return { type: "form", flow_id: "flow-1", step_id: "select_advanced_circuit" };
-      }
-      return { type: "form", flow_id: "flow-1", step_id: "advanced_settings" };
+      return {};
     },
   };
   let destination = "";
@@ -4930,12 +4919,8 @@ def test_panel_opens_the_requested_options_flow_step() -> None:
     options_step: "advanced_settings",
     path: "/config/integrations/integration/circuitsetup_energy_analyzer",
   });
-  assert.equal(JSON.stringify(calls), JSON.stringify([
-    { method: "POST", path: "config/config_entries/options/flow", data: { handler: "entry-1" } },
-    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { next_step_id: "advanced" } },
-    { method: "POST", path: "config/config_entries/options/flow/flow-1", data: { circuit_id: "fridge" } },
-  ]));
-  assert.equal(destination, "/config/integrations/config_flow/flow-1");
+  assert.equal(JSON.stringify(calls), "[]");
+  assert.equal(destination, "/config/integrations/integration/circuitsetup_energy_analyzer");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )

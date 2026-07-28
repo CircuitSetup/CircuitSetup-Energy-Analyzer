@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
-from urllib.parse import urlencode
 
 from ..const import (
     CONF_CIRCUITS,
@@ -20,7 +19,6 @@ from ..profiles import get_profile_definition
 from ..state import circuit_is_learning
 
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
-SETUP_HEALTH_OPTIONS_PATH = "/config/integrations/dashboard"
 
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
@@ -509,18 +507,10 @@ def _setup_health_options_path(
     *,
     circuit_id: Any | None = None,
 ) -> str | None:
+    del coordinator, circuit_id
     if not options_step:
         return None
-    entry_id = getattr(coordinator, "entry_id", None)
-    if not isinstance(entry_id, str) or not entry_id:
-        return None
-    params = {
-        "config_entry": entry_id,
-        "options_step": options_step,
-    }
-    if circuit_id:
-        params["circuit_id"] = str(circuit_id)
-    return f"{SETUP_HEALTH_OPTIONS_PATH}#{urlencode(params)}"
+    return SETUP_HEALTH_OPEN_PATH
 
 
 def _setup_health_config_value(coordinator: Any, key: str) -> Any:
