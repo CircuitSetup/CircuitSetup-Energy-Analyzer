@@ -317,6 +317,10 @@ async def async_create_weekly_digest_notification(
         return
     biggest = list(getattr(digest, "biggest_changes", ()))
     top_energy = list(getattr(digest, "top_energy_users", ()))
+    observed = list(getattr(digest, "observed_alerts", ()))
+    unresolved = list(getattr(digest, "unresolved_items", ()))
+    nilm_review = list(getattr(digest, "nilm_review_items", ()))
+    load_shift = list(getattr(digest, "load_shift_opportunities", ()))
     lines = [
         _notification_text_format(
             "weekly_digest",
@@ -353,6 +357,30 @@ async def async_create_weekly_digest_notification(
             or [_notification_text("weekly_digest", "no_energy_data")]
         ),
     ]
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "observed_alerts"),
+            observed,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "unresolved_items"),
+            unresolved,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "nilm_review"),
+            nilm_review,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "load_shift_opportunities"),
+            load_shift,
+        )
+    )
     try:
         create(
             hass,
@@ -362,6 +390,21 @@ async def async_create_weekly_digest_notification(
         )
     except (AttributeError, TypeError):
         return
+
+
+def _digest_section_lines(
+    title: str,
+    items: list[Any],
+    *,
+    limit: int = 5,
+) -> list[str]:
+    if not items:
+        return []
+    return [
+        "",
+        f"**{title}**",
+        *[f"- {item.display_name}" for item in items[:limit]],
+    ]
 
 
 async def async_create_daily_summary_notification(

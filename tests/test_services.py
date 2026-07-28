@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -403,6 +403,76 @@ async def test_daily_summary_describes_historical_observed_alerts(
 
     assert calls[0]["title"] == "Daily Appliance Summary"
     assert "Alerts observed on 2026-07-13." in str(calls[0]["message"])
+
+
+@pytest.mark.asyncio
+async def test_weekly_digest_notification_renders_every_non_empty_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import notifications
+
+    messages: list[str] = []
+
+    def fake_create(hass, message, *, title, notification_id):
+        del hass, title, notification_id
+        messages.append(str(message))
+
+    homeassistant = ModuleType("homeassistant")
+    components = ModuleType("homeassistant.components")
+    persistent_notification = ModuleType(
+        "homeassistant.components.persistent_notification",
+    )
+    persistent_notification.async_create = fake_create
+    components.persistent_notification = persistent_notification
+    homeassistant.components = components
+    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
+    monkeypatch.setitem(sys.modules, "homeassistant.components", components)
+    monkeypatch.setitem(
+        sys.modules,
+        "homeassistant.components.persistent_notification",
+        persistent_notification,
+    )
+    digest = SimpleNamespace(
+        week_start=date(2026, 7, 6),
+        week_end=date(2026, 7, 12),
+        biggest_changes=(
+            SimpleNamespace(display_name="Dryer", change_ratio=0.25),
+        ),
+        top_energy_users=(
+            SimpleNamespace(display_name="EV Charger", energy_kwh=42.0),
+        ),
+        observed_alerts=(SimpleNamespace(display_name="Dishwasher"),),
+        unresolved_items=(SimpleNamespace(display_name="Refrigerator"),),
+        nilm_review_items=(SimpleNamespace(display_name="Dehumidifier"),),
+        load_shift_opportunities=(SimpleNamespace(display_name="Water Heater"),),
+    )
+
+    await notifications.async_create_weekly_digest_notification(
+        SimpleNamespace(),
+        digest,
+    )
+
+    message = messages[0]
+    assert "**Observed alerts**" in message
+    assert "**Unresolved items**" in message
+    assert "**NILM review**" in message
+    assert "**Load-shifting opportunities**" in message
+    for display_name in (
+        "Dryer",
+        "EV Charger",
+        "Dishwasher",
+        "Refrigerator",
+        "Dehumidifier",
+        "Water Heater",
+    ):
+        assert message.count(display_name) == 1
+
+    digest.observed_alerts = ()
+    await notifications.async_create_weekly_digest_notification(
+        SimpleNamespace(),
+        digest,
+    )
+    assert "**Observed alerts**" not in messages[1]
 
 
 def test_alert_notification_message_keeps_safety_notice_near_capacity_alert() -> None:

@@ -585,15 +585,23 @@ class NotificationController:
         call = getattr(services, "async_call", None)
         if not callable(call):
             return
+        counts = [
+            (len(digest.biggest_changes), "meaningful changes"),
+            (len(digest.top_energy_users), "top energy users"),
+            (len(digest.observed_alerts), "observed alerts"),
+            (len(digest.unresolved_items), "unresolved items"),
+            (len(digest.nilm_review_items), "NILM review items"),
+            (len(digest.load_shift_opportunities), "load-shifting opportunities"),
+        ]
+        message = "; ".join(
+            f"{count} {label}" for count, label in counts if count
+        )
         await call(
             "notify",
             service.split(".", 1)[1],
             {
                 "title": "Weekly Appliance Digest",
-                "message": (
-                    f"{len(digest.biggest_changes)} meaningful changes and "
-                    f"{len(digest.unresolved_items)} unresolved items."
-                ),
+                "message": f"{message}." if message else "No digest items.",
             },
         )
 

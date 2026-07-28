@@ -956,6 +956,52 @@ async def test_daily_queue_deduplicates_observed_alerts_by_id(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_mobile_weekly_digest_reports_every_non_empty_section() -> None:
+    calls: list[tuple[str, str, dict[str, str]]] = []
+
+    class Services:
+        async def async_call(self, domain, service, data) -> None:
+            calls.append((domain, service, data))
+
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(services=Services()),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+        ),
+    )
+    digest = SimpleNamespace(
+        biggest_changes=(object(),),
+        top_energy_users=(object(),),
+        observed_alerts=(object(),),
+        unresolved_items=(object(),),
+        nilm_review_items=(object(),),
+        load_shift_opportunities=(object(),),
+    )
+
+    await notification_controller.NotificationController(
+        coordinator
+    )._async_send_mobile_digest(
+        digest,
+        {"notify_service": "notify.mobile_app_phone"},
+    )
+
+    assert calls == [
+        (
+            "notify",
+            "mobile_app_phone",
+            {
+                "title": "Weekly Appliance Digest",
+                "message": (
+                    "1 meaningful changes; 1 top energy users; 1 observed alerts; "
+                    "1 unresolved items; 1 NILM review items; "
+                    "1 load-shifting opportunities."
+                ),
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_due_skips_alert_history_when_queues_are_empty() -> None:
     class AlertHistory:
         def __iter__(self):

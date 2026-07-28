@@ -886,7 +886,11 @@
         "no_changes": "- No meaningful changes from learned normal.",
         "top_energy_users": "Top energy users",
         "energy_item": "- {display_name}: {energy_kwh} kWh",
-        "no_energy_data": "- No retained appliance energy data."
+        "no_energy_data": "- No retained appliance energy data.",
+        "observed_alerts": "Observed alerts",
+        "unresolved_items": "Unresolved items",
+        "nilm_review": "NILM review",
+        "load_shift_opportunities": "Load-shifting opportunities"
       },
       "daily_summary": {
         "title": "Daily Appliance Summary",
