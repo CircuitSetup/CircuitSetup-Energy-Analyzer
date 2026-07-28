@@ -2550,6 +2550,17 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
     now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
     coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
     calls = _record_source_scoped_update_work(coordinator)
+    untouched_alert = AlertEvidence(
+        timestamp=now_holder["value"],
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+        change_ratio=0.4,
+    )
+    coordinator.state.active_alerts_by_circuit = {"hvac": [untouched_alert]}
+    coordinator.state.anomaly_score_by_circuit = {"hvac": 0.4}
+    coordinator.store_data.alerts.append(untouched_alert)
 
     await coordinator.async_process_update(
         changed_entities=("sensor.fridge_power",),
@@ -2563,6 +2574,10 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
         "hvac": 1800.0,
         "well_pump": 700.0,
     }
+    assert coordinator.state.active_alerts_by_circuit == {
+        "hvac": [untouched_alert]
+    }
+    assert coordinator.state.anomaly_score_by_circuit["hvac"] == 0.4
 
 
 @pytest.mark.asyncio

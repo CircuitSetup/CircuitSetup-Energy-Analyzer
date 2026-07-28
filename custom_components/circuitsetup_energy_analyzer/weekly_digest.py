@@ -277,6 +277,55 @@ def digest_items_for_coordinator(
                         else "normal",
                     }
                 )
+    items_by_key = {item["appliance_key"]: item for item in items}
+    retained_alerts = getattr(store_data, "alerts", ())
+    for alert in (
+        retained_alerts[-100:] if isinstance(retained_alerts, list | tuple) else ()
+    ):
+        severity = getattr(alert, "severity", "")
+        if (
+            str(getattr(severity, "value", severity)) not in {"warning", "error"}
+            or getattr(alert, "feedback_status", None) == "expected"
+            or not _date_between(
+                getattr(alert, "timestamp", None),
+                week_start,
+                week_end,
+                time_zone,
+            )
+        ):
+            continue
+        circuit_id = str(getattr(alert, "circuit_id", "") or "")
+        if not circuit_id or circuit_is_learning(state, circuit_id):
+            continue
+        features = getattr(alert, "features", {})
+        appliance_key = str(
+            features.get("appliance_key") or f"circuit:{circuit_id}"
+        )
+        unresolved = alert in (
+            active_alerts.get(circuit_id, ())
+            if isinstance(active_alerts, Mapping)
+            else ()
+        )
+        status = "unresolved" if unresolved else "observed"
+        item = items_by_key.get(appliance_key)
+        if item is not None:
+            if status == "unresolved" or item.get("status") == "normal":
+                item["status"] = status
+            continue
+        item = {
+            "appliance_key": appliance_key,
+            "display_name": str(
+                features.get("display_name")
+                or appliance_key.split(":", 1)[-1].replace("_", " ").title()
+            ),
+            "energy_kwh": 0.0,
+            "normal_energy_kwh": 0.0,
+            "confidence": 1.0,
+            "status": status,
+            "comparable_energy": False,
+        }
+        items.append(item)
+        items_by_key[appliance_key] = item
     return items[:100]
 
 

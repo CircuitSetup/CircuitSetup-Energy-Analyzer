@@ -4,6 +4,10 @@ from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
+    Severity,
+)
 from custom_components.circuitsetup_energy_analyzer.weekly_digest import (
     build_weekly_digest,
     digest_idempotence_key,
@@ -207,6 +211,42 @@ def test_digest_direct_items_require_two_complete_eligible_weeks() -> None:
         now=now,
         time_zone=ZoneInfo("UTC"),
     ) == []
+
+
+def test_digest_observes_retained_alerts_from_the_completed_week() -> None:
+    now = datetime(2026, 7, 27, 12, tzinfo=UTC)
+    days = [
+        {
+            "date": (date(2026, 7, 13) + timedelta(days=offset)).isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(14)
+    ]
+    coordinator = _direct_digest_coordinator(days)
+    coordinator.store_data.alerts = [
+        AlertEvidence(
+            timestamp=datetime(2026, 7, 23, 12, tzinfo=UTC),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Dryer runtime changed.",
+            feature="run_cycle_duration_s",
+        )
+    ]
+
+    digest = build_weekly_digest(
+        digest_items_for_coordinator(
+            coordinator,
+            now=now,
+            time_zone=ZoneInfo("UTC"),
+        ),
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    )
+
+    assert [item.appliance_key for item in digest.observed_alerts] == [
+        "circuit:dryer"
+    ]
 
 
 def test_digest_honors_weather_and_water_flow_context_evidence() -> None:

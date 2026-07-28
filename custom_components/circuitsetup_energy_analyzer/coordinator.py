@@ -475,7 +475,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-        process_events_into_state(self.state, events, alerts)
+        process_events_into_state(
+            self.state,
+            events,
+            alerts,
+            evaluated_circuit_ids=processing_circuit_ids,
+        )
         events_by_circuit = _items_by_circuit(self.store_data.events)
         alerts_by_circuit = _items_by_circuit(self.store_data.alerts)
         for config, sample in samples:
@@ -511,7 +516,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(water_context_alert)
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
         if alerts:
-            process_events_into_state(self.state, events, alerts)
+            process_events_into_state(
+                self.state,
+                events,
+                alerts,
+                evaluated_circuit_ids=processing_circuit_ids,
+            )
         recommendation_refresh_due = self._settings_recommendation_refresh_due(
             now,
             changed_entities=changed_entities,
