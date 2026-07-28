@@ -32,12 +32,22 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         / "circuitsetup_energy_analyzer"
         / "energy_alert_notification.yaml"
     )
+    blueprint_data = load_yaml_dict(path)
     blueprint = Blueprint(
-        load_yaml_dict(path),
+        blueprint_data,
         path=str(path),
         expected_domain="automation",
         schema=AUTOMATION_BLUEPRINT_SCHEMA,
     )
+    blueprint_inputs = blueprint_data["blueprint"]["input"]
+    assert blueprint_inputs["persistent_notification"]["default"] is False
+    selectable_values = {
+        item["value"]
+        for item in blueprint_inputs["alert_states"]["selector"]["select"]["options"]
+    }
+    assert "maintenance" not in selectable_values
+    assert "stale" not in selectable_values
+    assert "needs_data" not in selectable_values
     inputs = BlueprintInputs(
         blueprint,
         {
@@ -120,6 +130,20 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     state.active_alerts_by_circuit["washer"] = [
         SimpleNamespace(feature="daily_energy_usage_spike")
     ]
+    state.maintenance_by_circuit["washer"] = {"active": True}
+    hass.states.async_set(
+        "sensor.washer_energy_summary",
+        energy_summary_value(state, "washer"),
+        energy_summary_attributes(state, "washer"),
+    )
+    await hass.async_block_till_done()
+
+    assert events == []
+    assert notifications == []
+
+    hass.states.async_set("sensor.washer_energy_summary", "Normal")
+    await hass.async_block_till_done()
+    state.maintenance_by_circuit.clear()
     hass.states.async_set(
         "sensor.washer_energy_summary",
         energy_summary_value(state, "washer"),
@@ -133,25 +157,8 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         "path": "/circuitsetup-energy-analyzer-evidence?circuit_id=washer",
         "state": "High Usage",
     }
-    assert len(notifications) == 1
-    assert notifications[0]["title"] == "CircuitSetup Energy Analyzer alert"
-    assert "Energy use is above a configured threshold or budget." in notifications[0][
-        "message"
-    ]
-    assert (
-        "[Open evidence graph]"
-        "(/circuitsetup-energy-analyzer-evidence?circuit_id=washer)"
-        in notifications[0]["message"]
-    )
-    assert notifications[0]["notification_id"] == (
-        "circuitsetup_energy_analyzer_blueprint_sensor_washer_energy_summary"
-    )
+    assert notifications == []
 
-    notification_updates = []
-    persistent_notification.async_register_callback(
-        hass,
-        lambda update_type, items: notification_updates.append((update_type, items)),
-    )
     state.active_alerts_by_circuit.clear()
     hass.states.async_set(
         "sensor.washer_energy_summary",
@@ -161,11 +168,6 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     await hass.async_block_till_done()
 
     assert hass.states.get("sensor.washer_energy_summary").state == "High Usage"
-    assert any(
-        update_type is persistent_notification.UpdateType.REMOVED
-        and notifications[0]["notification_id"] in items
-        for update_type, items in notification_updates
-    )
 
     hass.states.async_set("sensor.washer_health_summary", "Ready")
     await hass.async_block_till_done()
@@ -182,7 +184,7 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
     )
     await hass.async_block_till_done()
     assert len(events) == 1
-    assert len(notifications) == 1
+    assert notifications == []
 
     hass.states.async_set("sensor.washer_health_summary", "Ready")
     await hass.async_block_till_done()
@@ -210,4 +212,4 @@ async def test_notification_blueprint_runs_with_summary_sensor_attributes(
         "path": "/circuitsetup-energy-analyzer-evidence?circuit_id=washer",
         "state": "Possible Power Quality Change",
     }
-    assert len(notifications) == 2
+    assert notifications == []

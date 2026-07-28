@@ -1325,9 +1325,6 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         "possible_power_quality_change",
         "high_usage",
         "watch",
-        "needs_data",
-        "needs_energy_data",
-        "needs_metrics",
         "mixed_observation",
         "nilm_review",
     } <= options
@@ -1345,10 +1342,12 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         power_quality_alert_confirmed: bool = False,
         learning: bool | None = False,
         alert_confirmed: bool | None = True,
+        maintenance_active: bool = False,
         electrical_summary: str | None = None,
     ) -> bool:
         attributes = {
             "power_quality_alert_confirmed": power_quality_alert_confirmed,
+            "maintenance_active": maintenance_active,
         }
         if learning is not None:
             attributes["learning"] = learning
@@ -1386,6 +1385,11 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         alert_confirmed=False,
     )
     assert condition_matches("Possible issue", defaults, learning=False)
+    assert not condition_matches(
+        "Possible issue",
+        defaults,
+        maintenance_active=True,
+    )
     assert condition_matches("Possible issue: Cycle Duration", defaults)
     assert condition_matches("High Usage", defaults)
     assert condition_matches("Watch", defaults)
@@ -1402,8 +1406,6 @@ def test_alert_blueprint_matches_current_summary_alert_states() -> None:
         power_quality_alert_confirmed=True,
     )
     assert not condition_matches("Needs data", defaults)
-    assert condition_matches("Needs data", ["needs_data"])
-    assert condition_matches("Needs Metrics", ["needs_metrics"])
 
 
 def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:

@@ -828,11 +828,19 @@ The repository includes a Home Assistant automation blueprint:
 blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml
 ```
 
-Use it to create persistent notifications or custom follow-up actions when selected analyzer entities report the chosen alert states after learning finishes and the analyzer confirms current alert evidence. This keeps each notification linked to evidence that is still available for review.
+Use it for custom Companion App notifications, lights, scripts, or other
+follow-up actions when selected analyzer entities report confirmed alert
+evidence after learning finishes. The automation also stays quiet during
+maintenance.
 
 The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
 
-Blueprint persistent notifications use one stable notification per selected entity and are removed automatically when the selected alert is no longer current. Notifications created by older blueprint versions used generated IDs and may need to be dismissed once manually.
+The integration already creates and clears native persistent notifications, so
+the blueprint's persistent-notification input defaults off. Normally leave it
+off and put mobile notifications or other custom behavior in `alert_actions`.
+Turn it on only when you explicitly want a second persistent notification.
+Blueprint actions are user-authored automations; the integration's native
+cooldown, quiet-hour, category, and delivery preferences do not govern them.
 
 Companion App mobile notifications can use the `evidence_path` template variable for `data.url` and Android `data.clickAction`, so tapping the notification opens the same Home Assistant evidence view.
 

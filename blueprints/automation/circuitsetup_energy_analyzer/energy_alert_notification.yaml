@@ -1,10 +1,10 @@
 blueprint:
   name: CircuitSetup Energy Analyzer Alerts
   description: >-
-    Create friendly notifications and optional follow-up actions when selected
-    CircuitSetup Energy Analyzer entities report a selected alert state backed by
-    current alert evidence. Companion App mobile notifications can use data.url and
-    data.clickAction with the evidence_path template variable.
+    Run optional custom mobile notifications or follow-up actions when selected
+    CircuitSetup Energy Analyzer entities report a confirmed alert. The integration
+    already creates native persistent notifications. Enable this blueprint's
+    persistent notification only when you explicitly want a second one.
   domain: automation
   input:
     alert_entities:
@@ -21,7 +21,8 @@ blueprint:
         Choose the states that should be treated as actionable alerts. Current
         summary entities use display states such as Possible issue and High
         Usage; older diagnostic status entities may use raw values such as
-        projected_over_budget or over_limit.
+        projected_over_budget or over_limit. Data, maintenance, and stale states
+        are not confirmed alerts and are intentionally unavailable here.
       default:
         - possible_issue
         - possible_imbalance
@@ -51,12 +52,6 @@ blueprint:
               value: high_usage
             - label: Watch
               value: watch
-            - label: Needs Data
-              value: needs_data
-            - label: Needs Energy Data
-              value: needs_energy_data
-            - label: Needs Metrics
-              value: needs_metrics
             - label: Mixed Observation
               value: mixed_observation
             - label: NILM Review
@@ -71,10 +66,6 @@ blueprint:
               value: over_limit
             - label: Issue
               value: issue
-            - label: Maintenance
-              value: maintenance
-            - label: Stale
-              value: stale
     for_duration:
       name: Repeat Duration
       description: Require the alert state to remain active for this long before notifying.
@@ -84,14 +75,17 @@ blueprint:
         duration:
     notification_title:
       name: Notification Title
-      description: Title used for the persistent notification.
+      description: Title used only when the optional second persistent notification is enabled.
       default: CircuitSetup Energy Analyzer alert
       selector:
         text:
     persistent_notification:
       name: Persistent Notification
-      description: Create a Home Assistant persistent notification with the observed evidence.
-      default: true
+      description: >-
+        Create a second Home Assistant persistent notification. Leave this off
+        for normal use because the integration already creates and clears its
+        own evidence-backed persistent notifications.
+      default: false
       selector:
         boolean:
     alert_actions:
@@ -100,7 +94,9 @@ blueprint:
         Optional actions such as mobile notifications, lights, or scripts.
         Mobile app actions can use {{ evidence_path }} as both data.url and
         data.clickAction, for example url: "{{ evidence_path }}" and
-        clickAction: "{{ evidence_path }}".
+        clickAction: "{{ evidence_path }}". These user-authored actions run
+        independently of the integration's native cooldown, quiet-hour,
+        category, and delivery preferences.
       default: []
       selector:
         action:
@@ -170,6 +166,7 @@ variables:
     {{ trigger.to_state is not none
        and alert_state_normalized in selected_states
        and not trigger.to_state.attributes.get('learning', true)
+       and not trigger.to_state.attributes.get('maintenance_active', false)
        and trigger.to_state.attributes.get('alert_confirmed', false)
        and (
          alert_state_normalized != 'possible_power_quality_change'
