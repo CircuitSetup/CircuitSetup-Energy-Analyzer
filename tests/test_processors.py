@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -949,6 +950,14 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
     ]
     assert store_data.contextual_baseline_samples_by_circuit == {}
 
+    processor.process(
+        _energy_sample(106.0),
+        config,
+        replace(context, now=now + timedelta(minutes=30)),
+    )
+
+    assert store_data.contextual_baseline_samples_by_circuit == {}
+
 
 def _energy_usage_projection_evidence(
     days: list[dict[str, object]],
@@ -1845,6 +1854,57 @@ def test_run_cycle_processor_context_uses_rollup_timestamp() -> None:
     stored = store_data.contextual_baseline_samples_by_circuit["fridge"][0]
     assert stored["timestamp"] == now.isoformat()
     assert stored["context"]["time_of_day"] == "evening"
+
+
+def test_run_cycle_processor_skips_contextual_learning_for_flagged_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(hours=2),
+                circuit_id="water_heater",
+                event_type=EventType.START,
+            ),
+            CircuitEvent(
+                timestamp=now - timedelta(hours=1),
+                circuit_id="water_heater",
+                event_type=EventType.STOP,
+                features={"baseline_eligible": False},
+            ),
+        ]
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        learning_mature=lambda _config, _now: False,
+    )
+
+    processor.process(_energy_sample(106.0), config, context)
+
+    assert store_data.contextual_baseline_samples_by_circuit == {}
 
 
 def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() -> None:

@@ -170,23 +170,13 @@ def cycle_baseline_feature_values(
     day_start = _day_start_for_datetime(now, time_zone)
     current_date = _calendar_date(now, time_zone)
     circuit_events = _circuit_cycle_events(events, circuit_id)
-    flagged_dates = {
-        _calendar_date(event.timestamp, time_zone)
-        for event in circuit_events
-        if event.features.get("baseline_eligible") is False
-    }
-    ineligible_dates = set(flagged_dates)
-    for session in build_normalized_run_sessions(
+    ineligible_dates = cycle_baseline_ineligible_dates(
         circuit_events,
         circuit_id=circuit_id,
-        merge_gap_seconds=merge_gap_seconds,
         now=day_start,
-    ):
-        session_dates = {_calendar_date(session.started_at, time_zone)}
-        if session.stopped_at is not None:
-            session_dates.add(_calendar_date(session.stopped_at, time_zone))
-        if session_dates & flagged_dates:
-            ineligible_dates.update(session_dates)
+        merge_gap_seconds=merge_gap_seconds,
+        time_zone=time_zone,
+    )
     prior_dates = sorted(
         {
             _calendar_date(event.timestamp, time_zone)
@@ -229,6 +219,36 @@ def cycle_baseline_feature_values(
             summary.runtime_seconds for summary in active_daily_summaries
         ],
     }
+
+
+def cycle_baseline_ineligible_dates(
+    events: Iterable[CircuitEvent],
+    *,
+    circuit_id: str,
+    now: datetime,
+    merge_gap_seconds: float = 0.0,
+    time_zone: TimeZone = None,
+) -> set[date]:
+    """Return dates containing cycle evidence excluded from learning."""
+    circuit_events = _circuit_cycle_events(events, circuit_id)
+    flagged_dates = {
+        _calendar_date(event.timestamp, time_zone)
+        for event in circuit_events
+        if event.features.get("baseline_eligible") is False
+    }
+    ineligible_dates = set(flagged_dates)
+    for session in build_normalized_run_sessions(
+        circuit_events,
+        circuit_id=circuit_id,
+        merge_gap_seconds=merge_gap_seconds,
+        now=now,
+    ):
+        session_dates = {_calendar_date(session.started_at, time_zone)}
+        if session.stopped_at is not None:
+            session_dates.add(_calendar_date(session.stopped_at, time_zone))
+        if session_dates & flagged_dates:
+            ineligible_dates.update(session_dates)
+    return ineligible_dates
 
 
 def select_cycle_anomaly_evidence(

@@ -27,9 +27,11 @@ from ..cycles import (
     RUN_CYCLE_RUNTIME_TODAY_FEATURE,
     RUN_CYCLE_START_COUNT_FEATURE,
     cycle_baseline_feature_values,
+    cycle_baseline_ineligible_dates,
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
 )
+from ..local_time import local_date
 from ..models import BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
@@ -105,6 +107,17 @@ class RunCycleProcessor:
                 ),
             }
         )
+        contextual_baseline_eligible = context_allows_baseline_learning(
+            context_key
+        ) and local_date(context.now, context.time_zone) not in (
+            cycle_baseline_ineligible_dates(
+                context.store_data.events,
+                circuit_id=circuit_config.circuit_id,
+                now=context.now,
+                merge_gap_seconds=merge_gap_seconds,
+                time_zone=context.time_zone,
+            )
+        )
         if not self._learning_mature(circuit_config, context.now):
             contextual_dirty = _record_contextual_cycle_samples(
                 store_data=context.store_data,
@@ -113,6 +126,7 @@ class RunCycleProcessor:
                 context_key=context_key,
                 now=context.now,
                 time_zone=context.time_zone,
+                baseline_eligible=contextual_baseline_eligible,
             )
             return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
@@ -137,6 +151,7 @@ class RunCycleProcessor:
                     now=context.now,
                     time_zone=context.time_zone,
                     contextual_samples_cache=context.contextual_samples_cache,
+                    baseline_eligible=contextual_baseline_eligible,
                 )
             )
             return feature_result
@@ -158,6 +173,7 @@ class RunCycleProcessor:
                 now=context.now,
                 time_zone=context.time_zone,
                 contextual_samples_cache=context.contextual_samples_cache,
+                baseline_eligible=contextual_baseline_eligible,
             )
         )
         if contextual_comparison.get("comparison_basis") == "contextual":
@@ -259,8 +275,9 @@ def _record_contextual_cycle_samples(
     now: datetime,
     time_zone: str | None = None,
     contextual_samples_cache: Any | None = None,
+    baseline_eligible: bool,
 ) -> bool:
-    if not context_allows_baseline_learning(context_key):
+    if not baseline_eligible:
         return False
     samples = store_data.contextual_baseline_samples_by_circuit.setdefault(
         circuit_id,

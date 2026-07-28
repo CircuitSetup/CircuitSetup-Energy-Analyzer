@@ -108,7 +108,10 @@ class EnergyUsageProcessor:
             result,
             context,
             context_key,
-            baseline_eligible=baseline_eligible,
+            baseline_eligible=(
+                baseline_eligible
+                and _energy_day_allows_baseline_learning(history, result.date)
+            ),
         )
         energy_source = str(history.get("energy_source") or "")
         evidence = energy_usage_evidence_payload(
@@ -360,6 +363,21 @@ def _energy_interval_allows_baseline_learning(
         maintenance_end = maintenance_end.replace(tzinfo=None)
     return not (
         sample_start < maintenance_end and sample_end > maintenance_start
+    )
+
+
+def _energy_day_allows_baseline_learning(
+    history: Mapping[str, Any],
+    date: str,
+) -> bool:
+    days = history.get("days")
+    if not isinstance(days, list):
+        return True
+    return all(
+        not isinstance(day, Mapping)
+        or str(day.get("date")) != date
+        or day.get("baseline_eligible") is not False
+        for day in days
     )
 
 
