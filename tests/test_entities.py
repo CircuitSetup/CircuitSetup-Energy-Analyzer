@@ -1923,6 +1923,38 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
     )
     assert setup_health_value(stale) == "Fix stale source sensor"
 
+    invalid_source = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power non_finite"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": True,
+                    "numeric_states_valid": False,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(invalid_source) == (
+        "Fix unavailable or invalid source data"
+    )
+
+    invalid_timestamp = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power future_timestamp"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": True,
+                    "numeric_states_valid": True,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(invalid_timestamp) == "Fix source sensor timestamps"
+
     negative_power = coordinator_for(
         fridge,
         AnalyzerState(

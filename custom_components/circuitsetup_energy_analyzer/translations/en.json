@@ -702,6 +702,14 @@
       "title": "Energy Analyzer source sensor is missing",
       "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
     },
+    "invalid_source_sensor": {
+      "title": "Energy Analyzer source sensor data is invalid",
+      "description": "{circuit_name} has an unavailable, non-numeric, or non-finite source sensor. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
+    "invalid_source_timestamp": {
+      "title": "Energy Analyzer source sensor timestamp is invalid",
+      "description": "{circuit_name} has a source sensor with a missing time zone or future update timestamp. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
     "phase_mismatch": {
       "title": "Energy Analyzer phase pairing looks suspicious",
       "description": "A dual-phase circuit has source data that does not look like a valid paired load. Review the selected channels and CT orientation. Suggested fix: {fix}"
