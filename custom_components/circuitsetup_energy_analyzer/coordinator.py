@@ -20,7 +20,10 @@ from .config_parsing import (
 from .const import (
     DOMAIN,
 )
-from .expected_schedule import refresh_expected_schedule_contexts
+from .expected_schedule import (
+    expected_schedule_circuit_ids,
+    refresh_expected_schedule_contexts,
+)
 from .managers.source_samples import normalized_leg
 from .managers.utility_energy_sources import (
     _ha_recorder_get_instance,
@@ -56,6 +59,9 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
+_EXPECTED_SCHEDULE_ALERT_FEATURES = frozenset(
+    {"expected_schedule_missed", "running_outside_expected_schedule"}
+)
 try:
     from homeassistant.helpers.event import (
         async_track_point_in_time,
@@ -96,6 +102,19 @@ def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
         for entity_id in (str(entity_id).strip() for entity_id in entity_ids)
         if entity_id
     }
+
+
+def _non_schedule_alerts_for_circuits(
+    state: Any,
+    circuit_ids: set[str],
+) -> list[AlertEvidence]:
+    active_alerts = getattr(state, "active_alerts_by_circuit", {})
+    return [
+        alert
+        for circuit_id in circuit_ids
+        for alert in active_alerts.get(circuit_id, ())
+        if alert.feature not in _EXPECTED_SCHEDULE_ALERT_FEATURES
+    ]
 
 
 def _source_circuit_ids_by_entity(
@@ -264,9 +283,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
         """Evaluate local schedule boundaries without a source state change."""
         await self.evidence_actions.async_expire_maintenance_if_due(now)
-        alerts = await self._async_apply_expected_schedule_contexts(now)
-        if alerts:
-            process_events_into_state(self.state, (), alerts)
+        schedule_circuit_ids = expected_schedule_circuit_ids(self)
+        alerts = _non_schedule_alerts_for_circuits(
+            self.state,
+            schedule_circuit_ids,
+        )
+        alerts.extend(await self._async_apply_expected_schedule_contexts(now))
+        if schedule_circuit_ids or alerts:
+            process_events_into_state(
+                self.state,
+                (),
+                alerts,
+                evaluated_circuit_ids=schedule_circuit_ids,
+            )
+        if schedule_circuit_ids:
+            await self.notification_controller.async_sync_alert_notifications(
+                schedule_circuit_ids
+            )
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
 
@@ -514,13 +547,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
+        schedule_circuit_ids = expected_schedule_circuit_ids(self)
+        alerts.extend(
+            _non_schedule_alerts_for_circuits(
+                self.state,
+                schedule_circuit_ids - processing_circuit_ids,
+            )
+        )
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
-        if alerts:
+        evaluated_alert_circuit_ids = (
+            processing_circuit_ids | schedule_circuit_ids
+        )
+        if alerts or schedule_circuit_ids:
             process_events_into_state(
                 self.state,
                 events,
                 alerts,
-                evaluated_circuit_ids=processing_circuit_ids,
+                evaluated_circuit_ids=evaluated_alert_circuit_ids,
             )
         recommendation_refresh_due = self._settings_recommendation_refresh_due(
             now,
@@ -534,7 +577,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             now,
         )
         await self.notification_controller.async_sync_alert_notifications(
-            processing_circuit_ids
+            evaluated_alert_circuit_ids
         )
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)

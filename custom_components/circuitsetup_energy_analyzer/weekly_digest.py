@@ -125,6 +125,44 @@ def completed_week_bounds(now: datetime, time_zone: tzinfo) -> tuple[date, date]
     return week_end - timedelta(days=6), week_end
 
 
+def weekly_digest_rollover_ready(
+    coordinator: Any,
+    *,
+    now: datetime,
+    time_zone: tzinfo,
+) -> bool:
+    """Return whether every mature direct circuit has processed week rollover."""
+    _, week_end = completed_week_bounds(now, time_zone)
+    state = getattr(coordinator, "state", None)
+    energy_history = getattr(
+        getattr(coordinator, "store_data", None),
+        "energy_usage_by_circuit",
+        {},
+    )
+    for config in getattr(coordinator, "circuit_configs", ()):
+        circuit_id = str(getattr(config, "circuit_id", "") or "")
+        mode = str(getattr(getattr(config, "mode", ""), "value", ""))
+        history = (
+            energy_history.get(circuit_id, {})
+            if isinstance(energy_history, Mapping)
+            else {}
+        )
+        if (
+            circuit_id
+            and mode != "mains_nilm"
+            and not circuit_is_learning(state, circuit_id)
+            and isinstance(history, Mapping)
+            and _date_between(
+                history.get("last_sample_at"),
+                week_end,
+                week_end,
+                time_zone,
+            )
+        ):
+            return False
+    return True
+
+
 def digest_items_for_coordinator(
     coordinator: Any,
     *,
@@ -275,13 +313,25 @@ def digest_items_for_coordinator(
                         if str(assignment.get("lifecycle_state") or "")
                         not in {"validated", "confirmed"}
                         else "normal",
+                        "comparable_energy": False,
                     }
                 )
     items_by_key = {item["appliance_key"]: item for item in items}
     retained_alerts = getattr(store_data, "alerts", ())
-    for alert in (
-        retained_alerts[-100:] if isinstance(retained_alerts, list | tuple) else ()
-    ):
+    alert_candidates = (
+        retained_alerts
+        if isinstance(retained_alerts, list | tuple) and len(retained_alerts) <= 200
+        else (
+            (*retained_alerts[:100], *retained_alerts[-100:])
+            if isinstance(retained_alerts, list | tuple)
+            else ()
+        )
+    )
+    for alert in sorted(
+        alert_candidates,
+        key=_alert_timestamp,
+        reverse=True,
+    )[:100]:
         severity = getattr(alert, "severity", "")
         if (
             str(getattr(severity, "value", severity)) not in {"warning", "error"}
@@ -352,6 +402,11 @@ def _number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _alert_timestamp(alert: Any) -> float:
+    timestamp = getattr(alert, "timestamp", None)
+    return timestamp.timestamp() if isinstance(timestamp, datetime) else float("-inf")
 
 
 def _complete_daily_values_between(

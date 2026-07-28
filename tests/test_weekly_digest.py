@@ -249,6 +249,51 @@ def test_digest_observes_retained_alerts_from_the_completed_week() -> None:
     ]
 
 
+def test_digest_observes_newest_alerts_after_retention_sort() -> None:
+    now = datetime(2026, 7, 27, 12, tzinfo=UTC)
+    days = [
+        {
+            "date": (date(2026, 7, 13) + timedelta(days=offset)).isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(14)
+    ]
+    coordinator = _direct_digest_coordinator(days)
+    recent = AlertEvidence(
+        timestamp=datetime(2026, 7, 23, 12, tzinfo=UTC),
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Dryer runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    older = [
+        AlertEvidence(
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=index),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Older dryer evidence.",
+            feature="run_cycle_duration_s",
+        )
+        for index in range(100)
+    ]
+    coordinator.store_data.alerts = [recent, *reversed(older)]
+
+    digest = build_weekly_digest(
+        digest_items_for_coordinator(
+            coordinator,
+            now=now,
+            time_zone=ZoneInfo("UTC"),
+        ),
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    )
+
+    assert [item.appliance_key for item in digest.observed_alerts] == [
+        "circuit:dryer"
+    ]
+
+
 def test_digest_honors_weather_and_water_flow_context_evidence() -> None:
     days = [
         {
@@ -353,6 +398,56 @@ def test_digest_reuses_idle_solar_load_shift_candidates() -> None:
         time_zone=ZoneInfo("UTC"),
     )
     assert digest.top_energy_users == ()
+
+
+def test_nilm_review_items_without_full_week_coverage_are_not_ranked() -> None:
+    now = datetime(2026, 7, 27, 12, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_by_circuit={"mains": False},
+            solar_load_shift_evidence_by_circuit={},
+        ),
+        store_data=SimpleNamespace(
+            energy_usage_by_circuit={},
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "dishwasher",
+                        "appliance_key": "nilm:dishwasher",
+                        "display_name": "Dishwasher",
+                        "expected_daily_energy_kwh": 1.0,
+                        "confidence": 0.8,
+                        "lifecycle_state": "candidate",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "dishwasher",
+                        "start": "2026-07-23T12:00:00+00:00",
+                        "estimated_energy_kwh": 5.0,
+                    }
+                ]
+            },
+        ),
+    )
+
+    (item,) = digest_items_for_coordinator(
+        coordinator,
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    )
+    digest = build_weekly_digest([item], now=now, time_zone=ZoneInfo("UTC"))
+
+    assert item["comparable_energy"] is False
+    assert digest.top_energy_users == ()
+    assert digest.biggest_changes == ()
+    assert [entry.appliance_key for entry in digest.nilm_review_items] == [
+        "nilm:dishwasher"
+    ]
 
 
 def _direct_digest_coordinator(

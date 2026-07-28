@@ -443,6 +443,19 @@ def refresh_expected_schedule_contexts(
     return alerts
 
 
+def expected_schedule_circuit_ids(coordinator: Any) -> set[str]:
+    """Return circuits evaluated by the configured appliance schedules."""
+    store_data = getattr(coordinator, "store_data", None)
+    raw_settings = getattr(store_data, "appliance_schedule_settings", {})
+    if not isinstance(raw_settings, Mapping):
+        return set()
+    return {
+        target.circuit_id
+        for appliance_key in raw_settings
+        if (target := _schedule_target(store_data, str(appliance_key or "").strip()))
+    }
+
+
 def _suppressed(
     settings: ExpectedScheduleSettings,
     reason: str,

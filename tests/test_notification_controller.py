@@ -1082,6 +1082,84 @@ async def test_weekly_queue_builds_digest_when_global_digest_is_disabled() -> No
     assert store_data.notification_delivery_state["weekly"] == []
 
 
+@pytest.mark.asyncio
+async def test_weekly_digest_waits_for_each_mature_circuit_to_roll_over() -> None:
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    start = datetime(2026, 6, 29, tzinfo=UTC)
+    completed_days = [
+        {
+            "date": (start + timedelta(days=offset)).date().isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(14)
+    ]
+    pending_days = [dict(day) for day in completed_days]
+    pending_days[-1]["complete"] = False
+    store_data = SimpleNamespace(
+        settings_recommendation_notification_episode_key=(),
+        appliance_notification_preferences={},
+        notification_delivery_state={},
+        weekly_digest_settings={"enabled": True, "delivery": "panel_only"},
+        energy_usage_by_circuit={
+            "dryer": {
+                "days": completed_days,
+                "last_sample_at": "2026-07-13T00:05:00+00:00",
+            },
+            "washer": {
+                "days": pending_days,
+                "last_sample_at": "2026-07-12T23:55:00+00:00",
+            },
+        },
+        nilm_appliance_assignments_by_circuit={},
+        nilm_session_history_by_circuit={},
+        alerts=[],
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        circuit_configs=tuple(
+            SimpleNamespace(
+                circuit_id=circuit_id,
+                name=circuit_id.title(),
+                mode=SimpleNamespace(value="single_phase"),
+            )
+            for circuit_id in ("dryer", "washer")
+        ),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_by_circuit={"dryer": False, "washer": False},
+            learning_progress_by_circuit={
+                "dryer": {"alert_ready": True},
+                "washer": {"alert_ready": True},
+            },
+        ),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_refresh_weekly_digest(now)
+
+    assert "last_weekly_digest_key" not in store_data.notification_delivery_state
+    assert "latest_report" not in store_data.weekly_digest_settings
+
+    pending_days[-1]["complete"] = True
+    store_data.energy_usage_by_circuit["washer"]["last_sample_at"] = (
+        "2026-07-13T00:05:00+00:00"
+    )
+    await controller.async_refresh_weekly_digest(now)
+
+    assert store_data.notification_delivery_state["last_weekly_digest_key"] == (
+        "weekly_appliance_digest:2026-07-06"
+    )
+    assert {
+        item["appliance_key"]
+        for item in store_data.weekly_digest_settings["latest_report"][
+            "top_energy_users"
+        ]
+    } == {"circuit:dryer", "circuit:washer"}
+
+
 @pytest.mark.parametrize("retain_alert", [False, True])
 @pytest.mark.asyncio
 async def test_weekly_queue_drops_routine_alert_when_circuit_reenters_learning(

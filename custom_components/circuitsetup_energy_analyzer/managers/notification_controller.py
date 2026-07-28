@@ -18,6 +18,7 @@ from ..weekly_digest import (
     completed_week_bounds,
     digest_idempotence_key,
     digest_items_for_coordinator,
+    weekly_digest_rollover_ready,
 )
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
@@ -449,6 +450,12 @@ class NotificationController:
             if blocked_weekly:
                 state["weekly"] = pending_weekly
                 self._mark_store_dirty()
+            return
+        if not weekly_digest_rollover_ready(
+            self._coordinator,
+            now=now,
+            time_zone=time_zone,
+        ):
             return
         digest_items = digest_items_for_coordinator(
             self._coordinator,

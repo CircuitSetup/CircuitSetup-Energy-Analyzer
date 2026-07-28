@@ -2581,6 +2581,56 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_source_update_clears_schedule_alerts_for_all_evaluated_schedules(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:hvac": {"enabled": True}
+    }
+    schedule_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC ran outside its expected schedule.",
+        feature="running_outside_expected_schedule",
+    )
+    runtime_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    coordinator.state.active_alerts_by_circuit = {
+        "hvac": [schedule_alert, runtime_alert]
+    }
+    coordinator.store_data.alerts.extend((schedule_alert, runtime_alert))
+    sync_notifications = AsyncMock()
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        sync_notifications
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        lambda coordinator, now: [],
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["hvac"] == [runtime_alert]
+    sync_notifications.assert_awaited_once_with({"fridge", "hvac"})
+
+
+@pytest.mark.asyncio
 async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
