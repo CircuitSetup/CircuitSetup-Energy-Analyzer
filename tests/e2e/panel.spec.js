@@ -3818,6 +3818,64 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
   await expect(panel.getByText("Respond to this alert")).toHaveCount(0);
 });
 
+test("Suggested Settings uses a compact support column", async ({ page, isMobile }) => {
+  test.skip(isMobile, "The desktop layout is covered here; mobile already stacks the card.");
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/alert_evidence")) return false;
+    await route.fulfill({
+      json: {
+        ...evidence,
+        setting_recommendations: evidence.setting_recommendations.map((recommendation) => ({
+          ...recommendation,
+          evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
+        })),
+      },
+    });
+    return true;
+  });
+
+  for (const query of [
+    "?review_suggested_settings=1&circuit_id=kitchen",
+    "?appliance_detail=1&circuit_id=kitchen",
+  ]) {
+    const panel = await openPanel(page, query);
+    const layout = panel.locator(".recommendation-layout").first();
+    await expect(layout.locator(".recommendation-evidence")).toContainText("Observed Days: 12");
+    const card = await layout.evaluate((element) => {
+      const heading = element.querySelector(".recommendation-heading");
+      const summary = element.querySelector(".recommendation-summary");
+      const support = element.querySelector(".recommendation-support");
+      const expectedEffect = support.querySelector("p > strong");
+      const evidence = support.querySelector(".recommendation-evidence > strong");
+      const historicalImpact = support.querySelector(".setting-impact-preview > strong");
+      const limitations = support.querySelector(".setting-impact-preview .muted > strong");
+      return {
+        headingPresent: Boolean(heading),
+        headingBottom: heading?.getBoundingClientRect().bottom || 0,
+        headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+        summaryTop: summary.getBoundingClientRect().top,
+        summaryLeft: summary.getBoundingClientRect().left,
+        supportTop: support.getBoundingClientRect().top,
+        supportLeft: support.getBoundingClientRect().left,
+        supportAlignContent: getComputedStyle(support).alignContent,
+        expectedEffectFontSize: Number.parseFloat(getComputedStyle(expectedEffect).fontSize),
+        evidenceFontSize: Number.parseFloat(getComputedStyle(evidence).fontSize),
+        historicalImpactFontSize: Number.parseFloat(getComputedStyle(historicalImpact).fontSize),
+        limitationsFontSize: Number.parseFloat(getComputedStyle(limitations).fontSize),
+      };
+    });
+    expect(card.headingPresent).toBe(true);
+    expect(card.summaryTop).toBeGreaterThan(card.headingBottom);
+    expect(card.supportTop).toBeGreaterThan(card.headingBottom);
+    expect(card.supportLeft).toBeGreaterThan(card.summaryLeft);
+    expect(card.supportAlignContent).toBe("start");
+    expect(card.expectedEffectFontSize).toBeLessThan(card.headingFontSize);
+    expect(card.evidenceFontSize).toBeLessThan(card.headingFontSize);
+    expect(card.historicalImpactFontSize).toBeLessThan(card.headingFontSize);
+    expect(card.limitationsFontSize).toBeLessThan(card.headingFontSize);
+  }
+});
+
 test("alert responses and setting preview actions call their services", async ({ page, isMobile }) => {
   test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
   await mockPanelApi(page);

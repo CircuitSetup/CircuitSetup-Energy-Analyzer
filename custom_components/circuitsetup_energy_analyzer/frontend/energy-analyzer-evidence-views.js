@@ -330,8 +330,8 @@ export function createEvidenceViewMethods({
           ${recommendationItems.map(({ recommendation, originalIndex }) => `
             <div class="metric">
               <div class="recommendation-layout">
+                <strong class="recommendation-heading">${this._escape(recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting"))}</strong>
                 <div class="recommendation-summary">
-                  <strong>${this._escape(recommendation.display_label || recommendation.title || this._panelText("recommendations.suggested_setting"))}</strong>
                   ${recommendation.summary ? `<p class="muted">${this._escape(recommendation.summary)}</p>` : ""}
                   ${recommendation.reason ? `<p class="muted">${this._escape(recommendation.reason)}</p>` : ""}
                   ${this._recommendationValueRows(recommendation)}

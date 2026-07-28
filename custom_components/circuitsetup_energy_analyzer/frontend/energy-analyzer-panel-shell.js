@@ -604,6 +604,9 @@ export class PanelShellMethods {
           gap: 16px;
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .recommendation-heading {
+          grid-column: 1 / -1;
+        }
         .recommendation-summary,
         .recommendation-support,
         .recommendation-evidence,
@@ -631,6 +634,20 @@ export class PanelShellMethods {
         .recommendation-evidence-line {
           display: block;
         }
+        .recommendation-summary,
+        .recommendation-support {
+          align-content: start;
+        }
+        .recommendation-support > p,
+        .recommendation-evidence,
+        .setting-impact-preview {
+          font-size: 14px;
+        }
+        .recommendation-support > p > strong,
+        .recommendation-evidence > strong,
+        .setting-impact-preview strong {
+          font-size: 14px;
+        }
         .recommendation-evidence-actions {
           margin-top: 16px;
         }
@@ -645,11 +662,6 @@ export class PanelShellMethods {
         .selected-recommendation-evidence p,
         .selected-recommendation-evidence .muted {
           color: var(--primary-text-color, #1f2933);
-        }
-        .selected-recommendation-evidence .recommendation-support > p > strong,
-        .selected-recommendation-evidence .recommendation-evidence > strong,
-        .selected-recommendation-evidence .setting-impact-preview strong {
-          font-size: 14px;
         }
         .recommendation-evidence-graph {
           display: grid;
