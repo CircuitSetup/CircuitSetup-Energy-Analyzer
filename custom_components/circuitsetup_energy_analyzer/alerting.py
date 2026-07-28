@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from math import floor, log10
+from math import floor, log
 from types import MappingProxyType
 from typing import Any, Self
 
@@ -238,14 +238,18 @@ def _alert_feedback_fingerprint(
     if schema_version == ALERT_FINGERPRINT_SCHEMA_VERSION:
         if alert.value_metric:
             parts.append(f"metric={alert.value_metric}")
-        reference = (
-            alert.baseline_value
-            if alert.baseline_value != 0.0
-            else 10.0
-            ** floor(log10(max(abs(alert.observed_value), 1.0)) + 0.5)
-        )
-        observed_bucket = _relative_value_bucket(alert.observed_value, reference)
-        baseline_bucket = _relative_value_bucket(alert.baseline_value, reference)
+        if alert.baseline_value == 0.0:
+            observed_bucket = _zero_baseline_value_bucket(alert.observed_value)
+            baseline_bucket = "zero"
+        else:
+            observed_bucket = _relative_value_bucket(
+                alert.observed_value,
+                alert.baseline_value,
+            )
+            baseline_bucket = _relative_value_bucket(
+                alert.baseline_value,
+                alert.baseline_value,
+            )
     else:
         observed_bucket = _value_bucket(alert.observed_value)
         baseline_bucket = _value_bucket(alert.baseline_value)
@@ -315,6 +319,15 @@ def _relative_value_bucket(value: float, reference: float) -> str:
     normalized = float(value) / max(abs(float(reference)), 1e-12)
     bucket_start = floor((normalized * 20.0) + 1e-9) / 20.0
     return f"{bucket_start:.3f}-{bucket_start + 0.05:.3f}x"
+
+
+def _zero_baseline_value_bucket(value: float) -> str:
+    """Bucket zero-baseline values on a uniform relative scale."""
+    if float(value) == 0.0:
+        return "zero"
+    sign = "positive" if value > 0.0 else "negative"
+    magnitude = round(log(abs(float(value)), 1.1))
+    return f"{sign}:{magnitude}@10pct"
 
 
 def _change_direction(observed_value: float, baseline_value: float) -> str:

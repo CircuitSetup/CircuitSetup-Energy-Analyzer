@@ -378,6 +378,9 @@ def test_alert_feedback_fingerprint_tolerates_small_zero_baseline_changes() -> N
     assert alert_feedback_fingerprint(alert(100.0)) != (
         alert_feedback_fingerprint(alert(112.0))
     )
+    assert alert_feedback_fingerprint(alert(316.0)) == (
+        alert_feedback_fingerprint(alert(317.0))
+    )
 
 
 def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:

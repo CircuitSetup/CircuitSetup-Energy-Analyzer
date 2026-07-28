@@ -83,6 +83,7 @@ def record_demand_sample(
     settings: DemandSettings,
     retention_days: int = 45,
     time_zone: TimeZone = None,
+    baseline_eligible: bool = True,
 ) -> DemandResult | None:
     """Fold a real-power sample into a rolling demand window."""
     if real_power_w is None:
@@ -92,17 +93,23 @@ def record_demand_sample(
     window = timedelta(minutes=window_minutes)
     today = _calendar_date(timestamp, time_zone).isoformat()
     samples = _coerce_samples(history.get("samples"))
-    samples.append(
+    calculation_samples = [
+        *samples,
         {
             "timestamp": timestamp.isoformat(),
             "real_power_w": _round_w(max(float(real_power_w), 0.0)),
-        }
-    )
-    samples = _prune_samples(samples, timestamp, window)
+        },
+    ]
+    calculation_samples = _prune_samples(calculation_samples, timestamp, window)
 
-    current_demand = _time_weighted_average(samples, timestamp, window)
+    current_demand = _time_weighted_average(calculation_samples, timestamp, window)
     daily_peaks = _coerce_daily_peaks(history.get("daily_peaks"))
-    peak_demand = _record_daily_peak(daily_peaks, today, current_demand)
+    calculation_daily_peaks = daily_peaks if baseline_eligible else list(daily_peaks)
+    peak_demand = _record_daily_peak(
+        calculation_daily_peaks,
+        today,
+        current_demand,
+    )
     monthly_peak = _record_monthly_peak_window(
         history,
         circuit_id=circuit_id,
@@ -113,15 +120,17 @@ def record_demand_sample(
         peak_warning_ratio=settings.peak_warning_ratio,
         retention_days=retention_days,
         time_zone=time_zone,
+        baseline_eligible=baseline_eligible,
     )
 
-    history["samples"] = samples
-    history["daily_peaks"] = _prune_daily_peaks(
-        daily_peaks,
-        timestamp,
-        retention_days,
-        time_zone=time_zone,
-    )
+    if baseline_eligible:
+        history["samples"] = calculation_samples
+        history["daily_peaks"] = _prune_daily_peaks(
+            calculation_daily_peaks,
+            timestamp,
+            retention_days,
+            time_zone=time_zone,
+        )
 
     limit_w = _positive_float_or_none(settings.demand_limit_w)
     limit_usage = (
@@ -252,6 +261,7 @@ def _record_monthly_peak_window(
     peak_warning_ratio: float,
     retention_days: int,
     time_zone: TimeZone = None,
+    baseline_eligible: bool = True,
 ) -> dict[str, Any]:
     rank_count = max(int(peak_rank_count), 1)
     warning_ratio = min(max(float(peak_warning_ratio), 0.0), 1.0)
@@ -306,7 +316,7 @@ def _record_monthly_peak_window(
         )
 
     before_windows = list(windows)
-    if current_demand_w > 0.0:
+    if baseline_eligible and current_demand_w > 0.0:
         windows.append(
             {
                 "timestamp": timestamp.isoformat(),
@@ -321,7 +331,7 @@ def _record_monthly_peak_window(
         time_zone=time_zone,
     )
     recorded = pruned_windows != before_windows
-    if recorded or "monthly_peak_windows" in history:
+    if baseline_eligible and (recorded or "monthly_peak_windows" in history):
         history["monthly_peak_windows"] = pruned_windows
     return {
         "rank": rank,

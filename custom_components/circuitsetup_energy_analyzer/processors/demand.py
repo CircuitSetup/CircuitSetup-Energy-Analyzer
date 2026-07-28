@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..alerting import Observation
@@ -68,6 +68,15 @@ class DemandProcessor:
             settings=self._settings_for_config(circuit_config, circuit_id),
             retention_days=self._retention_days_for_circuit(circuit_id),
             time_zone=context.time_zone,
+            baseline_eligible=not (
+                isinstance(
+                    maintenance := context.store_data.maintenance_by_circuit.get(
+                        circuit_id,
+                    ),
+                    Mapping,
+                )
+                and maintenance.get("active") is True
+            ),
         )
         if result is None:
             return FeatureResult()
