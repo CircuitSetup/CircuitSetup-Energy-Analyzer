@@ -73,6 +73,14 @@ _PROFILE_DEFAULTS: dict[ApplianceProfile, dict[str, float]] = {
         "merge_gap_seconds": 120.0,
         "max_sample_gap_seconds": 600.0,
     },
+    ApplianceProfile.MINI_SPLIT: {
+        "on_threshold_w": 100.0,
+        "off_threshold_w": 40.0,
+        "on_dwell_seconds": 30.0,
+        "off_dwell_seconds": 180.0,
+        "merge_gap_seconds": 300.0,
+        "max_sample_gap_seconds": 600.0,
+    },
     ApplianceProfile.HVAC_BLOWER: {
         "on_threshold_w": 80.0,
         "off_threshold_w": 30.0,

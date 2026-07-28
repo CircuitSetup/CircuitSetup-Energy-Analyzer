@@ -201,6 +201,49 @@ def test_config_parser_infers_new_appliance_profiles(
 
 
 @pytest.mark.parametrize(
+    "entity_id",
+    [
+        "sensor.bedroom_mini_split_active_power",
+        "sensor.bedroom_minisplit_active_power",
+        "sensor.office_ductless_heat_pump_active_power",
+        "sensor.office_ductless_ac_active_power",
+    ],
+)
+def test_config_parser_infers_mini_split_profile(entity_id: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    config = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: [entity_id]})[0]
+
+    assert config.appliance_profile is ApplianceProfile.MINI_SPLIT
+    assert config.mode is CircuitMode.DUAL_PHASE
+
+
+def test_config_parser_accepts_both_mini_split_modes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    for mode in (CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE):
+        config = circuit_configs_from_entry_data(
+            {
+                CONF_CIRCUITS: [
+                    {
+                        "circuit_id": f"mini_split_{mode.value}",
+                        "name": "Mini-Split",
+                        "appliance_profile": "mini_split",
+                        "mode": mode.value,
+                        "sensors": ["sensor.mini_split_active_power"],
+                    }
+                ]
+            }
+        )[0]
+        assert config.appliance_profile is ApplianceProfile.MINI_SPLIT
+        assert config.mode is mode
+
+
+@pytest.mark.parametrize(
     ("entity_id", "expected_mode"),
     [
         ("sensor.laundry_gas_dryer_active_power", CircuitMode.SINGLE_PHASE),

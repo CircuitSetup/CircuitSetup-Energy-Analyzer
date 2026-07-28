@@ -800,7 +800,7 @@ def test_readme_explains_environmental_sensor_learning_and_scope() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for phrase in (
-        "HVAC, HVAC compressor, HVAC blower, and electric heat",
+        "HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat",
         "three distinct prior local dates",
         "ten dry, compressor-free context samples",
         "does not create a rain-specific missing-pump alert",
@@ -6918,6 +6918,8 @@ def test_readme_documents_assignment_defaults() -> None:
         "| `3d_printer` | Single phase | Load |",
         "| `hvac` | Dual phase when both legs are selected; "
         "otherwise single phase | Load |",
+        "| `mini_split` | Dual phase when both legs are selected; "
+        "otherwise single phase | Load |",
         "| `solar_inverter` | Dual phase | Generation |",
         "| `mains_nilm` | Mains NILM | Mains/net |",
         "| `mixed` | Mixed | Load |",
@@ -6932,6 +6934,17 @@ def test_readme_documents_assignment_defaults() -> None:
     assert (
         "Automatic source parsing treats explicit `gas_dryer` names as single "
         "phase and explicit `electric_dryer` names as dual phase."
+        in normalized_readme
+    )
+    assert (
+        "This context applies only to HVAC, HVAC compressor, HVAC blower, "
+        "Mini-Split, and electric heat profiles."
+        in normalized_readme
+    )
+    assert (
+        "Mini-Split inverter operation can remain at low power; tune the "
+        "default `100 W` on and `40 W` off thresholds in Advanced Circuit "
+        "Settings when equipment or metering differs."
         in normalized_readme
     )
 

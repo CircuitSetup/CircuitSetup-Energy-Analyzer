@@ -2938,6 +2938,7 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
     for profile in (
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
     ):
@@ -3052,6 +3053,54 @@ def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
         binary_sensors["water_flow_mismatch"], circuit, coordinator
     )
     assert _setup_health_needs_capacity_settings(coordinator, circuit)
+
+
+@pytest.mark.parametrize("mode", [CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE])
+def test_mini_split_exposes_cycle_demand_and_capacity_behavior(
+    mode: CircuitMode,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
+        _setup_health_needs_capacity_settings,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    circuit = CircuitConfig(
+        circuit_id="mini_split",
+        name="Mini-Split",
+        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        mode=mode,
+        sensors=(
+            SensorRef("sensor.mini_split_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mini_split_current", SensorRole.CURRENT),
+        ),
+    )
+    unconfigured = SimpleNamespace(
+        options={},
+        entry_data={},
+        store_data=FeatureStoreData(),
+    )
+    configured = SimpleNamespace(
+        options={},
+        entry_data={},
+        store_data=FeatureStoreData(
+            capacity_settings_by_circuit={"mini_split": {"breaker_amps": 20.0}},
+        ),
+    )
+
+    assert sensor_description_applies(
+        descriptions["run_cycle_count"], circuit, unconfigured
+    )
+    assert sensor_description_applies(
+        descriptions["current_demand"], circuit, unconfigured
+    )
+    assert sensor_description_applies(
+        descriptions["capacity_usage"], circuit, configured
+    )
+    assert _setup_health_needs_capacity_settings(unconfigured, circuit)
 
 
 def test_shared_mains_voltage_enables_appliance_voltage_calculations() -> None:

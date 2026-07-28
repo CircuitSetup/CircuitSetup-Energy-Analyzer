@@ -258,7 +258,11 @@ def temperature_bin(temperature: float) -> str:
 
 def _weather_mode(mode: str) -> str:
     normalized = str(mode or "cooling").strip().lower()
-    return normalized if normalized in {"cooling", "heating"} else "cooling"
+    return (
+        normalized
+        if normalized in {"cooling", "heating", "neutral"}
+        else "cooling"
+    )
 
 
 def _explanation(

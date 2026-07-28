@@ -244,10 +244,13 @@ def test_lowest_factor_confidence_suppresses_causal_breakdown() -> None:
     )
 
 
-def test_hvac_weather_context_is_presented_as_context_not_precise_causality() -> None:
+@pytest.mark.parametrize("appliance_profile", ("hvac", "mini_split"))
+def test_weather_context_is_presented_as_context_not_precise_causality(
+    appliance_profile: str,
+) -> None:
     explanation = appliance_insights.energy_change_explanation(
         _detail(
-            appliance_profile="hvac",
+            appliance_profile=appliance_profile,
             expectations=(
                 SimpleNamespace(
                     expectation_id="weather_context",
@@ -265,6 +268,25 @@ def test_hvac_weather_context_is_presented_as_context_not_precise_causality() ->
         in explanation.explanation.casefold()
     )
     assert explanation.usage_event_contribution_percent is None
+
+
+def test_mini_split_recipe_does_not_claim_weather_context() -> None:
+    explanation = appliance_insights.energy_change_explanation(
+        _detail(
+            appliance_profile="mini_split",
+            expectations=(
+                SimpleNamespace(
+                    expectation_id="mini_split:operation_check",
+                    title="Mini-Split operation check",
+                    observed="Runtime is above normal.",
+                    expected="Power should modulate with outdoor temperature.",
+                ),
+            ),
+        )
+    )
+
+    assert explanation is not None
+    assert "outdoor-temperature context" not in explanation.explanation.casefold()
 
 
 def _install_index_sources(

@@ -26,7 +26,7 @@ from ..context_sources import (
     has_rain_context_source_configured,
     strings_from_any,
 )
-from ..contextual_baseline import rain_context
+from ..contextual_baseline import rain_context, weather_mode_for_temperature
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
 from ..water_correlations import (
@@ -43,6 +43,7 @@ HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
     }
@@ -118,13 +119,40 @@ class EnvironmentalContextManager:
             now,
             outdoor_temperature=outdoor_temperature,
         )
-        history = self.weather_context_history_samples(circuit_id, now)
+        weather_mode = _weather_context_mode(config, outdoor_temperature)
+        history = self.weather_context_history_samples(
+            circuit_id,
+            now,
+            mode=(
+                weather_mode
+                if config.appliance_profile is ApplianceProfile.MINI_SPLIT
+                else None
+            ),
+        )
+        weather_runtime_minutes = runtime_minutes
+        weather_duty_cycle_percent = duty_cycle_percent
+        if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+            (
+                weather_runtime_minutes,
+                weather_duty_cycle_percent,
+                _,
+            ) = _weather_context_mode_metrics(
+                coordinator.store_data.weather_context_history_by_circuit.get(
+                    circuit_id,
+                    [],
+                ),
+                now,
+                coordinator.context_builder.time_zone(),
+                mode=weather_mode,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
+            )
         evidence = evaluate_weather_context(
             outdoor_temperature=outdoor_temperature,
-            current_runtime_minutes=runtime_minutes,
-            current_duty_cycle_percent=duty_cycle_percent,
+            current_runtime_minutes=weather_runtime_minutes,
+            current_duty_cycle_percent=weather_duty_cycle_percent,
             history=history,
-            mode=_weather_context_mode(config),
+            mode=weather_mode,
             display_temperature=(
                 outdoor_temperature_reading["display_temperature"]
                 if outdoor_temperature_reading is not None
@@ -156,6 +184,11 @@ class EnvironmentalContextManager:
                 temperature=outdoor_temperature,
                 runtime_minutes=runtime_minutes,
                 duty_cycle_percent=duty_cycle_percent,
+                mode=(
+                    weather_mode
+                    if config.appliance_profile is ApplianceProfile.MINI_SPLIT
+                    else None
+                ),
             )
             if changed:
                 self._mark_store_dirty()
@@ -549,6 +582,7 @@ class EnvironmentalContextManager:
             if config.appliance_profile not in {
                 ApplianceProfile.HVAC,
                 ApplianceProfile.HVAC_COMPRESSOR,
+                ApplianceProfile.MINI_SPLIT,
             }:
                 continue
             circuit_ids.append(config.circuit_id)
@@ -718,6 +752,8 @@ class EnvironmentalContextManager:
         self,
         circuit_id: str,
         now: datetime,
+        *,
+        mode: str | None = None,
     ) -> list[WeatherContextSample]:
         samples: list[WeatherContextSample] = []
         raw_samples = (
@@ -740,6 +776,8 @@ class EnvironmentalContextManager:
             runtime = _float_or_none(raw_sample.get("runtime_minutes"))
             duty = _float_or_none(raw_sample.get("duty_cycle_percent"))
             if temperature is None or runtime is None or duty is None:
+                continue
+            if mode is not None and _weather_context_sample_mode(raw_sample) != mode:
                 continue
             samples.append(
                 WeatherContextSample(
@@ -768,8 +806,61 @@ class EnvironmentalContextManager:
         temperature: float,
         runtime_minutes: float,
         duty_cycle_percent: float,
+        mode: str | None = None,
     ) -> bool:
         coordinator = self._coordinator
+        history = coordinator.store_data.weather_context_history_by_circuit.setdefault(
+            circuit_id,
+            [],
+        )
+        time_zone = coordinator.context_builder.time_zone()
+        if mode is not None:
+            same_day = [
+                item
+                for item in history
+                if (
+                    (sample_time := _datetime_or_none(item.get("timestamp")))
+                    is not None
+                    and _ha_local_date(sample_time, time_zone)
+                    == _ha_local_date(now, time_zone)
+                )
+            ]
+            existing = next(
+                (
+                    item
+                    for item in same_day
+                    if _weather_context_sample_mode(item) == mode
+                ),
+                None,
+            )
+            mode_runtime, mode_duty, mode_elapsed = _weather_context_mode_metrics(
+                history,
+                now,
+                time_zone,
+                mode=mode,
+                runtime_minutes=runtime_minutes,
+                duty_cycle_percent=duty_cycle_percent,
+            )
+            sample = {
+                "timestamp": now.isoformat(),
+                "temperature": round(float(temperature), 3),
+                "mode": mode,
+                "runtime_minutes": round(mode_runtime, 3),
+                "duty_cycle_percent": round(mode_duty, 3),
+                "start_count": coordinator.state.run_cycle_count_by_circuit.get(
+                    circuit_id,
+                    0,
+                ),
+                "_mode_elapsed_minutes": round(mode_elapsed, 3),
+            }
+            if existing is not None:
+                if existing == sample and history[-1] is existing:
+                    return False
+                history.remove(existing)
+            history.append(sample)
+            del history[:-WEATHER_CONTEXT_HISTORY_MAX_SAMPLES]
+            return True
+
         sample = {
             "timestamp": now.isoformat(),
             "temperature": round(float(temperature), 3),
@@ -780,11 +871,6 @@ class EnvironmentalContextManager:
                 0,
             ),
         }
-        history = coordinator.store_data.weather_context_history_by_circuit.setdefault(
-            circuit_id,
-            [],
-        )
-        time_zone = coordinator.context_builder.time_zone()
         for index in range(len(history) - 1, -1, -1):
             existing_time = _datetime_or_none(history[index].get("timestamp"))
             if existing_time is not None and _ha_local_date(
@@ -840,10 +926,95 @@ def _water_context_history_sample_is_dry(sample: Mapping[str, Any]) -> bool:
     return sample.get("rain_active") is False
 
 
-def _weather_context_mode(config: CircuitConfig) -> str:
+def _weather_context_mode(
+    config: CircuitConfig,
+    outdoor_temperature: float | None = None,
+) -> str:
     if config.appliance_profile is ApplianceProfile.ELECTRIC_HEAT:
         return "heating"
+    if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+        return weather_mode_for_temperature(outdoor_temperature)
     return "cooling"
+
+
+def _weather_context_sample_mode(sample: Mapping[str, Any]) -> str:
+    mode = str(sample.get("mode") or "").casefold()
+    return mode or weather_mode_for_temperature(
+        _float_or_none(sample.get("temperature")),
+    )
+
+
+def _weather_context_sample_elapsed(sample: Mapping[str, Any]) -> float:
+    elapsed = _float_or_none(sample.get("_mode_elapsed_minutes"))
+    if elapsed is not None:
+        return elapsed
+    runtime = _float_or_none(sample.get("runtime_minutes")) or 0.0
+    duty = _float_or_none(sample.get("duty_cycle_percent")) or 0.0
+    return runtime * 100.0 / duty if duty > 0.0 else 0.0
+
+
+def _weather_context_mode_metrics(
+    history: Iterable[Mapping[str, Any]],
+    now: datetime,
+    time_zone: str | None,
+    *,
+    mode: str,
+    runtime_minutes: float,
+    duty_cycle_percent: float,
+) -> tuple[float, float, float]:
+    same_day = [
+        (sample, sample_time)
+        for sample in history
+        if (
+            (sample_time := _datetime_or_none(sample.get("timestamp"))) is not None
+            and _ha_local_date(sample_time, time_zone)
+            == _ha_local_date(now, time_zone)
+        )
+    ]
+    other_samples = [
+        sample
+        for sample, _ in same_day
+        if _weather_context_sample_mode(sample) != mode
+    ]
+    mode_runtime = max(
+        float(runtime_minutes)
+        - sum(
+            _float_or_none(sample.get("runtime_minutes")) or 0.0
+            for sample in other_samples
+        ),
+        0.0,
+    )
+    existing = next(
+        (
+            sample
+            for sample, _ in same_day
+            if _weather_context_sample_mode(sample) == mode
+        ),
+        None,
+    )
+    latest_time = max(
+        (sample_time for _, sample_time in same_day),
+        default=None,
+    )
+    mode_elapsed = (
+        _weather_context_sample_elapsed(existing)
+        if existing is not None
+        else (
+            float(runtime_minutes) * 100.0 / duty_cycle_percent
+            if not same_day and duty_cycle_percent > 0.0
+            else 0.0
+        )
+    ) + (
+        max((now - latest_time).total_seconds() / 60.0, 0.0)
+        if latest_time is not None
+        else 0.0
+    )
+    mode_duty = (
+        mode_runtime * 100.0 / mode_elapsed
+        if mode_elapsed > 0.0
+        else float(duty_cycle_percent)
+    )
+    return mode_runtime, mode_duty, mode_elapsed
 
 
 def _float_or_none(value: Any) -> float | None:

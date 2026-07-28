@@ -386,16 +386,11 @@ def _explanation_confidence(
 
 
 def _has_weather_context(detail: Any) -> bool:
-    if "hvac" not in str(getattr(detail, "appliance_profile", "")).casefold():
-        return False
-    for item in getattr(detail, "expectations", ()) or ():
-        text = " ".join(
-            str(getattr(item, field, ""))
-            for field in ("expectation_id", "title", "observed", "expected")
-        ).casefold()
-        if "weather" in text or "temperature" in text:
-            return True
-    return False
+    return any(
+        "weather_context"
+        in str(getattr(item, "expectation_id", "")).casefold()
+        for item in getattr(detail, "expectations", ()) or ()
+    )
 
 
 def _is_learning(readiness: Mapping[str, Any], detail: Any) -> bool:

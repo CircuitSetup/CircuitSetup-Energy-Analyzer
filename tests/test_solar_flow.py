@@ -1,7 +1,15 @@
+from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
+from custom_components.circuitsetup_energy_analyzer.processors.solar_flow import (
+    FLEXIBLE_SOLAR_LOAD_PROFILES,
+)
 from custom_components.circuitsetup_energy_analyzer.solar_flow import (
     SolarFlowInput,
     calculate_solar_flow,
 )
+
+
+def test_mini_split_is_a_flexible_solar_load() -> None:
+    assert ApplianceProfile.MINI_SPLIT in FLEXIBLE_SOLAR_LOAD_PROFILES
 
 
 def test_calculate_solar_flow_tracks_export_and_self_consumption() -> None:

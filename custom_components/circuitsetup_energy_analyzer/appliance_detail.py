@@ -67,6 +67,16 @@ _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] =
             "to idle.",
         ),
     ),
+    ApplianceProfile.MINI_SPLIT: (
+        "Mini-Split operation check",
+        "Mini-Split power should modulate with outdoor temperature and demand.",
+        "Low-load operation and brief defrost changes can be normal for an "
+        "inverter heat pump.",
+        (
+            "Compare outdoor temperature, operating mode, and recent defrost "
+            "behavior.",
+        ),
+    ),
     ApplianceProfile.WASHER: (
         "Washer cycle check",
         "Washer activity should stay within a bounded cycle duration.",
@@ -1142,9 +1152,11 @@ def _primary_appliance_expectations_for_circuit(
             ),
         )
 
-    if profile in {ApplianceProfile.HVAC, ApplianceProfile.HVAC_SYSTEM} and _is_higher(
-        runtime
-    ):
+    if profile in {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_SYSTEM,
+        ApplianceProfile.MINI_SPLIT,
+    } and _is_higher(runtime):
         weather_status = _mapping_status(
             state,
             "weather_context_by_circuit",

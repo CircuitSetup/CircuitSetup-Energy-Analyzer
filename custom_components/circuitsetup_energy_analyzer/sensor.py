@@ -2154,6 +2154,7 @@ _WATER_FLOW_CONTEXT_SENSOR_KEYS = {
 _WEATHER_CONTEXT_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.HVAC_BLOWER,
     ApplianceProfile.ELECTRIC_HEAT,
 }
@@ -2174,6 +2175,7 @@ _CYCLIC_APPLIANCE_PROFILES = {
     ApplianceProfile.FREEZER,
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.HVAC_BLOWER,
     ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
@@ -2193,6 +2195,7 @@ _CYCLIC_APPLIANCE_PROFILES = {
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
     ApplianceProfile.OVEN,

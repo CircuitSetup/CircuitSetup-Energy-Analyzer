@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from custom_components.circuitsetup_energy_analyzer.demo import (
     DEMO_HISTORY_SEED_VERSION,
 )
+from custom_components.circuitsetup_energy_analyzer.managers import demo_data
 from custom_components.circuitsetup_energy_analyzer.managers.demo_data import (
     DemoDataSeeder,
 )
@@ -31,6 +32,10 @@ class _DirtyTracker:
 
     def mark_dirty(self) -> None:
         self.dirty = True
+
+
+def test_demo_weather_context_profiles_include_mini_split() -> None:
+    assert ApplianceProfile.MINI_SPLIT in demo_data._DEMO_WEATHER_CONTEXT_PROFILES
 
 
 class _ContextBuilder:

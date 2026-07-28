@@ -540,6 +540,37 @@ def test_build_context_for_hvac_sample_uses_existing_weather_evidence() -> None:
     }
 
 
+def test_build_context_for_mini_split_keeps_weather_dimensions() -> None:
+    now = datetime(2026, 7, 27, 14, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="mini_split",
+        name="Mini-Split",
+        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        weather_context_by_circuit={
+            "mini_split": {
+                "temperature_f": 88.0,
+                "mode": "cooling",
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("mini_split", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    ).as_dict()
+
+    assert context["temperature_bin"] == "hot"
+    assert context["weather_mode"] == "cooling"
+    assert "time_of_day" in context
+
+
 def test_build_context_for_sample_uses_sample_local_calendar() -> None:
     sample_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
     now = datetime(2026, 6, 2, 15, tzinfo=UTC)

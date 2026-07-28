@@ -1483,6 +1483,34 @@ def test_dashboard_adds_hvac_weather_section_for_hvac_compressor() -> None:
     assert "sensor.compressor_run_cycle_duty_cycle" not in graph_refs
 
 
+def test_dashboard_adds_hvac_weather_section_for_mini_split() -> None:
+    dashboard = build_recommended_dashboard(
+        (
+            CircuitConfig(
+                circuit_id="mini_split",
+                name="Mini-Split",
+                appliance_profile=ApplianceProfile.MINI_SPLIT,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(
+                    SensorRef("sensor.mini_split_power", SensorRole.REAL_POWER),
+                ),
+            ),
+        ),
+        DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.backyard_temperature",
+    )
+    graphs = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "energy-costs"
+    )
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+
+    assert "sensor.backyard_temperature" in _entity_refs(graphs)
+    assert "sensor.mini_split_weather_context" in _entity_refs(insights)
+    assert _card_with_title(insights, "HVAC weather context")["type"] == SUMMARY_CARD
+
+
 def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     circuits = (
         CircuitConfig(

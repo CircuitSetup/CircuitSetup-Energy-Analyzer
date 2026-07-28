@@ -494,6 +494,7 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.FREEZER.value,
     ApplianceProfile.HVAC.value,
     ApplianceProfile.HVAC_COMPRESSOR.value,
+    ApplianceProfile.MINI_SPLIT.value,
     ApplianceProfile.HVAC_BLOWER.value,
     ApplianceProfile.ELECTRIC_HEAT.value,
     ApplianceProfile.WATER_HEATER.value,
@@ -520,6 +521,7 @@ _APPLIANCE_PROFILE_LABELS = {
     "exclude": "Exclude",
     ApplianceProfile.HVAC.value: "HVAC",
     ApplianceProfile.HVAC_COMPRESSOR.value: "HVAC Compressor",
+    ApplianceProfile.MINI_SPLIT.value: "Mini-Split",
     ApplianceProfile.HVAC_BLOWER.value: "HVAC Blower",
     ApplianceProfile.EV_CHARGER.value: "EV Charger",
     ApplianceProfile.THREE_D_PRINTER.value: "3D Printer",
@@ -2400,6 +2402,7 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
     if profile in {
         ApplianceProfile.HVAC.value,
         ApplianceProfile.HVAC_COMPRESSOR.value,
+        ApplianceProfile.MINI_SPLIT.value,
         ApplianceProfile.ELECTRIC_HEAT.value,
         ApplianceProfile.WATER_HEATER.value,
         ApplianceProfile.OVEN.value,
@@ -3341,6 +3344,20 @@ def _suggest_assignment_profile_mode(
         token in text for token in ("_aux_heat_", "_electric_heat_", "_heat_strip_")
     ):
         profile = ApplianceProfile.ELECTRIC_HEAT.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
+    if any(
+        token in text
+        for token in (
+            "_mini_split_",
+            "_minisplit_",
+            "_ductless_heat_pump_",
+            "_ductless_ac_",
+        )
+    ):
+        profile = ApplianceProfile.MINI_SPLIT.value
         return profile, _assignment_mode_for_profile_and_entities(
             profile,
             entity_id_list,
