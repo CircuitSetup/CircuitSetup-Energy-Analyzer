@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from .models import CircuitConfig, CircuitSample, PowerFlowMode, SensorRole
@@ -67,7 +67,6 @@ def build_circuit_sample(
     values: dict[SensorRole, float | None] = {}
     source_by_role: dict[SensorRole, str] = {}
     quality_issues: list[str] = []
-    stale_current_entity_ids: list[str] = []
     source_entity_ids = tuple(sensor.entity_id for sensor in config.sensors)
 
     for sensor in config.sensors:
@@ -87,10 +86,7 @@ def build_circuit_sample(
         now_utc = now.astimezone(UTC)
         is_stale = now_utc - source_last_updated > STALE_AFTER
         if is_stale:
-            if sensor.role is SensorRole.CURRENT:
-                stale_current_entity_ids.append(sensor.entity_id)
-            else:
-                quality_issues.append(f"{sensor.entity_id} stale")
+            quality_issues.append(f"{sensor.entity_id} stale")
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
@@ -125,14 +121,6 @@ def build_circuit_sample(
         source_by_role[sensor.role] = sensor.entity_id
 
     raw_real_power = values.get(SensorRole.REAL_POWER)
-    if (
-        inactive_power_threshold_w is None
-        or raw_real_power is None
-        or abs(raw_real_power) > inactive_power_threshold_w
-    ):
-        quality_issues.extend(
-            f"{entity_id} stale" for entity_id in stale_current_entity_ids
-        )
     real_power, power_flow_direction = _normalize_real_power(
         raw_real_power,
         config.power_flow,
@@ -141,7 +129,7 @@ def build_circuit_sample(
         entity_id = source_by_role.get(SensorRole.REAL_POWER, "real_power")
         quality_issues.append(f"{entity_id} negative_real_power_load")
 
-    return NormalizedCircuitSample(
+    sample = NormalizedCircuitSample(
         timestamp=now,
         circuit_id=config.circuit_id,
         real_power=real_power,
@@ -157,6 +145,37 @@ def build_circuit_sample(
         raw_real_power=raw_real_power,
         power_flow=config.power_flow,
         power_flow_direction=power_flow_direction,
+    )
+    return suppress_inactive_stale_current_issues(
+        config,
+        sample,
+        inactive_power_threshold_w,
+    )
+
+
+def suppress_inactive_stale_current_issues(
+    config: CircuitConfig,
+    sample: NormalizedCircuitSample,
+    inactive_power_threshold_w: float | None,
+) -> NormalizedCircuitSample:
+    if (
+        inactive_power_threshold_w is None
+        or sample.raw_real_power is None
+        or abs(sample.raw_real_power) > inactive_power_threshold_w
+    ):
+        return sample
+    stale_current_issues = {
+        f"{sensor.entity_id} stale"
+        for sensor in config.sensors
+        if sensor.role is SensorRole.CURRENT
+    }
+    return replace(
+        sample,
+        quality_issues=tuple(
+            issue
+            for issue in sample.quality_issues
+            if issue not in stale_current_issues
+        ),
     )
 
 

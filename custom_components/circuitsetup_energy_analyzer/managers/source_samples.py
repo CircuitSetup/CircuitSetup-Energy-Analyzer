@@ -8,7 +8,12 @@ from ..aggregation import aggregate_dual_phase
 from ..const import DOMAIN
 from ..demo import is_demo_source_entity_id
 from ..models import CircuitConfig, CircuitMode, PowerFlowMode, SensorRef, SensorRole
-from ..normalize import NormalizedCircuitSample, SourceState, build_circuit_sample
+from ..normalize import (
+    NormalizedCircuitSample,
+    SourceState,
+    build_circuit_sample,
+    suppress_inactive_stale_current_issues,
+)
 
 _DEMO_SOURCE_UNIQUE_ID_PREFIX = "demo_source_exact_"
 
@@ -28,7 +33,11 @@ class SourceSampleBuilder:
         inactive_power_threshold_w: float | None = None,
     ) -> NormalizedCircuitSample:
         if config.mode is CircuitMode.MAINS_NILM:
-            return self._aggregate_parallel_sample(config, now)
+            return self._aggregate_parallel_sample(
+                config,
+                now,
+                inactive_power_threshold_w=inactive_power_threshold_w,
+            )
         if config.mode is not CircuitMode.DUAL_PHASE:
             return build_circuit_sample(
                 config,
@@ -65,20 +74,18 @@ class SourceSampleBuilder:
             left_config,
             self.source_states_for(left_config, now),
             now,
-            inactive_power_threshold_w=inactive_power_threshold_w,
         )
         right_sample = build_circuit_sample(
             right_config,
             self.source_states_for(right_config, now),
             now,
-            inactive_power_threshold_w=inactive_power_threshold_w,
         )
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
         raw_real_power = _sum_complete_sample_values(
             (left_sample, right_sample),
             "raw_real_power",
         )
-        return NormalizedCircuitSample(
+        sample = NormalizedCircuitSample(
             timestamp=aggregated.timestamp,
             circuit_id=config.circuit_id,
             real_power=aggregated.combined_real_power,
@@ -105,6 +112,11 @@ class SourceSampleBuilder:
             leg_b_voltage=aggregated.leg_b.voltage,
             leg_power_imbalance_ratio=aggregated.leg_power_imbalance_ratio,
             voltage_difference=aggregated.voltage_difference,
+        )
+        return suppress_inactive_stale_current_issues(
+            config,
+            sample,
+            inactive_power_threshold_w,
         )
 
     def source_states_for(
@@ -188,6 +200,8 @@ class SourceSampleBuilder:
         self,
         config: CircuitConfig,
         now: datetime,
+        *,
+        inactive_power_threshold_w: float | None = None,
     ) -> NormalizedCircuitSample:
         sensor_samples = [
             (
@@ -210,7 +224,7 @@ class SourceSampleBuilder:
             SensorRole.REAL_POWER,
         )
         leg_a_sample, leg_b_sample = _parallel_leg_samples(sensor_samples)
-        return NormalizedCircuitSample(
+        sample = NormalizedCircuitSample(
             timestamp=max(sample.timestamp for sample in samples),
             circuit_id=config.circuit_id,
             real_power=_sum_parallel_sensor_values(
@@ -267,6 +281,11 @@ class SourceSampleBuilder:
                 SensorRole.VOLTAGE,
                 "b",
             ),
+        )
+        return suppress_inactive_stale_current_issues(
+            config,
+            sample,
+            inactive_power_threshold_w,
         )
 
 
