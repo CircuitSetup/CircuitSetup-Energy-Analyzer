@@ -8074,6 +8074,65 @@ async def test_stale_source_repair_waits_for_learning_and_names_stale_sensor(
     assert issues[0][3]["source_entities"] == ["sensor.ac2_current"]
 
 
+def test_sample_for_config_uses_operating_off_threshold_for_stale_current() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+    class FakeStates:
+        def get(self, entity_id: str):
+            value, unit, updated = {
+                "sensor.dryer_power": ("11", "W", now),
+                "sensor.dryer_current": (
+                    "0.001",
+                    "A",
+                    now - timedelta(minutes=30),
+                ),
+            }[entity_id]
+            return SimpleNamespace(
+                state=value,
+                attributes={"unit_of_measurement": unit},
+                last_updated=updated,
+            )
+
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=FakeStates(), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "dryer",
+                    "name": "Dryer",
+                    "mode": "single_phase",
+                    "appliance_profile": "dryer",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.dryer_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.dryer_current",
+                            "role": "current",
+                        },
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: now,
+    )
+    config = coordinator.circuit_configs[0]
+    settings = coordinator.store_data.operating_detection_settings_by_circuit
+
+    settings["dryer"] = {"operating_off_threshold_w": 12.0}
+    inactive = coordinator._sample_for_config(config, now)
+    settings["dryer"] = {"operating_off_threshold_w": 10.0}
+    active = coordinator._sample_for_config(config, now)
+
+    assert "sensor.dryer_current stale" not in inactive.quality_issues
+    assert "sensor.dryer_current stale" in active.quality_issues
+
+
 @pytest.mark.asyncio
 async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
