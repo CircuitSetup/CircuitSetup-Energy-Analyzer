@@ -215,6 +215,7 @@ def test_digest_honors_weather_and_water_flow_context_evidence() -> None:
             "date": (date(2026, 7, 13) + timedelta(days=offset)).isoformat(),
             "usage_kwh": 1.0,
             "complete": True,
+            "expected_context": offset >= 7,
         }
         for offset in range(14)
     ]
@@ -225,18 +226,27 @@ def test_digest_honors_weather_and_water_flow_context_evidence() -> None:
             name="Water Heater",
             mode=SimpleNamespace(value="single_phase"),
         ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            name="Fridge",
+            mode=SimpleNamespace(value="single_phase"),
+        ),
     )
-    coordinator.store_data.energy_usage_by_circuit["water_heater"] = {"days": days}
+    coordinator.store_data.energy_usage_by_circuit["water_heater"] = {
+        "days": [dict(day) for day in days]
+    }
+    coordinator.store_data.energy_usage_by_circuit["fridge"] = {
+        "days": [
+            {key: value for key, value in day.items() if key != "expected_context"}
+            for day in days
+        ]
+    }
     coordinator.state.learning_by_circuit["water_heater"] = False
+    coordinator.state.learning_by_circuit["fridge"] = False
     coordinator.state.energy_usage_evidence_by_circuit = {
-        "hvac": {
-            "status": "context_explained",
-            "baseline_context": {"season": "summer", "weather_mode": "cooling"},
-        },
-        "water_heater": {
-            "status": "context_explained",
-            "baseline_context": {"water_flow_state": "active_flow"},
-        },
+        "hvac": {"status": "normal"},
+        "water_heater": {"status": "normal"},
+        "fridge": {"status": "context_explained"},
     }
 
     items = digest_items_for_coordinator(
@@ -250,6 +260,7 @@ def test_digest_honors_weather_and_water_flow_context_evidence() -> None:
     } == {
         "circuit:hvac": True,
         "circuit:water_heater": True,
+        "circuit:fridge": False,
     }
 
 

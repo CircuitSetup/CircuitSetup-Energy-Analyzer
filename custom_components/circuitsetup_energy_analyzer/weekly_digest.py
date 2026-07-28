@@ -138,7 +138,6 @@ def digest_items_for_coordinator(
     energy_history = getattr(store_data, "energy_usage_by_circuit", {})
     active_alerts = getattr(state, "active_alerts_by_circuit", {})
     learning = getattr(state, "learning_progress_by_circuit", {})
-    energy_evidence = getattr(state, "energy_usage_evidence_by_circuit", {})
     week_start, week_end = completed_week_bounds(now, time_zone)
     prior_start = week_start - timedelta(days=7)
     prior_end = week_start - timedelta(days=1)
@@ -155,6 +154,7 @@ def digest_items_for_coordinator(
         days = history.get("days", ()) if isinstance(history, Mapping) else ()
         week_values = _complete_daily_values_between(days, week_start, week_end)
         prior_values = _complete_daily_values_between(days, prior_start, prior_end)
+        week_dates = {day.isoformat() for day in week_values}
         if circuit_is_learning(state, circuit_id):
             continue
         has_active_alert = bool(
@@ -165,11 +165,6 @@ def digest_items_for_coordinator(
         if not comparable_energy and not has_active_alert:
             continue
         progress = learning.get(circuit_id, {}) if isinstance(learning, Mapping) else {}
-        evidence = (
-            energy_evidence.get(circuit_id, {})
-            if isinstance(energy_evidence, Mapping)
-            else {}
-        )
         item = {
             "appliance_key": f"circuit:{circuit_id}",
             "display_name": str(getattr(config, "name", "") or circuit_id),
@@ -181,9 +176,11 @@ def digest_items_for_coordinator(
             if isinstance(progress, Mapping) and progress.get("alert_ready")
             else 0.6,
             "status": "unresolved" if has_active_alert else "normal",
-            "expected_context": (
-                isinstance(evidence, Mapping)
-                and evidence.get("status") == "context_explained"
+            "expected_context": any(
+                isinstance(day, Mapping)
+                and str(day.get("date") or "") in week_dates
+                and day.get("expected_context") is True
+                for day in (days if isinstance(days, list | tuple) else ())
             ),
         }
         if not comparable_energy:

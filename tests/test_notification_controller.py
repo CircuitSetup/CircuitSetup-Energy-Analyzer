@@ -279,6 +279,60 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     ) == 2
 
 
+@pytest.mark.parametrize("delivery_mode", ["daily_summary", "weekly_digest"])
+@pytest.mark.asyncio
+async def test_summary_alert_resolution_records_lifecycle_recovery(
+    delivery_mode: str,
+) -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="dryer",
+        severity=Severity.WARNING,
+        message="Dryer runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    state = SimpleNamespace(
+        learning_by_circuit={"dryer": False},
+        energy_usage_evidence_by_circuit={},
+        active_alerts_by_circuit={"dryer": [alert]},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: SimpleNamespace(name="Dryer"),
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={
+                "circuit:dryer": {
+                    "delivery_mode": delivery_mode,
+                    "lifecycle_update": True,
+                },
+            },
+            notification_delivery_state={},
+            learning_started_at_by_circuit={},
+            alerts=[alert],
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(alert)
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications({"dryer"})
+
+    assert [item.feature for item in coordinator.store_data.alerts].count(
+        "alert_recovered"
+    ) == 1
+
+
 @pytest.mark.asyncio
 async def test_alert_notifications_are_dismissed_when_evidence_is_no_longer_active(
     monkeypatch: pytest.MonkeyPatch,

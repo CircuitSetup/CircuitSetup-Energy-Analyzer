@@ -143,6 +143,16 @@ class EnergyUsageProcessor:
                 and date.fromisoformat(result.date) not in ineligible_dates
             ),
         )
+        for day in history.get("days", ()):
+            if isinstance(day, dict) and day.get("date") == result.date:
+                if (
+                    contextual_comparison.get("status_override")
+                    == "context_explained"
+                ):
+                    day["expected_context"] = True
+                else:
+                    day.pop("expected_context", None)
+                break
         energy_source = str(history.get("energy_source") or "")
         evidence = energy_usage_evidence_payload(
             result,

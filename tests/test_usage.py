@@ -13,7 +13,12 @@ def test_record_energy_usage_flags_day_above_window_share() -> None:
         "last_energy_kwh": 100.0,
         "last_sample_at": "2026-06-03T00:00:00+00:00",
         "days": [
-            {"date": "2026-05-27", "usage_kwh": 6.0, "complete": True},
+            {
+                "date": "2026-05-27",
+                "usage_kwh": 6.0,
+                "complete": True,
+                "expected_context": True,
+            },
             {"date": "2026-05-28", "usage_kwh": 7.0, "complete": True},
             {"date": "2026-05-29", "usage_kwh": 8.0, "complete": True},
             {"date": "2026-05-30", "usage_kwh": 7.0, "complete": True},
@@ -47,6 +52,7 @@ def test_record_energy_usage_flags_day_above_window_share() -> None:
         "threshold_ratio": 0.25,
         "daily_usage_share": 0.252,
     }
+    assert history["days"][0]["expected_context"] is True
 
 
 def test_record_energy_usage_waits_for_full_baseline_window() -> None:

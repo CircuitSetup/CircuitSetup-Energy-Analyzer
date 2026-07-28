@@ -105,7 +105,26 @@ class NotificationController:
         evaluated_circuit_ids: set[str] | None = None,
     ) -> None:
         """Dismiss alert notifications whose evidence is no longer active."""
-        recoverable_ids = set(self._managed_alert_notification_ids)
+        delivery_state = self._delivery_state()
+        stored_summary_ids = delivery_state.get("summary_recovery_alert_ids", ())
+        summary_recovery_ids = {
+            str(alert_id)
+            for alert_id in (
+                stored_summary_ids if isinstance(stored_summary_ids, list) else ()
+            )
+            if isinstance(alert_id, str) and alert_id
+        }
+        for queue_key in ("daily", "weekly"):
+            queue = delivery_state.get(queue_key, ())
+            summary_recovery_ids.update(
+                str(item.get("alert_id") or "")
+                for item in (queue if isinstance(queue, list) else ())
+                if isinstance(item, dict)
+                if item.get("alert_id")
+            )
+        recoverable_ids = (
+            set(self._managed_alert_notification_ids) | summary_recovery_ids
+        )
         if not self._alert_notifications_initialized:
             self._managed_alert_notification_ids.update(
                 notifications.notification_id_for_alert(alert)
@@ -113,15 +132,16 @@ class NotificationController:
                 if not self._is_lifecycle_alert(alert)
             )
             self._alert_notifications_initialized = True
+        tracked_alert_ids = (
+            self._managed_alert_notification_ids | summary_recovery_ids
+        )
         active_alert_ids = self._active_alert_ids()
         alerts_by_id = {
             notifications.notification_id_for_alert(alert): alert
             for alert in getattr(self._coordinator.store_data, "alerts", ())
         }
         recovered_by_circuit: dict[str, tuple[str, AlertEvidence]] = {}
-        for alert_id in sorted(
-            self._managed_alert_notification_ids - active_alert_ids
-        ):
+        for alert_id in sorted(tracked_alert_ids - active_alert_ids):
             recovered_alert = (
                 alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
             )
@@ -133,7 +153,10 @@ class NotificationController:
                 )
             ):
                 continue
-            await self.async_dismiss_alert_notification(alert_id)
+            if alert_id in self._managed_alert_notification_ids:
+                await self.async_dismiss_alert_notification(alert_id)
+            else:
+                self.notified_alert_ids.discard(alert_id)
             if (
                 recovered_alert is not None
                 and not self._coordinator.evidence_actions.alerts_paused(
@@ -174,6 +197,11 @@ class NotificationController:
                 active_alert_ids
             )
             self.notified_alert_ids.intersection_update(active_alert_ids)
+            remaining_summary_ids = summary_recovery_ids & active_alert_ids
+            self._set_summary_recovery_alert_ids(
+                delivery_state,
+                remaining_summary_ids,
+            )
             return
         self._managed_alert_notification_ids = {
             alert_id
@@ -189,6 +217,16 @@ class NotificationController:
             or (alert := alerts_by_id.get(alert_id)) is None
             or alert.circuit_id not in evaluated_circuit_ids
         }
+        self._set_summary_recovery_alert_ids(
+            delivery_state,
+            {
+                alert_id
+                for alert_id in summary_recovery_ids
+                if alert_id in active_alert_ids
+                or (alert := alerts_by_id.get(alert_id)) is None
+                or alert.circuit_id not in evaluated_circuit_ids
+            },
+        )
 
     async def async_notify_learning_transitions(
         self,
@@ -767,6 +805,25 @@ class NotificationController:
             }
         )
         del queue[:-100]
+        if action in {"queue_daily", "queue_weekly"} and category != "lifecycle_update":
+            recovery_ids = state.setdefault("summary_recovery_alert_ids", [])
+            if not isinstance(recovery_ids, list):
+                recovery_ids = []
+                state["summary_recovery_alert_ids"] = recovery_ids
+            if alert_id not in recovery_ids:
+                recovery_ids.append(alert_id)
+                del recovery_ids[:-100]
+        self._mark_store_dirty()
+
+    def _set_summary_recovery_alert_ids(
+        self,
+        state: dict[str, Any],
+        alert_ids: set[str],
+    ) -> None:
+        retained = sorted(alert_ids)[-100:]
+        if state.get("summary_recovery_alert_ids") == retained:
+            return
+        state["summary_recovery_alert_ids"] = retained
         self._mark_store_dirty()
 
     def _record_delivery(

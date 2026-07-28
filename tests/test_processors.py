@@ -1333,6 +1333,9 @@ def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -
     assert evidence["baseline_sample_count"] == 7
     assert evidence["contextual_baseline_median_kwh"] == 14.4
     assert evidence["contextual_baseline_p90_kwh"] == 15.0
+    assert store_data.energy_usage_by_circuit["hvac"]["days"][-1][
+        "expected_context"
+    ] is True
     assert "daily_energy_kwh" in (
         store_data.contextual_baseline_samples_by_circuit["hvac"][-1]["feature"]
     )
