@@ -1372,6 +1372,7 @@ def test_setup_health_treats_optional_energy_and_metric_inputs_as_ready() -> Non
         data=AnalyzerState(
             data_quality_checklist_by_circuit={
                 "fridge": {
+                    "sample_observed": True,
                     "required_sensors_present": True,
                     "numeric_states_valid": True,
                     "source_data_fresh": True,
@@ -1463,6 +1464,7 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
         data=AnalyzerState(
             data_quality_checklist_by_circuit={
                 "fridge": {
+                    "sample_observed": True,
                     "required_sensors_present": True,
                     "numeric_states_valid": True,
                     "source_data_fresh": True,
@@ -1509,18 +1511,24 @@ def test_setup_health_waits_to_verify_configured_source_data() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
     )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        data_quality_checklist,
+    )
 
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
     coordinator = SimpleNamespace(
-        data=AnalyzerState(),
-        circuit_configs=(
-            CircuitConfig(
-                circuit_id="fridge",
-                name="Kitchen Fridge",
-                appliance_profile=ApplianceProfile.REFRIGERATOR,
-                mode=CircuitMode.SINGLE_PHASE,
-                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
-            ),
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": data_quality_checklist(circuit, None)
+            }
         ),
+        circuit_configs=(circuit,),
     )
 
     checklist = {

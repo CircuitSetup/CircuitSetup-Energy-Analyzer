@@ -327,6 +327,7 @@ def _setup_health_checklist(
             circuit.circuit_id,
         ))
         is not None
+        and checklist.get("sample_observed") is True
         and checklist.get("required_sensors_present") is True
         and checklist.get("numeric_states_valid") is True
         and checklist.get("source_data_fresh") is True
@@ -889,7 +890,7 @@ def _setup_health_data_quality_issue(
             ),
             issue="check_ct_direction",
         )
-    if checklist is None:
+    if checklist is None or checklist.get("sample_observed") is False:
         return None
     if checklist.get("source_data_fresh") is False or "stale" in issue_text:
         return _setup_health_issue(
