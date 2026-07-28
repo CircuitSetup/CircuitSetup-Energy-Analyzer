@@ -699,8 +699,8 @@
       "description": "The integration has no configured source sensors. Add at least one CircuitSetup energy sensor before appliance analysis can start. Suggested fix: {fix}"
     },
     "missing_required_sensor": {
-      "title": "Energy Analyzer source sensor is missing",
-      "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
+      "title": "Energy Analyzer source sensor is missing for {circuit_name}",
+      "description": "{circuit_name} is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
     },
     "invalid_source_sensor": {
       "title": "Energy Analyzer source sensor data is invalid",
