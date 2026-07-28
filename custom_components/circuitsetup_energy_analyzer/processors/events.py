@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
+from dataclasses import replace
 from typing import Any
 
 from ..events import CircuitEventDetector
@@ -78,7 +79,23 @@ class CircuitEventProcessor:
             )
             self.detectors[circuit_config.circuit_id] = detector
             self._resolved_by_circuit[circuit_config.circuit_id] = key
-        events = detector.process(sample)
+        maintenance = context.store_data.maintenance_by_circuit.get(
+            circuit_config.circuit_id,
+            {},
+        )
+        baseline_eligible = not (
+            isinstance(maintenance, Mapping) and maintenance.get("active") is True
+        )
+        events = [
+            replace(
+                event,
+                features={
+                    **event.features,
+                    "baseline_eligible": baseline_eligible,
+                },
+            )
+            for event in detector.process(sample)
+        ]
         snapshot = detector.last_snapshot
         state_updates: list[StateUpdate] = []
         if snapshot is not None:

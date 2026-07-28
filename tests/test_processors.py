@@ -535,7 +535,14 @@ async def test_coordinator_applies_observation_lane_without_creating_alert_histo
     ]
 
 
-def test_event_processor_returns_events_after_dwell() -> None:
+@pytest.mark.parametrize(
+    ("maintenance_active", "baseline_eligible"),
+    [(False, True), (True, False)],
+)
+def test_event_processor_returns_events_after_dwell(
+    maintenance_active: bool,
+    baseline_eligible: bool,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -549,7 +556,11 @@ def test_event_processor_returns_events_after_dwell() -> None:
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
         state=AnalyzerState(),
-        store_data=FeatureStoreData(),
+        store_data=FeatureStoreData(
+            maintenance_by_circuit=(
+                {"fridge": {"active": True}} if maintenance_active else {}
+            )
+        ),
         options={},
         entry_data={},
         known_load_circuit_ids=frozenset(),
@@ -570,6 +581,7 @@ def test_event_processor_returns_events_after_dwell() -> None:
     assert first.events == []
     assert second.events == []
     assert [event.event_type for event in third.events] == [EventType.START]
+    assert third.events[0].features["baseline_eligible"] is baseline_eligible
     assert third.store_dirty is True
 
 
@@ -1366,6 +1378,13 @@ def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -
     processor.process(sample, config, context)
 
     assert store_data.contextual_baseline_samples_by_circuit == {}
+    assert store_data.energy_usage_by_circuit["ev"]["days"] == [
+        {
+            "date": "2026-05-31",
+            "usage_kwh": 4.0,
+            "baseline_eligible": False,
+        }
+    ]
 
 
 def test_energy_usage_alert_features_include_contextual_baseline_details() -> None:
@@ -5222,6 +5241,70 @@ def test_power_quality_processor_requests_clear_when_features_missing() -> None:
     assert result.alerts == []
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("learning_by_circuit", "fridge")] is True
+
+
+def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    baseline_values: defaultdict[str, list[float]] = defaultdict(list)
+    seeded: list[dict[str, float]] = []
+    policy = _CaptureAlertPolicy()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            maintenance_by_circuit={"fridge": {"active": True}}
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="fridge",
+        real_power=120.0,
+        current=1.0,
+        voltage=120.0,
+        reactive_power=80.0,
+        apparent_power=145.0,
+        power_factor=0.83,
+        frequency=60.0,
+        energy=0.0,
+    )
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_power_quality_baselines=lambda _config, features: seeded.append(
+            dict(features)
+        ),
+        baseline_values=baseline_values,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert baseline_values == {}
+    assert seeded == []
+    assert policy.observations == []
+    assert result.alerts == []
+    assert result.store_dirty is False
 
 
 @pytest.mark.asyncio

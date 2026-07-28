@@ -331,6 +331,40 @@ def test_cycle_baselines_use_prior_completed_cycles_and_daily_activity() -> None
     assert values["run_cycle_daily_duty_cycle_percent"] == [1.4] * 15
 
 
+def test_cycle_baselines_exclude_maintenance_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        cycle_baseline_feature_values,
+    )
+
+    now = datetime(2026, 6, 4, 12, 0, tzinfo=UTC)
+    events = []
+    for day in range(1, 4):
+        start = datetime(2026, 6, day, 1, 0, tzinfo=UTC)
+        features = {"baseline_eligible": day != 2}
+        events.extend(
+            [
+                CircuitEvent(
+                    timestamp=start,
+                    circuit_id="fridge",
+                    event_type=EventType.START,
+                    features=features,
+                ),
+                CircuitEvent(
+                    timestamp=start + timedelta(minutes=20),
+                    circuit_id="fridge",
+                    event_type=EventType.STOP,
+                    features=features,
+                ),
+            ]
+        )
+
+    values = cycle_baseline_feature_values(events, circuit_id="fridge", now=now)
+
+    assert values["run_cycle_duration_s"] == [1200.0, 1200.0]
+    assert values["run_cycle_daily_start_count"] == [1.0, 1.0]
+    assert values["run_cycle_daily_duty_cycle_percent"] == [1.4, 1.4]
+
+
 def test_cycle_evidence_flags_active_run_longer_than_learned_cycles() -> None:
     from custom_components.circuitsetup_energy_analyzer.cycles import (
         CircuitCycleSummary,

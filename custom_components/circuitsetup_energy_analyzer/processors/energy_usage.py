@@ -9,6 +9,7 @@ from ..alerting import Observation
 from ..baseline import build_baseline
 from ..contextual_baseline import (
     DAILY_ENERGY_FEATURE,
+    ContextKey,
     ContextualBaselineSample,
     build_context_for_sample,
     context_allows_baseline_learning,
@@ -67,6 +68,16 @@ class EnergyUsageProcessor:
         if self._seed_demo_history is not None:
             self._seed_demo_history(circuit_config, sample, context.now, settings)
 
+        context_key = build_context_for_sample(
+            circuit_config=circuit_config,
+            sample=sample,
+            state=context.state,
+            store_data=context.store_data,
+            now=context.now,
+            feature=DAILY_ENERGY_FEATURE,
+            time_zone=context.time_zone,
+            calendar_timestamp=context.now,
+        )
         history = context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {})
         result = record_energy_usage(
             history,
@@ -79,15 +90,15 @@ class EnergyUsageProcessor:
             ),
             retention_days=self._retention_days_for_circuit(circuit_id),
             time_zone=context.time_zone,
+            baseline_eligible=context_allows_baseline_learning(context_key),
         )
         if result is None:
             return FeatureResult()
 
         contextual_comparison = _contextual_daily_energy_comparison(
             result,
-            circuit_config,
-            sample,
             context,
+            context_key,
         )
         energy_source = str(history.get("energy_source") or "")
         evidence = energy_usage_evidence_payload(
@@ -220,22 +231,11 @@ def energy_usage_evidence_payload(
 
 def _contextual_daily_energy_comparison(
     result: Any,
-    circuit_config: CircuitConfig,
-    sample: NormalizedCircuitSample,
     context: ProcessingContext,
+    context_key: ContextKey,
 ) -> dict[str, Any]:
     """Record and compare daily energy against contextual history."""
-    circuit_id = circuit_config.circuit_id
-    context_key = build_context_for_sample(
-        circuit_config=circuit_config,
-        sample=sample,
-        state=context.state,
-        store_data=context.store_data,
-        now=context.now,
-        feature=DAILY_ENERGY_FEATURE,
-        time_zone=context.time_zone,
-        calendar_timestamp=context.now,
-    )
+    circuit_id = result.circuit_id
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_id,
         [],
@@ -337,6 +337,7 @@ def _daily_energy_projection(
         if (
             not isinstance(item, dict)
             or item.get("complete") is not True
+            or item.get("baseline_eligible") is False
             or str(item.get("date")) >= today
         ):
             continue

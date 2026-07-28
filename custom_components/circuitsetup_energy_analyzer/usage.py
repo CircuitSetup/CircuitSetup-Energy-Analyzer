@@ -92,6 +92,7 @@ def record_energy_usage(
     settings: EnergyUsageSettings,
     retention_days: int = 45,
     time_zone: TimeZone = None,
+    baseline_eligible: bool = True,
 ) -> EnergyUsageResult | None:
     """Fold a cumulative kWh sample into daily usage history."""
     if energy_kwh is None:
@@ -116,8 +117,13 @@ def record_energy_usage(
     initial_sample = last_energy is None or last_sample_at is None
     delta_kwh = 0.0 if initial_sample else max(float(energy_kwh) - last_energy, 0.0)
 
-    if delta_kwh > 0.0:
-        _add_daily_usage(days, today, delta_kwh)
+    if delta_kwh > 0.0 or not baseline_eligible:
+        _add_daily_usage(
+            days,
+            today,
+            delta_kwh,
+            baseline_eligible=baseline_eligible,
+        )
 
     history["last_energy_kwh"] = float(energy_kwh)
     history["last_sample_at"] = timestamp.isoformat()
@@ -226,6 +232,8 @@ def _coerce_days(raw_days: Any) -> list[dict[str, float | str | bool]]:
         }
         if isinstance(raw_day.get("complete"), bool):
             day["complete"] = raw_day["complete"]
+        if isinstance(raw_day.get("baseline_eligible"), bool):
+            day["baseline_eligible"] = raw_day["baseline_eligible"]
         days.append(day)
     return days
 
@@ -238,7 +246,11 @@ def _prior_days(
     prior = [
         {"date": str(day["date"]), "usage_kwh": float(day["usage_kwh"])}
         for day in days
-        if str(day["date"]) < today and day.get("complete") is True
+        if (
+            str(day["date"]) < today
+            and day.get("complete") is True
+            and day.get("baseline_eligible") is not False
+        )
     ]
     prior.sort(key=lambda day: day["date"])
     return prior[-window_days:]
@@ -248,12 +260,22 @@ def _add_daily_usage(
     days: list[dict[str, float | str | bool]],
     date: str,
     delta_kwh: float,
+    *,
+    baseline_eligible: bool,
 ) -> None:
     for day in days:
         if day["date"] == date:
             day["usage_kwh"] = _round_kwh(float(day["usage_kwh"]) + delta_kwh)
+            if not baseline_eligible:
+                day["baseline_eligible"] = False
             return
-    days.append({"date": date, "usage_kwh": _round_kwh(delta_kwh)})
+    day: dict[str, float | str | bool] = {
+        "date": date,
+        "usage_kwh": _round_kwh(delta_kwh),
+    }
+    if not baseline_eligible:
+        day["baseline_eligible"] = False
+    days.append(day)
 
 
 def _usage_for_date(

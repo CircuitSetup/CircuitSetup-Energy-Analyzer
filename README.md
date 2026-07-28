@@ -865,6 +865,11 @@ action:
 
 Use the circuit Pause alerts switch before servicing an appliance, replacing equipment, moving CTs, or making wiring changes that could make analyzer evidence temporarily misleading.
 
+Maintenance keeps current telemetry and totals visible, pauses appliance
+notifications, and excludes maintenance-affected days, cycles, and electrical
+samples from learned baselines. If Relearn On End is enabled, manual and timed
+maintenance completion both reset the circuit baseline.
+
 ```yaml
 action: circuitsetup_energy_analyzer.start_maintenance
 data:

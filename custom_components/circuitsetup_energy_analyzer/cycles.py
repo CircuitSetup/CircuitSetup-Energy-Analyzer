@@ -170,11 +170,17 @@ def cycle_baseline_feature_values(
     day_start = _day_start_for_datetime(now, time_zone)
     current_date = _calendar_date(now, time_zone)
     circuit_events = _circuit_cycle_events(events, circuit_id)
+    ineligible_dates = {
+        _calendar_date(event.timestamp, time_zone)
+        for event in circuit_events
+        if event.features.get("baseline_eligible") is False
+    }
     prior_dates = sorted(
         {
             _calendar_date(event.timestamp, time_zone)
             for event in circuit_events
             if _calendar_date(event.timestamp, time_zone) < current_date
+            and _calendar_date(event.timestamp, time_zone) not in ineligible_dates
         }
     )
     daily_summaries = [
@@ -198,6 +204,8 @@ def cycle_baseline_feature_values(
             circuit_id=circuit_id,
             before=day_start,
             merge_gap_seconds=merge_gap_seconds,
+            excluded_dates=ineligible_dates,
+            time_zone=time_zone,
         ),
         RUN_CYCLE_DUTY_CYCLE_FEATURE: [
             summary.duty_cycle_percent for summary in active_daily_summaries
@@ -461,7 +469,10 @@ def _completed_cycle_durations(
     circuit_id: str,
     before: datetime,
     merge_gap_seconds: float = 0.0,
+    excluded_dates: set[date] | None = None,
+    time_zone: TimeZone = None,
 ) -> list[float]:
+    excluded_dates = excluded_dates or set()
     return [
         session.duration_seconds
         for session in build_normalized_run_sessions(
@@ -470,7 +481,12 @@ def _completed_cycle_durations(
             merge_gap_seconds=merge_gap_seconds,
             now=before,
         )
-        if session.stopped_at is not None and session.stopped_at < before
+        if (
+            session.stopped_at is not None
+            and session.stopped_at < before
+            and _calendar_date(session.started_at, time_zone) not in excluded_dates
+            and _calendar_date(session.stopped_at, time_zone) not in excluded_dates
+        )
     ]
 
 
