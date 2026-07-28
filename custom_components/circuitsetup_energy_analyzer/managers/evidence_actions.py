@@ -123,11 +123,35 @@ class EvidenceActionController:
         coordinator.store_data.maintenance_by_circuit[circuit_id] = current
         coordinator.paused_circuits.discard(circuit_id)
         coordinator.store_persistence.mark_dirty()
+        if not should_relearn:
+            coordinator.refresh_ux_state_for_circuit(circuit_id, now)
+            coordinator.async_set_updated_data(coordinator.state)
+        await coordinator.store_persistence.async_save_if_dirty(now)
+        started_at = str(current.get("started_at") or now.isoformat())
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
+        display_name = str(
+            getattr(config, "name", "") or circuit_id.replace("_", " ").title()
+        )
+        await coordinator.notification_controller.async_notify_lifecycle_update(
+            circuit_id,
+            feature="maintenance_completed",
+            message=f"{display_name} maintenance ended.",
+            episode_key=f"maintenance_completed:{started_at}",
+            now=now,
+        )
         if should_relearn:
             await coordinator.async_relearn_baseline(circuit_id)
-            return
-        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
-        coordinator.async_set_updated_data(coordinator.state)
+            learning_epoch = coordinator.store_data.learning_started_at_by_circuit.get(
+                circuit_id,
+                now.isoformat(),
+            )
+            await coordinator.notification_controller.async_notify_lifecycle_update(
+                circuit_id,
+                feature="relearning_started",
+                message=f"{display_name} started relearning its normal behavior.",
+                episode_key=f"relearning_started:{learning_epoch}",
+                now=now,
+            )
         await coordinator.store_persistence.async_save_if_dirty(now)
 
     def alerts_paused(self, circuit_id: str, now: datetime | None = None) -> bool:

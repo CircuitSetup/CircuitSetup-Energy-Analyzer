@@ -176,8 +176,12 @@ questions instead of raw diagnostic entity lists:
   the candidate would have produced from up to 14 days and 500 samples. The
   preview is historical guidance, not a prediction of future behavior.
 - **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
-  each appliance's own normal separately from top energy users and can stay in
-  the panel or use a persistent/mobile notification target.
+  each appliance's own normal separately from top energy users, reports
+  unresolved alerts separately from alerts merely observed during the week,
+  and can stay in the panel or use a persistent/mobile notification target.
+  Week-over-week change rankings require two full seven-day weeks of complete,
+  maintenance-free data; weather-, season-, rain-, or water-flow-explained
+  behavior remains contextual rather than being promoted as degradation.
 - **Appliance Insights** is the evidence panel's integration-level appliance
   index. It lists direct-meter and NILM appliances together, defaults to
   needs-attention and running appliances first, and supports running,
@@ -783,6 +787,18 @@ The analyzer uses two different Home Assistant surfaces:
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
 Routine alert evidence, alert notifications, blueprint follow-up actions, suggested settings, and stale-source repair issues wait until that appliance or mains circuit finishes both its shared baseline and any active rolling energy-use baseline. Configuration and missing-source repairs remain immediate.
+
+Daily summaries describe alert evidence observed on the completed local day,
+even when it has since cleared. Weekly digests label currently active evidence
+as unresolved and keep it separate from those historical observations.
+Week-over-week rankings appear only after both comparison weeks contain seven
+complete eligible local days.
+
+Per-appliance lifecycle updates can report learning completion, maintenance
+completion, relearning, and natural recovery. They are retained as informational
+evidence but are off by default; enable the `lifecycle_update` notification
+preference only for appliances where those updates are useful. Acknowledging or
+classifying an alert is a user action and does not create a recovery update.
 
 An unchanged optional current source is not reported as stale while a fresh
 real-power source remains at or below that circuit's configured turn-off

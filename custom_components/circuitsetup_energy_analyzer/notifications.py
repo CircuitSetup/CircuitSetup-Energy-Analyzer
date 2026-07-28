@@ -104,6 +104,17 @@ def alert_notification_message(
     display_name = nilm_display_name or (
         config.name if config is not None and config.name else alert.circuit_id
     )
+    if alert.features.get("notification_type") == "lifecycle_update":
+        return "\n".join(
+            (
+                f"**{display_name}**",
+                "",
+                alert.message,
+                "",
+                f"[{_notification_text('alert', 'open_appliance_evidence')}]"
+                f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+            )
+        )
     lines = [f"**{display_name}**", "", alert.message]
     lines.extend(_power_quality_notice_lines(alert))
     lines.extend(_nilm_source_lines(alert))

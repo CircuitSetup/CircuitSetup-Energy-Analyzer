@@ -15,8 +15,176 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.notifications import (
+    alert_notification_message,
     notification_id_for_alert,
 )
+
+
+@pytest.mark.asyncio
+async def test_learning_completion_lifecycle_is_opt_in_and_once_per_epoch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    clock = {"now": now}
+    created: list[AlertEvidence] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        created.append(alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: clock["now"],
+        state=SimpleNamespace(
+            learning_by_circuit={"fridge": False},
+            energy_usage_evidence_by_circuit={},
+        ),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: SimpleNamespace(name="Fridge"),
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={
+                "circuit:fridge": {"lifecycle_update": True},
+            },
+            notification_delivery_state={},
+            learning_started_at_by_circuit={
+                "fridge": "2026-07-20T12:00:00+00:00",
+            },
+            alerts=[],
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_learning_transitions({"fridge": True}, now)
+    await controller.async_notify_learning_transitions(
+        {"fridge": False},
+        now + timedelta(minutes=1),
+    )
+    next_epoch = "2026-08-01T12:00:00+00:00"
+    coordinator.store_data.learning_started_at_by_circuit["fridge"] = next_epoch
+    clock["now"] = now + timedelta(days=4)
+    await controller.async_notify_learning_transitions(
+        {"fridge": True},
+        clock["now"],
+    )
+
+    assert [alert.feature for alert in created] == [
+        "learning_completed",
+        "learning_completed",
+    ]
+    assert [alert.feature for alert in coordinator.store_data.alerts] == [
+        "learning_completed",
+        "learning_completed",
+    ]
+    assert coordinator.store_data.notification_delivery_state[
+        "lifecycle_episodes"
+    ] == [f"fridge|learning_completed:{next_epoch}"]
+    message = alert_notification_message(
+        coordinator.store_data.alerts[0],
+        config=SimpleNamespace(name="Fridge"),
+    )
+    assert "Open appliance evidence" in message
+    assert "Observed value" not in message
+    assert "Repeated observations" not in message
+
+
+@pytest.mark.asyncio
+async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    active_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    user_dismissed_alert = AlertEvidence(
+        timestamp=now + timedelta(minutes=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge energy changed.",
+        feature="daily_energy_usage_spike",
+    )
+    created: list[AlertEvidence] = []
+    dismissed: list[str] = []
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        created.append(alert)
+
+    async def dismiss_notification(hass, notification_id: str) -> None:
+        del hass
+        dismissed.append(notification_id)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_dismiss_persistent_notification",
+        dismiss_notification,
+    )
+    state = SimpleNamespace(
+        learning_by_circuit={"fridge": False},
+        energy_usage_evidence_by_circuit={},
+        active_alerts_by_circuit={"fridge": [active_alert]},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: SimpleNamespace(name="Fridge"),
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={
+                "circuit:fridge": {"lifecycle_update": True},
+            },
+            notification_delivery_state={},
+            learning_started_at_by_circuit={},
+            alerts=[active_alert],
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(active_alert)
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications()
+
+    coordinator.store_data.alerts.append(user_dismissed_alert)
+    state.active_alerts_by_circuit = {"fridge": [user_dismissed_alert]}
+    await controller.async_notify_alert(user_dismissed_alert)
+    await controller.async_dismiss_alert_notification(
+        notification_id_for_alert(user_dismissed_alert)
+    )
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications()
+
+    assert dismissed == [
+        notification_id_for_alert(active_alert),
+        notification_id_for_alert(user_dismissed_alert),
+    ]
+    assert [alert.feature for alert in created].count("alert_recovered") == 1
+    assert [alert.feature for alert in coordinator.store_data.alerts].count(
+        "alert_recovered"
+    ) == 1
 
 
 @pytest.mark.asyncio

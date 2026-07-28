@@ -42,6 +42,7 @@ from .processors import (
 from .runtime_factory import initialize_runtime
 from .state import (
     AnalyzerState,
+    circuit_is_learning,
     process_events_into_state,
 )
 from .storage import (
@@ -397,14 +398,21 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
+        processing_configs = self._processing_configs_for_changed_entities(
+            changed_entities
+        )
+        previous_learning = {
+            config.circuit_id: circuit_is_learning(
+                self.state,
+                config.circuit_id,
+            )
+            for config in processing_configs
+        }
         await self.evidence_actions.async_expire_maintenance_if_due(now)
         context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
-        processing_configs = self._processing_configs_for_changed_entities(
-            changed_entities
-        )
         processing_circuit_ids = {
             config.circuit_id for config in processing_configs
         }
@@ -511,6 +519,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
             self._mark_store_dirty()
+        await self.notification_controller.async_notify_learning_transitions(
+            previous_learning,
+            now,
+        )
         await self.notification_controller.async_sync_alert_notifications()
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)

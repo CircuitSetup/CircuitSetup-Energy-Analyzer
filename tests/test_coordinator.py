@@ -214,6 +214,49 @@ def _completed_energy_learning_history(
 
 
 @pytest.mark.asyncio
+async def test_process_update_passes_prior_learning_state_to_lifecycle_controller() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({"sensor.fridge_power": 0}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        },
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["fridge"] = True
+    coordinator.notification_controller.async_notify_learning_transitions = (
+        AsyncMock()
+    )
+
+    await coordinator.async_process_update()
+
+    coordinator.notification_controller.async_notify_learning_transitions.assert_awaited_once_with(
+        {"fridge": True},
+        now,
+    )
+
+
+@pytest.mark.asyncio
 async def test_process_update_promotes_new_expected_schedule_alerts(
     monkeypatch,
 ) -> None:
@@ -11398,7 +11441,9 @@ async def test_runtime_real_power_state_change_does_not_create_alert(
 
     assert notifications == []
     assert coordinator.state.active_alerts_by_circuit.get("fridge", []) == []
-    assert coordinator.store_data.alerts == []
+    assert [alert.feature for alert in coordinator.store_data.alerts] == [
+        "learning_completed"
+    ]
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,7 @@ def test_default_preferences_use_safe_defaults_and_category_choices() -> None:
         appliance_key="circuit:fridge"
     )
     assert preferences.finished_running is False
+    assert preferences.lifecycle_update is False
     assert preferences.electrical_issue is True
     assert preferences.data_quality_issue is True
     assert preferences.other_issue is True
@@ -35,6 +36,21 @@ def test_default_preferences_use_safe_defaults_and_category_choices() -> None:
         now=now,
         source_type="direct_meter",
     ).action == "suppress"
+    assert decide_notification_delivery(
+        preferences,
+        category="lifecycle_update",
+        now=now,
+        source_type="direct_meter",
+    ).action == "suppress"
+    assert decide_notification_delivery(
+        preferences_from_dict(
+            {"lifecycle_update": True},
+            appliance_key="circuit:fridge",
+        ),
+        category="lifecycle_update",
+        now=now,
+        source_type="direct_meter",
+    ).action == "send"
     assert decide_notification_delivery(
         preferences,
         category="electrical_issue",
