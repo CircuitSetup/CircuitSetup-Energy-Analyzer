@@ -61,10 +61,13 @@ def build_circuit_sample(
     config: CircuitConfig,
     states: dict[str, SourceState],
     now: datetime,
+    *,
+    inactive_power_threshold_w: float | None = None,
 ) -> NormalizedCircuitSample:
     values: dict[SensorRole, float | None] = {}
     source_by_role: dict[SensorRole, str] = {}
     quality_issues: list[str] = []
+    stale_current_entity_ids: list[str] = []
     source_entity_ids = tuple(sensor.entity_id for sensor in config.sensors)
 
     for sensor in config.sensors:
@@ -84,7 +87,10 @@ def build_circuit_sample(
         now_utc = now.astimezone(UTC)
         is_stale = now_utc - source_last_updated > STALE_AFTER
         if is_stale:
-            quality_issues.append(f"{sensor.entity_id} stale")
+            if sensor.role is SensorRole.CURRENT:
+                stale_current_entity_ids.append(sensor.entity_id)
+            else:
+                quality_issues.append(f"{sensor.entity_id} stale")
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
@@ -119,6 +125,14 @@ def build_circuit_sample(
         source_by_role[sensor.role] = sensor.entity_id
 
     raw_real_power = values.get(SensorRole.REAL_POWER)
+    if (
+        inactive_power_threshold_w is None
+        or raw_real_power is None
+        or abs(raw_real_power) > inactive_power_threshold_w
+    ):
+        quality_issues.extend(
+            f"{entity_id} stale" for entity_id in stale_current_entity_ids
+        )
     real_power, power_flow_direction = _normalize_real_power(
         raw_real_power,
         config.power_flow,

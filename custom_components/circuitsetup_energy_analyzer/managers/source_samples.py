@@ -24,6 +24,8 @@ class SourceSampleBuilder:
         self,
         config: CircuitConfig,
         now: datetime,
+        *,
+        inactive_power_threshold_w: float | None = None,
     ) -> NormalizedCircuitSample:
         if config.mode is CircuitMode.MAINS_NILM:
             return self._aggregate_parallel_sample(config, now)
@@ -32,6 +34,7 @@ class SourceSampleBuilder:
                 config,
                 self.source_states_for(config, now),
                 now,
+                inactive_power_threshold_w=inactive_power_threshold_w,
             )
 
         left_sensors = tuple(
@@ -45,6 +48,7 @@ class SourceSampleBuilder:
                 config,
                 self.source_states_for(config, now),
                 now,
+                inactive_power_threshold_w=inactive_power_threshold_w,
             )
 
         left_config = replace(
@@ -61,11 +65,13 @@ class SourceSampleBuilder:
             left_config,
             self.source_states_for(left_config, now),
             now,
+            inactive_power_threshold_w=inactive_power_threshold_w,
         )
         right_sample = build_circuit_sample(
             right_config,
             self.source_states_for(right_config, now),
             now,
+            inactive_power_threshold_w=inactive_power_threshold_w,
         )
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
         raw_real_power = _sum_complete_sample_values(
