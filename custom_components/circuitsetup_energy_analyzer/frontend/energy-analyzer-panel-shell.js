@@ -348,6 +348,21 @@ export class PanelShellMethods {
           height: 16px;
           width: 16px;
         }
+        .metric .setup-health-status {
+          color: var(--primary-text-color, #212121);
+        }
+        .setup-health-status-ok ha-icon {
+          color: var(--success-color, #2e7d32);
+        }
+        .setup-health-status-needs_attention ha-icon {
+          color: var(--warning-color, #f9a825);
+        }
+        .setup-health-status-optional ha-icon {
+          color: var(--secondary-text-color, #5f6b7a);
+        }
+        .setup-health-status-learning ha-icon {
+          color: var(--primary-color, #0b6bcb);
+        }
         .metric strong {
           font-size: 18px;
         }

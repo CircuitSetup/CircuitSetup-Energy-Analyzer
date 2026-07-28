@@ -4442,18 +4442,15 @@ panel._setupHealth = {
   message: "Configure breaker amps for HVAC",
   open_path: integrationPath,
   issue_count: 1,
-  checklist_ready_count: 1,
-  checklist_total_count: 3,
+  checklist_ready_count: 2,
+  checklist_total_count: 4,
   checklist: [
-    { item_id: "source_data_found", status: "ok" },
+    { item_id: "source_data_found", status: "needs_attention" },
     {
-      item_id: "entity_detail_level_selected",
-      status: "needs_attention",
-      title: "Entity detail level selected",
-      why_it_matters: "Choose how much setup detail Home Assistant should create.",
-      fix: "Choose entity detail level",
-      open_path: integrationPath,
+      item_id: "notifications_enabled",
+      status: "ok",
     },
+    { item_id: "nilm_enabled", status: "optional" },
     {
       item_id: "learning_progress",
       status: "learning",
@@ -4498,9 +4495,27 @@ if (nextStepCount !== 1) {
   );
 }
 for (const expected of [
-  "Source data found",
+  'icon="mdi:check-circle"',
+  'icon="mdi:alert-circle"',
+  'icon="mdi:minus-circle-outline"',
+  'icon="mdi:progress-clock"',
+  'aria-label="Complete"',
+  'aria-label="Needs attention"',
+  'aria-label="Optional"',
+  'aria-label="Learning"',
+]) {
+  if (!rendered.includes(expected)) {
+    throw new Error(`missing checklist status icon: ${expected}`);
+  }
+}
+if (rendered.includes("<span>Needs attention</span>")) {
+  throw new Error(`raw checklist status remains: ${rendered}`);
+}
+for (const expected of [
+  "Source data needs attention",
   "Confirms Home Assistant is receiving live readings for each circuit.",
-  "Entity detail level selected",
+  "Notifications enabled",
+  "NILM enabled",
   "Capacity tracking needs the circuit breaker size.",
   "Open integration options",
   integrationHref,
