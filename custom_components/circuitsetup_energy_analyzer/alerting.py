@@ -4,13 +4,15 @@ from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from math import floor
 from types import MappingProxyType
 from typing import Any, Self
 
 from .models import AlertEvidence, CircuitConfig, Severity
 from .ux import friendly_feature_name
 
-ALERT_FINGERPRINT_SCHEMA_VERSION = "alert:v2"
+ALERT_FINGERPRINT_SCHEMA_VERSION = "alert:v3"
+LEGACY_ALERT_FINGERPRINT_SCHEMA_VERSION = "alert:v2"
 
 
 def alert_anomaly_score(alert: AlertEvidence) -> float:
@@ -157,21 +159,19 @@ def alert_feedback_fingerprint_for_observation(
 ) -> str:
     """Return the alert feedback key an observation would produce if promoted."""
     return alert_feedback_fingerprint(
-        AlertEvidence(
-            timestamp=observation.observed_at,
-            circuit_id=observation.circuit_id,
-            severity=Severity.WARNING,
-            message=observation.message,
-            feature=observation.feature,
-            value_metric=observation.value_metric,
-            observed_value=observation.observed_value,
-            baseline_value=observation.baseline_value,
-            change_ratio=ConservativeAlertPolicy._change_ratio(
-                observation.observed_value,
-                observation.baseline_value,
-            ),
-            features=observation.features,
-        ),
+        _alert_evidence_for_observation(observation),
+        config=config,
+    )
+
+
+def alert_feedback_fingerprint_candidates_for_observation(
+    observation: Observation,
+    *,
+    config: CircuitConfig | None = None,
+) -> tuple[str, ...]:
+    """Return current and legacy feedback keys for an observation."""
+    return alert_feedback_fingerprint_candidates(
+        _alert_evidence_for_observation(observation),
         config=config,
     )
 
@@ -182,7 +182,43 @@ def alert_feedback_fingerprint(
     config: CircuitConfig | None = None,
 ) -> str:
     """Return a stable key for matching repeated versions of alert evidence."""
-    parts = [ALERT_FINGERPRINT_SCHEMA_VERSION, alert.circuit_id, _alert_feature(alert)]
+    return _alert_feedback_fingerprint(
+        alert,
+        config=config,
+        schema_version=ALERT_FINGERPRINT_SCHEMA_VERSION,
+    )
+
+
+def alert_feedback_fingerprint_candidates(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None = None,
+) -> tuple[str, ...]:
+    """Return configured and unconfigured current and legacy feedback keys."""
+    configs = (config, None) if config is not None else (None,)
+    return tuple(
+        dict.fromkeys(
+            _alert_feedback_fingerprint(
+                alert,
+                config=candidate_config,
+                schema_version=schema_version,
+            )
+            for schema_version in (
+                ALERT_FINGERPRINT_SCHEMA_VERSION,
+                LEGACY_ALERT_FINGERPRINT_SCHEMA_VERSION,
+            )
+            for candidate_config in configs
+        )
+    )
+
+
+def _alert_feedback_fingerprint(
+    alert: AlertEvidence,
+    *,
+    config: CircuitConfig | None,
+    schema_version: str,
+) -> str:
+    parts = [schema_version, alert.circuit_id, _alert_feature(alert)]
     if alert.event_type is not None:
         parts.append(f"event={alert.event_type.value}")
     if config is not None:
@@ -199,10 +235,23 @@ def alert_feedback_fingerprint(
                 f"power_flow={config.power_flow.value}",
             )
         )
+    if schema_version == ALERT_FINGERPRINT_SCHEMA_VERSION:
+        if alert.value_metric:
+            parts.append(f"metric={alert.value_metric}")
+        reference = (
+            alert.baseline_value
+            if alert.baseline_value != 0.0
+            else max(abs(alert.observed_value), 1.0)
+        )
+        observed_bucket = _relative_value_bucket(alert.observed_value, reference)
+        baseline_bucket = _relative_value_bucket(alert.baseline_value, reference)
+    else:
+        observed_bucket = _value_bucket(alert.observed_value)
+        baseline_bucket = _value_bucket(alert.baseline_value)
     parts.extend(
         (
-            f"observed={_value_bucket(alert.observed_value)}",
-            f"baseline={_value_bucket(alert.baseline_value)}",
+            f"observed={observed_bucket}",
+            f"baseline={baseline_bucket}",
             "direction="
             f"{_change_direction(alert.observed_value, alert.baseline_value)}",
             f"ratio={_ratio_bucket(alert)}",
@@ -213,6 +262,24 @@ def alert_feedback_fingerprint(
     if (baseline_context := _baseline_context_bucket(alert.features)) is not None:
         parts.append(f"context={baseline_context}")
     return "|".join(parts)
+
+
+def _alert_evidence_for_observation(observation: Observation) -> AlertEvidence:
+    return AlertEvidence(
+        timestamp=observation.observed_at,
+        circuit_id=observation.circuit_id,
+        severity=Severity.WARNING,
+        message=observation.message,
+        feature=observation.feature,
+        value_metric=observation.value_metric,
+        observed_value=observation.observed_value,
+        baseline_value=observation.baseline_value,
+        change_ratio=ConservativeAlertPolicy._change_ratio(
+            observation.observed_value,
+            observation.baseline_value,
+        ),
+        features=observation.features,
+    )
 
 
 def _alert_feature(alert: AlertEvidence) -> str:
@@ -239,6 +306,15 @@ def _value_bucket(value: float) -> str:
     bucket_start = _floor_to_step(float(value), step)
     bucket_end = bucket_start + step
     return f"{bucket_start:.1f}-{bucket_end:.1f}"
+
+
+def _relative_value_bucket(value: float, reference: float) -> str:
+    if float(value) == 0.0:
+        return "zero"
+    step = max(abs(float(reference)) * 0.05, 0.05)
+    bucket_start = floor(float(value) / step) * step
+    bucket_end = bucket_start + step
+    return f"{bucket_start:.3f}-{bucket_end:.3f}"
 
 
 def _change_direction(observed_value: float, baseline_value: float) -> str:

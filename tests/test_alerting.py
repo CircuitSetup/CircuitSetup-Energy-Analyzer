@@ -316,6 +316,29 @@ def test_alert_feedback_fingerprint_is_stable_across_alert_timestamps() -> None:
     assert alert_feedback_fingerprint(first) == alert_feedback_fingerprint(repeated)
 
 
+def test_alert_feedback_fingerprint_tolerates_small_high_scale_changes() -> None:
+    def alert(observed: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="runtime_power",
+            value_metric="power_w",
+            observed_value=observed,
+            baseline_value=800.0,
+            change_ratio=(observed - 800.0) / 800.0,
+        )
+
+    assert alert_feedback_fingerprint(alert(1000.0)) == (
+        alert_feedback_fingerprint(alert(1001.0))
+    )
+    assert alert_feedback_fingerprint(alert(1000.0)) != (
+        alert_feedback_fingerprint(alert(1120.0))
+    )
+    assert "metric=power_w" in alert_feedback_fingerprint(alert(1000.0))
+
+
 def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     config = CircuitConfig(
         circuit_id="fridge",
@@ -353,7 +376,7 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
 
     fingerprint = alert_feedback_fingerprint(alert, config=config)
 
-    assert fingerprint.startswith("alert:v2|fridge|daily_energy_spike|")
+    assert fingerprint.startswith("alert:v3|fridge|daily_energy_spike|")
     assert "sources=energy+real_power" in fingerprint
     assert "source_map=energy:sensor.fridge_energy+real_power:sensor.fridge_power" in (
         fingerprint
@@ -361,7 +384,8 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     assert "profile=refrigerator" in fingerprint
     assert "mode=single_phase" in fingerprint
     assert "power_flow=load" in fingerprint
-    assert "observed=2.5-3.0" in fingerprint
+    assert "observed=2.600-2.700" in fingerprint
+    assert "baseline=2.000-2.100" in fingerprint
     assert "ratio=25-50pct" in fingerprint
     assert "direction=increase" in fingerprint
     assert "temp=90-95f" in fingerprint
