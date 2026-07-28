@@ -319,12 +319,16 @@ def _setup_health_checklist(
         CONF_ENTITY_DETAIL_LEVEL,
     )
     compact = len(issues) > _MAX_SETUP_HEALTH_ISSUES
+    source_data_ready = has_sources and not source_circuits
 
     items = [
         _setup_health_checklist_item(
             "source_data_found",
-            _setup_health_checklist_value("source_data_found", "title"),
-            "ok" if has_sources and not source_circuits else "needs_attention",
+            _setup_health_checklist_value(
+                "source_data_found",
+                "title" if source_data_ready else "title_attention",
+            ),
+            "ok" if source_data_ready else "needs_attention",
             _setup_health_checklist_value("source_data_found", "why_it_matters"),
             affected_circuits=source_circuits,
             fix=(

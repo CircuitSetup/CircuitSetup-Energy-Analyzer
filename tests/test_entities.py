@@ -1443,6 +1443,8 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert attrs["issues"][0]["fix"] == (
         "Add at least one source sensor to Garage Freezer"
     )
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+    assert checklist["source_data_found"]["title"] == "Source data needs attention"
 
 
 def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
@@ -1478,6 +1480,9 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
 
     assert attrs["checklist_total_count"] == 10
     assert checklist["source_data_found"]["status"] == "ok"
+    assert checklist["source_data_found"]["title"] == (
+        "Source data is available and healthy"
+    )
     assert checklist["cumulative_kwh_sources_found"]["status"] == "ok"
     assert "affected_circuits" not in checklist["cumulative_kwh_sources_found"]
     assert checklist["dashboard_created"]["status"] == "ok"

@@ -3206,7 +3206,7 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     assert payload["checklist"][0] == {
         "item_id": "source_data_found",
         "status": "ok",
-        "title": "Source data found",
+        "title": "Source data is available and healthy",
         "why_it_matters": (
             "Confirms Home Assistant is receiving live readings for each circuit."
         ),
