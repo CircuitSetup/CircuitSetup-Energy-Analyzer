@@ -195,7 +195,7 @@ def select_power_quality_evidence(
     by_feature = {score.feature: score for score in scores}
     real_score = by_feature.get("real_power")
     if _relationship_contributor_count(scores, min_relationship_score) < 2:
-        return _real_power_fallback(by_feature, min_relationship_score)
+        return None
 
     material_family_scores = _material_relationship_family_scores(
         scores,
@@ -203,7 +203,7 @@ def select_power_quality_evidence(
     )
     rms_score = relationship_rms_score(scores)
     if rms_score < min_relationship_score:
-        return _real_power_fallback(by_feature, min_relationship_score)
+        return None
 
     stable_real = _real_power_is_stable(real_score)
     evidence_features = {
@@ -305,7 +305,7 @@ def select_power_quality_evidence(
     if config.mode is CircuitMode.DUAL_PHASE and rms_score >= min_relationship_score:
         selected = _strongest(reactive_score, pf_score, apparent_score)
         if not _score_high(selected, min_relationship_score):
-            return _real_power_fallback(by_feature, min_relationship_score)
+            return None
         return _evidence(
             "split_phase_relationship_changed",
             "Possible issue: the combined split-phase W/VAR/VA/PF relationship "
@@ -330,7 +330,7 @@ def select_power_quality_evidence(
     ):
         selected = _strongest(reactive_score, pf_score, apparent_score)
         if not _score_high(selected, min_relationship_score):
-            return _real_power_fallback(by_feature, min_relationship_score)
+            return None
         return _evidence(
             "motor_relationship_changed",
             "Possible issue: motor-load W/VAR/VA/PF behavior changed from its "
@@ -349,7 +349,7 @@ def select_power_quality_evidence(
             ),
         )
 
-    return _real_power_fallback(by_feature, min_relationship_score)
+    return None
 
 
 def _evidence(
@@ -383,27 +383,6 @@ def _evidence(
         else selected.baseline_confidence,
         features=features,
     )
-
-
-def _real_power_fallback(
-    by_feature: Mapping[str, PowerQualityFeatureScore],
-    threshold: float,
-) -> PowerQualityEvidence | None:
-    real_score = by_feature.get("real_power")
-    if real_score is None or real_score.score < threshold:
-        return None
-    return PowerQualityEvidence(
-        feature="real_power",
-        metric=real_score.feature,
-        message="",
-        observed_value=real_score.observed_value,
-        baseline_value=real_score.baseline_value,
-        change_ratio=real_score.change_ratio,
-        score=real_score.score,
-        baseline_confidence=real_score.baseline_confidence,
-        features={"real_power": real_score.score},
-    )
-
 
 def _real_power_is_stable(score: PowerQualityFeatureScore | None) -> bool:
     if score is None:

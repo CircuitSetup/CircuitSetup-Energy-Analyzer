@@ -9,7 +9,7 @@ from typing import Any
 
 from ..alerting import Observation
 from ..baseline import build_baseline
-from ..models import ApplianceProfile, CircuitConfig, CircuitMode
+from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..power_quality import (
     PowerQualityEvidence,
@@ -102,12 +102,6 @@ class PowerQualityProcessor:
             scores,
             min_relationship_score=policy.min_average_score,
         )
-        if (
-            evidence is None
-            and circuit_config.mode is not CircuitMode.MIXED
-            and circuit_config.appliance_profile is not ApplianceProfile.MIXED
-        ):
-            evidence = real_power_fallback_evidence(scores, policy)
 
         mature = self._learning_mature(circuit_config, context.now)
         has_confident_scores = any(score.baseline_confidence >= 0.6 for score in scores)
@@ -140,31 +134,6 @@ class PowerQualityProcessor:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)
         return feature_result
-
-
-def real_power_fallback_evidence(
-    scores: Iterable[Any],
-    policy: AlertPolicy,
-) -> PowerQualityEvidence | None:
-    """Return real-power fallback evidence when no relationship evidence wins."""
-    for score in scores:
-        if (
-            score.feature == "real_power"
-            and score.baseline_confidence >= policy.min_baseline_confidence
-        ):
-            return PowerQualityEvidence(
-                feature="real_power",
-                metric=score.feature,
-                message="",
-                observed_value=score.observed_value,
-                baseline_value=score.baseline_value,
-                change_ratio=score.change_ratio,
-                score=score.score,
-                baseline_confidence=score.baseline_confidence,
-                features={"real_power": score.score},
-            )
-    return None
-
 
 def power_quality_state_updates(
     circuit_id: str,

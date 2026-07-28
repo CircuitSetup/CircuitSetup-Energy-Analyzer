@@ -324,7 +324,7 @@ Use summary sensors for dashboards and automations. When a summary changes, open
 
 For power-meter interpretation:
 
-- **Watts**: what the circuit is doing right now.
+- **Watts**: what the circuit is doing right now. Real-power changes are evaluated by activity, cycle, standby, and demand checks; watts alone do not create power-quality alerts.
 - **kWh**: how much energy it used over time.
 - **Amps**: how hard the circuit is loaded.
 - **Power factor, reactive power, and apparent power**: electrical evidence used for health and consistency checks.
