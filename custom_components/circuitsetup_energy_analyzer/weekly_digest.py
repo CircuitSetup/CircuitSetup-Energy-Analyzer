@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
+from .state import circuit_is_learning
+
 
 @dataclass(frozen=True, slots=True)
 class DigestItem:
@@ -122,6 +124,7 @@ def digest_items_for_coordinator(
     energy_history = getattr(store_data, "energy_usage_by_circuit", {})
     active_alerts = getattr(state, "active_alerts_by_circuit", {})
     learning = getattr(state, "learning_progress_by_circuit", {})
+    energy_evidence = getattr(state, "energy_usage_evidence_by_circuit", {})
     week_start, week_end = completed_week_bounds(now, time_zone)
     prior_start = week_start - timedelta(days=7)
     prior_end = week_start - timedelta(days=1)
@@ -136,23 +139,79 @@ def digest_items_for_coordinator(
             else {}
         )
         days = history.get("days", ()) if isinstance(history, Mapping) else ()
-        week_values = _daily_values_between(days, week_start, week_end)
-        prior_values = _daily_values_between(days, prior_start, prior_end)
+        week_values = _complete_daily_values_between(days, week_start, week_end)
+        prior_values = _complete_daily_values_between(days, prior_start, prior_end)
+        if (
+            circuit_is_learning(state, circuit_id)
+            or len(week_values) != 7
+            or len(prior_values) != 7
+        ):
+            continue
         progress = learning.get(circuit_id, {}) if isinstance(learning, Mapping) else {}
+        evidence = (
+            energy_evidence.get(circuit_id, {})
+            if isinstance(energy_evidence, Mapping)
+            else {}
+        )
         items.append(
             {
                 "appliance_key": f"circuit:{circuit_id}",
                 "display_name": str(getattr(config, "name", "") or circuit_id),
-                "energy_kwh": sum(week_values),
-                "normal_energy_kwh": sum(prior_values),
+                "energy_kwh": sum(week_values.values()),
+                "normal_energy_kwh": sum(prior_values.values()),
                 "confidence": 1.0
                 if isinstance(progress, Mapping) and progress.get("alert_ready")
                 else 0.6,
                 "status": "unresolved"
                 if isinstance(active_alerts, Mapping) and active_alerts.get(circuit_id)
                 else "normal",
+                "expected_context": (
+                    isinstance(evidence, Mapping)
+                    and evidence.get("status") == "context_explained"
+                ),
             }
         )
+    items_by_key = {item["appliance_key"]: item for item in items}
+    load_shift_evidence = getattr(state, "solar_load_shift_evidence_by_circuit", {})
+    candidate_budget = 100
+    if isinstance(load_shift_evidence, Mapping):
+        for index, evidence in enumerate(load_shift_evidence.values()):
+            if index >= 100 or candidate_budget == 0:
+                break
+            if (
+                not isinstance(evidence, Mapping)
+                or evidence.get("status") != "surplus_candidate"
+            ):
+                continue
+            candidates = evidence.get("candidate_loads")
+            for candidate in (
+                candidates[:candidate_budget] if isinstance(candidates, list) else ()
+            ):
+                candidate_budget -= 1
+                if (
+                    not isinstance(candidate, Mapping)
+                    or candidate.get("state") != "idle"
+                ):
+                    continue
+                circuit_id = str(candidate.get("circuit_id") or "").strip()
+                if not circuit_id:
+                    continue
+                appliance_key = f"circuit:{circuit_id}"
+                item = items_by_key.get(appliance_key)
+                if item is not None:
+                    if item["status"] == "normal":
+                        item["status"] = "load_shift_opportunity"
+                    continue
+                item = {
+                    "appliance_key": appliance_key,
+                    "display_name": str(candidate.get("name") or circuit_id),
+                    "energy_kwh": 0.0,
+                    "normal_energy_kwh": 0.0,
+                    "confidence": 1.0,
+                    "status": "load_shift_opportunity",
+                }
+                items.append(item)
+                items_by_key[appliance_key] = item
     assignments = getattr(store_data, "nilm_appliance_assignments_by_circuit", {})
     session_history = getattr(store_data, "nilm_session_history_by_circuit", {})
     if isinstance(assignments, Mapping):
@@ -230,12 +289,12 @@ def _number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _daily_values_between(
+def _complete_daily_values_between(
     days: Any,
     start: date,
     end: date,
-) -> list[float]:
-    values: list[float] = []
+) -> dict[date, float]:
+    values: dict[date, float] = {}
     for item in days if isinstance(days, list | tuple) else ():
         if not isinstance(item, Mapping):
             continue
@@ -243,8 +302,12 @@ def _daily_values_between(
             item_date = date.fromisoformat(str(item.get("date") or ""))
         except ValueError:
             continue
-        if start <= item_date <= end:
-            values.append(_number(item.get("usage_kwh")))
+        if (
+            start <= item_date <= end
+            and item.get("complete") is True
+            and item.get("baseline_eligible") is not False
+        ):
+            values[item_date] = _number(item.get("usage_kwh"))
     return values
 
 

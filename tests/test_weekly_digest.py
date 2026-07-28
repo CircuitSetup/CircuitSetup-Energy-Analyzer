@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -96,13 +96,13 @@ def test_digest_uses_local_week_and_has_a_stable_idempotence_key() -> None:
 def test_digest_items_sum_completed_week_and_compare_prior_week() -> None:
     now = datetime(2026, 7, 13, 12, tzinfo=UTC)
     days = [
-        {"date": f"2026-07-{day:02d}", "usage_kwh": 2.0}
+        {"date": f"2026-07-{day:02d}", "usage_kwh": 2.0, "complete": True}
         for day in range(6, 13)
     ] + [
-        {"date": f"2026-06-{day:02d}", "usage_kwh": 1.0}
+        {"date": f"2026-06-{day:02d}", "usage_kwh": 1.0, "complete": True}
         for day in range(29, 31)
     ] + [
-        {"date": f"2026-07-{day:02d}", "usage_kwh": 1.0}
+        {"date": f"2026-07-{day:02d}", "usage_kwh": 1.0, "complete": True}
         for day in range(1, 6)
     ]
     coordinator = SimpleNamespace(
@@ -116,7 +116,10 @@ def test_digest_items_sum_completed_week_and_compare_prior_week() -> None:
         state=SimpleNamespace(
             active_alerts_by_circuit={},
             daily_energy_usage_by_circuit={"fridge": 99.0},
+            learning_by_circuit={"fridge": False},
             learning_progress_by_circuit={"fridge": {"alert_ready": True}},
+            energy_usage_evidence_by_circuit={},
+            solar_load_shift_evidence_by_circuit={},
         ),
         store_data=SimpleNamespace(
             energy_usage_by_circuit={"fridge": {"days": days}},
@@ -133,3 +136,168 @@ def test_digest_items_sum_completed_week_and_compare_prior_week() -> None:
 
     assert item["energy_kwh"] == 14.0
     assert item["normal_energy_kwh"] == 7.0
+
+
+def test_digest_direct_items_require_two_complete_eligible_weeks() -> None:
+    now = datetime(2026, 7, 27, 12, tzinfo=UTC)
+    start = date(2026, 7, 13)
+    days = [
+        {
+            "date": (start + timedelta(days=offset)).isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(13)
+    ]
+    coordinator = _direct_digest_coordinator(days)
+
+    assert digest_items_for_coordinator(
+        coordinator,
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    ) == []
+
+    days.append(
+        {
+            "date": date(2026, 7, 26).isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+    )
+    assert len(
+        digest_items_for_coordinator(
+            coordinator,
+            now=now,
+            time_zone=ZoneInfo("UTC"),
+        )
+    ) == 1
+
+    days[-1]["baseline_eligible"] = False
+    assert digest_items_for_coordinator(
+        coordinator,
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    ) == []
+
+    days[-1]["baseline_eligible"] = True
+    coordinator.state.learning_by_circuit["dryer"] = True
+    assert digest_items_for_coordinator(
+        coordinator,
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    ) == []
+
+
+def test_digest_honors_weather_and_water_flow_context_evidence() -> None:
+    days = [
+        {
+            "date": (date(2026, 7, 13) + timedelta(days=offset)).isoformat(),
+            "usage_kwh": 1.0,
+            "complete": True,
+        }
+        for offset in range(14)
+    ]
+    coordinator = _direct_digest_coordinator(days, circuit_id="hvac", name="HVAC")
+    coordinator.circuit_configs += (
+        SimpleNamespace(
+            circuit_id="water_heater",
+            name="Water Heater",
+            mode=SimpleNamespace(value="single_phase"),
+        ),
+    )
+    coordinator.store_data.energy_usage_by_circuit["water_heater"] = {"days": days}
+    coordinator.state.learning_by_circuit["water_heater"] = False
+    coordinator.state.energy_usage_evidence_by_circuit = {
+        "hvac": {
+            "status": "context_explained",
+            "baseline_context": {"season": "summer", "weather_mode": "cooling"},
+        },
+        "water_heater": {
+            "status": "context_explained",
+            "baseline_context": {"water_flow_state": "active_flow"},
+        },
+    }
+
+    items = digest_items_for_coordinator(
+        coordinator,
+        now=datetime(2026, 7, 27, 12, tzinfo=UTC),
+        time_zone=ZoneInfo("UTC"),
+    )
+
+    assert {
+        item["appliance_key"]: item["expected_context"] for item in items
+    } == {
+        "circuit:hvac": True,
+        "circuit:water_heater": True,
+    }
+
+
+def test_digest_reuses_idle_solar_load_shift_candidates() -> None:
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        state=SimpleNamespace(
+            solar_load_shift_evidence_by_circuit={
+                "solar": {
+                    "status": "surplus_candidate",
+                    "solar_load_shift_available_w": 2500.0,
+                    "candidate_loads": [
+                        {
+                            "circuit_id": "water_heater",
+                            "name": "Water Heater",
+                            "current_power_w": 0.0,
+                            "state": "idle",
+                        }
+                    ],
+                }
+            }
+        ),
+        store_data=SimpleNamespace(
+            energy_usage_by_circuit={},
+            nilm_appliance_assignments_by_circuit={},
+            nilm_session_history_by_circuit={},
+        ),
+    )
+
+    assert digest_items_for_coordinator(
+        coordinator,
+        now=datetime(2026, 7, 27, 12, tzinfo=UTC),
+        time_zone=ZoneInfo("UTC"),
+    ) == [
+        {
+            "appliance_key": "circuit:water_heater",
+            "display_name": "Water Heater",
+            "energy_kwh": 0.0,
+            "normal_energy_kwh": 0.0,
+            "confidence": 1.0,
+            "status": "load_shift_opportunity",
+        }
+    ]
+
+
+def _direct_digest_coordinator(
+    days: list[dict[str, object]],
+    *,
+    circuit_id: str = "dryer",
+    name: str = "Dryer",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        circuit_configs=(
+            SimpleNamespace(
+                circuit_id=circuit_id,
+                name=name,
+                mode=SimpleNamespace(value="single_phase"),
+            ),
+        ),
+        state=SimpleNamespace(
+            active_alerts_by_circuit={},
+            learning_by_circuit={circuit_id: False},
+            learning_progress_by_circuit={circuit_id: {"alert_ready": True}},
+            energy_usage_evidence_by_circuit={},
+            solar_load_shift_evidence_by_circuit={},
+        ),
+        store_data=SimpleNamespace(
+            energy_usage_by_circuit={circuit_id: {"days": days}},
+            nilm_appliance_assignments_by_circuit={},
+            nilm_session_history_by_circuit={},
+        ),
+    )
