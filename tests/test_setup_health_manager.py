@@ -146,6 +146,54 @@ async def test_setup_health_creates_each_simultaneous_data_quality_repair(
     }
 
 
+@pytest.mark.parametrize("issue_suffix", ["unavailable", "future_timestamp"])
+@pytest.mark.asyncio
+async def test_setup_health_refreshes_invalid_source_repair_entities(
+    monkeypatch,
+    issue_suffix: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import repairs
+
+    created: list[list[str]] = []
+
+    async def fake_create(
+        hass,
+        circuit_id,
+        problem,
+        *,
+        source_entities=(),
+        **kwargs,
+    ) -> None:
+        del hass, circuit_id, problem, kwargs
+        created.append(list(source_entities))
+
+    monkeypatch.setattr(
+        repairs,
+        "existing_circuit_problem_issues",
+        lambda hass, circuit_id, problems: set(),
+    )
+    monkeypatch.setattr(repairs, "async_create_data_quality_issue", fake_create)
+    coordinator = _coordinator()
+    coordinator.state.learning_by_circuit["fridge"] = False
+
+    for entity_id in ("sensor.fridge_power", "sensor.fridge_current"):
+        await coordinator.setup_health.async_sync_data_quality_repairs(
+            "fridge",
+            SimpleNamespace(
+                quality_issues=(f"{entity_id} {issue_suffix}",),
+                source_entity_ids=(
+                    "sensor.fridge_power",
+                    "sensor.fridge_current",
+                ),
+            ),
+        )
+
+    assert created == [
+        ["sensor.fridge_power"],
+        ["sensor.fridge_current"],
+    ]
+
+
 @pytest.mark.asyncio
 async def test_setup_health_aggregator_runs_mapping_checks(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import repairs

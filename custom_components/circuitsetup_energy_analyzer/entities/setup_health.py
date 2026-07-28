@@ -873,7 +873,8 @@ def _setup_health_data_quality_issue(
             else []
         )
     ]
-    issue_text = " ".join([data_quality, *quality_issues]).lower()
+    issue_details = [data_quality, *quality_issues]
+    issue_text = " ".join(issue_details).lower()
 
     if "missing_source_entities" in issue_text:
         return _setup_health_issue(
@@ -905,7 +906,10 @@ def _setup_health_data_quality_issue(
             issue="invalid_source_timestamp",
             source_entities=_source_entities_mentioned_in_issues(
                 circuit,
-                issue_text,
+                _matching_quality_issue_text(
+                    issue_details,
+                    {"naive_timestamp", "future_timestamp"},
+                ),
             ),
         )
     if (
@@ -922,7 +926,10 @@ def _setup_health_data_quality_issue(
             issue="invalid_source_sensor",
             source_entities=_source_entities_mentioned_in_issues(
                 circuit,
-                issue_text,
+                _matching_quality_issue_text(
+                    issue_details,
+                    {"non_numeric", "non_finite", "unavailable"},
+                ),
             ),
         )
     if checklist.get("source_data_fresh") is False or "stale" in issue_text:
@@ -934,7 +941,7 @@ def _setup_health_data_quality_issue(
             issue="stale_source",
             source_entities=_source_entities_mentioned_in_issues(
                 circuit,
-                issue_text,
+                _matching_quality_issue_text(issue_details, {"stale"}),
             ),
         )
     if checklist.get("required_sensors_present") is False or "missing" in issue_text:
@@ -1251,6 +1258,17 @@ def _source_entities_mentioned_in_issues(circuit: Any, issue_text: str) -> list[
         entity_id for entity_id in source_entities if entity_id.lower() in issue_text
     ]
     return mentioned or source_entities
+
+
+def _matching_quality_issue_text(
+    issues: Iterable[str],
+    markers: set[str],
+) -> str:
+    return " ".join(
+        str(issue).lower()
+        for issue in issues
+        if any(marker in str(issue).lower() for marker in markers)
+    )
 
 
 def _source_entities(circuit: Any) -> list[str]:

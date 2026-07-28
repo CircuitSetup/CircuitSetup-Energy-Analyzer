@@ -108,7 +108,15 @@ class SetupHealthAggregator:
 
         issues_to_create = desired - self.active_repair_issues
         issues_to_create.update(
-            issue for issue in desired if issue[1] == "stale_source_sensor"
+            issue
+            for issue in desired
+            if issue[1]
+            in {
+                "invalid_source_sensor",
+                "invalid_source_timestamp",
+                "stale_source_sensor",
+                "unexpected_negative_real_power",
+            }
         )
         for issue in issues_to_create:
             source_entities = (
