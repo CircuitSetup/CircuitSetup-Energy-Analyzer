@@ -395,6 +395,7 @@ def test_data_quality_checklist_reports_required_optional_and_sample_state() -> 
 
     checklist = data_quality_checklist(config, sample)
 
+    assert checklist["sample_observed"] is True
     assert checklist["required_sensors_present"] is True
     assert checklist["optional_sensors_present"] is True
     assert checklist["numeric_states_valid"] is True

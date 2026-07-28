@@ -363,6 +363,7 @@ def data_quality_checklist(
     quality_issue_preview = quality_issues[:MAX_QUALITY_ISSUES]
 
     return {
+        "sample_observed": sample is not None,
         "required_sensors_present": required_present,
         "optional_sensors_present": optional_present,
         "numeric_states_valid": not _has_any_issue_containing(

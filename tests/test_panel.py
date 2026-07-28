@@ -3197,6 +3197,16 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     )
 
     coordinator = _coordinator(config=_config("hvac"))
+    coordinator.data = SimpleNamespace(
+        data_quality_checklist_by_circuit={
+            "hvac": {
+                "sample_observed": True,
+                "required_sensors_present": True,
+                "numeric_states_valid": True,
+                "source_data_fresh": True,
+            }
+        }
+    )
 
     payload = setup_health_payload([coordinator])
 
@@ -3206,7 +3216,7 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     assert payload["checklist"][0] == {
         "item_id": "source_data_found",
         "status": "ok",
-        "title": "Source data found",
+        "title": "Source data is available and healthy",
         "why_it_matters": (
             "Confirms Home Assistant is receiving live readings for each circuit."
         ),
