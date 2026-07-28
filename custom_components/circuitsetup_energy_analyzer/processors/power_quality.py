@@ -80,8 +80,8 @@ class PowerQualityProcessor:
         maintenance_active = (
             isinstance(maintenance, Mapping) and maintenance.get("active") is True
         )
-        self._seed_demo_event_history(circuit_config, context.now)
         if not maintenance_active:
+            self._seed_demo_event_history(circuit_config, context.now)
             self._seed_demo_power_quality_baselines(circuit_config, features)
 
         baselines: dict[str, Any] = {}

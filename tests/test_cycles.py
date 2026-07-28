@@ -365,6 +365,35 @@ def test_cycle_baselines_exclude_maintenance_events() -> None:
     assert values["run_cycle_daily_duty_cycle_percent"] == [1.4, 1.4]
 
 
+def test_cycle_baselines_exclude_cross_day_maintenance_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        cycle_baseline_feature_values,
+    )
+
+    events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 1, 23, 50, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+            features={"baseline_eligible": False},
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 2, 0, 20, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            features={"baseline_eligible": True},
+        ),
+    ]
+
+    values = cycle_baseline_feature_values(
+        events,
+        circuit_id="fridge",
+        now=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+    )
+
+    assert all(not samples for samples in values.values())
+
+
 def test_cycle_evidence_flags_active_run_longer_than_learned_cycles() -> None:
     from custom_components.circuitsetup_energy_analyzer.cycles import (
         CircuitCycleSummary,

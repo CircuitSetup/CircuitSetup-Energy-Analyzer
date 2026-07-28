@@ -170,11 +170,23 @@ def cycle_baseline_feature_values(
     day_start = _day_start_for_datetime(now, time_zone)
     current_date = _calendar_date(now, time_zone)
     circuit_events = _circuit_cycle_events(events, circuit_id)
-    ineligible_dates = {
+    flagged_dates = {
         _calendar_date(event.timestamp, time_zone)
         for event in circuit_events
         if event.features.get("baseline_eligible") is False
     }
+    ineligible_dates = set(flagged_dates)
+    for session in build_normalized_run_sessions(
+        circuit_events,
+        circuit_id=circuit_id,
+        merge_gap_seconds=merge_gap_seconds,
+        now=day_start,
+    ):
+        session_dates = {_calendar_date(session.started_at, time_zone)}
+        if session.stopped_at is not None:
+            session_dates.add(_calendar_date(session.stopped_at, time_zone))
+        if session_dates & flagged_dates:
+            ineligible_dates.update(session_dates)
     prior_dates = sorted(
         {
             _calendar_date(event.timestamp, time_zone)

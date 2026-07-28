@@ -5256,6 +5256,7 @@ def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
 
     now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
     baseline_values: defaultdict[str, list[float]] = defaultdict(list)
+    seeded_events: list[str] = []
     seeded: list[dict[str, float]] = []
     policy = _CaptureAlertPolicy()
     context = ProcessingContext(
@@ -5291,7 +5292,9 @@ def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
     processor = processors.PowerQualityProcessor(
         alert_policy_for_circuit=lambda _circuit_id: policy,
         learning_mature=lambda _config, _now: True,
-        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_event_history=lambda config, _now: seeded_events.append(
+            config.circuit_id
+        ),
         seed_demo_power_quality_baselines=lambda _config, features: seeded.append(
             dict(features)
         ),
@@ -5301,6 +5304,7 @@ def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
     result = processor.process(sample, config, context)
 
     assert baseline_values == {}
+    assert seeded_events == []
     assert seeded == []
     assert policy.observations == []
     assert result.alerts == []
