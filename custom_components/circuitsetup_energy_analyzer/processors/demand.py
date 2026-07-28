@@ -51,6 +51,7 @@ class DemandProcessor:
         self._settings_for_config = settings_for_config
         self._alert_policy_for_circuit = alert_policy_for_circuit
         self._retention_days_for_circuit = retention_days_for_circuit
+        self._transient_samples_by_circuit: dict[str, list[dict[str, Any]]] = {}
 
     def process(
         self,
@@ -76,6 +77,10 @@ class DemandProcessor:
                     Mapping,
                 )
                 and maintenance.get("active") is True
+            ),
+            transient_samples=self._transient_samples_by_circuit.setdefault(
+                circuit_id,
+                [],
             ),
         )
         if result is None:
@@ -319,8 +324,10 @@ def _contextual_demand_comparison(
     )
 
     sample_recorded = False
-    if result.peak_demand_w > 0.0 and context_allows_baseline_learning(
-        context_key
+    if (
+        result.window_baseline_eligible
+        and result.peak_demand_w > 0.0
+        and context_allows_baseline_learning(context_key)
     ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_config.circuit_id,

@@ -3191,6 +3191,80 @@ def test_demand_processor_keeps_maintenance_readings_out_of_history() -> None:
     assert result.store_dirty is False
 
 
+def test_demand_processor_excludes_windows_overlapping_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+
+    processor.process(_sample(0, 1000.0), config, context)
+    history = store_data.demand_by_circuit["ev"]
+    samples_before = list(history["samples"])
+    daily_peaks_before = list(history["daily_peaks"])
+    monthly_windows_before = list(history["monthly_peak_windows"])
+    contextual_before = list(
+        store_data.contextual_baseline_samples_by_circuit["ev"]
+    )
+
+    store_data.maintenance_by_circuit["ev"] = {"active": True}
+    processor.process(
+        _sample(300, 5000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=5)),
+    )
+    processor.process(
+        _sample(600, 5000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=10)),
+    )
+    store_data.maintenance_by_circuit["ev"] = {"active": False}
+    result = processor.process(
+        _sample(900, 1000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=15)),
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("current_demand_w_by_circuit", "ev")] == 3666.7
+    assert history["samples"] == samples_before
+    assert history["daily_peaks"] == daily_peaks_before
+    assert history["monthly_peak_windows"] == monthly_windows_before
+    assert (
+        store_data.contextual_baseline_samples_by_circuit["ev"]
+        == contextual_before
+    )
+    assert result.store_dirty is False
+
+
 def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (

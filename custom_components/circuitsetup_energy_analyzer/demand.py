@@ -61,6 +61,7 @@ class DemandResult:
     current_demand_w: float
     peak_demand_w: float
     window_minutes: int
+    window_baseline_eligible: bool = True
     demand_limit_w: float | None = None
     demand_limit_usage: float = 0.0
     limit_exceeded: DemandLimitEvidence | None = None
@@ -84,6 +85,7 @@ def record_demand_sample(
     retention_days: int = 45,
     time_zone: TimeZone = None,
     baseline_eligible: bool = True,
+    transient_samples: list[dict[str, Any]] | None = None,
 ) -> DemandResult | None:
     """Fold a real-power sample into a rolling demand window."""
     if real_power_w is None:
@@ -92,19 +94,32 @@ def record_demand_sample(
     window_minutes = max(int(settings.window_minutes), 1)
     window = timedelta(minutes=window_minutes)
     today = _calendar_date(timestamp, time_zone).isoformat()
-    samples = _coerce_samples(history.get("samples"))
+    samples = _coerce_samples(
+        transient_samples if transient_samples else history.get("samples")
+    )
+    current_sample: dict[str, float | str | bool] = {
+        "timestamp": timestamp.isoformat(),
+        "real_power_w": _round_w(max(float(real_power_w), 0.0)),
+    }
+    if not baseline_eligible:
+        current_sample["baseline_eligible"] = False
     calculation_samples = [
         *samples,
-        {
-            "timestamp": timestamp.isoformat(),
-            "real_power_w": _round_w(max(float(real_power_w), 0.0)),
-        },
+        current_sample,
     ]
     calculation_samples = _prune_samples(calculation_samples, timestamp, window)
+    window_baseline_eligible = baseline_eligible and all(
+        sample.get("baseline_eligible") is not False
+        for sample in calculation_samples
+    )
+    if transient_samples is not None:
+        transient_samples[:] = calculation_samples
 
     current_demand = _time_weighted_average(calculation_samples, timestamp, window)
     daily_peaks = _coerce_daily_peaks(history.get("daily_peaks"))
-    calculation_daily_peaks = daily_peaks if baseline_eligible else list(daily_peaks)
+    calculation_daily_peaks = (
+        daily_peaks if window_baseline_eligible else list(daily_peaks)
+    )
     peak_demand = _record_daily_peak(
         calculation_daily_peaks,
         today,
@@ -120,11 +135,11 @@ def record_demand_sample(
         peak_warning_ratio=settings.peak_warning_ratio,
         retention_days=retention_days,
         time_zone=time_zone,
-        baseline_eligible=baseline_eligible,
+        baseline_eligible=window_baseline_eligible,
     )
 
-    if baseline_eligible:
-        history["samples"] = calculation_samples
+    if window_baseline_eligible:
+        history["samples"] = [dict(sample) for sample in calculation_samples]
         history["daily_peaks"] = _prune_daily_peaks(
             calculation_daily_peaks,
             timestamp,
@@ -144,6 +159,7 @@ def record_demand_sample(
         current_demand_w=current_demand,
         peak_demand_w=peak_demand,
         window_minutes=window_minutes,
+        window_baseline_eligible=window_baseline_eligible,
         demand_limit_w=limit_w,
         demand_limit_usage=limit_usage,
         monthly_peak_rank=monthly_peak["rank"],
@@ -177,8 +193,8 @@ def record_demand_sample(
     return replace(result, limit_exceeded=evidence)
 
 
-def _coerce_samples(raw_samples: Any) -> list[dict[str, float | str]]:
-    samples: list[dict[str, float | str]] = []
+def _coerce_samples(raw_samples: Any) -> list[dict[str, float | str | bool]]:
+    samples: list[dict[str, float | str | bool]] = []
     if not isinstance(raw_samples, list):
         return samples
     for raw_sample in raw_samples:
@@ -190,12 +206,13 @@ def _coerce_samples(raw_samples: Any) -> list[dict[str, float | str]]:
             continue
         if _datetime_or_none(timestamp) is None:
             continue
-        samples.append(
-            {
-                "timestamp": timestamp,
-                "real_power_w": _round_w(max(power, 0.0)),
-            }
-        )
+        sample: dict[str, float | str | bool] = {
+            "timestamp": timestamp,
+            "real_power_w": _round_w(max(power, 0.0)),
+        }
+        if raw_sample.get("baseline_eligible") is False:
+            sample["baseline_eligible"] = False
+        samples.append(sample)
     return sorted(samples, key=lambda sample: str(sample["timestamp"]))
 
 
@@ -346,10 +363,10 @@ def _record_monthly_peak_window(
 
 
 def _prune_samples(
-    samples: list[dict[str, float | str]],
+    samples: list[dict[str, float | str | bool]],
     timestamp: datetime,
     window: timedelta,
-) -> list[dict[str, float | str]]:
+) -> list[dict[str, float | str | bool]]:
     cutoff = timestamp - window
     return [
         sample
@@ -360,7 +377,7 @@ def _prune_samples(
 
 
 def _time_weighted_average(
-    samples: list[dict[str, float | str]],
+    samples: list[dict[str, float | str | bool]],
     timestamp: datetime,
     window: timedelta,
 ) -> float:
