@@ -414,6 +414,34 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     assert fingerprint != alert_feedback_fingerprint(cooler_context, config=config)
 
 
+def test_alert_feedback_fingerprint_preserves_season_and_water_flow_context() -> None:
+    def alert(baseline_context: str) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="water_heater",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="daily_energy_spike",
+            observed_value=5.0,
+            baseline_value=3.0,
+            change_ratio=2 / 3,
+            features={
+                "comparison_basis": "contextual",
+                "baseline_context": baseline_context,
+                "baseline_fallback_level": "exact_context",
+            },
+        )
+
+    active_flow = alert("water_heater, single_phase, summer, active_flow")
+    no_flow = alert("water_heater, single_phase, summer, no_flow")
+    winter_flow = alert("water_heater, single_phase, winter, active_flow")
+
+    active_fingerprint = alert_feedback_fingerprint(active_flow)
+    assert "summer, active_flow" in active_fingerprint
+    assert active_fingerprint != alert_feedback_fingerprint(no_flow)
+    assert active_fingerprint != alert_feedback_fingerprint(winter_flow)
+
+
 def test_alert_feedback_fingerprint_changes_when_sources_are_remapped() -> None:
     first_config = CircuitConfig(
         circuit_id="fridge",
