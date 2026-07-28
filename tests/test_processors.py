@@ -1912,6 +1912,17 @@ def test_run_cycle_processor_skips_contextual_learning_for_flagged_day() -> None
                 }
             ]
         },
+        baselines={
+            "water_heater:run_cycle_duration_s": BaselineStats(
+                "run_cycle_duration_s",
+                9,
+                1800.0,
+                60.0,
+                1700.0,
+                1900.0,
+                1.0,
+            )
+        },
     )
     context = ProcessingContext(
         now=now,
@@ -1937,6 +1948,7 @@ def test_run_cycle_processor_skips_contextual_learning_for_flagged_day() -> None
     processor.process(_energy_sample(106.0), config, context)
 
     assert store_data.contextual_baseline_samples_by_circuit == {}
+    assert "water_heater:run_cycle_duration_s" not in store_data.baselines
 
 
 def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() -> None:

@@ -394,6 +394,34 @@ def test_cycle_baselines_exclude_cross_day_maintenance_sessions() -> None:
     assert all(not samples for samples in values.values())
 
 
+def test_cycle_ineligible_dates_include_every_date_spanned_by_session() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        cycle_baseline_ineligible_dates,
+    )
+
+    events = [
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 1, 23, 50, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.START,
+        ),
+        CircuitEvent(
+            timestamp=datetime(2026, 6, 4, 0, 20, tzinfo=UTC),
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            features={"baseline_eligible": False},
+        ),
+    ]
+
+    assert cycle_baseline_ineligible_dates(
+        events,
+        circuit_id="fridge",
+        now=datetime(2026, 6, 5, 12, 0, tzinfo=UTC),
+    ) == {
+        datetime(2026, 6, day, tzinfo=UTC).date() for day in range(1, 5)
+    }
+
+
 def test_cycle_evidence_flags_active_run_longer_than_learned_cycles() -> None:
     from custom_components.circuitsetup_energy_analyzer.cycles import (
         CircuitCycleSummary,

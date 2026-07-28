@@ -75,6 +75,13 @@ class RunCycleProcessor:
                 {},
             ).get(circuit_config.circuit_id, {}),
         ).profile.merge_gap_seconds
+        ineligible_dates = cycle_baseline_ineligible_dates(
+            context.store_data.events,
+            circuit_id=circuit_config.circuit_id,
+            now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
+        )
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
@@ -88,6 +95,7 @@ class RunCycleProcessor:
             context.now,
             merge_gap_seconds=merge_gap_seconds,
             time_zone=context.time_zone,
+            rebuild_for_exclusions=bool(ineligible_dates),
         )
         context_key = build_context_for_sample(
             circuit_config=circuit_config,
@@ -107,13 +115,6 @@ class RunCycleProcessor:
                     time_zone=context.time_zone,
                 ),
             }
-        )
-        ineligible_dates = cycle_baseline_ineligible_dates(
-            context.store_data.events,
-            circuit_id=circuit_config.circuit_id,
-            now=context.now,
-            merge_gap_seconds=merge_gap_seconds,
-            time_zone=context.time_zone,
         )
         raw_contextual_samples = (
             context.store_data.contextual_baseline_samples_by_circuit.get(
@@ -252,6 +253,7 @@ class RunCycleProcessor:
         *,
         merge_gap_seconds: float,
         time_zone: str | None = None,
+        rebuild_for_exclusions: bool = False,
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
@@ -265,7 +267,16 @@ class RunCycleProcessor:
         for feature, values in values_by_feature.items():
             key = _baseline_key(config.circuit_id, feature)
             baseline = store_data.baselines.get(key)
-            if baseline is None and len(values) >= 9:
+            if rebuild_for_exclusions:
+                rebuilt = build_baseline(feature, values) if len(values) >= 9 else None
+                if rebuilt != baseline:
+                    if rebuilt is None:
+                        store_data.baselines.pop(key, None)
+                    else:
+                        store_data.baselines[key] = rebuilt
+                    store_dirty = True
+                baseline = rebuilt
+            elif baseline is None and len(values) >= 9:
                 baseline = build_baseline(feature, values)
                 store_data.baselines[key] = baseline
                 store_dirty = True

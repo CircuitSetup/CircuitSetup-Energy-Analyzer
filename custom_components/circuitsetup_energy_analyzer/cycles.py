@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from types import MappingProxyType
 from typing import Any
 
@@ -243,9 +243,12 @@ def cycle_baseline_ineligible_dates(
         merge_gap_seconds=merge_gap_seconds,
         now=now,
     ):
-        session_dates = {_calendar_date(session.started_at, time_zone)}
-        if session.stopped_at is not None:
-            session_dates.add(_calendar_date(session.stopped_at, time_zone))
+        started_on = _calendar_date(session.started_at, time_zone)
+        stopped_on = _calendar_date(session.stopped_at or now, time_zone)
+        session_dates = {
+            started_on + timedelta(days=offset)
+            for offset in range((stopped_on - started_on).days + 1)
+        }
         if session_dates & flagged_dates:
             ineligible_dates.update(session_dates)
     return ineligible_dates
