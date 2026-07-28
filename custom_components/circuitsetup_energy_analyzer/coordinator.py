@@ -369,6 +369,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
+        await self.evidence_actions.async_expire_maintenance_if_due(now)
         context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []

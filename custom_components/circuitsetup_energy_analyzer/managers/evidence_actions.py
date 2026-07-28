@@ -125,33 +125,30 @@ class EvidenceActionController:
 
     def alerts_paused(self, circuit_id: str, now: datetime | None = None) -> bool:
         """Return whether circuit alerts are currently paused."""
-        self.expire_maintenance_if_due(circuit_id, now)
+        del now
         return circuit_id in self._coordinator.paused_circuits
 
-    def expire_maintenance_if_due(
+    async def async_expire_maintenance_if_due(
         self,
-        circuit_id: str,
         now: datetime | None = None,
-    ) -> bool:
-        """Clear a timed maintenance pause once its expiry is reached."""
+    ) -> tuple[str, ...]:
+        """Complete every timed maintenance window whose expiry has passed."""
         coordinator = self._coordinator
-        maintenance = dict(
-            coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
-        )
-        if maintenance.get("active") is not True:
-            return False
-        expires_at = mapping_datetime(maintenance.get("expires_at"))
-        if expires_at is None:
-            return False
         now = now or coordinator.current_time()
-        if expires_at > _datetime_for_comparison(now, expires_at):
-            return False
-
-        maintenance.update({"active": False, "ended_at": now.isoformat()})
-        coordinator.store_data.maintenance_by_circuit[circuit_id] = maintenance
-        coordinator.paused_circuits.discard(circuit_id)
-        coordinator.store_persistence.mark_dirty()
-        return True
+        expired: list[str] = []
+        for circuit_id, raw in tuple(
+            coordinator.store_data.maintenance_by_circuit.items()
+        ):
+            maintenance = dict(raw)
+            expires_at = mapping_datetime(maintenance.get("expires_at"))
+            if (
+                maintenance.get("active") is True
+                and expires_at is not None
+                and expires_at <= _datetime_for_comparison(now, expires_at)
+            ):
+                await self.async_end_maintenance(circuit_id)
+                expired.append(circuit_id)
+        return tuple(expired)
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""

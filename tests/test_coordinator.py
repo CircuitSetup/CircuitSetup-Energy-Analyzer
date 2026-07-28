@@ -11659,6 +11659,54 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
     assert issues == [("fridge", "missing_required_sensor")]
 
 
+@pytest.mark.asyncio
+async def test_timed_maintenance_expires_before_processing_context_is_built() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        now_fn=lambda: current_time[0],
+    )
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+    active_when_context_built: list[bool] = []
+    original_build = coordinator.context_builder.build
+
+    def build_context(now):
+        active_when_context_built.append(
+            coordinator.store_data.maintenance_by_circuit["fridge"]["active"]
+        )
+        return original_build(now)
+
+    coordinator.context_builder.build = build_context
+    current_time[0] = datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    await coordinator.async_process_update()
+
+    assert active_when_context_built
+    assert not any(active_when_context_built)
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+
+
 def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

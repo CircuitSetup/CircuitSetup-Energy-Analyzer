@@ -43,7 +43,7 @@ def test_coordinator_exposes_ux_state_manager_for_refresh() -> None:
     }
 
 
-def test_hydrate_state_from_store_expires_timed_maintenance() -> None:
+def test_hydrate_state_from_store_does_not_expire_timed_maintenance() -> None:
     now = datetime(2026, 7, 2, 12, tzinfo=UTC)
     store_data = FeatureStoreData(
         maintenance_by_circuit={
@@ -76,6 +76,6 @@ def test_hydrate_state_from_store_expires_timed_maintenance() -> None:
     )
 
     maintenance = store_data.maintenance_by_circuit["fridge"]
-    assert "fridge" not in coordinator.paused_circuits
-    assert maintenance["active"] is False
-    assert maintenance["ended_at"] == now.isoformat()
+    assert "fridge" in coordinator.paused_circuits
+    assert maintenance["active"] is True
+    assert "ended_at" not in maintenance

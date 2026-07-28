@@ -206,13 +206,18 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_evidence_action_controller_expires_timed_maintenance() -> None:
+async def test_timed_maintenance_expiry_honors_relearn_on_end() -> None:
     coordinator = _ActionCoordinator()
     controller = EvidenceActionController(coordinator)
 
     await controller.async_start_maintenance(
         "fridge",
         duration="01:30:00",
+        relearn_on_end=True,
+    )
+    await controller.async_start_maintenance(
+        "freezer",
+        duration="02:00:00",
     )
 
     maintenance = coordinator.store_data.maintenance_by_circuit["fridge"]
@@ -222,8 +227,15 @@ async def test_evidence_action_controller_expires_timed_maintenance() -> None:
 
     coordinator.now = datetime(2026, 6, 30, 13, 30, tzinfo=UTC)
 
-    assert controller.alerts_paused("fridge") is False
+    assert controller.alerts_paused("fridge") is True
+
+    expired = await controller.async_expire_maintenance_if_due()
+
+    assert expired == ("fridge",)
+    assert coordinator.relearned == ["fridge"]
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert coordinator.store_data.maintenance_by_circuit["freezer"]["active"] is True
+    assert controller.alerts_paused("fridge") is False
     assert "fridge" not in coordinator.paused_circuits
 
 
