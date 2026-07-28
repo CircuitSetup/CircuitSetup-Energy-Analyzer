@@ -114,8 +114,16 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         message="Fridge energy changed.",
         feature="daily_energy_usage_spike",
     )
+    maintenance_suppressed_alert = AlertEvidence(
+        timestamp=now + timedelta(minutes=2),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge demand changed.",
+        feature="demand_limit",
+    )
     created: list[AlertEvidence] = []
     dismissed: list[str] = []
+    paused: set[str] = set()
 
     async def create_notification(hass, alert, *, config=None) -> None:
         del hass, config
@@ -145,7 +153,7 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         current_time=lambda: now,
         state=state,
         evidence_actions=SimpleNamespace(
-            alerts_paused=lambda circuit_id: False,
+            alerts_paused=lambda circuit_id: circuit_id in paused,
             has_suppressed_alert_feedback=lambda alert: False,
         ),
         circuit_registry=SimpleNamespace(
@@ -177,9 +185,18 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications()
 
+    coordinator.store_data.alerts.append(maintenance_suppressed_alert)
+    state.active_alerts_by_circuit = {"fridge": [maintenance_suppressed_alert]}
+    paused.clear()
+    await controller.async_notify_alert(maintenance_suppressed_alert)
+    paused.add("fridge")
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications()
+
     assert dismissed == [
         notification_id_for_alert(active_alert),
         notification_id_for_alert(user_dismissed_alert),
+        notification_id_for_alert(maintenance_suppressed_alert),
     ]
     assert [alert.feature for alert in created].count("alert_recovered") == 1
     assert [alert.feature for alert in coordinator.store_data.alerts].count(

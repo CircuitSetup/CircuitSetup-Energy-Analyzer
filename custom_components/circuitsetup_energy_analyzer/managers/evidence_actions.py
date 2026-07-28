@@ -118,7 +118,8 @@ class EvidenceActionController:
         current = dict(
             coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
         )
-        should_relearn = bool(relearn or current.get("relearn_on_end"))
+        was_active = current.get("active") is True
+        should_relearn = bool(relearn or (was_active and current.get("relearn_on_end")))
         current.update({"active": False, "ended_at": now.isoformat()})
         coordinator.store_data.maintenance_by_circuit[circuit_id] = current
         coordinator.paused_circuits.discard(circuit_id)
@@ -132,13 +133,14 @@ class EvidenceActionController:
         display_name = str(
             getattr(config, "name", "") or circuit_id.replace("_", " ").title()
         )
-        await coordinator.notification_controller.async_notify_lifecycle_update(
-            circuit_id,
-            feature="maintenance_completed",
-            message=f"{display_name} maintenance ended.",
-            episode_key=f"maintenance_completed:{started_at}",
-            now=now,
-        )
+        if was_active:
+            await coordinator.notification_controller.async_notify_lifecycle_update(
+                circuit_id,
+                feature="maintenance_completed",
+                message=f"{display_name} maintenance ended.",
+                episode_key=f"maintenance_completed:{started_at}",
+                now=now,
+            )
         if should_relearn:
             await coordinator.async_relearn_baseline(circuit_id)
             learning_epoch = coordinator.store_data.learning_started_at_by_circuit.get(

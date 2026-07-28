@@ -122,7 +122,13 @@ class NotificationController:
                 alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
             )
             await self.async_dismiss_alert_notification(alert_id)
-            if recovered_alert is not None:
+            if (
+                recovered_alert is not None
+                and not self._coordinator.evidence_actions.alerts_paused(
+                    recovered_alert.circuit_id
+                )
+                and not self._circuit_is_learning(recovered_alert.circuit_id)
+            ):
                 await self.async_notify_lifecycle_update(
                     recovered_alert.circuit_id,
                     feature="alert_recovered",
@@ -194,6 +200,13 @@ class NotificationController:
         )
         self._coordinator.store_data.alerts.append(alert)
         self._mark_store_dirty()
+        alerts_paused = getattr(
+            getattr(self._coordinator, "evidence_actions", None),
+            "alerts_paused",
+            None,
+        )
+        if callable(alerts_paused) and alerts_paused(circuit_id):
+            return
         decision, appliance_key, category = self._delivery_decision(alert)
         if decision.action == "suppress":
             return
@@ -657,7 +670,6 @@ class NotificationController:
             ]
         episodes.append(stored_key)
         del episodes[:-100]
-        self._mark_store_dirty()
         return True
 
     @staticmethod

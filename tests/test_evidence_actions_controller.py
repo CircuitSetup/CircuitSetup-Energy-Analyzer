@@ -220,6 +220,16 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ending_inactive_maintenance_does_not_emit_completion() -> None:
+    coordinator = _ActionCoordinator()
+    controller = EvidenceActionController(coordinator)
+
+    await controller.async_end_maintenance("fridge")
+
+    assert coordinator.lifecycle_features == []
+
+
+@pytest.mark.asyncio
 async def test_timed_maintenance_expiry_honors_relearn_on_end() -> None:
     coordinator = _ActionCoordinator()
     controller = EvidenceActionController(coordinator)
