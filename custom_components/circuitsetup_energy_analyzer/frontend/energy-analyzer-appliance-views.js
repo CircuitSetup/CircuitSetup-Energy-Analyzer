@@ -466,13 +466,33 @@ export function createApplianceViewMethods({
     const affected = Array.isArray(item.affected_circuits) ? item.affected_circuits : [];
     const path = item.open_path || "";
     const description = item.why_it_matters || this._setupHealthChecklistText(item.item_id, "why_it_matters") || this._setupHealthText("fallbacks.review_item_reason");
-    const title = item.title || this._setupHealthChecklistText(item.item_id, "title") || this._friendlyFeature(item.item_id || this._setupHealthText("fallbacks.setup_item"));
+    const status = ["ok", "needs_attention", "optional", "learning"].includes(item.status)
+      ? item.status
+      : "needs_attention";
+    const statusIcon = {
+      ok: "mdi:check-circle",
+      needs_attention: "mdi:alert-circle",
+      optional: "mdi:minus-circle-outline",
+      learning: "mdi:progress-clock",
+    }[status];
+    const statusLabel = this._setupHealthText(`status_labels.${status}`)
+      || this._friendlyFeature(status);
+    const titleKey = status === "needs_attention"
+      ? "title_attention"
+      : status === "learning"
+        ? "title_learning"
+        : "title";
+    const title = item.title
+      || this._setupHealthChecklistText(item.item_id, titleKey)
+      || this._setupHealthChecklistText(item.item_id, "title")
+      || this._friendlyFeature(item.item_id || this._setupHealthText("fallbacks.setup_item"));
     const affectedLabel = this._setupHealthText("labels.affected");
-    const showStatus = !(item.item_id === "learning_progress" && item.status === "learning");
     return `
       <div class="metric">
-        ${showStatus ? `<span>${this._escape(this._friendlyFeature(item.status || "unknown"))}</span>` : ""}
-        <strong>${this._escape(title)}</strong>
+        <span class="metric-heading setup-health-status setup-health-status-${status}">
+          <ha-icon icon="${statusIcon}" role="img" aria-label="${this._escape(statusLabel)}" title="${this._escape(statusLabel)}"></ha-icon>
+          <strong>${this._escape(title)}</strong>
+        </span>
         <p>${this._escape(description)}</p>
         ${affected.length ? `<p class="muted">${this._escape(affectedLabel)}: ${this._escape(affected.join(", "))}</p>` : ""}
         ${item.fix ? this._setupHealthAction(path, item.fix) : ""}

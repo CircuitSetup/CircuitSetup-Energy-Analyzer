@@ -266,6 +266,7 @@ def _setup_health_checklist(
     coordinator: Any,
     issues: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    state = getattr(coordinator, "data", None)
     circuits = _setup_health_circuits(coordinator)
     has_circuits = bool(circuits)
     has_sources = any(
@@ -319,12 +320,40 @@ def _setup_health_checklist(
         CONF_ENTITY_DETAIL_LEVEL,
     )
     compact = len(issues) > _MAX_SETUP_HEALTH_ISSUES
+    source_data_observed = bool(circuits) and all(
+        (checklist := _setup_health_mapping(
+            state,
+            "data_quality_checklist_by_circuit",
+            circuit.circuit_id,
+        ))
+        is not None
+        and checklist.get("sample_observed") is True
+        and checklist.get("required_sensors_present") is True
+        and checklist.get("numeric_states_valid") is True
+        and checklist.get("source_data_fresh") is True
+        for _, circuit in circuits
+    )
+    source_data_status = (
+        "needs_attention"
+        if not has_sources or source_circuits
+        else "ok"
+        if source_data_observed
+        else "learning"
+    )
+    source_data_title_key = {
+        "learning": "title_learning",
+        "needs_attention": "title_attention",
+        "ok": "title",
+    }[source_data_status]
 
     items = [
         _setup_health_checklist_item(
             "source_data_found",
-            _setup_health_checklist_value("source_data_found", "title"),
-            "ok" if has_sources and not source_circuits else "needs_attention",
+            _setup_health_checklist_value(
+                "source_data_found",
+                source_data_title_key,
+            ),
+            source_data_status,
             _setup_health_checklist_value("source_data_found", "why_it_matters"),
             affected_circuits=source_circuits,
             fix=(
@@ -861,7 +890,7 @@ def _setup_health_data_quality_issue(
             ),
             issue="check_ct_direction",
         )
-    if checklist is None:
+    if checklist is None or checklist.get("sample_observed") is False:
         return None
     if checklist.get("source_data_fresh") is False or "stale" in issue_text:
         return _setup_health_issue(

@@ -1370,6 +1370,14 @@ def test_setup_health_treats_optional_energy_and_metric_inputs_as_ready() -> Non
 
     setup_coordinator = SimpleNamespace(
         data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": True,
+                }
+            },
             energy_dashboard_status_by_circuit={"fridge": "needs_energy_source"},
             energy_dashboard_evidence_by_circuit={
                 "fridge": {"status": "needs_energy_source"}
@@ -1443,6 +1451,8 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert attrs["issues"][0]["fix"] == (
         "Add at least one source sensor to Garage Freezer"
     )
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+    assert checklist["source_data_found"]["title"] == "Source data needs attention"
 
 
 def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
@@ -1452,6 +1462,14 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
 
     coordinator = SimpleNamespace(
         data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": True,
+                }
+            },
             energy_dashboard_status_by_circuit={"fridge": "needs_energy_source"},
             energy_dashboard_evidence_by_circuit={
                 "fridge": {"status": "needs_energy_source"}
@@ -1478,6 +1496,9 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
 
     assert attrs["checklist_total_count"] == 10
     assert checklist["source_data_found"]["status"] == "ok"
+    assert checklist["source_data_found"]["title"] == (
+        "Source data is available and healthy"
+    )
     assert checklist["cumulative_kwh_sources_found"]["status"] == "ok"
     assert "affected_circuits" not in checklist["cumulative_kwh_sources_found"]
     assert checklist["dashboard_created"]["status"] == "ok"
@@ -1486,7 +1507,42 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
     assert attrs["checklist_ready_count"] == 10
 
 
-def test_setup_health_source_status_does_not_depend_on_assignments() -> None:
+def test_setup_health_waits_to_verify_configured_source_data() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import (
+        data_quality_checklist,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": data_quality_checklist(circuit, None)
+            }
+        ),
+        circuit_configs=(circuit,),
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+
+    assert checklist["source_data_found"]["status"] == "learning"
+    assert checklist["source_data_found"]["title"] == (
+        "Waiting to verify source data"
+    )
+
+
+def test_setup_health_unassigned_source_waits_for_verification() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
     )
@@ -1501,9 +1557,14 @@ def test_setup_health_source_status_does_not_depend_on_assignments() -> None:
         item["item_id"]: item
         for item in setup_health_attributes(coordinator)["checklist"]
     }
-    assert checklist["source_data_found"]["status"] == "ok"
-    assert "fix" not in checklist["source_data_found"]
-    assert "open_path" not in checklist["source_data_found"]
+    assert checklist["source_data_found"]["status"] == "learning"
+    assert checklist["source_data_found"]["title"] == (
+        "Waiting to verify source data"
+    )
+    assert checklist["source_data_found"]["fix"] == "Review circuit assignments"
+    assert checklist["source_data_found"]["open_path"].startswith(
+        "/config/integrations/"
+    )
     assert checklist["circuit_assignments_reviewed"]["status"] == "needs_attention"
 
 

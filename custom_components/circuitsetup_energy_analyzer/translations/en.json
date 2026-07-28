@@ -1121,9 +1121,17 @@
           "message": "Setup Health is not available because the integration is not loaded.",
           "next_step": "Reload the integration, then open Setup Health again."
         },
+        "status_labels": {
+          "ok": "Complete",
+          "needs_attention": "Needs attention",
+          "optional": "Optional",
+          "learning": "Learning"
+        },
         "checklist": {
           "source_data_found": {
-            "title": "Source data found",
+            "title": "Source data is available and healthy",
+            "title_attention": "Source data needs attention",
+            "title_learning": "Waiting to verify source data",
             "why_it_matters": "Confirms Home Assistant is receiving live readings for each circuit.",
             "fix": "Review source sensors"
           },
