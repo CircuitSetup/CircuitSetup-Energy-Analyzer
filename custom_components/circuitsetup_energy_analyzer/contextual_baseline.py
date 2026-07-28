@@ -688,6 +688,37 @@ def stored_contextual_samples(
     return samples
 
 
+def remove_contextual_samples_for_dates(
+    samples: list[dict[str, Any]],
+    *,
+    circuit_id: str,
+    dates: Iterable[date],
+    time_zone: TimeZone = None,
+    cache: ContextualSamplesCache | None = None,
+) -> bool:
+    """Remove learned samples whose local dates are no longer eligible."""
+    excluded_dates = set(dates)
+    if not excluded_dates:
+        return False
+    retained = [
+        raw
+        for raw in samples
+        if (
+            (sample := contextual_sample_from_dict(circuit_id, raw)) is None
+            or _sample_calendar_date(sample.timestamp, time_zone)
+            not in excluded_dates
+        )
+    ]
+    if len(retained) == len(samples):
+        return False
+    samples[:] = retained
+    if cache is not None:
+        for key in tuple(cache):
+            if key[0] == circuit_id:
+                cache.pop(key, None)
+    return True
+
+
 def upsert_contextual_sample(
     samples: list[dict[str, Any]],
     sample: ContextualBaselineSample,

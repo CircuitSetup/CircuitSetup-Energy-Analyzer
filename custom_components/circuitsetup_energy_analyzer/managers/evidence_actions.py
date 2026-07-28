@@ -96,6 +96,13 @@ class EvidenceActionController:
         coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
         coordinator.paused_circuits.add(circuit_id)
         coordinator.store_persistence.mark_dirty()
+        refresh_expiry = getattr(
+            coordinator,
+            "refresh_maintenance_expiry_listener",
+            None,
+        )
+        if refresh_expiry is not None:
+            refresh_expiry()
         coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -148,7 +155,25 @@ class EvidenceActionController:
             ):
                 await self.async_end_maintenance(circuit_id)
                 expired.append(circuit_id)
+        refresh_expiry = getattr(
+            coordinator,
+            "refresh_maintenance_expiry_listener",
+            None,
+        )
+        if refresh_expiry is not None:
+            refresh_expiry()
         return tuple(expired)
+
+    def next_maintenance_expiry(self) -> datetime | None:
+        """Return the earliest active timed-maintenance expiry."""
+        expiries = [
+            expires_at
+            for raw in self._coordinator.store_data.maintenance_by_circuit.values()
+            if isinstance(raw, Mapping)
+            and raw.get("active") is True
+            and (expires_at := mapping_datetime(raw.get("expires_at"))) is not None
+        ]
+        return min(expiries, default=None)
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""

@@ -11657,11 +11657,18 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
 
 
 @pytest.mark.asyncio
-async def test_timed_maintenance_expires_before_processing_context_is_built() -> None:
+async def test_timed_maintenance_expires_before_processing_context_is_built(
+    monkeypatch,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
 
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        lambda hass, callback, point_in_time: lambda: None,
+    )
     current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
@@ -11744,6 +11751,51 @@ async def test_timed_maintenance_expires_without_a_source_update(trigger: str) -
 
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
     assert "fridge" not in coordinator.paused_circuits
+
+
+@pytest.mark.asyncio
+async def test_timed_maintenance_schedules_its_own_expiry(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    tracked: list[tuple[datetime, Any]] = []
+    cancelled: list[bool] = []
+
+    def track_point(hass, callback, point_in_time):
+        del hass
+        tracked.append((point_in_time, callback))
+        return lambda: cancelled.append(True)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        track_point,
+        raising=False,
+    )
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        now_fn=lambda: current_time[0],
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+
+    expires_at, callback = tracked[-1]
+    assert expires_at == datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    current_time[0] = expires_at
+    await callback(expires_at)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+    assert cancelled == []
 
 
 def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from ..alert_feedback import mapping_datetime
@@ -18,6 +18,7 @@ from ..contextual_baseline import (
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
+    remove_contextual_samples_for_dates,
     select_contextual_baseline,
     stored_contextual_samples,
     upsert_contextual_sample,
@@ -104,13 +105,33 @@ class EnergyUsageProcessor:
         if result is None:
             return FeatureResult()
 
+        ineligible_dates = _energy_ineligible_dates(history)
+        raw_contextual_samples = (
+            context.store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        if remove_contextual_samples_for_dates(
+            raw_contextual_samples,
+            circuit_id=circuit_id,
+            dates=ineligible_dates,
+            time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
+        ):
+            if not raw_contextual_samples:
+                context.store_data.contextual_baseline_samples_by_circuit.pop(
+                    circuit_id,
+                    None,
+                )
+            context.store_data.contextual_baselines_by_circuit.pop(circuit_id, None)
         contextual_comparison = _contextual_daily_energy_comparison(
             result,
             context,
             context_key,
             baseline_eligible=(
                 baseline_eligible
-                and _energy_day_allows_baseline_learning(history, result.date)
+                and date.fromisoformat(result.date) not in ineligible_dates
             ),
         )
         energy_source = str(history.get("energy_source") or "")
@@ -366,19 +387,21 @@ def _energy_interval_allows_baseline_learning(
     )
 
 
-def _energy_day_allows_baseline_learning(
+def _energy_ineligible_dates(
     history: Mapping[str, Any],
-    date: str,
-) -> bool:
+) -> set[date]:
     days = history.get("days")
     if not isinstance(days, list):
-        return True
-    return all(
-        not isinstance(day, Mapping)
-        or str(day.get("date")) != date
-        or day.get("baseline_eligible") is not False
-        for day in days
-    )
+        return set()
+    ineligible: set[date] = set()
+    for day in days:
+        if not isinstance(day, Mapping) or day.get("baseline_eligible") is not False:
+            continue
+        try:
+            ineligible.add(date.fromisoformat(str(day.get("date") or "")))
+        except ValueError:
+            continue
+    return ineligible
 
 
 def _daily_energy_projection(

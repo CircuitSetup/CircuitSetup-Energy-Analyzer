@@ -916,6 +916,22 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
                 "ended_at": (now - timedelta(hours=1)).isoformat(),
             }
         },
+        contextual_baseline_samples_by_circuit={
+            "water_heater": [
+                {
+                    "timestamp": (now - timedelta(hours=4)).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": 1.0,
+                    "context": {
+                        "appliance_profile": "water_heater",
+                        "circuit_mode": "single_phase",
+                        "season": "summer",
+                        "water_flow_state": "active_flow",
+                    },
+                    "source": "energy_usage",
+                }
+            ]
+        },
     )
     context = ProcessingContext(
         now=now,
@@ -1879,7 +1895,23 @@ def test_run_cycle_processor_skips_contextual_learning_for_flagged_day() -> None
                 event_type=EventType.STOP,
                 features={"baseline_eligible": False},
             ),
-        ]
+        ],
+        contextual_baseline_samples_by_circuit={
+            "water_heater": [
+                {
+                    "timestamp": now.isoformat(),
+                    "feature": "runtime_today_seconds",
+                    "value": 1800.0,
+                    "context": {
+                        "appliance_profile": "water_heater",
+                        "circuit_mode": "single_phase",
+                        "season": "summer",
+                        "water_flow_state": "active_flow",
+                    },
+                    "source": "run_cycle",
+                }
+            ]
+        },
     )
     context = ProcessingContext(
         now=now,

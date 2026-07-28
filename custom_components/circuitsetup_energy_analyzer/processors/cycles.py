@@ -17,6 +17,7 @@ from ..contextual_baseline import (
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
     day_progress_bucket,
+    remove_contextual_samples_for_dates,
     select_contextual_baseline,
     stored_contextual_samples,
     upsert_contextual_sample,
@@ -107,17 +108,39 @@ class RunCycleProcessor:
                 ),
             }
         )
-        contextual_baseline_eligible = context_allows_baseline_learning(
-            context_key
-        ) and local_date(context.now, context.time_zone) not in (
-            cycle_baseline_ineligible_dates(
-                context.store_data.events,
-                circuit_id=circuit_config.circuit_id,
-                now=context.now,
-                merge_gap_seconds=merge_gap_seconds,
-                time_zone=context.time_zone,
+        ineligible_dates = cycle_baseline_ineligible_dates(
+            context.store_data.events,
+            circuit_id=circuit_config.circuit_id,
+            now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
+        )
+        raw_contextual_samples = (
+            context.store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_config.circuit_id,
+                [],
             )
         )
+        contextual_samples_removed = remove_contextual_samples_for_dates(
+            raw_contextual_samples,
+            circuit_id=circuit_config.circuit_id,
+            dates=ineligible_dates,
+            time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
+        )
+        if contextual_samples_removed:
+            if not raw_contextual_samples:
+                context.store_data.contextual_baseline_samples_by_circuit.pop(
+                    circuit_config.circuit_id,
+                    None,
+                )
+            context.store_data.contextual_baselines_by_circuit.pop(
+                circuit_config.circuit_id,
+                None,
+            )
+        contextual_baseline_eligible = context_allows_baseline_learning(
+            context_key
+        ) and local_date(context.now, context.time_zone) not in ineligible_dates
         if not self._learning_mature(circuit_config, context.now):
             contextual_dirty = _record_contextual_cycle_samples(
                 store_data=context.store_data,
@@ -128,9 +151,15 @@ class RunCycleProcessor:
                 time_zone=context.time_zone,
                 baseline_eligible=contextual_baseline_eligible,
             )
-            return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
+            return FeatureResult(
+                store_dirty=(
+                    baseline_dirty or contextual_samples_removed or contextual_dirty
+                )
+            )
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
-            return FeatureResult(store_dirty=baseline_dirty)
+            return FeatureResult(
+                store_dirty=baseline_dirty or contextual_samples_removed
+            )
 
         policy = self._alert_policy_for_circuit(circuit_config.circuit_id)
         evidence = select_cycle_anomaly_evidence(
@@ -139,7 +168,9 @@ class RunCycleProcessor:
             baselines,
             min_score=policy.min_average_score,
         )
-        feature_result = FeatureResult(store_dirty=baseline_dirty)
+        feature_result = FeatureResult(
+            store_dirty=baseline_dirty or contextual_samples_removed
+        )
         if evidence is None:
             feature_result.store_dirty = (
                 feature_result.store_dirty
