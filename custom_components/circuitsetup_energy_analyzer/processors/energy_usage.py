@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from ..alert_feedback import mapping_datetime
@@ -23,7 +23,7 @@ from ..contextual_baseline import (
     stored_contextual_samples,
     upsert_contextual_sample,
 )
-from ..local_time import as_ha_local, local_date
+from ..local_time import TimeZone, as_ha_local, local_date
 from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -82,11 +82,19 @@ class EnergyUsageProcessor:
             calendar_timestamp=context.now,
         )
         history = context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {})
+        retention_days = self._retention_days_for_circuit(circuit_id)
+        maintenance = context.store_data.maintenance_by_circuit.get(circuit_id, {})
+        maintenance_dates = _maintenance_ineligible_dates(
+            maintenance,
+            context.now,
+            time_zone=context.time_zone,
+            retention_days=retention_days,
+        )
         baseline_eligible = context_allows_baseline_learning(
             context_key
         ) and _energy_interval_allows_baseline_learning(
             history,
-            context.store_data.maintenance_by_circuit.get(circuit_id, {}),
+            maintenance,
             context.now,
         )
         result = record_energy_usage(
@@ -98,14 +106,15 @@ class EnergyUsageProcessor:
                 window_days=settings.window_days,
                 daily_spike_ratio=settings.daily_spike_ratio,
             ),
-            retention_days=self._retention_days_for_circuit(circuit_id),
+            retention_days=retention_days,
             time_zone=context.time_zone,
             baseline_eligible=baseline_eligible,
+            ineligible_dates=maintenance_dates,
         )
         if result is None:
             return FeatureResult()
 
-        ineligible_dates = _energy_ineligible_dates(history)
+        ineligible_dates = _energy_ineligible_dates(history) | maintenance_dates
         raw_contextual_samples = (
             context.store_data.contextual_baseline_samples_by_circuit.get(
                 circuit_id,
@@ -385,6 +394,39 @@ def _energy_interval_allows_baseline_learning(
     return not (
         sample_start < maintenance_end and sample_end > maintenance_start
     )
+
+
+def _maintenance_ineligible_dates(
+    maintenance: Any,
+    timestamp: datetime,
+    *,
+    time_zone: TimeZone,
+    retention_days: int,
+) -> set[date]:
+    if not isinstance(maintenance, Mapping):
+        return set()
+    started_at = mapping_datetime(maintenance.get("started_at"))
+    ended_at = (
+        timestamp
+        if maintenance.get("active") is True
+        else mapping_datetime(maintenance.get("ended_at"))
+    )
+    if started_at is None or ended_at is None:
+        if maintenance.get("active"):
+            return {local_date(timestamp, time_zone)}
+        return set()
+
+    today = local_date(timestamp, time_zone)
+    first = max(
+        local_date(started_at, time_zone),
+        today - timedelta(days=max(int(retention_days), 1)),
+    )
+    last = min(local_date(ended_at, time_zone), today)
+    if last < first:
+        return set()
+    return {
+        first + timedelta(days=offset) for offset in range((last - first).days + 1)
+    }
 
 
 def _energy_ineligible_dates(

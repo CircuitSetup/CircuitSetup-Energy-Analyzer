@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -93,6 +94,7 @@ def record_energy_usage(
     retention_days: int = 45,
     time_zone: TimeZone = None,
     baseline_eligible: bool = True,
+    ineligible_dates: Collection[date] = (),
 ) -> EnergyUsageResult | None:
     """Fold a cumulative kWh sample into daily usage history."""
     if energy_kwh is None:
@@ -109,6 +111,12 @@ def record_energy_usage(
         today=today,
         time_zone=time_zone,
     )
+    ineligible_date_keys = {day.isoformat() for day in ineligible_dates}
+    for day in days:
+        if day["date"] in ineligible_date_keys:
+            day["baseline_eligible"] = False
+    if today in ineligible_date_keys:
+        baseline_eligible = False
     prior_days = _prior_days(days, today, window_days)
     average_days = _prior_days(days, today, DEFAULT_USAGE_WINDOW_DAYS)
 

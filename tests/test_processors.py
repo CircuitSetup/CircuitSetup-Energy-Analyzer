@@ -900,36 +900,53 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
         EnergyUsageProcessor,
     )
 
-    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    now = datetime(2026, 7, 28, 0, 5, tzinfo=UTC)
+    previous_day = now - timedelta(days=1)
     store_data = FeatureStoreData(
         energy_usage_by_circuit={
             "water_heater": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(hours=4)).isoformat(),
-                "days": [],
+                "last_sample_at": previous_day.replace(hour=23, minute=50).isoformat(),
+                "coverage_date": previous_day.date().isoformat(),
+                "coverage_first_sample_at": previous_day.replace(
+                    hour=0,
+                    minute=5,
+                ).isoformat(),
+                "coverage_last_sample_at": previous_day.replace(
+                    hour=23,
+                    minute=50,
+                ).isoformat(),
+                "days": [
+                    {
+                        "date": previous_day.date().isoformat(),
+                        "usage_kwh": 8.0,
+                    }
+                ],
             }
         },
         maintenance_by_circuit={
             "water_heater": {
                 "active": False,
-                "started_at": (now - timedelta(hours=3)).isoformat(),
-                "ended_at": (now - timedelta(hours=1)).isoformat(),
+                "started_at": previous_day.replace(hour=23, minute=55).isoformat(),
+                "ended_at": now.replace(minute=2).isoformat(),
             }
         },
         contextual_baseline_samples_by_circuit={
             "water_heater": [
                 {
-                    "timestamp": (now - timedelta(hours=4)).isoformat(),
+                    "timestamp": previous_day.replace(hour=23, minute=50).isoformat(),
                     "feature": "daily_energy_kwh",
-                    "value": 1.0,
-                    "context": {
-                        "appliance_profile": "water_heater",
-                        "circuit_mode": "single_phase",
-                        "season": "summer",
-                        "water_flow_state": "active_flow",
-                    },
+                    "value": 8.0,
+                    "context": {"season": "summer"},
                     "source": "energy_usage",
-                }
+                },
+                {
+                    "timestamp": now.isoformat(),
+                    "feature": "cost_today",
+                    "value": 1.0,
+                    "context": {"season": "summer"},
+                    "source": "cost",
+                },
             ]
         },
     )
@@ -942,6 +959,7 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
         entry_data={},
         known_load_circuit_ids=frozenset(),
         sensitivity="standard",
+        time_zone="UTC",
     )
     config = CircuitConfig(
         circuit_id="water_heater",
@@ -955,19 +973,29 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
         alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
     )
 
-    processor.process(_energy_sample(105.0), config, context)
+    result = processor.process(_energy_sample(101.0), config, context)
 
     assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
         {
-            "date": "2026-07-28",
-            "usage_kwh": 5.0,
+            "date": "2026-07-27",
+            "usage_kwh": 8.0,
+            "complete": True,
             "baseline_eligible": False,
-        }
+        },
+        {
+            "date": "2026-07-28",
+            "usage_kwh": 1.0,
+            "baseline_eligible": False,
+        },
     ]
+    evidence = {
+        update.path: update.value for update in result.state_updates
+    }[("energy_usage_evidence_by_circuit", "water_heater")]
+    assert evidence["baseline_day_count"] == 0
     assert store_data.contextual_baseline_samples_by_circuit == {}
 
     processor.process(
-        _energy_sample(106.0),
+        _energy_sample(102.0),
         config,
         replace(context, now=now + timedelta(minutes=30)),
     )
@@ -4353,7 +4381,20 @@ def test_solar_flow_processor_adds_contextual_surplus_evidence() -> None:
     )
 
 
-def test_solar_flow_processor_skips_contextual_learning_during_maintenance() -> None:
+@pytest.mark.parametrize(
+    "maintenance",
+    [
+        {"active": True},
+        {
+            "active": False,
+            "started_at": "2026-06-17T13:00:00+00:00",
+            "ended_at": "2026-06-17T14:00:00+00:00",
+        },
+    ],
+)
+def test_solar_flow_processor_skips_contextual_learning_during_maintenance(
+    maintenance: dict[str, object],
+) -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -4364,7 +4405,7 @@ def test_solar_flow_processor_skips_contextual_learning_during_maintenance() -> 
 
     now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
     store_data = FeatureStoreData(
-        maintenance_by_circuit={"mains": {"active": True}},
+        maintenance_by_circuit={"mains": maintenance},
     )
     context = ProcessingContext(
         now=now,
