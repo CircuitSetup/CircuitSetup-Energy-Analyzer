@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -217,6 +217,29 @@ def test_record_cost_sample_accumulates_daily_cost_at_actual_tou_rates() -> None
     evidence = cost_evidence_payload(peak)
     assert evidence["cost_today"] == 0.50
     assert evidence["cost_today_status"] == "actual"
+
+
+def test_record_cost_sample_accumulates_subcent_intervals() -> None:
+    history = {
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-06-08T12:00:00+00:00",
+    }
+    start = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)
+
+    for minute in range(1, 101):
+        result = record_cost_sample(
+            history,
+            circuit_id="fridge",
+            timestamp=start + timedelta(minutes=minute),
+            energy_kwh=100.0 + minute * 0.01,
+            settings=CostSettings(default_rate_per_kwh=0.22),
+            time_zone="UTC",
+        )
+
+    assert result.cost_today == 0.22
+    assert result.cycle_cost == 0.22
+    assert history["cost_today"] == 0.22
+    assert history["cycle_cost"] == 0.22
 
 
 def test_record_cost_sample_resets_daily_cost_on_ha_local_day() -> None:

@@ -69,7 +69,7 @@ def record_cost_sample(
     )
     cycle_key = cycle_start.isoformat()
     same_cycle = history.get("cycle_start") == cycle_key
-    cycle_cost = _existing_cycle_cost(history, cycle_start)
+    precise_cycle_cost = _existing_cycle_cost(history, cycle_start)
 
     last_energy = _float_or_none(history.get("last_energy_kwh"))
     last_sample_at = _datetime_or_none(history.get("last_sample_at"))
@@ -92,12 +92,13 @@ def record_cost_sample(
             )
         )
         if not ambiguous_rate:
-            cycle_cost += delta_kwh * current_rate
+            precise_cycle_cost += delta_kwh * current_rate
 
-    cycle_cost = _round_money(cycle_cost)
-    delta_cost = _round_money(
+    precise_delta_cost = (
         0.0 if ambiguous_rate else delta_kwh * (current_rate or 0.0)
     )
+    cycle_cost = _round_money(precise_cycle_cost)
+    delta_cost = _round_money(precise_delta_cost)
     today = calendar_timestamp.date().isoformat()
     _update_completed_cost_days(
         history,
@@ -106,12 +107,19 @@ def record_cost_sample(
         delta_kwh=delta_kwh,
         time_zone=time_zone,
     )
-    accumulated_today = (
-        max(_float_or_none(history.get("cost_today")) or 0.0, 0.0)
+    precise_cost_today = (
+        max(
+            _float_or_none(
+                history.get("cost_today_precise", history.get("cost_today"))
+            )
+            or 0.0,
+            0.0,
+        )
         if history.get("cost_today_date") == today
         else 0.0
     )
-    accumulated_today = _round_money(accumulated_today + delta_cost)
+    precise_cost_today += precise_delta_cost
+    accumulated_today = _round_money(precise_cost_today)
     crossed_local_date = (
         last_sample_at is not None
         and _calendar_datetime(last_sample_at, time_zone).date()
@@ -141,11 +149,15 @@ def record_cost_sample(
     )
     elapsed_days = max((calendar_timestamp.date() - cycle_start).days + 1, 1)
     cycle_days = max((cycle_end - cycle_start).days, 1)
-    projected_cycle_cost = _round_money(cycle_cost * cycle_days / elapsed_days)
+    projected_cycle_cost = _round_money(
+        precise_cycle_cost * cycle_days / elapsed_days
+    )
     history["cycle_start"] = cycle_key
     history["cycle_end"] = cycle_end.isoformat()
+    history["cycle_cost_precise"] = precise_cycle_cost
     history["cycle_cost"] = cycle_cost
     history["cost_today_date"] = today
+    history["cost_today_precise"] = precise_cost_today
     history["cost_today"] = accumulated_today
     history["cost_today_status"] = cost_today_status
     history["cycle_cost_status"] = cycle_cost_status
@@ -242,7 +254,13 @@ def _interval_rate_is_ambiguous(
 def _existing_cycle_cost(history: dict[str, Any], cycle_start: date) -> float:
     if history.get("cycle_start") != cycle_start.isoformat():
         return 0.0
-    return max(_float_or_none(history.get("cycle_cost")) or 0.0, 0.0)
+    return max(
+        _float_or_none(
+            history.get("cycle_cost_precise", history.get("cycle_cost"))
+        )
+        or 0.0,
+        0.0,
+    )
 
 
 def _cycle_start_for_date(current: date, start_day: int) -> date:
