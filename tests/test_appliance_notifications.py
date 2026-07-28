@@ -24,6 +24,8 @@ def test_default_preferences_use_safe_defaults_and_category_choices() -> None:
     assert preferences.finished_running is False
     assert preferences.electrical_issue is True
     assert preferences.data_quality_issue is True
+    assert preferences.other_issue is True
+    assert "other_issue" in preferences.as_dict()
     assert preferences.delivery_mode == "immediate"
 
     now = datetime(2026, 7, 13, 12, 0, tzinfo=LOCAL)
@@ -130,6 +132,24 @@ def test_nilm_alert_categories_remain_independent() -> None:
     assert alert_notification_category("nilm_low_confidence_change") == (
         "nilm_review_needed"
     )
+
+
+@pytest.mark.parametrize(
+    ("feature", "category"),
+    [
+        ("billing_cycle_budget", "high_daily_energy"),
+        ("utility_energy_mismatch", "data_quality_issue"),
+        ("always_on_power", "high_daily_energy"),
+        ("run_cycle_duration_s", "unusual_runtime"),
+        ("breaker_capacity", "capacity_demand_issue"),
+        ("future_feature", "other_issue"),
+    ],
+)
+def test_alert_features_use_semantic_notification_categories(
+    feature: str,
+    category: str,
+) -> None:
+    assert alert_notification_category(feature) == category
 
 
 @pytest.mark.parametrize(
