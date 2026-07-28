@@ -11702,6 +11702,44 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
 
 
 @pytest.mark.asyncio
+async def test_maintenance_lifecycle_history_survives_relearn() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(get=lambda entity_id: None),
+            data={},
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_start_maintenance(
+        "fridge",
+        relearn_on_end=True,
+    )
+    await coordinator.async_end_maintenance("fridge")
+
+    assert [alert.feature for alert in coordinator.store_data.alerts] == [
+        "maintenance_completed",
+        "relearning_started",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_timed_maintenance_expires_before_processing_context_is_built(
     monkeypatch,
 ) -> None:

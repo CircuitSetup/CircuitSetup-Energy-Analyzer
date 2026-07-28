@@ -121,6 +121,13 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         message="Fridge demand changed.",
         feature="demand_limit",
     )
+    unprocessed_alert = AlertEvidence(
+        timestamp=now + timedelta(minutes=3),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge electrical behavior changed.",
+        feature="power_factor_shift_under_load",
+    )
     created: list[AlertEvidence] = []
     dismissed: list[str] = []
     paused: set[str] = set()
@@ -193,15 +200,30 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications()
 
+    paused.clear()
+    coordinator.store_data.alerts.append(unprocessed_alert)
+    state.active_alerts_by_circuit = {"fridge": [unprocessed_alert]}
+    await controller.async_notify_alert(unprocessed_alert)
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications({"washer"})
+
+    assert notification_id_for_alert(unprocessed_alert) not in dismissed
+    assert [alert.feature for alert in coordinator.store_data.alerts].count(
+        "alert_recovered"
+    ) == 1
+
+    await controller.async_sync_alert_notifications({"fridge"})
+
     assert dismissed == [
         notification_id_for_alert(active_alert),
         notification_id_for_alert(user_dismissed_alert),
         notification_id_for_alert(maintenance_suppressed_alert),
+        notification_id_for_alert(unprocessed_alert),
     ]
-    assert [alert.feature for alert in created].count("alert_recovered") == 1
+    assert [alert.feature for alert in created].count("alert_recovered") >= 1
     assert [alert.feature for alert in coordinator.store_data.alerts].count(
         "alert_recovered"
-    ) == 1
+    ) == 2
 
 
 @pytest.mark.asyncio

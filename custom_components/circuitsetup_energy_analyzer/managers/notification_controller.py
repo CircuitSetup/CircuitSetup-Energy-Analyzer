@@ -100,7 +100,10 @@ class NotificationController:
             circuit_id,
         )
 
-    async def async_sync_alert_notifications(self) -> None:
+    async def async_sync_alert_notifications(
+        self,
+        evaluated_circuit_ids: set[str] | None = None,
+    ) -> None:
         """Dismiss alert notifications whose evidence is no longer active."""
         recoverable_ids = set(self._managed_alert_notification_ids)
         if not self._alert_notifications_initialized:
@@ -121,6 +124,14 @@ class NotificationController:
             recovered_alert = (
                 alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
             )
+            if (
+                evaluated_circuit_ids is not None
+                and (
+                    recovered_alert is None
+                    or recovered_alert.circuit_id not in evaluated_circuit_ids
+                )
+            ):
+                continue
             await self.async_dismiss_alert_notification(alert_id)
             if (
                 recovered_alert is not None
@@ -142,8 +153,26 @@ class NotificationController:
                     ),
                     now=self._current_time(),
                 )
-        self._managed_alert_notification_ids.intersection_update(active_alert_ids)
-        self.notified_alert_ids.intersection_update(active_alert_ids)
+        if evaluated_circuit_ids is None:
+            self._managed_alert_notification_ids.intersection_update(
+                active_alert_ids
+            )
+            self.notified_alert_ids.intersection_update(active_alert_ids)
+            return
+        self._managed_alert_notification_ids = {
+            alert_id
+            for alert_id in self._managed_alert_notification_ids
+            if alert_id in active_alert_ids
+            or (alert := alerts_by_id.get(alert_id)) is None
+            or alert.circuit_id not in evaluated_circuit_ids
+        }
+        self.notified_alert_ids = {
+            alert_id
+            for alert_id in self.notified_alert_ids
+            if alert_id in active_alert_ids
+            or (alert := alerts_by_id.get(alert_id)) is None
+            or alert.circuit_id not in evaluated_circuit_ids
+        }
 
     async def async_notify_learning_transitions(
         self,

@@ -133,6 +133,13 @@ class EvidenceActionController:
         display_name = str(
             getattr(config, "name", "") or circuit_id.replace("_", " ").title()
         )
+        learning_epoch = None
+        if should_relearn:
+            await coordinator.async_relearn_baseline(circuit_id)
+            learning_epoch = coordinator.store_data.learning_started_at_by_circuit.get(
+                circuit_id,
+                now.isoformat(),
+            )
         if was_active:
             await coordinator.notification_controller.async_notify_lifecycle_update(
                 circuit_id,
@@ -141,12 +148,7 @@ class EvidenceActionController:
                 episode_key=f"maintenance_completed:{started_at}",
                 now=now,
             )
-        if should_relearn:
-            await coordinator.async_relearn_baseline(circuit_id)
-            learning_epoch = coordinator.store_data.learning_started_at_by_circuit.get(
-                circuit_id,
-                now.isoformat(),
-            )
+        if learning_epoch is not None:
             await coordinator.notification_controller.async_notify_lifecycle_update(
                 circuit_id,
                 feature="relearning_started",

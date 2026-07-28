@@ -64,12 +64,18 @@ def build_weekly_digest(
         for raw in raw_items
         if isinstance(raw, Mapping) and raw.get("expected_context") is True
     }
+    comparable_keys = {
+        str(raw.get("appliance_key") or "")
+        for raw in raw_items
+        if isinstance(raw, Mapping) and raw.get("comparable_energy") is not False
+    }
     changes = tuple(
         sorted(
             (
                 item
                 for item in active
                 if item.appliance_key not in expected_keys
+                and item.appliance_key in comparable_keys
                 and item.normal_energy_kwh > 0.0
                 and item.change_ratio != 0.0
             ),
@@ -85,7 +91,15 @@ def build_weekly_digest(
         week_end=week_end,
         biggest_changes=changes,
         top_energy_users=tuple(
-            sorted(active, key=lambda item: item.energy_kwh, reverse=True)[:5]
+            sorted(
+                (
+                    item
+                    for item in active
+                    if item.appliance_key in comparable_keys
+                ),
+                key=lambda item: item.energy_kwh,
+                reverse=True,
+            )[:5]
         ),
         observed_alerts=tuple(item for item in active if item.status == "observed")[:5],
         unresolved_items=tuple(item for item in active if item.status == "unresolved")[
@@ -141,11 +155,14 @@ def digest_items_for_coordinator(
         days = history.get("days", ()) if isinstance(history, Mapping) else ()
         week_values = _complete_daily_values_between(days, week_start, week_end)
         prior_values = _complete_daily_values_between(days, prior_start, prior_end)
-        if (
-            circuit_is_learning(state, circuit_id)
-            or len(week_values) != 7
-            or len(prior_values) != 7
-        ):
+        if circuit_is_learning(state, circuit_id):
+            continue
+        has_active_alert = bool(
+            isinstance(active_alerts, Mapping)
+            and active_alerts.get(circuit_id)
+        )
+        comparable_energy = len(week_values) == 7 and len(prior_values) == 7
+        if not comparable_energy and not has_active_alert:
             continue
         progress = learning.get(circuit_id, {}) if isinstance(learning, Mapping) else {}
         evidence = (
@@ -153,24 +170,25 @@ def digest_items_for_coordinator(
             if isinstance(energy_evidence, Mapping)
             else {}
         )
-        items.append(
-            {
-                "appliance_key": f"circuit:{circuit_id}",
-                "display_name": str(getattr(config, "name", "") or circuit_id),
-                "energy_kwh": sum(week_values.values()),
-                "normal_energy_kwh": sum(prior_values.values()),
-                "confidence": 1.0
-                if isinstance(progress, Mapping) and progress.get("alert_ready")
-                else 0.6,
-                "status": "unresolved"
-                if isinstance(active_alerts, Mapping) and active_alerts.get(circuit_id)
-                else "normal",
-                "expected_context": (
-                    isinstance(evidence, Mapping)
-                    and evidence.get("status") == "context_explained"
-                ),
-            }
-        )
+        item = {
+            "appliance_key": f"circuit:{circuit_id}",
+            "display_name": str(getattr(config, "name", "") or circuit_id),
+            "energy_kwh": sum(week_values.values()) if comparable_energy else 0.0,
+            "normal_energy_kwh": (
+                sum(prior_values.values()) if comparable_energy else 0.0
+            ),
+            "confidence": 1.0
+            if isinstance(progress, Mapping) and progress.get("alert_ready")
+            else 0.6,
+            "status": "unresolved" if has_active_alert else "normal",
+            "expected_context": (
+                isinstance(evidence, Mapping)
+                and evidence.get("status") == "context_explained"
+            ),
+        }
+        if not comparable_energy:
+            item["comparable_energy"] = False
+        items.append(item)
     items_by_key = {item["appliance_key"]: item for item in items}
     load_shift_evidence = getattr(state, "solar_load_shift_evidence_by_circuit", {})
     candidate_budget = 100

@@ -157,6 +157,26 @@ def test_digest_direct_items_require_two_complete_eligible_weeks() -> None:
         time_zone=ZoneInfo("UTC"),
     ) == []
 
+    coordinator.state.active_alerts_by_circuit["dryer"] = [object()]
+    (unresolved,) = digest_items_for_coordinator(
+        coordinator,
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    )
+    assert unresolved["status"] == "unresolved"
+    assert unresolved["comparable_energy"] is False
+    digest = build_weekly_digest(
+        [unresolved],
+        now=now,
+        time_zone=ZoneInfo("UTC"),
+    )
+    assert [item.appliance_key for item in digest.unresolved_items] == [
+        "circuit:dryer"
+    ]
+    assert digest.biggest_changes == ()
+    assert digest.top_energy_users == ()
+    coordinator.state.active_alerts_by_circuit.clear()
+
     days.append(
         {
             "date": date(2026, 7, 26).isoformat(),
@@ -181,6 +201,7 @@ def test_digest_direct_items_require_two_complete_eligible_weeks() -> None:
 
     days[-1]["baseline_eligible"] = True
     coordinator.state.learning_by_circuit["dryer"] = True
+    coordinator.state.active_alerts_by_circuit["dryer"] = [object()]
     assert digest_items_for_coordinator(
         coordinator,
         now=now,

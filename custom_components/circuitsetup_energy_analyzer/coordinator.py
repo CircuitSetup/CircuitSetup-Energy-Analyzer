@@ -523,7 +523,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             previous_learning,
             now,
         )
-        await self.notification_controller.async_sync_alert_notifications()
+        await self.notification_controller.async_sync_alert_notifications(
+            processing_circuit_ids
+        )
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)
         self.async_set_updated_data(self.state)

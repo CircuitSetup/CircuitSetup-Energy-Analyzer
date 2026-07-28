@@ -40,6 +40,7 @@ class _ActionCoordinator:
         self.dirty_count = 0
         self.relearned: list[str] = []
         self.lifecycle_features: list[str] = []
+        self.lifecycle_sequence: list[str] = []
         self.dismissed_alert_ids: list[str] = []
         self.now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
         self.store_persistence = SimpleNamespace(
@@ -78,7 +79,9 @@ class _ActionCoordinator:
 
     async def _notify_lifecycle_update(self, circuit_id: str, **kwargs: object) -> None:
         del circuit_id
-        self.lifecycle_features.append(str(kwargs["feature"]))
+        feature = str(kwargs["feature"])
+        self.lifecycle_features.append(feature)
+        self.lifecycle_sequence.append(feature)
 
     def _record_store_dirty(self) -> None:
         self.dirty_count += 1
@@ -97,6 +100,7 @@ class _ActionCoordinator:
 
     async def async_relearn_baseline(self, circuit_id: str) -> None:
         self.relearned.append(circuit_id)
+        self.lifecycle_sequence.append("baseline_reset")
         self.store_data.learning_started_at_by_circuit[circuit_id] = (
             self.now.isoformat()
         )
@@ -212,6 +216,11 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
     )
     assert coordinator.relearned == ["fridge"]
     assert coordinator.lifecycle_features == [
+        "maintenance_completed",
+        "relearning_started",
+    ]
+    assert coordinator.lifecycle_sequence == [
+        "baseline_reset",
         "maintenance_completed",
         "relearning_started",
     ]
