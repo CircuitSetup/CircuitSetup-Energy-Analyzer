@@ -3197,6 +3197,15 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     )
 
     coordinator = _coordinator(config=_config("hvac"))
+    coordinator.data = SimpleNamespace(
+        data_quality_checklist_by_circuit={
+            "hvac": {
+                "required_sensors_present": True,
+                "numeric_states_valid": True,
+                "source_data_fresh": True,
+            }
+        }
+    )
 
     payload = setup_health_payload([coordinator])
 

@@ -477,7 +477,11 @@ export function createApplianceViewMethods({
     }[status];
     const statusLabel = this._setupHealthText(`status_labels.${status}`)
       || this._friendlyFeature(status);
-    const titleKey = status === "needs_attention" ? "title_attention" : "title";
+    const titleKey = status === "needs_attention"
+      ? "title_attention"
+      : status === "learning"
+        ? "title_learning"
+        : "title";
     const title = item.title
       || this._setupHealthChecklistText(item.item_id, titleKey)
       || this._setupHealthChecklistText(item.item_id, "title")

@@ -4471,6 +4471,13 @@ panel._setupHealth = {
   ],
 };
 const rendered = panel._renderSetupHealthContent();
+const waitingSource = panel._renderSetupHealthChecklistItem({
+  item_id: "source_data_found",
+  status: "learning",
+});
+if (!waitingSource.includes("Waiting to verify source data")) {
+  throw new Error(`missing waiting source title: ${waitingSource}`);
+}
 for (const unexpected of [
   ">Status<",
   ">Next Step<",
