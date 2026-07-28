@@ -57,12 +57,14 @@ SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
 try:
     from homeassistant.helpers.event import (
+        async_track_point_in_time,
         async_track_state_change_event,
         async_track_time_interval,
     )
     from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 except ModuleNotFoundError:
     async_track_state_change_event = None
+    async_track_point_in_time = None
     async_track_time_interval = None
 
     class DataUpdateCoordinator:
@@ -169,6 +171,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
+        await self.evidence_actions.async_expire_maintenance_if_due(
+            self.current_time()
+        )
         entities = [
             str(entity_id)
             for entity_id in source_entities
@@ -194,10 +199,32 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
+        if self._unsub_maintenance_expiry is not None:
+            self._unsub_maintenance_expiry()
+            self._unsub_maintenance_expiry = None
         if self._unsub_expected_schedule_interval is not None:
             self._unsub_expected_schedule_interval()
             self._unsub_expected_schedule_interval = None
         await self.source_updates.async_stop()
+
+    def refresh_maintenance_expiry_listener(self: Self) -> None:
+        """Schedule the next timed maintenance expiry."""
+        if self._unsub_maintenance_expiry is not None:
+            self._unsub_maintenance_expiry()
+            self._unsub_maintenance_expiry = None
+        expires_at = self.evidence_actions.next_maintenance_expiry()
+        if async_track_point_in_time is None or expires_at is None:
+            return
+        self._unsub_maintenance_expiry = async_track_point_in_time(
+            self.hass,
+            self._async_handle_maintenance_expiry,
+            expires_at,
+        )
+
+    async def _async_handle_maintenance_expiry(self: Self, now: datetime) -> None:
+        """Expire maintenance from Home Assistant's event-loop timer."""
+        self._unsub_maintenance_expiry = None
+        await self.evidence_actions.async_expire_maintenance_if_due(now)
 
     def _refresh_expected_schedule_interval_listener(self: Self) -> None:
         """Refresh periodic evaluation for local expected-schedule windows."""
@@ -235,6 +262,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
         """Evaluate local schedule boundaries without a source state change."""
+        await self.evidence_actions.async_expire_maintenance_if_due(now)
         alerts = await self._async_apply_expected_schedule_contexts(now)
         if alerts:
             process_events_into_state(self.state, (), alerts)
@@ -369,6 +397,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
+        await self.evidence_actions.async_expire_maintenance_if_due(now)
         context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
@@ -860,6 +889,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Clear maintenance state and optionally relearn the circuit baseline."""
         await self.evidence_actions.async_end_maintenance(circuit_id, relearn=relearn)
+        self.refresh_maintenance_expiry_listener()
 
     async def async_mark_alert_expected(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""

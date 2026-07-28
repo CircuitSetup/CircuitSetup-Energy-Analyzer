@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -535,7 +536,14 @@ async def test_coordinator_applies_observation_lane_without_creating_alert_histo
     ]
 
 
-def test_event_processor_returns_events_after_dwell() -> None:
+@pytest.mark.parametrize(
+    ("maintenance_active", "baseline_eligible"),
+    [(False, True), (True, False)],
+)
+def test_event_processor_returns_events_after_dwell(
+    maintenance_active: bool,
+    baseline_eligible: bool,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -549,7 +557,11 @@ def test_event_processor_returns_events_after_dwell() -> None:
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
         state=AnalyzerState(),
-        store_data=FeatureStoreData(),
+        store_data=FeatureStoreData(
+            maintenance_by_circuit=(
+                {"fridge": {"active": True}} if maintenance_active else {}
+            )
+        ),
         options={},
         entry_data={},
         known_load_circuit_ids=frozenset(),
@@ -570,7 +582,52 @@ def test_event_processor_returns_events_after_dwell() -> None:
     assert first.events == []
     assert second.events == []
     assert [event.event_type for event in third.events] == [EventType.START]
+    assert third.events[0].features["baseline_eligible"] is baseline_eligible
     assert third.store_dirty is True
+
+
+def test_event_processor_excludes_run_overlapping_completed_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = CircuitEventProcessor()
+
+    processor.process(_sample(0, 5.0), config, context)
+    processor.process(_sample(10, 210.0), config, context)
+    started = processor.process(_sample(21, 210.0), config, context)
+    assert started.events[0].features["baseline_eligible"] is True
+
+    context.store_data.maintenance_by_circuit["fridge"] = {
+        "active": False,
+        "started_at": _sample(25, 210.0).timestamp.isoformat(),
+        "ended_at": _sample(35, 210.0).timestamp.isoformat(),
+    }
+    processor.process(_sample(40, 5.0), config, context)
+    stopped = processor.process(_sample(90, 5.0), config, context)
+
+    assert [event.event_type for event in stopped.events] == [EventType.STOP]
+    assert stopped.events[0].features["baseline_eligible"] is False
 
 
 def test_event_processor_uses_profile_thresholds_and_dwell() -> None:
@@ -832,6 +889,118 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     assert evidence["status"] == "over_threshold"
     assert evidence["daily_usage_share_percent"] == 25.8
     assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9
+
+
+def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 7, 28, 0, 5, tzinfo=UTC)
+    previous_day = now - timedelta(days=1)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "water_heater": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": previous_day.replace(hour=23, minute=50).isoformat(),
+                "coverage_date": previous_day.date().isoformat(),
+                "coverage_first_sample_at": previous_day.replace(
+                    hour=0,
+                    minute=5,
+                ).isoformat(),
+                "coverage_last_sample_at": previous_day.replace(
+                    hour=23,
+                    minute=50,
+                ).isoformat(),
+                "days": [
+                    {
+                        "date": previous_day.date().isoformat(),
+                        "usage_kwh": 8.0,
+                    }
+                ],
+            }
+        },
+        maintenance_by_circuit={
+            "water_heater": {
+                "active": False,
+                "started_at": previous_day.replace(hour=23, minute=55).isoformat(),
+                "ended_at": now.replace(minute=2).isoformat(),
+            }
+        },
+        contextual_baseline_samples_by_circuit={
+            "water_heater": [
+                {
+                    "timestamp": previous_day.replace(hour=23, minute=50).isoformat(),
+                    "feature": "daily_energy_kwh",
+                    "value": 8.0,
+                    "context": {"season": "summer"},
+                    "source": "energy_usage",
+                },
+                {
+                    "timestamp": now.isoformat(),
+                    "feature": "cost_today",
+                    "value": 1.0,
+                    "context": {"season": "summer"},
+                    "source": "cost",
+                },
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+        time_zone="UTC",
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+
+    result = processor.process(_energy_sample(101.0), config, context)
+
+    assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
+        {
+            "date": "2026-07-27",
+            "usage_kwh": 8.0,
+            "complete": True,
+            "baseline_eligible": False,
+        },
+        {
+            "date": "2026-07-28",
+            "usage_kwh": 1.0,
+            "baseline_eligible": False,
+        },
+    ]
+    evidence = {
+        update.path: update.value for update in result.state_updates
+    }[("energy_usage_evidence_by_circuit", "water_heater")]
+    assert evidence["baseline_day_count"] == 0
+    assert store_data.contextual_baseline_samples_by_circuit == {}
+
+    processor.process(
+        _energy_sample(102.0),
+        config,
+        replace(context, now=now + timedelta(minutes=30)),
+    )
+
+    assert store_data.contextual_baseline_samples_by_circuit == {}
 
 
 def _energy_usage_projection_evidence(
@@ -1366,6 +1535,13 @@ def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -
     processor.process(sample, config, context)
 
     assert store_data.contextual_baseline_samples_by_circuit == {}
+    assert store_data.energy_usage_by_circuit["ev"]["days"] == [
+        {
+            "date": "2026-05-31",
+            "usage_kwh": 4.0,
+            "baseline_eligible": False,
+        }
+    ]
 
 
 def test_energy_usage_alert_features_include_contextual_baseline_details() -> None:
@@ -1722,6 +1898,85 @@ def test_run_cycle_processor_context_uses_rollup_timestamp() -> None:
     stored = store_data.contextual_baseline_samples_by_circuit["fridge"][0]
     assert stored["timestamp"] == now.isoformat()
     assert stored["context"]["time_of_day"] == "evening"
+
+
+def test_run_cycle_processor_skips_contextual_learning_for_flagged_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(hours=2),
+                circuit_id="water_heater",
+                event_type=EventType.START,
+            ),
+            CircuitEvent(
+                timestamp=now - timedelta(hours=1),
+                circuit_id="water_heater",
+                event_type=EventType.STOP,
+                features={"baseline_eligible": False},
+            ),
+        ],
+        contextual_baseline_samples_by_circuit={
+            "water_heater": [
+                {
+                    "timestamp": now.isoformat(),
+                    "feature": "runtime_today_seconds",
+                    "value": 1800.0,
+                    "context": {
+                        "appliance_profile": "water_heater",
+                        "circuit_mode": "single_phase",
+                        "season": "summer",
+                        "water_flow_state": "active_flow",
+                    },
+                    "source": "run_cycle",
+                }
+            ]
+        },
+        baselines={
+            "water_heater:run_cycle_duration_s": BaselineStats(
+                "run_cycle_duration_s",
+                9,
+                1800.0,
+                60.0,
+                1700.0,
+                1900.0,
+                1.0,
+            )
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        learning_mature=lambda _config, _now: False,
+    )
+
+    processor.process(_energy_sample(106.0), config, context)
+
+    assert store_data.contextual_baseline_samples_by_circuit == {}
+    assert "water_heater:run_cycle_duration_s" not in store_data.baselines
 
 
 def test_run_cycle_processor_suppresses_alert_when_context_explains_runtime() -> None:
@@ -2897,6 +3152,221 @@ def test_demand_processor_updates_state_and_returns_limit_alert() -> None:
     ]
 
 
+def test_demand_processor_keeps_maintenance_readings_out_of_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    history = {
+        "daily_peaks": [{"date": "2026-06-10", "peak_demand_w": 1200.0}],
+        "monthly_peak_windows": [
+            {
+                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "demand_w": 1200.0,
+                "window_minutes": 15,
+            }
+        ],
+    }
+    store_data = FeatureStoreData(
+        demand_by_circuit={"ev": history},
+        maintenance_by_circuit={"ev": {"active": True}},
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+
+    result = processor.process(_sample(0, 5000.0), config, context)
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("current_demand_w_by_circuit", "ev")] == 5000.0
+    assert "samples" not in history
+    assert history["daily_peaks"] == [
+        {"date": "2026-06-10", "peak_demand_w": 1200.0}
+    ]
+    assert history["monthly_peak_windows"] == [
+        {
+            "timestamp": (now - timedelta(days=1)).isoformat(),
+            "demand_w": 1200.0,
+            "window_minutes": 15,
+        }
+    ]
+    assert "ev" not in store_data.contextual_baseline_samples_by_circuit
+    assert result.store_dirty is False
+
+
+def test_demand_processor_excludes_windows_overlapping_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+
+    processor.process(_sample(0, 1000.0), config, context)
+    history = store_data.demand_by_circuit["ev"]
+    samples_before = list(history["samples"])
+    daily_peaks_before = list(history["daily_peaks"])
+    monthly_windows_before = list(history["monthly_peak_windows"])
+    contextual_before = list(
+        store_data.contextual_baseline_samples_by_circuit["ev"]
+    )
+
+    store_data.maintenance_by_circuit["ev"] = {"active": True}
+    processor.process(
+        _sample(300, 5000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=5)),
+    )
+    processor.process(
+        _sample(600, 5000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=10)),
+    )
+    store_data.maintenance_by_circuit["ev"] = {"active": False}
+    result = processor.process(
+        _sample(900, 1000.0),
+        config,
+        replace(context, now=now + timedelta(minutes=15)),
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("current_demand_w_by_circuit", "ev")] == 3666.7
+    assert history["samples"] == samples_before
+    assert history["daily_peaks"] == daily_peaks_before
+    assert history["monthly_peak_windows"] == monthly_windows_before
+    assert (
+        store_data.contextual_baseline_samples_by_circuit["ev"]
+        == contextual_before
+    )
+    assert result.store_dirty is False
+
+
+def test_demand_processor_restart_preserves_maintenance_window_exclusion() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.demand import (
+        DemandProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 12, tzinfo=UTC)
+    history = {
+        "samples": [
+            {
+                "timestamp": (now - timedelta(minutes=12)).isoformat(),
+                "real_power_w": 1000.0,
+            }
+        ],
+        "daily_peaks": [{"date": "2026-06-10", "peak_demand_w": 1200.0}],
+        "monthly_peak_windows": [
+            {
+                "timestamp": (now - timedelta(days=1)).isoformat(),
+                "demand_w": 1200.0,
+                "window_minutes": 15,
+            }
+        ],
+    }
+    store_data = FeatureStoreData(
+        demand_by_circuit={"ev": history},
+        maintenance_by_circuit={
+            "ev": {
+                "active": False,
+                "started_at": (now - timedelta(minutes=7)).isoformat(),
+                "ended_at": (now - timedelta(minutes=2)).isoformat(),
+            }
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="ev",
+        name="EV Charger",
+        appliance_profile=ApplianceProfile.EV_CHARGER,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    processor = DemandProcessor(
+        settings_for_config=lambda _config, _circuit_id: DemandSettings(
+            window_minutes=15,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+    )
+    samples_before = list(history["samples"])
+    daily_peaks_before = list(history["daily_peaks"])
+    monthly_windows_before = list(history["monthly_peak_windows"])
+
+    result = processor.process(_sample(720, 5000.0), config, context)
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("current_demand_w_by_circuit", "ev")] == 1000.0
+    assert history["samples"] == samples_before
+    assert history["daily_peaks"] == daily_peaks_before
+    assert history["monthly_peak_windows"] == monthly_windows_before
+    assert "ev" not in store_data.contextual_baseline_samples_by_circuit
+    assert result.store_dirty is False
+
+
 def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -3911,7 +4381,20 @@ def test_solar_flow_processor_adds_contextual_surplus_evidence() -> None:
     )
 
 
-def test_solar_flow_processor_skips_contextual_learning_during_maintenance() -> None:
+@pytest.mark.parametrize(
+    "maintenance",
+    [
+        {"active": True},
+        {
+            "active": False,
+            "started_at": "2026-06-17T13:00:00+00:00",
+            "ended_at": "2026-06-17T14:00:00+00:00",
+        },
+    ],
+)
+def test_solar_flow_processor_skips_contextual_learning_during_maintenance(
+    maintenance: dict[str, object],
+) -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -3922,7 +4405,7 @@ def test_solar_flow_processor_skips_contextual_learning_during_maintenance() -> 
 
     now = datetime(2026, 6, 17, 15, 0, tzinfo=UTC)
     store_data = FeatureStoreData(
-        maintenance_by_circuit={"mains": {"active": True}},
+        maintenance_by_circuit={"mains": maintenance},
     )
     context = ProcessingContext(
         now=now,
@@ -5222,6 +5705,74 @@ def test_power_quality_processor_requests_clear_when_features_missing() -> None:
     assert result.alerts == []
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("learning_by_circuit", "fridge")] is True
+
+
+def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    baseline_values: defaultdict[str, list[float]] = defaultdict(list)
+    seeded_events: list[str] = []
+    seeded: list[dict[str, float]] = []
+    policy = _CaptureAlertPolicy()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            maintenance_by_circuit={"fridge": {"active": True}}
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    sample = CircuitSample(
+        timestamp=now,
+        circuit_id="fridge",
+        real_power=120.0,
+        current=1.0,
+        voltage=120.0,
+        reactive_power=80.0,
+        apparent_power=145.0,
+        power_factor=0.83,
+        frequency=60.0,
+        energy=0.0,
+    )
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda config, _now: seeded_events.append(
+            config.circuit_id
+        ),
+        seed_demo_power_quality_baselines=lambda _config, features: seeded.append(
+            dict(features)
+        ),
+        baseline_values=baseline_values,
+    )
+
+    result = processor.process(sample, config, context)
+
+    assert baseline_values == {}
+    assert seeded_events == []
+    assert seeded == []
+    assert policy.observations == []
+    assert result.alerts == []
+    assert result.store_dirty is False
 
 
 @pytest.mark.asyncio

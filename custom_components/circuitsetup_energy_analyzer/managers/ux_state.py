@@ -43,8 +43,6 @@ class UxStateManager:
         now = coordinator.current_time()
         maintenance_by_circuit = coordinator.store_data.maintenance_by_circuit
         for circuit_id, maintenance in maintenance_by_circuit.items():
-            if coordinator.evidence_actions.expire_maintenance_if_due(circuit_id, now):
-                continue
             if maintenance.get("active") is True:
                 coordinator.paused_circuits.add(circuit_id)
         coordinator.nilm_controller.hydrate_state_from_store()
@@ -95,7 +93,6 @@ class UxStateManager:
             if circuit_alerts is None
             else circuit_alerts
         )
-        coordinator.evidence_actions.expire_maintenance_if_due(circuit_id, now)
         checklist = data_quality_checklist(config, sample)
         if (
             sample is None

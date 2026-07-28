@@ -354,6 +354,7 @@ def initialize_runtime(
     self.mapping_checks_run = 0
     self._last_settings_recommendation_source_refresh_at: datetime | None = None
     self._unsub_expected_schedule_interval: Any | None = None
+    self._unsub_maintenance_expiry: Any | None = None
     self.state = AnalyzerState()
     self.started = False
     self.source_updates = SourceUpdateManager(

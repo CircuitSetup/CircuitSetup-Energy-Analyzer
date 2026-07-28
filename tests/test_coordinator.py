@@ -8252,17 +8252,14 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
         (
             "fridge",
             "unexpected_negative_real_power",
-            ("sensor.fridge_power", "sensor.fridge_current"),
+            ("sensor.fridge_power",),
             {
                 "circuit_name": "Fridge",
                 "reason": "A load circuit is reporting sustained negative real power.",
                 "recommended_action": (
                     "Check CT direction or power-flow mode for Fridge"
                 ),
-                "source_entities": [
-                    "sensor.fridge_power",
-                    "sensor.fridge_current",
-                ],
+                "source_entities": ["sensor.fridge_power"],
             },
         )
     ]
@@ -11657,6 +11654,148 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
     assert "fridge" in coordinator.paused_circuits
     assert coordinator.state.maintenance_by_circuit["fridge"]["active"] is True
     assert issues == [("fridge", "missing_required_sensor")]
+
+
+@pytest.mark.asyncio
+async def test_timed_maintenance_expires_before_processing_context_is_built(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        lambda hass, callback, point_in_time: lambda: None,
+    )
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        now_fn=lambda: current_time[0],
+    )
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+    active_when_context_built: list[bool] = []
+    original_build = coordinator.context_builder.build
+
+    def build_context(now):
+        active_when_context_built.append(
+            coordinator.store_data.maintenance_by_circuit["fridge"]["active"]
+        )
+        return original_build(now)
+
+    coordinator.context_builder.build = build_context
+    current_time[0] = datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    await coordinator.async_process_update()
+
+    assert active_when_context_built
+    assert not any(active_when_context_built)
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["startup", "schedule_refresh"])
+async def test_timed_maintenance_expires_without_a_source_update(trigger: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            maintenance_by_circuit={
+                "fridge": {
+                    "active": True,
+                    "started_at": (now - timedelta(hours=2)).isoformat(),
+                    "expires_at": (now - timedelta(minutes=30)).isoformat(),
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    if trigger == "startup":
+        await coordinator.async_start(())
+    else:
+        await coordinator.async_refresh_expected_schedules(now)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+
+
+@pytest.mark.asyncio
+async def test_timed_maintenance_schedules_its_own_expiry(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    tracked: list[tuple[datetime, Any]] = []
+    cancelled: list[bool] = []
+
+    def track_point(hass, callback, point_in_time):
+        del hass
+        tracked.append((point_in_time, callback))
+        return lambda: cancelled.append(True)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        track_point,
+        raising=False,
+    )
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        now_fn=lambda: current_time[0],
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+
+    expires_at, callback = tracked[-1]
+    assert expires_at == datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    current_time[0] = expires_at
+    await callback(expires_at)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+    assert cancelled == []
 
 
 def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:

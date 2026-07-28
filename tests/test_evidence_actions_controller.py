@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.alerting import (
     Observation,
     alert_feedback_fingerprint,
+    alert_feedback_fingerprint_candidates,
     alert_feedback_fingerprint_for_observation,
 )
 from custom_components.circuitsetup_energy_analyzer.managers.evidence_actions import (
@@ -204,13 +206,18 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_evidence_action_controller_expires_timed_maintenance() -> None:
+async def test_timed_maintenance_expiry_honors_relearn_on_end() -> None:
     coordinator = _ActionCoordinator()
     controller = EvidenceActionController(coordinator)
 
     await controller.async_start_maintenance(
         "fridge",
         duration="01:30:00",
+        relearn_on_end=True,
+    )
+    await controller.async_start_maintenance(
+        "freezer",
+        duration="02:00:00",
     )
 
     maintenance = coordinator.store_data.maintenance_by_circuit["fridge"]
@@ -220,8 +227,15 @@ async def test_evidence_action_controller_expires_timed_maintenance() -> None:
 
     coordinator.now = datetime(2026, 6, 30, 13, 30, tzinfo=UTC)
 
-    assert controller.alerts_paused("fridge") is False
+    assert controller.alerts_paused("fridge") is True
+
+    expired = await controller.async_expire_maintenance_if_due()
+
+    assert expired == ("fridge",)
+    assert coordinator.relearned == ["fridge"]
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert coordinator.store_data.maintenance_by_circuit["freezer"]["active"] is True
+    assert controller.alerts_paused("fridge") is False
     assert "fridge" not in coordinator.paused_circuits
 
 
@@ -262,6 +276,37 @@ async def test_evidence_action_controller_stores_feedback_and_retires_alert() ->
     assert coordinator.refreshed == [coordinator.now]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
+
+
+@pytest.mark.asyncio
+async def test_feedback_action_carries_v2_evidence_count_into_v3() -> None:
+    coordinator = _ActionCoordinator()
+    alert = replace(
+        _alert("fridge", "daily_energy_spike"),
+        observed_value=2.61,
+        baseline_value=2.0,
+        change_ratio=0.305,
+    )
+    alert_id = notification_id_for_alert(alert)
+    coordinator.store_data.alerts = [alert]
+    coordinator.state.active_alerts_by_circuit = {"fridge": [alert]}
+    legacy_key = next(
+        key
+        for key in alert_feedback_fingerprint_candidates(alert)
+        if key.startswith("alert:v2|")
+    )
+    coordinator.store_data.alert_feedback[legacy_key] = {
+        "action": "unhelpful",
+        "evidence_count": 2,
+        "expires_at": (coordinator.now + timedelta(days=1)).isoformat(),
+    }
+
+    await EvidenceActionController(coordinator).async_mark_alert_unhelpful(alert_id)
+
+    current_key = alert_feedback_fingerprint(alert)
+    assert current_key.startswith("alert:v3|")
+    assert coordinator.store_data.alert_feedback[current_key]["evidence_count"] == 3
+    assert legacy_key not in coordinator.store_data.alert_feedback
 
 
 def test_evidence_action_controller_annotates_suppressed_feedback() -> None:

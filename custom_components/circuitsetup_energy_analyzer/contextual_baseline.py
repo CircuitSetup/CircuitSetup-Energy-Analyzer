@@ -6,6 +6,7 @@ from datetime import date, datetime
 from math import isfinite
 from typing import Any
 
+from .alert_feedback import mapping_datetime
 from .baseline import build_baseline
 from .local_time import TimeZone, as_ha_local, local_date
 from .models import ApplianceProfile, CircuitConfig, PowerFlowMode
@@ -586,12 +587,14 @@ def build_context_for_sample(
     if solar_status is not None or solar_surplus is not None:
         values["solar_flow_state"] = solar_flow_state(solar_status, solar_surplus)
 
-    maintenance = _mapping_for(
-        getattr(store_data, "maintenance_by_circuit", {}),
-        circuit_id,
+    maintenance_state = maintenance_context_state(
+        store_data,
+        circuit_id=circuit_id,
+        timestamp=context_timestamp,
+        time_zone=time_zone,
     )
-    if maintenance.get("active") is True:
-        values["maintenance_state"] = "active"
+    if maintenance_state is not None:
+        values["maintenance_state"] = maintenance_state
 
     return ContextKey.from_mapping(_filter_context_for_profile(circuit_config, values))
 
@@ -688,6 +691,37 @@ def stored_contextual_samples(
     return samples
 
 
+def remove_contextual_samples_for_dates(
+    samples: list[dict[str, Any]],
+    *,
+    circuit_id: str,
+    dates: Iterable[date],
+    time_zone: TimeZone = None,
+    cache: ContextualSamplesCache | None = None,
+) -> bool:
+    """Remove learned samples whose local dates are no longer eligible."""
+    excluded_dates = set(dates)
+    if not excluded_dates:
+        return False
+    retained = [
+        raw
+        for raw in samples
+        if (
+            (sample := contextual_sample_from_dict(circuit_id, raw)) is None
+            or _sample_calendar_date(sample.timestamp, time_zone)
+            not in excluded_dates
+        )
+    ]
+    if len(retained) == len(samples):
+        return False
+    samples[:] = retained
+    if cache is not None:
+        for key in tuple(cache):
+            if key[0] == circuit_id:
+                cache.pop(key, None)
+    return True
+
+
 def upsert_contextual_sample(
     samples: list[dict[str, Any]],
     sample: ContextualBaselineSample,
@@ -748,7 +782,49 @@ def upsert_contextual_sample(
 
 
 def context_allows_baseline_learning(context: ContextKey) -> bool:
-    return context.as_dict().get("maintenance_state") != "active"
+    return "maintenance_state" not in context.as_dict()
+
+
+def maintenance_context_state(
+    store_data: Any,
+    *,
+    circuit_id: str,
+    timestamp: datetime,
+    time_zone: TimeZone = None,
+) -> str | None:
+    """Return maintenance exclusion state for one circuit date."""
+    maintenance = _mapping_for(
+        getattr(store_data, "maintenance_by_circuit", {}),
+        circuit_id,
+    )
+    if maintenance.get("active") is True:
+        return "active"
+
+    sample_date = local_date(timestamp, time_zone)
+    started_at = mapping_datetime(maintenance.get("started_at"))
+    ended_at = mapping_datetime(maintenance.get("ended_at"))
+    if (
+        started_at is not None
+        and ended_at is not None
+        and local_date(started_at, time_zone)
+        <= sample_date
+        <= local_date(ended_at, time_zone)
+    ):
+        return "excluded"
+
+    energy_history = _mapping_for(
+        getattr(store_data, "energy_usage_by_circuit", {}),
+        circuit_id,
+    )
+    days = energy_history.get("days")
+    if isinstance(days, list) and any(
+        isinstance(day, Mapping)
+        and day.get("date") == sample_date.isoformat()
+        and day.get("baseline_eligible") is False
+        for day in days
+    ):
+        return "excluded"
+    return None
 
 
 def _build_weighted_contextual_stats(

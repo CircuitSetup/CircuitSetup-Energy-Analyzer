@@ -18,7 +18,17 @@ NOTIFICATION_CATEGORIES = (
     "capacity_demand_issue",
     "data_quality_issue",
     "nilm_review_needed",
+    "other_issue",
 )
+
+_NOTIFICATION_CATEGORY_BY_FEATURE = {
+    "activity_inactive_too_long": "unusual_runtime",
+    "activity_left_on": "unusual_runtime",
+    "always_on_power": "high_daily_energy",
+    "billing_cycle_budget": "high_daily_energy",
+    "daily_energy_spike": "high_daily_energy",
+    "utility_energy_mismatch": "data_quality_issue",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +41,7 @@ class ApplianceNotificationPreferences:
     capacity_demand_issue: bool = True
     data_quality_issue: bool = True
     nilm_review_needed: bool = True
+    other_issue: bool = True
     delivery_mode: str = "immediate"
     minimum_confidence: float = 0.6
     cooldown_minutes: int = 60
@@ -128,6 +139,8 @@ def decide_notification_delivery(
 
 def alert_notification_category(feature: str) -> str:
     normalized = str(feature or "").lower()
+    if normalized in _NOTIFICATION_CATEGORY_BY_FEATURE:
+        return _NOTIFICATION_CATEGORY_BY_FEATURE[normalized]
     if normalized in POWER_QUALITY_ALERT_FEATURES:
         return "electrical_issue"
     if "finished" in normalized:
@@ -153,7 +166,7 @@ def alert_notification_category(feature: str) -> str:
         return "electrical_issue"
     if normalized.startswith("nilm_"):
         return "nilm_review_needed"
-    return "unusual_runtime"
+    return "other_issue"
 
 
 def _quiet_hours_end(

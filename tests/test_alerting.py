@@ -316,6 +316,73 @@ def test_alert_feedback_fingerprint_is_stable_across_alert_timestamps() -> None:
     assert alert_feedback_fingerprint(first) == alert_feedback_fingerprint(repeated)
 
 
+def test_alert_feedback_fingerprint_tolerates_small_high_scale_changes() -> None:
+    def alert(observed: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="runtime_power",
+            value_metric="power_w",
+            observed_value=observed,
+            baseline_value=800.0,
+            change_ratio=(observed - 800.0) / 800.0,
+        )
+
+    assert alert_feedback_fingerprint(alert(1000.0)) == (
+        alert_feedback_fingerprint(alert(1001.0))
+    )
+    assert alert_feedback_fingerprint(alert(1000.0)) != (
+        alert_feedback_fingerprint(alert(1120.0))
+    )
+    assert "metric=power_w" in alert_feedback_fingerprint(alert(1000.0))
+
+
+def test_alert_feedback_fingerprint_tolerates_matching_baseline_drift() -> None:
+    def alert(observed: float, baseline: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="runtime_power",
+            value_metric="power_w",
+            observed_value=observed,
+            baseline_value=baseline,
+            change_ratio=(observed - baseline) / baseline,
+        )
+
+    assert alert_feedback_fingerprint(alert(1000.0, 800.0)) == (
+        alert_feedback_fingerprint(alert(1010.0, 808.0))
+    )
+
+
+def test_alert_feedback_fingerprint_tolerates_small_zero_baseline_changes() -> None:
+    def alert(observed: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="pump",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="unexpected_runtime",
+            value_metric="runtime_minutes",
+            observed_value=observed,
+            baseline_value=0.0,
+            change_ratio=0.0,
+        )
+
+    assert alert_feedback_fingerprint(alert(100.0)) == (
+        alert_feedback_fingerprint(alert(101.0))
+    )
+    assert alert_feedback_fingerprint(alert(100.0)) != (
+        alert_feedback_fingerprint(alert(112.0))
+    )
+    assert alert_feedback_fingerprint(alert(316.0)) == (
+        alert_feedback_fingerprint(alert(317.0))
+    )
+
+
 def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     config = CircuitConfig(
         circuit_id="fridge",
@@ -353,7 +420,7 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
 
     fingerprint = alert_feedback_fingerprint(alert, config=config)
 
-    assert fingerprint.startswith("alert:v2|fridge|daily_energy_spike|")
+    assert fingerprint.startswith("alert:v3|fridge|daily_energy_spike|")
     assert "sources=energy+real_power" in fingerprint
     assert "source_map=energy:sensor.fridge_energy+real_power:sensor.fridge_power" in (
         fingerprint
@@ -361,11 +428,40 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     assert "profile=refrigerator" in fingerprint
     assert "mode=single_phase" in fingerprint
     assert "power_flow=load" in fingerprint
-    assert "observed=2.5-3.0" in fingerprint
+    assert "observed=1.300-1.350x" in fingerprint
+    assert "baseline=1.000-1.050x" in fingerprint
     assert "ratio=25-50pct" in fingerprint
     assert "direction=increase" in fingerprint
     assert "temp=90-95f" in fingerprint
     assert fingerprint != alert_feedback_fingerprint(cooler_context, config=config)
+
+
+def test_alert_feedback_fingerprint_preserves_season_and_water_flow_context() -> None:
+    def alert(baseline_context: str) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="water_heater",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="daily_energy_spike",
+            observed_value=5.0,
+            baseline_value=3.0,
+            change_ratio=2 / 3,
+            features={
+                "comparison_basis": "contextual",
+                "baseline_context": baseline_context,
+                "baseline_fallback_level": "exact_context",
+            },
+        )
+
+    active_flow = alert("water_heater, single_phase, summer, active_flow")
+    no_flow = alert("water_heater, single_phase, summer, no_flow")
+    winter_flow = alert("water_heater, single_phase, winter, active_flow")
+
+    active_fingerprint = alert_feedback_fingerprint(active_flow)
+    assert "summer, active_flow" in active_fingerprint
+    assert active_fingerprint != alert_feedback_fingerprint(no_flow)
+    assert active_fingerprint != alert_feedback_fingerprint(winter_flow)
 
 
 def test_alert_feedback_fingerprint_changes_when_sources_are_remapped() -> None:

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.usage import (
     DEFAULT_DAILY_USAGE_SPIKE_RATIO,
@@ -95,6 +95,74 @@ def test_record_energy_usage_ignores_incomplete_baseline_days() -> None:
     assert result.baseline_day_count == 1
     assert result.tracking_status == "learning"
     assert result.spike is None
+
+
+def test_record_energy_usage_excludes_maintenance_days_from_baselines() -> None:
+    history = {
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-07-08T00:00:00+00:00",
+        "days": [
+            {
+                "date": f"2026-07-{day:02d}",
+                "usage_kwh": float(day),
+                "complete": True,
+            }
+            for day in range(1, 8)
+        ],
+    }
+    settings = EnergyUsageSettings()
+
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 8, 12, 0, tzinfo=UTC),
+        energy_kwh=109.0,
+        settings=settings,
+        baseline_eligible=False,
+    )
+    history["days"][-1]["complete"] = True
+    result = record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 9, 12, 0, tzinfo=UTC),
+        energy_kwh=110.0,
+        settings=settings,
+    )
+
+    assert history["days"][-2]["baseline_eligible"] is False
+    assert result.baseline_day_count == 7
+    assert result.baseline_total_kwh == 28.0
+    assert result.average_kwh_per_day == 4.0
+
+
+def test_record_energy_usage_excludes_prior_maintenance_date_before_baseline() -> None:
+    history = {
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-07-27T23:50:00+00:00",
+        "coverage_date": "2026-07-27",
+        "coverage_first_sample_at": "2026-07-27T00:05:00+00:00",
+        "coverage_last_sample_at": "2026-07-27T23:50:00+00:00",
+        "days": [{"date": "2026-07-27", "usage_kwh": 8.0}],
+    }
+
+    result = record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 28, 0, 5, tzinfo=UTC),
+        energy_kwh=101.0,
+        settings=EnergyUsageSettings(),
+        baseline_eligible=False,
+        ineligible_dates={date(2026, 7, 27), date(2026, 7, 28)},
+    )
+
+    assert history["days"][0] == {
+        "date": "2026-07-27",
+        "usage_kwh": 8.0,
+        "complete": True,
+        "baseline_eligible": False,
+    }
+    assert result.baseline_day_count == 0
+    assert result.baseline_total_kwh == 0.0
 
 
 def test_energy_usage_average_uses_latest_seven_completed_days() -> None:

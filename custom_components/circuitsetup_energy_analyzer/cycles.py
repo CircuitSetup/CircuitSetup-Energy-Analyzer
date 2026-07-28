@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from types import MappingProxyType
 from typing import Any
 
@@ -170,11 +170,19 @@ def cycle_baseline_feature_values(
     day_start = _day_start_for_datetime(now, time_zone)
     current_date = _calendar_date(now, time_zone)
     circuit_events = _circuit_cycle_events(events, circuit_id)
+    ineligible_dates = cycle_baseline_ineligible_dates(
+        circuit_events,
+        circuit_id=circuit_id,
+        now=day_start,
+        merge_gap_seconds=merge_gap_seconds,
+        time_zone=time_zone,
+    )
     prior_dates = sorted(
         {
             _calendar_date(event.timestamp, time_zone)
             for event in circuit_events
             if _calendar_date(event.timestamp, time_zone) < current_date
+            and _calendar_date(event.timestamp, time_zone) not in ineligible_dates
         }
     )
     daily_summaries = [
@@ -198,6 +206,8 @@ def cycle_baseline_feature_values(
             circuit_id=circuit_id,
             before=day_start,
             merge_gap_seconds=merge_gap_seconds,
+            excluded_dates=ineligible_dates,
+            time_zone=time_zone,
         ),
         RUN_CYCLE_DUTY_CYCLE_FEATURE: [
             summary.duty_cycle_percent for summary in active_daily_summaries
@@ -209,6 +219,39 @@ def cycle_baseline_feature_values(
             summary.runtime_seconds for summary in active_daily_summaries
         ],
     }
+
+
+def cycle_baseline_ineligible_dates(
+    events: Iterable[CircuitEvent],
+    *,
+    circuit_id: str,
+    now: datetime,
+    merge_gap_seconds: float = 0.0,
+    time_zone: TimeZone = None,
+) -> set[date]:
+    """Return dates containing cycle evidence excluded from learning."""
+    circuit_events = _circuit_cycle_events(events, circuit_id)
+    flagged_dates = {
+        _calendar_date(event.timestamp, time_zone)
+        for event in circuit_events
+        if event.features.get("baseline_eligible") is False
+    }
+    ineligible_dates = set(flagged_dates)
+    for session in build_normalized_run_sessions(
+        circuit_events,
+        circuit_id=circuit_id,
+        merge_gap_seconds=merge_gap_seconds,
+        now=now,
+    ):
+        started_on = _calendar_date(session.started_at, time_zone)
+        stopped_on = _calendar_date(session.stopped_at or now, time_zone)
+        session_dates = {
+            started_on + timedelta(days=offset)
+            for offset in range((stopped_on - started_on).days + 1)
+        }
+        if session_dates & flagged_dates:
+            ineligible_dates.update(session_dates)
+    return ineligible_dates
 
 
 def select_cycle_anomaly_evidence(
@@ -461,7 +504,10 @@ def _completed_cycle_durations(
     circuit_id: str,
     before: datetime,
     merge_gap_seconds: float = 0.0,
+    excluded_dates: set[date] | None = None,
+    time_zone: TimeZone = None,
 ) -> list[float]:
+    excluded_dates = excluded_dates or set()
     return [
         session.duration_seconds
         for session in build_normalized_run_sessions(
@@ -470,7 +516,12 @@ def _completed_cycle_durations(
             merge_gap_seconds=merge_gap_seconds,
             now=before,
         )
-        if session.stopped_at is not None and session.stopped_at < before
+        if (
+            session.stopped_at is not None
+            and session.stopped_at < before
+            and _calendar_date(session.started_at, time_zone) not in excluded_dates
+            and _calendar_date(session.stopped_at, time_zone) not in excluded_dates
+        )
     ]
 
 

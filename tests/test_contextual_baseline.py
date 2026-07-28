@@ -9,6 +9,7 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
     build_contextual_baseline,
+    context_allows_baseline_learning,
     contextual_sample_from_dict,
     contextual_sample_to_dict,
     day_type_for_datetime,
@@ -569,6 +570,47 @@ def test_build_context_for_mini_split_keeps_weather_dimensions() -> None:
     assert context["temperature_bin"] == "hot"
     assert context["weather_mode"] == "cooling"
     assert "time_of_day" in context
+
+
+def test_build_context_excludes_completed_maintenance_date() -> None:
+    now = datetime(2026, 7, 27, 14, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="mini_split",
+        name="Mini-Split",
+        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        weather_context_by_circuit={
+            "mini_split": {
+                "temperature_f": 88.0,
+                "mode": "cooling",
+            }
+        }
+    )
+    store_data = FeatureStoreData(
+        maintenance_by_circuit={
+            "mini_split": {
+                "active": False,
+                "started_at": (now - timedelta(hours=2)).isoformat(),
+                "ended_at": (now - timedelta(hours=1)).isoformat(),
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("mini_split", now),
+        state=state,
+        store_data=store_data,
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict()["season"] == "summer"
+    assert context.as_dict()["weather_mode"] == "cooling"
+    assert context.as_dict()["maintenance_state"] == "excluded"
+    assert context_allows_baseline_learning(context) is False
 
 
 def test_build_context_for_sample_uses_sample_local_calendar() -> None:

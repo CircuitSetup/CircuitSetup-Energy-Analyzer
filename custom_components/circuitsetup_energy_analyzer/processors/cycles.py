@@ -17,6 +17,7 @@ from ..contextual_baseline import (
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
     day_progress_bucket,
+    remove_contextual_samples_for_dates,
     select_contextual_baseline,
     stored_contextual_samples,
     upsert_contextual_sample,
@@ -27,9 +28,11 @@ from ..cycles import (
     RUN_CYCLE_RUNTIME_TODAY_FEATURE,
     RUN_CYCLE_START_COUNT_FEATURE,
     cycle_baseline_feature_values,
+    cycle_baseline_ineligible_dates,
     select_cycle_anomaly_evidence,
     summarize_circuit_cycles,
 )
+from ..local_time import local_date
 from ..models import BaselineStats, CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
@@ -72,6 +75,13 @@ class RunCycleProcessor:
                 {},
             ).get(circuit_config.circuit_id, {}),
         ).profile.merge_gap_seconds
+        ineligible_dates = cycle_baseline_ineligible_dates(
+            context.store_data.events,
+            circuit_id=circuit_config.circuit_id,
+            now=context.now,
+            merge_gap_seconds=merge_gap_seconds,
+            time_zone=context.time_zone,
+        )
         summary = summarize_circuit_cycles(
             context.store_data.events,
             circuit_id=circuit_config.circuit_id,
@@ -85,6 +95,7 @@ class RunCycleProcessor:
             context.now,
             merge_gap_seconds=merge_gap_seconds,
             time_zone=context.time_zone,
+            rebuild_for_exclusions=bool(ineligible_dates),
         )
         context_key = build_context_for_sample(
             circuit_config=circuit_config,
@@ -105,6 +116,32 @@ class RunCycleProcessor:
                 ),
             }
         )
+        raw_contextual_samples = (
+            context.store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_config.circuit_id,
+                [],
+            )
+        )
+        contextual_samples_removed = remove_contextual_samples_for_dates(
+            raw_contextual_samples,
+            circuit_id=circuit_config.circuit_id,
+            dates=ineligible_dates,
+            time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
+        )
+        if contextual_samples_removed:
+            if not raw_contextual_samples:
+                context.store_data.contextual_baseline_samples_by_circuit.pop(
+                    circuit_config.circuit_id,
+                    None,
+                )
+            context.store_data.contextual_baselines_by_circuit.pop(
+                circuit_config.circuit_id,
+                None,
+            )
+        contextual_baseline_eligible = context_allows_baseline_learning(
+            context_key
+        ) and local_date(context.now, context.time_zone) not in ineligible_dates
         if not self._learning_mature(circuit_config, context.now):
             contextual_dirty = _record_contextual_cycle_samples(
                 store_data=context.store_data,
@@ -113,10 +150,17 @@ class RunCycleProcessor:
                 context_key=context_key,
                 now=context.now,
                 time_zone=context.time_zone,
+                baseline_eligible=contextual_baseline_eligible,
             )
-            return FeatureResult(store_dirty=baseline_dirty or contextual_dirty)
+            return FeatureResult(
+                store_dirty=(
+                    baseline_dirty or contextual_samples_removed or contextual_dirty
+                )
+            )
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
-            return FeatureResult(store_dirty=baseline_dirty)
+            return FeatureResult(
+                store_dirty=baseline_dirty or contextual_samples_removed
+            )
 
         policy = self._alert_policy_for_circuit(circuit_config.circuit_id)
         evidence = select_cycle_anomaly_evidence(
@@ -125,7 +169,9 @@ class RunCycleProcessor:
             baselines,
             min_score=policy.min_average_score,
         )
-        feature_result = FeatureResult(store_dirty=baseline_dirty)
+        feature_result = FeatureResult(
+            store_dirty=baseline_dirty or contextual_samples_removed
+        )
         if evidence is None:
             feature_result.store_dirty = (
                 feature_result.store_dirty
@@ -137,6 +183,7 @@ class RunCycleProcessor:
                     now=context.now,
                     time_zone=context.time_zone,
                     contextual_samples_cache=context.contextual_samples_cache,
+                    baseline_eligible=contextual_baseline_eligible,
                 )
             )
             return feature_result
@@ -158,6 +205,7 @@ class RunCycleProcessor:
                 now=context.now,
                 time_zone=context.time_zone,
                 contextual_samples_cache=context.contextual_samples_cache,
+                baseline_eligible=contextual_baseline_eligible,
             )
         )
         if contextual_comparison.get("comparison_basis") == "contextual":
@@ -205,6 +253,7 @@ class RunCycleProcessor:
         *,
         merge_gap_seconds: float,
         time_zone: str | None = None,
+        rebuild_for_exclusions: bool = False,
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
@@ -218,7 +267,16 @@ class RunCycleProcessor:
         for feature, values in values_by_feature.items():
             key = _baseline_key(config.circuit_id, feature)
             baseline = store_data.baselines.get(key)
-            if baseline is None and len(values) >= 9:
+            if rebuild_for_exclusions:
+                rebuilt = build_baseline(feature, values) if len(values) >= 9 else None
+                if rebuilt != baseline:
+                    if rebuilt is None:
+                        store_data.baselines.pop(key, None)
+                    else:
+                        store_data.baselines[key] = rebuilt
+                    store_dirty = True
+                baseline = rebuilt
+            elif baseline is None and len(values) >= 9:
                 baseline = build_baseline(feature, values)
                 store_data.baselines[key] = baseline
                 store_dirty = True
@@ -259,8 +317,9 @@ def _record_contextual_cycle_samples(
     now: datetime,
     time_zone: str | None = None,
     contextual_samples_cache: Any | None = None,
+    baseline_eligible: bool,
 ) -> bool:
-    if not context_allows_baseline_learning(context_key):
+    if not baseline_eligible:
         return False
     samples = store_data.contextual_baseline_samples_by_circuit.setdefault(
         circuit_id,
