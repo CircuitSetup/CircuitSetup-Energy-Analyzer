@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
+from ..alert_feedback import mapping_datetime
 from ..alerting import Observation
 from ..baseline import build_baseline
 from ..contextual_baseline import (
@@ -79,6 +81,13 @@ class EnergyUsageProcessor:
             calendar_timestamp=context.now,
         )
         history = context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {})
+        baseline_eligible = context_allows_baseline_learning(
+            context_key
+        ) and _energy_interval_allows_baseline_learning(
+            history,
+            context.store_data.maintenance_by_circuit.get(circuit_id, {}),
+            context.now,
+        )
         result = record_energy_usage(
             history,
             circuit_id=circuit_id,
@@ -90,7 +99,7 @@ class EnergyUsageProcessor:
             ),
             retention_days=self._retention_days_for_circuit(circuit_id),
             time_zone=context.time_zone,
-            baseline_eligible=context_allows_baseline_learning(context_key),
+            baseline_eligible=baseline_eligible,
         )
         if result is None:
             return FeatureResult()
@@ -99,6 +108,7 @@ class EnergyUsageProcessor:
             result,
             context,
             context_key,
+            baseline_eligible=baseline_eligible,
         )
         energy_source = str(history.get("energy_source") or "")
         evidence = energy_usage_evidence_payload(
@@ -233,6 +243,8 @@ def _contextual_daily_energy_comparison(
     result: Any,
     context: ProcessingContext,
     context_key: ContextKey,
+    *,
+    baseline_eligible: bool,
 ) -> dict[str, Any]:
     """Record and compare daily energy against contextual history."""
     circuit_id = result.circuit_id
@@ -257,9 +269,7 @@ def _contextual_daily_energy_comparison(
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
-    if result.daily_usage_kwh > 0.0 and context_allows_baseline_learning(
-        context_key
-    ):
+    if result.daily_usage_kwh > 0.0 and baseline_eligible:
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_id,
             [],
@@ -320,6 +330,37 @@ def _contextual_daily_energy_comparison(
     if result.spike is not None and result.daily_usage_kwh <= selected.p90:
         attrs["status_override"] = "context_explained"
     return attrs
+
+
+def _energy_interval_allows_baseline_learning(
+    history: Mapping[str, Any],
+    maintenance: Any,
+    timestamp: datetime,
+) -> bool:
+    if not isinstance(maintenance, Mapping):
+        return True
+    if maintenance.get("active") is True:
+        return False
+
+    sample_start = mapping_datetime(history.get("last_sample_at"))
+    maintenance_start = mapping_datetime(maintenance.get("started_at"))
+    maintenance_end = mapping_datetime(maintenance.get("ended_at"))
+    if sample_start is None or maintenance_start is None or maintenance_end is None:
+        return True
+
+    sample_end = timestamp
+    if maintenance_start.tzinfo is None:
+        sample_start = sample_start.replace(tzinfo=None)
+        sample_end = sample_end.replace(tzinfo=None)
+        maintenance_end = maintenance_end.replace(tzinfo=None)
+    elif sample_start.tzinfo is None or sample_end.tzinfo is None:
+        sample_start = sample_start.replace(tzinfo=None)
+        sample_end = sample_end.replace(tzinfo=None)
+        maintenance_start = maintenance_start.replace(tzinfo=None)
+        maintenance_end = maintenance_end.replace(tzinfo=None)
+    return not (
+        sample_start < maintenance_end and sample_end > maintenance_start
+    )
 
 
 def _daily_energy_projection(

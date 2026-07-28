@@ -890,6 +890,66 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
     assert store_data.energy_usage_by_circuit["fridge"]["last_energy_kwh"] == 112.9
 
 
+def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
+        EnergyUsageProcessor,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        energy_usage_by_circuit={
+            "water_heater": {
+                "last_energy_kwh": 100.0,
+                "last_sample_at": (now - timedelta(hours=4)).isoformat(),
+                "days": [],
+            }
+        },
+        maintenance_by_circuit={
+            "water_heater": {
+                "active": False,
+                "started_at": (now - timedelta(hours=3)).isoformat(),
+                "ended_at": (now - timedelta(hours=1)).isoformat(),
+            }
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="water_heater",
+        name="Water Heater",
+        appliance_profile=ApplianceProfile.WATER_HEATER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = EnergyUsageProcessor(
+        settings_for_config=lambda _config, _circuit_id: EnergyUsageSettings(),
+        retention_days_for_circuit=lambda _circuit_id: 45,
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+    )
+
+    processor.process(_energy_sample(105.0), config, context)
+
+    assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
+        {
+            "date": "2026-07-28",
+            "usage_kwh": 5.0,
+            "baseline_eligible": False,
+        }
+    ]
+    assert store_data.contextual_baseline_samples_by_circuit == {}
+
+
 def _energy_usage_projection_evidence(
     days: list[dict[str, object]],
 ) -> dict[str, object]:

@@ -339,6 +339,25 @@ def test_alert_feedback_fingerprint_tolerates_small_high_scale_changes() -> None
     assert "metric=power_w" in alert_feedback_fingerprint(alert(1000.0))
 
 
+def test_alert_feedback_fingerprint_tolerates_matching_baseline_drift() -> None:
+    def alert(observed: float, baseline: float) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=datetime(2026, 7, 28, tzinfo=UTC),
+            circuit_id="dryer",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature="runtime_power",
+            value_metric="power_w",
+            observed_value=observed,
+            baseline_value=baseline,
+            change_ratio=(observed - baseline) / baseline,
+        )
+
+    assert alert_feedback_fingerprint(alert(1000.0, 800.0)) == (
+        alert_feedback_fingerprint(alert(1010.0, 808.0))
+    )
+
+
 def test_alert_feedback_fingerprint_tolerates_small_zero_baseline_changes() -> None:
     def alert(observed: float) -> AlertEvidence:
         return AlertEvidence(
@@ -406,8 +425,8 @@ def test_alert_feedback_fingerprint_uses_context_without_timestamps() -> None:
     assert "profile=refrigerator" in fingerprint
     assert "mode=single_phase" in fingerprint
     assert "power_flow=load" in fingerprint
-    assert "observed=2.600-2.700" in fingerprint
-    assert "baseline=2.000-2.100" in fingerprint
+    assert "observed=1.300-1.350x" in fingerprint
+    assert "baseline=1.000-1.050x" in fingerprint
     assert "ratio=25-50pct" in fingerprint
     assert "direction=increase" in fingerprint
     assert "temp=90-95f" in fingerprint

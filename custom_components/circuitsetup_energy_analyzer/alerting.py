@@ -312,10 +312,9 @@ def _value_bucket(value: float) -> str:
 def _relative_value_bucket(value: float, reference: float) -> str:
     if float(value) == 0.0:
         return "zero"
-    step = max(abs(float(reference)) * 0.05, 0.05)
-    bucket_start = floor(float(value) / step) * step
-    bucket_end = bucket_start + step
-    return f"{bucket_start:.3f}-{bucket_end:.3f}"
+    normalized = float(value) / max(abs(float(reference)), 1e-12)
+    bucket_start = floor((normalized * 20.0) + 1e-9) / 20.0
+    return f"{bucket_start:.3f}-{bucket_start + 0.05:.3f}x"
 
 
 def _change_direction(observed_value: float, baseline_value: float) -> str:
