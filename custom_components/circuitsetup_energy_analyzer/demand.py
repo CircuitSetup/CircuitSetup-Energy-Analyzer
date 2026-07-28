@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from .alert_feedback import mapping_datetime
 from .local_time import TimeZone, local_date, local_month_key
 
 DEFAULT_DEMAND_WINDOW_MINUTES = 15
@@ -86,6 +88,7 @@ def record_demand_sample(
     time_zone: TimeZone = None,
     baseline_eligible: bool = True,
     transient_samples: list[dict[str, Any]] | None = None,
+    maintenance: Any = None,
 ) -> DemandResult | None:
     """Fold a real-power sample into a rolling demand window."""
     if real_power_w is None:
@@ -108,9 +111,13 @@ def record_demand_sample(
         current_sample,
     ]
     calculation_samples = _prune_samples(calculation_samples, timestamp, window)
-    window_baseline_eligible = baseline_eligible and all(
-        sample.get("baseline_eligible") is not False
-        for sample in calculation_samples
+    window_baseline_eligible = (
+        baseline_eligible
+        and not _window_overlaps_maintenance(timestamp, window, maintenance)
+        and all(
+            sample.get("baseline_eligible") is not False
+            for sample in calculation_samples
+        )
     )
     if transient_samples is not None:
         transient_samples[:] = calculation_samples
@@ -214,6 +221,31 @@ def _coerce_samples(raw_samples: Any) -> list[dict[str, float | str | bool]]:
             sample["baseline_eligible"] = False
         samples.append(sample)
     return sorted(samples, key=lambda sample: str(sample["timestamp"]))
+
+
+def _window_overlaps_maintenance(
+    timestamp: datetime,
+    window: timedelta,
+    maintenance: Any,
+) -> bool:
+    if not isinstance(maintenance, Mapping):
+        return False
+    maintenance_start = mapping_datetime(maintenance.get("started_at"))
+    maintenance_end = mapping_datetime(maintenance.get("ended_at"))
+    if maintenance_start is None or maintenance_end is None:
+        return False
+
+    window_start = timestamp - window
+    window_end = timestamp
+    if any(
+        value.tzinfo is None
+        for value in (window_start, window_end, maintenance_start, maintenance_end)
+    ):
+        window_start = window_start.replace(tzinfo=None)
+        window_end = window_end.replace(tzinfo=None)
+        maintenance_start = maintenance_start.replace(tzinfo=None)
+        maintenance_end = maintenance_end.replace(tzinfo=None)
+    return window_start < maintenance_end and window_end > maintenance_start
 
 
 def _coerce_daily_peaks(raw_peaks: Any) -> list[dict[str, float | str]]:

@@ -1455,6 +1455,53 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert checklist["source_data_found"]["title"] == "Source data needs attention"
 
 
+@pytest.mark.parametrize(
+    ("quality_issue", "numeric_states_valid"),
+    [
+        ("sensor.fridge_power unavailable", False),
+        ("sensor.fridge_power naive_timestamp", True),
+    ],
+)
+def test_setup_health_source_checklist_surfaces_invalid_source_issues(
+    quality_issue: str,
+    numeric_states_valid: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": numeric_states_valid,
+                    "source_data_fresh": True,
+                    "quality_issues": [quality_issue],
+                }
+            }
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+
+    assert checklist["source_data_found"]["status"] == "needs_attention"
+    assert checklist["source_data_found"]["affected_circuits"] == ["fridge"]
+
+
 def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,

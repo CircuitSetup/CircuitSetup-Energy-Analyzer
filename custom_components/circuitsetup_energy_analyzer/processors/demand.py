@@ -61,6 +61,7 @@ class DemandProcessor:
     ) -> FeatureResult:
         """Record demand state and return configured demand alerts."""
         circuit_id = circuit_config.circuit_id
+        maintenance = context.store_data.maintenance_by_circuit.get(circuit_id)
         result = record_demand_sample(
             context.store_data.demand_by_circuit.setdefault(circuit_id, {}),
             circuit_id=circuit_id,
@@ -70,18 +71,14 @@ class DemandProcessor:
             retention_days=self._retention_days_for_circuit(circuit_id),
             time_zone=context.time_zone,
             baseline_eligible=not (
-                isinstance(
-                    maintenance := context.store_data.maintenance_by_circuit.get(
-                        circuit_id,
-                    ),
-                    Mapping,
-                )
+                isinstance(maintenance, Mapping)
                 and maintenance.get("active") is True
             ),
             transient_samples=self._transient_samples_by_circuit.setdefault(
                 circuit_id,
                 [],
             ),
+            maintenance=maintenance,
         )
         if result is None:
             return FeatureResult()

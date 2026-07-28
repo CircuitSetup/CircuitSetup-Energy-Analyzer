@@ -288,6 +288,8 @@ def _setup_health_checklist(
             "missing_source_sensor",
             "stale_source",
             "invalid_source_state",
+            "invalid_source_sensor",
+            "invalid_source_timestamp",
             "source_data_quality",
         },
     )
