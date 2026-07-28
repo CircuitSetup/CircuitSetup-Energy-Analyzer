@@ -1903,6 +1903,21 @@ def test_weekly_digest_save_rejects_unsaved_api_results() -> None:
     )
 
 
+def test_weekly_digest_panel_renders_observed_alerts() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderWeeklyDigest({
+  week_start: "2026-07-20",
+  week_end: "2026-07-26",
+  observed_alerts: [{ display_name: "Dishwasher", energy_kwh: 0 }],
+}, { enabled: true, delivery: "panel_only" });
+assert.match(html, /Alerts observed this week/);
+assert.match(html, /Dishwasher/);
+"""
+    )
+
+
 def test_unavailable_setting_preview_hides_incomplete_impact_claims() -> None:
     _run_panel_node_script(
         r"""

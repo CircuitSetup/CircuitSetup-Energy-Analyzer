@@ -139,6 +139,15 @@ class NotificationController:
                     recovered_alert.circuit_id
                 )
                 and not self._circuit_is_learning(recovered_alert.circuit_id)
+                and self._is_actionable_alert(recovered_alert)
+                and not any(
+                    self._is_actionable_alert(active_alert)
+                    for active_alert in getattr(
+                        self._coordinator.state,
+                        "active_alerts_by_circuit",
+                        {},
+                    ).get(recovered_alert.circuit_id, ())
+                )
             ):
                 await self.async_notify_lifecycle_update(
                     recovered_alert.circuit_id,
@@ -704,6 +713,10 @@ class NotificationController:
     @staticmethod
     def _is_lifecycle_alert(alert: AlertEvidence) -> bool:
         return alert.features.get("notification_type") == "lifecycle_update"
+
+    @staticmethod
+    def _is_actionable_alert(alert: AlertEvidence) -> bool:
+        return alert.severity in {Severity.WARNING, Severity.ERROR}
 
     def _lifecycle_message(self, circuit_id: str, feature: str) -> str:
         registry = getattr(self._coordinator, "circuit_registry", None)

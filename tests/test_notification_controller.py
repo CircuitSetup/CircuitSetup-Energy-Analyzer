@@ -107,6 +107,13 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         message="Fridge runtime changed.",
         feature="run_cycle_duration_s",
     )
+    companion_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge source quality changed.",
+        feature="metric_consistency",
+    )
     user_dismissed_alert = AlertEvidence(
         timestamp=now + timedelta(minutes=1),
         circuit_id="fridge",
@@ -127,6 +134,14 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         severity=Severity.WARNING,
         message="Fridge electrical behavior changed.",
         feature="power_factor_shift_under_load",
+    )
+    finished_alert = AlertEvidence(
+        timestamp=now + timedelta(minutes=4),
+        circuit_id="fridge",
+        severity=Severity.INFO,
+        message="Fridge finished running.",
+        feature="finished_running",
+        features={"notification_type": "finished_running"},
     )
     created: list[AlertEvidence] = []
     dismissed: list[str] = []
@@ -153,7 +168,7 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     state = SimpleNamespace(
         learning_by_circuit={"fridge": False},
         energy_usage_evidence_by_circuit={},
-        active_alerts_by_circuit={"fridge": [active_alert]},
+        active_alerts_by_circuit={"fridge": [active_alert, companion_alert]},
     )
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
@@ -169,17 +184,28 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         store_data=SimpleNamespace(
             settings_recommendation_notification_episode_key=(),
             appliance_notification_preferences={
-                "circuit:fridge": {"lifecycle_update": True},
+                "circuit:fridge": {
+                    "finished_running": True,
+                    "lifecycle_update": True,
+                },
             },
             notification_delivery_state={},
             learning_started_at_by_circuit={},
-            alerts=[active_alert],
+            alerts=[active_alert, companion_alert],
         ),
         store_persistence=SimpleNamespace(mark_dirty=lambda: None),
     )
     controller = notification_controller.NotificationController(coordinator)
 
     await controller.async_notify_alert(active_alert)
+    await controller.async_notify_alert(companion_alert)
+    state.active_alerts_by_circuit = {"fridge": [companion_alert]}
+    await controller.async_sync_alert_notifications()
+
+    assert [alert.feature for alert in coordinator.store_data.alerts].count(
+        "alert_recovered"
+    ) == 0
+
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications()
 
@@ -201,6 +227,12 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     await controller.async_sync_alert_notifications()
 
     paused.clear()
+    coordinator.store_data.alerts.append(finished_alert)
+    state.active_alerts_by_circuit = {"fridge": [finished_alert]}
+    await controller.async_notify_alert(finished_alert)
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications()
+
     coordinator.store_data.alerts.append(unprocessed_alert)
     state.active_alerts_by_circuit = {"fridge": [unprocessed_alert]}
     await controller.async_notify_alert(unprocessed_alert)
@@ -216,8 +248,10 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
 
     assert dismissed == [
         notification_id_for_alert(active_alert),
+        notification_id_for_alert(companion_alert),
         notification_id_for_alert(user_dismissed_alert),
         notification_id_for_alert(maintenance_suppressed_alert),
+        notification_id_for_alert(finished_alert),
         notification_id_for_alert(unprocessed_alert),
     ]
     assert [alert.feature for alert in created].count("alert_recovered") >= 1

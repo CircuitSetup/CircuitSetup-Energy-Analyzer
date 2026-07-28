@@ -1545,6 +1545,7 @@
         "no_report": "No weekly report has been generated yet.",
         "biggest_changes": "Largest changes from normal",
         "top_energy_users": "Top energy users",
+        "observed_alerts": "Alerts observed this week",
         "unresolved_items": "Recurring unresolved issues",
         "nilm_review_items": "NILM assignments needing validation",
         "load_shift_opportunities": "Load-shifting opportunities",
