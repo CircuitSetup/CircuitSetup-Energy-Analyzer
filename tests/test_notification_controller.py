@@ -114,6 +114,13 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         message="Fridge source quality changed.",
         feature="metric_consistency",
     )
+    simultaneous_alert = AlertEvidence(
+        timestamp=now + timedelta(seconds=30),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge context changed.",
+        feature="water_flow_correlation",
+    )
     user_dismissed_alert = AlertEvidence(
         timestamp=now + timedelta(minutes=1),
         circuit_id="fridge",
@@ -206,8 +213,17 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
         "alert_recovered"
     ) == 0
 
+    coordinator.store_data.alerts.append(simultaneous_alert)
+    state.active_alerts_by_circuit = {
+        "fridge": [companion_alert, simultaneous_alert]
+    }
+    await controller.async_notify_alert(simultaneous_alert)
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications()
+
+    assert [alert.feature for alert in coordinator.store_data.alerts].count(
+        "alert_recovered"
+    ) == 1
 
     coordinator.store_data.alerts.append(user_dismissed_alert)
     state.active_alerts_by_circuit = {"fridge": [user_dismissed_alert]}
@@ -246,14 +262,17 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
 
     await controller.async_sync_alert_notifications({"fridge"})
 
-    assert dismissed == [
-        notification_id_for_alert(active_alert),
-        notification_id_for_alert(companion_alert),
-        notification_id_for_alert(user_dismissed_alert),
-        notification_id_for_alert(maintenance_suppressed_alert),
-        notification_id_for_alert(finished_alert),
-        notification_id_for_alert(unprocessed_alert),
-    ]
+    assert sorted(dismissed) == sorted(
+        [
+            notification_id_for_alert(active_alert),
+            notification_id_for_alert(companion_alert),
+            notification_id_for_alert(simultaneous_alert),
+            notification_id_for_alert(user_dismissed_alert),
+            notification_id_for_alert(maintenance_suppressed_alert),
+            notification_id_for_alert(finished_alert),
+            notification_id_for_alert(unprocessed_alert),
+        ]
+    )
     assert [alert.feature for alert in created].count("alert_recovered") >= 1
     assert [alert.feature for alert in coordinator.store_data.alerts].count(
         "alert_recovered"
@@ -887,6 +906,26 @@ async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
     assert len(alerts) == 2
     assert len(notification_ids) == 2
     assert notification_ids[0] != notification_ids[1]
+
+
+def test_synthetic_weekly_queue_items_do_not_rank_as_energy_users() -> None:
+    items = notification_controller._items_with_weekly_queue(
+        [],
+        [
+            {
+                "appliance_key": "circuit:dryer",
+                "category": "unusual_runtime",
+            }
+        ],
+    )
+
+    assert items[0]["comparable_energy"] is False
+    digest = notification_controller.build_weekly_digest(
+        items,
+        now=datetime(2026, 7, 13, 12, tzinfo=UTC),
+        time_zone=notification_controller.ZoneInfo("UTC"),
+    )
+    assert digest.top_energy_users == ()
 
 
 @pytest.mark.asyncio

@@ -227,6 +227,7 @@ def digest_items_for_coordinator(
                     "normal_energy_kwh": 0.0,
                     "confidence": 1.0,
                     "status": "load_shift_opportunity",
+                    "comparable_energy": False,
                 }
                 items.append(item)
                 items_by_key[appliance_key] = item

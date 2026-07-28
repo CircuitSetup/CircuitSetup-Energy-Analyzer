@@ -118,6 +118,7 @@ class NotificationController:
             notifications.notification_id_for_alert(alert): alert
             for alert in getattr(self._coordinator.store_data, "alerts", ())
         }
+        recovered_by_circuit: dict[str, tuple[str, AlertEvidence]] = {}
         for alert_id in sorted(
             self._managed_alert_notification_ids - active_alert_ids
         ):
@@ -149,19 +150,25 @@ class NotificationController:
                     ).get(recovered_alert.circuit_id, ())
                 )
             ):
-                await self.async_notify_lifecycle_update(
-                    recovered_alert.circuit_id,
-                    feature="alert_recovered",
-                    message=self._lifecycle_message(
-                        recovered_alert.circuit_id,
-                        "alert_recovered",
-                    ),
-                    episode_key=(
-                        f"alert_recovered:{alert_id}:"
-                        f"{recovered_alert.timestamp.isoformat()}"
-                    ),
-                    now=self._current_time(),
+                recovered_by_circuit[recovered_alert.circuit_id] = (
+                    alert_id,
+                    recovered_alert,
                 )
+        for circuit_id in sorted(recovered_by_circuit):
+            alert_id, recovered_alert = recovered_by_circuit[circuit_id]
+            await self.async_notify_lifecycle_update(
+                circuit_id,
+                feature="alert_recovered",
+                message=self._lifecycle_message(
+                    circuit_id,
+                    "alert_recovered",
+                ),
+                episode_key=(
+                    f"alert_recovered:{alert_id}:"
+                    f"{recovered_alert.timestamp.isoformat()}"
+                ),
+                now=self._current_time(),
+            )
         if evaluated_circuit_ids is None:
             self._managed_alert_notification_ids.intersection_update(
                 active_alert_ids
@@ -894,6 +901,7 @@ def _items_with_weekly_queue(
             "normal_energy_kwh": 0.0,
             "confidence": 1.0,
             "status": status,
+            "comparable_energy": False,
         }
         combined.append(item)
         by_key[appliance_key] = item

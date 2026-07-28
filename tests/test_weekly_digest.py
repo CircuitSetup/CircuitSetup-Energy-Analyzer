@@ -279,11 +279,13 @@ def test_digest_reuses_idle_solar_load_shift_candidates() -> None:
         ),
     )
 
-    assert digest_items_for_coordinator(
+    items = digest_items_for_coordinator(
         coordinator,
         now=datetime(2026, 7, 27, 12, tzinfo=UTC),
         time_zone=ZoneInfo("UTC"),
-    ) == [
+    )
+
+    assert items == [
         {
             "appliance_key": "circuit:water_heater",
             "display_name": "Water Heater",
@@ -291,8 +293,15 @@ def test_digest_reuses_idle_solar_load_shift_candidates() -> None:
             "normal_energy_kwh": 0.0,
             "confidence": 1.0,
             "status": "load_shift_opportunity",
+            "comparable_energy": False,
         }
     ]
+    digest = build_weekly_digest(
+        items,
+        now=datetime(2026, 7, 27, 12, tzinfo=UTC),
+        time_zone=ZoneInfo("UTC"),
+    )
+    assert digest.top_energy_users == ()
 
 
 def _direct_digest_coordinator(
