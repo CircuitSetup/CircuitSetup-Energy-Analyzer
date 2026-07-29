@@ -434,6 +434,13 @@ def test_efficiency_uses_comparable_medians_and_ignores_excluded_records() -> No
             minutes_per_degree=1.0,
             participants=("heat_pump", "electric_heat"),
         ),
+        *[
+            replace(
+                _completed_episode(index, minutes_per_degree=1.0),
+                supporting_blower_ids=(),
+            )
+            for index in range(19, 22)
+        ],
         replace(
             _completed_episode(18, minutes_per_degree=1.0),
             complete=False,

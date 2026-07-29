@@ -2487,6 +2487,7 @@ def _hvac_advisor_history(
                 str(episode.weather_mode or ""),
                 episode.gap_bin,
                 "+".join(participants),
+                "+".join(episode.supporting_blower_ids),
             )
         )
         episodes.append(

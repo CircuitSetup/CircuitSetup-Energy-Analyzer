@@ -428,6 +428,7 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
         episode.weather_mode,
         episode.gap_bin,
         episode.participant_signature,
+        episode.supporting_blower_ids,
     )
 
 
