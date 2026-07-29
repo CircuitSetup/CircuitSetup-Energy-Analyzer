@@ -209,7 +209,7 @@ def evaluate_efficiency(
         defaultdict(list)
     )
     for episode in episodes:
-        metric = _minutes_per_degree(episode)
+        metric = episode_minutes_per_degree(episode)
         if metric is None:
             continue
         groups[_comparison_key(episode)].append((episode, metric))
@@ -431,7 +431,10 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
     )
 
 
-def _minutes_per_degree(episode: HvacResponseEpisode) -> float | None:
+def episode_minutes_per_degree(
+    episode: HvacResponseEpisode,
+) -> float | None:
+    """Return the bounded response-time metric for one completed episode."""
     if episode.excluded_from_baseline or not _is_valid_completed_episode(episode):
         return None
     degrees_closed = _degrees_closed(episode)

@@ -24,6 +24,7 @@ from ..const import (
     CONF_UTILITY_COMPARISON_SETTINGS,
     DEFAULT_SENSITIVITY,
 )
+from ..context_sources import thermostat_mappings_for_settings
 from ..cost import CostSettings, _active_rate
 from ..cycles import (
     MIN_CYCLE_BASELINE_CONFIDENCE,
@@ -32,7 +33,7 @@ from ..cycles import (
 )
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
-from ..hvac_efficiency import episode_from_dict
+from ..hvac_efficiency import episode_from_dict, episode_minutes_per_degree
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from ..metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -401,6 +402,7 @@ class SettingsController:
             _hvac_advisor_history(
                 coordinator,
                 config,
+                self.advanced_settings_for_circuit(circuit_id),
             )
         )
 
@@ -2352,6 +2354,7 @@ def _replace_if_present_as(
 def _hvac_advisor_history(
     coordinator: Any,
     config: Any,
+    advanced_settings: Mapping[str, Any],
 ) -> dict[str, list[dict[str, Any]]]:
     circuit_id = str(config.circuit_id)
     histories = getattr(
@@ -2370,6 +2373,11 @@ def _hvac_advisor_history(
         {},
     )
     profile = str(getattr(config.appliance_profile, "value", ""))
+    thermostat_mappings = thermostat_mappings_for_settings(
+        coordinator.entry_data,
+        coordinator.options,
+        advanced_settings,
+    )
     calls = [
         dict(call)
         for call in stored_calls.get(circuit_id, ())[-256:]
@@ -2387,12 +2395,16 @@ def _hvac_advisor_history(
     raw_episodes = [
         dict(raw)
         for stream_id, history in histories.items()
-        if str(stream_id).startswith(f"{circuit_id}|")
+        if len(stream_parts := str(stream_id).split("|")) == 3
+        and stream_parts[0] == circuit_id
+        and stream_parts[1] in thermostat_mappings
         for raw in history
         if isinstance(raw, Mapping)
         and str(raw.get("baseline_era", "initial"))
         == str(eras.get(stream_id, "initial"))
         and str(raw.get("appliance_profile") or "") == profile
+        and (str(raw.get("temperature_entity_id") or "").strip() or None)
+        == thermostat_mappings[stream_parts[1]]
         and episode_from_dict(raw) is not None
     ][-256:]
 
@@ -2460,10 +2472,8 @@ def _hvac_advisor_history(
                 }
             )
             call_identities.add(call_identity)
-        degrees_closed = abs(
-            episode.latest_temperature_f - episode.start_temperature_f
-        )
-        if degrees_closed <= 0.0:
+        minutes_per_degree = episode_minutes_per_degree(episode)
+        if minutes_per_degree is None:
             continue
         context_key = "|".join(
             (
@@ -2486,7 +2496,7 @@ def _hvac_advisor_history(
                 "excluded_from_baseline": episode.excluded_from_baseline,
                 "alerted": episode.started_at.isoformat() in alerted_episode_ids,
                 "context_key": context_key,
-                "minutes_per_degree": elapsed / degrees_closed,
+                "minutes_per_degree": minutes_per_degree,
             }
         )
 
@@ -2494,15 +2504,22 @@ def _hvac_advisor_history(
     for episode in episodes:
         by_context.setdefault(str(episode["context_key"]), []).append(episode)
     for comparable in by_context.values():
-        if len(comparable) < 9:
+        eligible = [
+            episode
+            for episode in comparable
+            if bool(episode.get("complete"))
+            and not bool(episode.get("excluded_from_baseline"))
+            and not bool(episode.get("alerted"))
+        ]
+        if len(eligible) < 9:
             continue
         baseline = median(
             float(episode["minutes_per_degree"])
-            for episode in comparable[:9]
+            for episode in eligible[:9]
         )
         if baseline <= 0.0:
             continue
-        for episode in comparable:
+        for episode in eligible:
             episode["absolute_deviation_percent"] = abs(
                 float(episode["minutes_per_degree"]) / baseline - 1.0
             ) * 100.0

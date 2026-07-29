@@ -8,7 +8,9 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_SENSITIVITY,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_UTILITY_COMPARISON_SETTINGS,
 )
 from custom_components.circuitsetup_energy_analyzer.cycles import (
@@ -483,6 +485,12 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     config.name = "Downstairs Heat Pump"
     config.appliance_profile = ApplianceProfile.HEAT_PUMP
     stream_id = "heat_pump|climate.downstairs|cooling"
+    coordinator.entry_data[CONF_ADVANCED_SETTINGS]["heat_pump"] = {
+        CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+            "climate.downstairs": "sensor.downstairs_temperature"
+        },
+    }
     coordinator.store_data.hvac_baseline_era_by_stream = {stream_id: "era-2"}
     coordinator.store_data.hvac_response_history_by_stream = {
         stream_id: [
@@ -503,7 +511,7 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
                 ).isoformat(),
                 "start_temperature_f": 77.0,
                 "target_temperature_f": 72.0,
-                "latest_temperature_f": 72.0,
+                "latest_temperature_f": 70.0,
                 "elapsed_minutes": 50.0,
                 "active_minutes": 45.0,
                 "outdoor_temperature_f": 92.0,
@@ -520,6 +528,23 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
             for index in range(300)
         ]
     }
+    retained_history = coordinator.store_data.hvac_response_history_by_stream[
+        stream_id
+    ]
+    alerted_episode_ids = []
+    for raw in retained_history[44:49]:
+        raw["elapsed_minutes"] = 500.0
+        raw["active_minutes"] = 450.0
+        alerted_episode_ids.append(raw["started_at"])
+    retired_stream = "heat_pump|climate.retired|cooling"
+    coordinator.store_data.hvac_response_history_by_stream[retired_stream] = [
+        {
+            **raw,
+            "stream_id": retired_stream,
+            "thermostat_entity_id": "climate.retired",
+        }
+        for raw in retained_history
+    ]
     duplicate_observed_at = (
         datetime(2026, 1, 1, 1, tzinfo=UTC) + timedelta(hours=299)
     ).isoformat()
@@ -542,7 +567,14 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
             }
         ]
     }
-    coordinator.store_data.alerts = []
+    coordinator.store_data.alerts = [
+        SimpleNamespace(
+            features={
+                "health_feature": "hvac_thermostat_efficiency",
+                "recent_episode_ids": alerted_episode_ids,
+            }
+        )
+    ]
     coordinator.context_builder.thermostat_observations = lambda: {
         "climate.downstairs": ThermostatObservation(
             "climate.downstairs",
@@ -570,12 +602,25 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     assert call["temperature_entity_id"] == "sensor.downstairs_temperature"
     assert call["climate_has_current_temperature"] is True
     assert call["overlap_ratio"] == pytest.approx(0.9)
-    episode = history["hvac_response_episodes"][0]
+    assert all(
+        call["thermostat_entity_id"] == "climate.downstairs"
+        for call in history["hvac_correlation_calls"]
+    )
+    assert history["hvac_response_episodes"][0]["alerted"] is True
+    episode = next(
+        item for item in history["hvac_response_episodes"] if not item["alerted"]
+    )
     assert episode["complete"] is True
     assert episode["alerted"] is False
     assert episode["context_key"] == (
         "heat_pump|heat_pump|climate.downstairs|sensor.downstairs_temperature|"
         "cooling|very_hot|summer|cooling|4-6F|heat_pump"
+    )
+    assert episode["minutes_per_degree"] == 10.0
+    assert episode["absolute_deviation_percent"] == 0.0
+    assert all(
+        "climate.retired" not in item["context_key"]
+        for item in history["hvac_response_episodes"]
     )
 
 
