@@ -2,14 +2,35 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
+from types import MappingProxyType
 from typing import Any
 
-from ..const import CONF_OUTDOOR_TEMPERATURE_ENTITY
-from ..context_sources import configured_context_entity
+from ..const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_THERMOSTAT_ENTITIES,
+)
+from ..context_sources import (
+    configured_context_entities,
+    configured_context_entity,
+    thermostat_mappings_for_settings,
+)
+from ..hvac_efficiency import ThermostatObservation
+from ..models import ApplianceProfile
 from ..processors import ProcessingContext
 
 _DEGREE_F = "\N{DEGREE SIGN}F"
 _DEGREE_C = "\N{DEGREE SIGN}C"
+_HVAC_THERMOSTAT_PROFILES = frozenset(
+    {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
+        ApplianceProfile.MINI_SPLIT,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.ELECTRIC_HEAT,
+    }
+)
 
 
 class ProcessingContextBuilder:
@@ -42,7 +63,142 @@ class ProcessingContextBuilder:
             known_load_circuit_ids=coordinator.circuit_registry.known_load_circuit_ids,
             sensitivity=coordinator.settings_controller.default_sensitivity,
             time_zone=self.time_zone(),
+            thermostat_observations=self.thermostat_observations(),
             contextual_samples_cache=self._contextual_samples_cache,
+        )
+
+    def thermostat_observations(
+        self,
+    ) -> Mapping[str, ThermostatObservation]:
+        """Snapshot only configured thermostat and temperature entities."""
+        coordinator = self._coordinator
+        entry_data = getattr(coordinator, "entry_data", {}) or {}
+        options = getattr(coordinator, "options", {}) or {}
+        configured = configured_context_entities(
+            entry_data,
+            options,
+            CONF_THERMOSTAT_ENTITIES,
+        )
+        settings_by_circuit = options.get(
+            CONF_ADVANCED_SETTINGS,
+            entry_data.get(CONF_ADVANCED_SETTINGS, {}),
+        )
+        if not isinstance(settings_by_circuit, Mapping):
+            settings_by_circuit = {}
+
+        raw_states: dict[str, Any] = {}
+
+        def state_for(entity_id: str) -> Any | None:
+            if entity_id not in raw_states:
+                raw_states[entity_id] = self.raw_state_for_entity(entity_id)
+            return raw_states[entity_id]
+
+        observations: dict[str, ThermostatObservation] = {
+            entity_id: self._thermostat_observation(
+                entity_id,
+                None,
+                state_for=state_for,
+            )
+            for entity_id in configured
+        }
+        for config in getattr(coordinator, "circuit_configs", ()):
+            if (
+                getattr(config, "appliance_profile", None)
+                not in _HVAC_THERMOSTAT_PROFILES
+            ):
+                continue
+            circuit_id = str(getattr(config, "circuit_id", "") or "")
+            advanced = settings_by_circuit.get(circuit_id, {})
+            if not isinstance(advanced, Mapping):
+                advanced = {}
+            for thermostat_id, temperature_id in thermostat_mappings_for_settings(
+                entry_data,
+                options,
+                advanced,
+            ).items():
+                observations[f"{circuit_id}|{thermostat_id}"] = (
+                    self._thermostat_observation(
+                        thermostat_id,
+                        temperature_id,
+                        state_for=state_for,
+                    )
+                )
+        return MappingProxyType(observations)
+
+    def _thermostat_observation(
+        self,
+        thermostat_entity_id: str,
+        temperature_entity_id: str | None,
+        *,
+        state_for: Any,
+    ) -> ThermostatObservation:
+        raw_state = state_for(thermostat_entity_id)
+        attributes = getattr(raw_state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            attributes = {}
+        raw_mode = str(getattr(raw_state, "state", "") or "").strip().lower()
+        available = raw_mode not in {"", "unknown", "unavailable"}
+        mode = raw_mode if available else None
+        action = (
+            str(attributes.get("hvac_action") or "").strip().lower() or None
+            if available
+            else None
+        )
+        source_unit = self.temperature_source_unit(
+            str(attributes.get("temperature_unit") or "")
+        )
+        current = (
+            _temperature_attribute_f(
+                attributes,
+                "current_temperature",
+                source_unit,
+            )
+            if available
+            else None
+        )
+        actual = current
+        capabilities: set[str] = set()
+        if current is not None:
+            capabilities.add("current_temperature")
+        if action is not None:
+            capabilities.add("hvac_action")
+
+        targets = {
+            key: (
+                _temperature_attribute_f(attributes, key, source_unit)
+                if available
+                else None
+            )
+            for key in ("temperature", "target_temp_low", "target_temp_high")
+        }
+        capabilities.update(
+            key for key, value in targets.items() if value is not None
+        )
+
+        if temperature_entity_id:
+            override_state = state_for(temperature_entity_id)
+            override = _temperature_state_f(
+                override_state,
+                self.ha_temperature_unit(),
+            )
+            if override is not None:
+                actual = override
+                capabilities.add("temperature_override")
+
+        target = _thermostat_target(
+            targets,
+            mode=mode,
+            action=action,
+            actual=actual,
+        )
+        return ThermostatObservation(
+            thermostat_entity_id=thermostat_entity_id,
+            temperature_entity_id=temperature_entity_id,
+            actual_temperature_f=actual,
+            target_temperature_f=target,
+            mode=mode,
+            action=action,
+            available_capabilities=tuple(sorted(capabilities)),
         )
 
     def configured_context_entity(self, key: str) -> str:
@@ -324,3 +480,56 @@ def _temperature_from_fahrenheit(value: float, unit: str) -> float:
     if unit == _DEGREE_C:
         return (value - 32.0) * 5.0 / 9.0
     return value
+
+
+def _temperature_attribute_f(
+    attributes: Mapping[str, Any],
+    key: str,
+    source_unit: str,
+) -> float | None:
+    value = _float_or_none(attributes.get(key))
+    return (
+        _temperature_to_fahrenheit(value, source_unit)
+        if value is not None
+        else None
+    )
+
+
+def _temperature_state_f(raw_state: Any, default_unit: str) -> float | None:
+    if raw_state is None:
+        return None
+    raw_value = str(getattr(raw_state, "state", "") or "").strip()
+    if raw_value.lower() in {"", "unknown", "unavailable"}:
+        return None
+    value = _float_or_none(raw_value)
+    if value is None:
+        return None
+    attributes = getattr(raw_state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        attributes = {}
+    source_unit = _normalized_temperature_unit(
+        str(attributes.get("unit_of_measurement") or "")
+    )
+    return _temperature_to_fahrenheit(value, source_unit or default_unit)
+
+
+def _thermostat_target(
+    targets: Mapping[str, float | None],
+    *,
+    mode: str | None,
+    action: str | None,
+    actual: float | None,
+) -> float | None:
+    if targets.get("temperature") is not None:
+        return targets["temperature"]
+    if action == "heating" or mode in {"heat", "heating"}:
+        return targets.get("target_temp_low")
+    if action == "cooling" or mode in {"cool", "cooling"}:
+        return targets.get("target_temp_high")
+    low = targets.get("target_temp_low")
+    high = targets.get("target_temp_high")
+    if actual is not None and low is not None and actual < low:
+        return low
+    if actual is not None and high is not None and actual > high:
+        return high
+    return None

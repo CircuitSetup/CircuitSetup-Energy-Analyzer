@@ -62,6 +62,14 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
             CircuitEvent(now, "fridge", EventType.START),
             CircuitEvent(now, "washer", EventType.START),
         ],
+        hvac_response_history_by_stream={
+            "fridge|climate.kitchen|cooling": [{"complete": True}],
+            "washer|climate.laundry|cooling": [{"complete": True}],
+        },
+        hvac_baseline_era_by_stream={
+            "fridge|climate.kitchen|cooling": "era-1",
+            "washer|climate.laundry|cooling": "era-2",
+        },
     )
     baseline_values = defaultdict(list)
     baseline_values["fridge:real_power"].append(120.0)
@@ -86,6 +94,12 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     }
     assert [alert.circuit_id for alert in store_data.alerts] == ["washer"]
     assert [event.circuit_id for event in store_data.events] == ["fridge", "washer"]
+    assert store_data.hvac_response_history_by_stream == {
+        "washer|climate.laundry|cooling": [{"complete": True}]
+    }
+    assert store_data.hvac_baseline_era_by_stream == {
+        "washer|climate.laundry|cooling": "era-2"
+    }
     assert store_data.learning_started_at_by_circuit == {
         "fridge": "2026-06-30T12:00:00+00:00"
     }

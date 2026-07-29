@@ -1455,6 +1455,47 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert checklist["source_data_found"]["title"] == "Source data needs attention"
 
 
+def test_setup_health_includes_hvac_thermostat_source_issue() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="heat_pump",
+        name="Downstairs Heat Pump",
+        appliance_profile=ApplianceProfile.HEAT_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.heat_pump_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            hvac_thermostat_setup_issues_by_circuit={
+                "heat_pump": [
+                    {
+                        "issue_kind": "missing_required_sensor",
+                        "circuit_id": "heat_pump",
+                        "circuit_name": "Downstairs Heat Pump",
+                        "reason": (
+                            "Downstairs Heat Pump cannot use climate.downstairs "
+                            "because no current temperature is available."
+                        ),
+                        "source_entities": ["climate.downstairs"],
+                    }
+                ]
+            }
+        ),
+        circuit_configs=(circuit,),
+    )
+
+    issue = setup_health_attributes(coordinator)["issues"][0]
+
+    assert issue["issue"] == "hvac_thermostat_source"
+    assert issue["issue_kind"] == "missing_required_sensor"
+    assert issue["circuit_name"] == "Downstairs Heat Pump"
+    assert "Downstairs Heat Pump" in issue["reason"]
+    assert issue["source_entities"] == ["climate.downstairs"]
+
+
 @pytest.mark.parametrize(
     ("quality_issue", "numeric_states_valid"),
     [
@@ -3157,6 +3198,7 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
     for profile in (
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
@@ -3191,6 +3233,16 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
         ),
         coordinator_with_options,
     )
+
+
+def test_heat_pump_uses_cyclic_and_high_power_entity_groups() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        _CYCLIC_APPLIANCE_PROFILES,
+        _HIGH_POWER_PROFILES,
+    )
+
+    assert ApplianceProfile.HEAT_PUMP in _CYCLIC_APPLIANCE_PROFILES
+    assert ApplianceProfile.HEAT_PUMP in _HIGH_POWER_PROFILES
 
 
 def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> None:

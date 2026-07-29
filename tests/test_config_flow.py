@@ -10,14 +10,17 @@ import voluptuous as vol
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_BLOWER_REPRESENTS_GAS_HEAT,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_DASHBOARD_LAYOUT,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXTRA_SOURCE_ENTITIES,
+    CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -27,6 +30,9 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DASHBOARD_LAYOUT_EXPERT,
@@ -222,6 +228,31 @@ def test_validate_setup_input_parses_text_entity_values() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
+
+
+def test_validate_source_inputs_preserve_thermostat_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        validate_options_input,
+        validate_setup_input,
+    )
+
+    source_values = {
+        CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+        CONF_THERMOSTAT_ENTITIES: [
+            "climate.downstairs",
+            "climate.downstairs",
+        ],
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: ["sensor.downstairs_temperature"],
+    }
+
+    setup = validate_setup_input(source_values)
+    options = validate_options_input(source_values)
+
+    for validated in (setup, options):
+        assert validated[CONF_THERMOSTAT_ENTITIES] == ["climate.downstairs"]
+        assert validated[CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES] == [
+            "sensor.downstairs_temperature"
+        ]
 
 
 @pytest.mark.asyncio
@@ -933,9 +964,7 @@ async def test_options_recommendations_step_guides_solar_flow_suggestions() -> N
     result = await flow.async_step_recommendations()
 
     summary = result["description_placeholders"]["recommendations"]
-    assert (
-        "Mains - High Solar Surplus Power Threshold: 1500 W -> 2600 W" in summary
-    )
+    assert "Mains - High Solar Surplus Power Threshold: 1500 W -> 2600 W" in summary
     assert "Default value: 1500" in summary
     assert "Expected effect: Reserve high solar surplus guidance" in summary
     assert "Observed Export Samples: 7" in summary
@@ -1000,9 +1029,7 @@ async def test_recommendations_step_guides_solar_flow_advanced_settings() -> Non
     assert "Default value: 100" in summary
     assert "Expected effect: Keep normal CT and inverter timing drift" in summary
     assert "P95 Export Residual W: 220" in summary
-    assert (
-        "Mains - Flexible Load Running Power Threshold: 100 W -> 175 W" in summary
-    )
+    assert "Mains - Flexible Load Running Power Threshold: 100 W -> 175 W" in summary
     assert "Expected effect: Classify flexible loads as running only after" in summary
     assert "Observed Flexible Loads: 3" in summary
 
@@ -1309,9 +1336,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
         }.intersection(group["available_entity_ids"])
         for group in flow._assignment_groups
     )
-    assert all(
-        not group["selected_entity_ids"] for group in flow._assignment_groups
-    )
+    assert all(not group["selected_entity_ids"] for group in flow._assignment_groups)
 
     result = await flow.async_step_assign(
         {
@@ -1433,9 +1458,7 @@ async def test_options_refresh_sources_reviews_renamed_mains_sensor(
     )
 
     assert result["type"] == "create_entry"
-    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == [
-        "sensor.house_feed_power"
-    ]
+    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == ["sensor.house_feed_power"]
     assert "sensor.panel_mains_power" not in result["data"][CONF_SOURCE_ENTITIES]
     assert config_entries.reloads == ["entry-1"]
 
@@ -4551,8 +4574,7 @@ async def test_options_assignment_review_can_reassign_inactive_source() -> None:
         "sensor.microwave_power",
     ]
     assert [
-        sensor["entity_id"]
-        for sensor in result["data"][CONF_CIRCUITS][0]["sensors"]
+        sensor["entity_id"] for sensor in result["data"][CONF_CIRCUITS][0]["sensors"]
     ] == ["sensor.refrigerator_power", "sensor.microwave_power"]
     assert result["data"][CONF_CIRCUITS][1] == sensorless
 
@@ -4956,6 +4978,61 @@ async def test_advanced_settings_form_shows_operating_detection_source() -> None
 
 
 @pytest.mark.asyncio
+async def test_advanced_settings_maps_each_linked_thermostat_temperature_sensor() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [
+                "sensor.downstairs_temperature"
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "appliance_profile": "heat_pump",
+                    "mode": "dual_phase",
+                    "power_flow": "load",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow._advanced_circuit_id = "heat_pump"
+
+    mapping_form = await flow.async_step_advanced_settings(
+        {
+            "hvac_efficiency_settings": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT: 25,
+            }
+        }
+    )
+
+    assert mapping_form["type"] == "form"
+    assert mapping_form["step_id"] == "thermostat_mapping"
+    assert mapping_form["description_placeholders"]["thermostat_entity"] == (
+        "climate.downstairs"
+    )
+
+    result = await flow.async_step_thermostat_mapping(
+        {"thermostat_temperature_sensor_entity": ("sensor.downstairs_temperature")}
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS]["heat_pump"][
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP
+    ] == {"climate.downstairs": "sensor.downstairs_temperature"}
+
+
+@pytest.mark.asyncio
 async def test_advanced_settings_form_shows_learned_operating_detection_source() -> (
     None
 ):
@@ -5144,15 +5221,148 @@ def test_advanced_settings_schema_shows_water_context_for_water_appliances() -> 
             "power_flow": "load",
         },
     )
-
     assert "water_context_settings" in _schema_section_keys(dishwasher_schema)
-    assert _schema_default(
-        dishwasher_schema, "water_flow_correlation_enabled"
-    ) is True
+    assert _schema_default(dishwasher_schema, "water_flow_correlation_enabled") is True
     assert _schema_default(dishwasher_schema, "expects_water_flow") is True
+    assert _schema_default(dishwasher_schema, "flow_mismatch_threshold_minutes") == 5
+
+
+def test_setup_and_options_schemas_expose_thermostat_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    setup_schema = config_flow._setup_schema()
+    assert _schema_default(setup_schema, CONF_THERMOSTAT_ENTITIES) == []
     assert (
-        _schema_default(dishwasher_schema, "flow_mismatch_threshold_minutes") == 5
+        _schema_default(
+            setup_schema,
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+        )
+        == []
     )
+    assert config_flow._thermostat_entity_selector_config() == {
+        "entity": {
+            "multiple": True,
+            "filter": [{"domain": "climate"}],
+        }
+    }
+    assert config_flow._indoor_temperature_entity_selector_config() == {
+        "entity": {
+            "multiple": True,
+            "filter": [{"domain": "sensor", "device_class": "temperature"}],
+        }
+    }
+
+    entry = SimpleNamespace(
+        data={
+            CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [
+                "sensor.downstairs_temperature"
+            ],
+        },
+        options={},
+    )
+    options_schema = config_flow._options_schema(entry)
+    assert _schema_default(options_schema, CONF_THERMOSTAT_ENTITIES) == [
+        "climate.downstairs"
+    ]
+    assert _schema_default(
+        options_schema,
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    ) == ["sensor.downstairs_temperature"]
+
+
+def test_advanced_settings_schema_shows_hvac_thermostat_fields_only_when_applicable(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        ApplianceProfile,
+        CircuitMode,
+        _advanced_settings_schema,
+    )
+
+    applicable_profiles = (
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
+        ApplianceProfile.MINI_SPLIT,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.ELECTRIC_HEAT,
+    )
+    for profile in applicable_profiles:
+        schema = _advanced_settings_schema(
+            {},
+            {
+                "circuit_id": profile.value,
+                "name": profile.value,
+                "appliance_profile": profile.value,
+                "mode": CircuitMode.SINGLE_PHASE.value,
+                "power_flow": "load",
+            },
+        )
+        assert "hvac_efficiency_settings" in _schema_section_keys(schema)
+        assert _schema_default(schema, CONF_LINKED_THERMOSTAT_ENTITIES) == []
+        assert (
+            _schema_default(
+                schema,
+                CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+            )
+            == 25.0
+        )
+        if profile == ApplianceProfile.HVAC_BLOWER:
+            assert _schema_default(schema, CONF_BLOWER_REPRESENTS_GAS_HEAT) is False
+        else:
+            assert CONF_BLOWER_REPRESENTS_GAS_HEAT not in _schema_keys(schema)
+
+    refrigerator_schema = _advanced_settings_schema(
+        {},
+        {
+            "circuit_id": "refrigerator",
+            "name": "Refrigerator",
+            "appliance_profile": ApplianceProfile.REFRIGERATOR.value,
+            "mode": CircuitMode.SINGLE_PHASE.value,
+            "power_flow": "load",
+        },
+    )
+    assert "hvac_efficiency_settings" not in _schema_section_keys(refrigerator_schema)
+    assert CONF_LINKED_THERMOSTAT_ENTITIES not in _schema_keys(refrigerator_schema)
+
+
+def test_advanced_settings_from_input_validates_hvac_efficiency_fields() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        SetupValidationError,
+        _advanced_settings_from_input,
+    )
+
+    settings = _advanced_settings_from_input(
+        {
+            "hvac_efficiency_settings": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                    "climate.downstairs": "sensor.downstairs_temperature",
+                },
+                CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT: 25,
+                CONF_BLOWER_REPRESENTS_GAS_HEAT: True,
+            }
+        }
+    )
+    assert settings[CONF_LINKED_THERMOSTAT_ENTITIES] == ["climate.downstairs"]
+    assert settings[CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP] == {
+        "climate.downstairs": "sensor.downstairs_temperature"
+    }
+    assert settings[CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT] == 25.0
+    assert settings[CONF_BLOWER_REPRESENTS_GAS_HEAT] is True
+
+    for threshold in (4.9, 100.1):
+        with pytest.raises(
+            SetupValidationError,
+            match="invalid_advanced_settings",
+        ):
+            _advanced_settings_from_input(
+                {
+                    "hvac_efficiency_settings": {
+                        CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT: threshold
+                    }
+                }
+            )
 
 
 def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
@@ -5166,15 +5376,16 @@ def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
     assert options["dishwasher"] == "Dishwasher"
     assert options["3d_printer"] == "3D Printer"
     assert options["mini_split"] == "Mini-Split"
+    assert options["heat_pump"] == "Heat Pump"
     for profile in ("dishwasher", "3d_printer"):
         assert config_flow._default_mode_for_assignment_profile(profile) == (
             "single_phase"
         )
         assert config_flow._default_power_flow_for_assignment(profile) == "load"
     assert (
-        config_flow._default_mode_for_assignment_profile("mini_split")
-        == "dual_phase"
+        config_flow._default_mode_for_assignment_profile("mini_split") == "dual_phase"
     )
+    assert config_flow._default_mode_for_assignment_profile("heat_pump") == "dual_phase"
     assert config_flow._default_power_flow_for_assignment("mini_split") == "load"
 
 
@@ -5203,6 +5414,14 @@ def test_appliance_profile_options_include_new_profiles_with_defaults() -> None:
                 "sensor.garage_ductless_heat_pump_l2_power",
             ],
             ("mini_split", "dual_phase"),
+        ),
+        (
+            "central_heat_pump",
+            [
+                "sensor.central_heat_pump_l1_power",
+                "sensor.central_heat_pump_l2_power",
+            ],
+            ("heat_pump", "dual_phase"),
         ),
         (
             "office_ductless_ac",
@@ -5855,7 +6074,11 @@ def test_select_options_use_friendly_labels_for_home_assistant(monkeypatch) -> N
         assignment_schema,
         "appliance_profile",
     )["select"]["options"]
-    assert {"value": "hvac", "label": "HVAC"} in appliance_options
+    assert {
+        "value": "hvac",
+        "label": "HVAC System (combined/unspecified)",
+    } in appliance_options
+    assert {"value": "heat_pump", "label": "Heat Pump"} in appliance_options
     assert {"value": "hvac_compressor", "label": "HVAC Compressor"} in (
         appliance_options
     )
@@ -6086,6 +6309,36 @@ def test_source_entities_for_entry_includes_linked_flow_sensors() -> None:
 
     assert _source_entities_for_entry(entry, coordinator) == (
         "binary_sensor.washer_flow",
+    )
+
+
+def test_source_entities_for_entry_includes_thermostat_sources_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        _source_entities_for_entry,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [
+                "sensor.downstairs_temperature"
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "heat_pump": {
+                    CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                        "climate.downstairs": "sensor.downstairs_temperature"
+                    },
+                }
+            },
+        },
+        options={},
+    )
+    coordinator = SimpleNamespace(circuit_configs=())
+
+    assert _source_entities_for_entry(entry, coordinator) == (
+        "climate.downstairs",
+        "sensor.downstairs_temperature",
     )
 
 

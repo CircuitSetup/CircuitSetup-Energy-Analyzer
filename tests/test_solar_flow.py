@@ -10,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.solar_flow import (
 
 def test_mini_split_is_a_flexible_solar_load() -> None:
     assert ApplianceProfile.MINI_SPLIT in FLEXIBLE_SOLAR_LOAD_PROFILES
+    assert ApplianceProfile.HEAT_PUMP in FLEXIBLE_SOLAR_LOAD_PROFILES
 
 
 def test_calculate_solar_flow_tracks_export_and_self_consumption() -> None:

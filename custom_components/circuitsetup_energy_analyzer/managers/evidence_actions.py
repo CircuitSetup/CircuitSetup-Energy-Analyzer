@@ -258,6 +258,7 @@ class EvidenceActionController:
         if matched_fingerprint is not None and matched_fingerprint != fingerprint:
             coordinator.store_data.alert_feedback.pop(matched_fingerprint, None)
         coordinator.apply_nilm_alert_feedback(alert, action, now)
+        self.apply_hvac_alert_feedback(alert, action, now)
         await coordinator.notification_controller.async_dismiss_alert_notification(
             alert_id
         )
@@ -266,6 +267,45 @@ class EvidenceActionController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True
+
+    def apply_hvac_alert_feedback(
+        self,
+        alert: AlertEvidence,
+        action: str,
+        now: datetime,
+    ) -> None:
+        """Apply existing alert feedback to the affected HVAC baseline stream."""
+        if alert.features.get("health_feature") != "hvac_thermostat_efficiency":
+            return
+        stream_id = str(alert.features.get("stream_id") or "")
+        if not stream_id.startswith(f"{alert.circuit_id}|"):
+            return
+        store_data = self._coordinator.store_data
+        if action in {"expected", "corrected", "improved"}:
+            store_data.hvac_baseline_era_by_stream[stream_id] = now.isoformat()
+            state = self._coordinator.state
+            getattr(state, "hvac_current_episode_by_stream", {}).pop(
+                stream_id,
+                None,
+            )
+            getattr(state, "hvac_efficiency_by_circuit", {}).pop(
+                alert.circuit_id,
+                None,
+            )
+            return
+        if action != "confirmed":
+            return
+        episode_ids = {
+            str(episode_id)
+            for episode_id in alert.features.get("recent_episode_ids", ())
+            if episode_id
+        }
+        for episode in store_data.hvac_response_history_by_stream.get(
+            stream_id,
+            (),
+        ):
+            if str(episode.get("started_at") or "") in episode_ids:
+                episode["excluded_from_baseline"] = True
 
     def adjusted_min_repeated_for_observation(
         self,
