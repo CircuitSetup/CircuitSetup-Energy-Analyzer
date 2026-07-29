@@ -78,7 +78,7 @@ LIFECYCLE_LOG_BLOCKLIST = (
 
 @pytest.mark.usefixtures("enable_custom_integrations")
 @pytest.mark.asyncio
-async def test_feature_store_migrates_previous_major_version(
+async def test_feature_store_discards_unsupported_major_version(
     hass: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -96,15 +96,12 @@ async def test_feature_store_migrates_previous_major_version(
 
     entry_id = "unsupported-store-version"
     key = f"{STORAGE_KEY}.{entry_id}"
-    previous_data = {"sensitivity_by_circuit": {"fridge": "quiet"}}
-    await Store(hass, STORAGE_VERSION - 1, key).async_save(previous_data)
+    await Store(hass, STORAGE_VERSION - 1, key).async_save({"old": "data"})
 
     loaded = await FeatureStore(hass, entry_id).async_load()
 
-    assert loaded == FeatureStoreData(sensitivity_by_circuit={"fridge": "quiet"})
-    assert loaded.hvac_response_history_by_stream == {}
-    assert loaded.hvac_baseline_era_by_stream == {}
-    assert await Store(hass, STORAGE_VERSION, key).async_load() == previous_data
+    assert loaded == FeatureStoreData()
+    assert await Store(hass, STORAGE_VERSION, key).async_load() == {}
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")

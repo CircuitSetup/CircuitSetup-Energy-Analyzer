@@ -185,14 +185,6 @@ class StateReducer:
         self.clear_power_quality_state(state, circuit_id)
         state.appliance_health_status_by_circuit.pop(circuit_id, None)
         state.appliance_health_evidence_by_circuit.pop(circuit_id, None)
-        hvac_prefix = f"{circuit_id}|"
-        state.hvac_current_episode_by_stream = {
-            key: value
-            for key, value in state.hvac_current_episode_by_stream.items()
-            if not key.startswith(hvac_prefix)
-        }
-        state.hvac_efficiency_by_circuit.pop(circuit_id, None)
-        state.hvac_thermostat_setup_issues_by_circuit.pop(circuit_id, None)
 
     def refresh_alert_evidence_state(
         self,

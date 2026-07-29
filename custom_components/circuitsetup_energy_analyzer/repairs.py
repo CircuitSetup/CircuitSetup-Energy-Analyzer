@@ -37,13 +37,6 @@ _REPAIR_FIXES: dict[str, str] = {
     "missing_water_flow_source": (
         "Add a water-flow source or disable water-flow context for this circuit."
     ),
-    "hvac_thermostat_source": (
-        "Restore the selected thermostat or temperature sensor, or update the "
-        "thermostat mapping."
-    ),
-    "hvac_response_slower": (
-        "Inspect HVAC operating conditions, filters, airflow, and service needs."
-    ),
     "utility_comparison_source_mismatch": (
         "Review utility comparison source and measured kWh settings."
     ),

@@ -33,7 +33,6 @@ _DEMO_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
-        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,

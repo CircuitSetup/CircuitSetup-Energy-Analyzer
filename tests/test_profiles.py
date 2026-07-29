@@ -49,22 +49,6 @@ def test_hvac_profile_supports_dual_phase_and_voltage_context() -> None:
     assert "leg_imbalance" in definition.features
 
 
-def test_heat_pump_profile_models_reversible_central_hvac() -> None:
-    definition = get_profile_definition(ApplianceProfile.HEAT_PUMP)
-
-    assert definition.supported_modes == {
-        CircuitMode.SINGLE_PHASE,
-        CircuitMode.DUAL_PHASE,
-    }
-    assert definition.required_roles == {SensorRole.REAL_POWER}
-    assert SensorRole.CURRENT in definition.recommended_roles
-    assert SensorRole.VOLTAGE in definition.recommended_roles
-    assert "compressor_start" in definition.features
-    assert "aux_heat_stage" in definition.features
-    assert "short_cycle" in definition.features
-    assert definition.minimum_cycles == 12
-
-
 def test_recommended_v1_appliance_profiles_have_distinct_analysis_contexts() -> None:
     compressor = get_profile_definition(ApplianceProfile.HVAC_COMPRESSOR)
     blower = get_profile_definition(ApplianceProfile.HVAC_BLOWER)

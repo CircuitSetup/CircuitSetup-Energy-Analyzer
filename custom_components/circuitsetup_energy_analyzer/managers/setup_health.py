@@ -25,8 +25,6 @@ _SETUP_HEALTH_REPAIR_PROBLEMS = frozenset(
         "dual_phase_missing_leg",
         "missing_rain_context_source",
         "missing_water_flow_source",
-        "hvac_response_slower",
-        "hvac_thermostat_source",
         "utility_comparison_source_mismatch",
         "utility_comparison_missing_utility_source",
         "utility_comparison_missing_measured_source",
@@ -146,27 +144,6 @@ class SetupHealthAggregator:
         """Create/delete setup-health repair issues for one circuit."""
         coordinator = self._coordinator
         desired: set[tuple[str, str]] = set()
-        if getattr(
-            coordinator.state,
-            "hvac_thermostat_setup_issues_by_circuit",
-            {},
-        ).get(
-            circuit_id
-        ):
-            desired.add((circuit_id, "hvac_thermostat_source"))
-        if (
-            not circuit_is_learning(coordinator.state, circuit_id)
-            and getattr(
-                coordinator.state,
-                "hvac_efficiency_by_circuit",
-                {},
-            ).get(
-                circuit_id,
-                {},
-            ).get("finding")
-            == "slower"
-        ):
-            desired.add((circuit_id, "hvac_response_slower"))
         missing_source_entities = self.has_missing_source_entities(circuit_id)
         if missing_source_entities:
             desired.add((circuit_id, "missing_source_entities"))
@@ -325,12 +302,6 @@ class SetupHealthAggregator:
             ),
             "missing_rain_context_source": f"Add a rain sensor for {circuit_name}",
             "missing_water_flow_source": f"Add a water-flow sensor for {circuit_name}",
-            "hvac_thermostat_source": (
-                f"Review thermostat settings for {circuit_name}"
-            ),
-            "hvac_response_slower": (
-                f"Inspect HVAC operation or service needs for {circuit_name}"
-            ),
             "utility_comparison_source_mismatch": (
                 f"Review utility comparison source settings for {circuit_name}"
             ),
@@ -341,7 +312,7 @@ class SetupHealthAggregator:
                 f"Add measured kWh source for {circuit_name}"
             ),
         }
-        data = {
+        return {
             "circuit_name": str(circuit_name),
             "reason": self.repair_reason(circuit_id, problem),
             "recommended_action": recommended_actions.get(
@@ -350,21 +321,6 @@ class SetupHealthAggregator:
             ),
             "source_entities": self.repair_source_entities(circuit_id, problem),
         }
-        if problem == "hvac_thermostat_source":
-            raw_issues = (
-                getattr(
-                    coordinator.state,
-                    "hvac_thermostat_setup_issues_by_circuit",
-                    {},
-                ).get(
-                    circuit_id,
-                    (),
-                )
-            )
-            if raw_issues:
-                data.update(dict(raw_issues[0]))
-                data["circuit_name"] = str(circuit_name)
-        return data
 
     def repair_reason(self, circuit_id: str, problem: str) -> str:
         config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
@@ -394,14 +350,6 @@ class SetupHealthAggregator:
             ),
             "missing_water_flow_source": (
                 "Water-flow context is enabled, but no flow source is configured."
-            ),
-            "hvac_thermostat_source": (
-                f"{circuit_name} has a selected thermostat source that cannot "
-                "provide the data needed for response learning."
-            ),
-            "hvac_response_slower": (
-                f"{circuit_name} is taking materially longer per degree than its "
-                "weather-comparable learned response."
             ),
             "utility_comparison_source_mismatch": (
                 "Utility comparison sources or recorder periods cannot be compared."

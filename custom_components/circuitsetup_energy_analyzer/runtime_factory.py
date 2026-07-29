@@ -50,7 +50,6 @@ from .processors import (
     DemandProcessor,
     EnergyGoalProcessor,
     EnergyUsageProcessor,
-    HvacEfficiencyProcessor,
     LegImbalanceProcessor,
     MainsBalanceProcessor,
     MetricConsistencyProcessor,
@@ -275,11 +274,6 @@ def initialize_runtime(
             self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
         ),
     )
-    self._hvac_efficiency_processor = HvacEfficiencyProcessor(
-        alert_policy_for_circuit=(
-            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
-        )
-    )
     self.pipeline.configure_processors(
         event_processor=self._event_processor,
         power_quality_processor=self._power_quality_processor,
@@ -295,7 +289,6 @@ def initialize_runtime(
         leg_imbalance_processor=self._leg_imbalance_processor,
         metric_consistency_processor=self._metric_consistency_processor,
         standby_processor=self._standby_processor,
-        hvac_efficiency_processor=self._hvac_efficiency_processor,
         mains_balance_processor=self._mains_balance_processor,
         solar_flow_processor=self._solar_flow_processor,
         utility_comparison_processor=self._utility_comparison_processor,

@@ -623,15 +623,11 @@ def _appliance_profile_mode_from_circuit_id(
             CircuitMode.DUAL_PHASE,
         ),
         (
-            ("_heat_pump_",),
-            ApplianceProfile.HEAT_PUMP,
-            CircuitMode.DUAL_PHASE,
-        ),
-        (
             (
                 "_ac_compressor_",
                 "_a_c_compressor_",
                 "_compressor_",
+                "_heat_pump_",
                 "_air_conditioner_",
                 "_ac_",
             ),

@@ -15,8 +15,6 @@
           "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
-          "thermostat_entities": "Thermostats",
-          "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -30,8 +28,6 @@
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
-          "thermostat_entities": "Optional climate entities used to measure HVAC response to thermostat targets. Ecobee, Nest, and other integrations are supported through standard Home Assistant climate attributes.",
-          "thermostat_temperature_sensor_entities": "Optional indoor temperature sensors that can replace a thermostat's current-temperature attribute for a mapped zone.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -133,8 +129,6 @@
           "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
-          "thermostat_entities": "Thermostats",
-          "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -146,8 +140,6 @@
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
-          "thermostat_entities": "Optional climate entities used to measure HVAC response to thermostat targets. Ecobee, Nest, and other integrations are supported through standard Home Assistant climate attributes.",
-          "thermostat_temperature_sensor_entities": "Optional indoor temperature sensors that can replace a thermostat's current-temperature attribute for a mapped zone.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -416,22 +408,6 @@
               "flow_mismatch_threshold_minutes": "Minutes of unexplained flow or appliance activity before the mismatch is considered evidence."
             }
           },
-          "hvac_efficiency_settings": {
-            "name": "HVAC Thermostat Efficiency",
-            "description": "Links this HVAC appliance to thermostat zones and controls how much weather-adjusted response time must change before notification.",
-            "data": {
-              "reset_hvac_efficiency_settings_to_defaults": "Reset HVAC Efficiency Settings To Defaults",
-              "linked_thermostat_entities": "Linked Thermostats",
-              "hvac_efficiency_change_threshold_pct": "Response Change Alert Percent",
-              "blower_represents_gas_heat": "Blower Represents Gas-Furnace Operation"
-            },
-            "data_description": {
-              "reset_hvac_efficiency_settings_to_defaults": "Turn this on when saving to remove thermostat links, temperature overrides, the response-change threshold, and the gas-heat blower role.",
-              "linked_thermostat_entities": "Choose the thermostat zones served by this appliance. With one globally configured thermostat, leaving this blank uses that thermostat automatically; multiple thermostats require explicit links.",
-              "hvac_efficiency_change_threshold_pct": "Alert when learned weather-adjusted time-to-setpoint becomes this percent slower or faster. Default 25%; allowed range 5–100%.",
-              "blower_represents_gas_heat": "Enable only when this blower's power is the available proxy for gas-furnace heating. It never receives independent cooling credit."
-            }
-          },
           "dual_phase_settings": {
             "name": "Dual-Phase Leg Imbalance",
             "description": "Split-phase imbalance thresholds for 240 V circuits.",
@@ -494,16 +470,6 @@
           }
         }
       },
-      "thermostat_mapping": {
-        "title": "Map Thermostat Temperature",
-        "description": "Choose the optional indoor temperature sensor for **{thermostat_entity}** on circuit **{circuit_name}**. Leave blank to use the thermostat's current-temperature attribute.",
-        "data": {
-          "thermostat_temperature_sensor_entity": "Indoor Temperature Sensor"
-        },
-        "data_description": {
-          "thermostat_temperature_sensor_entity": "Optional zone temperature override for this thermostat."
-        }
-      },
       "recommendations": {
         "title": "Review Suggested Settings",
         "description": "{recommendations}",
@@ -543,7 +509,6 @@
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
-      "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
@@ -781,14 +746,6 @@
       "title": "Energy Analyzer water-flow context needs a flow source",
       "description": "Water-flow correlation is enabled for {circuit_name}, but no linked or global water-flow source is configured. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
-    "hvac_thermostat_source": {
-      "title": "Energy Analyzer thermostat source needs attention for {circuit_name}",
-      "description": "{reason} Next step: {recommended_action}. Suggested fix: {fix}"
-    },
-    "hvac_response_slower": {
-      "title": "Energy Analyzer found slower HVAC response for {circuit_name}",
-      "description": "{reason} This is an inspection prompt, not a component diagnosis or safety control. Next step: {recommended_action}. Suggested fix: {fix}"
-    },
     "utility_comparison_source_mismatch": {
       "title": "Energy Analyzer utility comparison needs source settings",
       "description": "Utility comparison is enabled for {circuit_name}, but the utility source, measured kWh source, or recorder period cannot be compared. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
@@ -892,7 +849,6 @@
           "current": "A",
           "starts": "starts",
           "starts_per_hour": "starts/h",
-          "minutes_per_degree": "min/\u00b0F",
           "seconds": "s"
         },
         "value_metrics": {
@@ -918,7 +874,6 @@
           "average_cycle_duration": "Average cycle duration",
           "starts_per_runtime_hour": "Starts per runtime hour",
           "session_duration_seconds": "Session duration",
-          "minutes_per_degree": "Thermostat response time",
           "nilm_appliance_unusual_energy": "NILM appliance unusual energy",
           "nilm_appliance_confidence": "NILM confidence",
           "nilm_appliance_unusual_runtime": "NILM appliance unusual runtime",
@@ -981,11 +936,7 @@
         "solar_export_tolerance_w": "Solar Export Power Tolerance",
         "high_solar_surplus_threshold_w": "High Solar Surplus Power Threshold",
         "flexible_load_running_threshold_w": "Flexible Load Running Power Threshold",
-        "circuit_retention_mode": "Circuit Retention Mode",
-        "linked_thermostat_entities": "Linked Thermostats",
-        "thermostat_temperature_sensor_map": "Thermostat Temperature Sensors",
-        "blower_represents_gas_heat": "Blower Represents Gas Heat",
-        "hvac_efficiency_change_threshold_pct": "HVAC Response Change Threshold"
+        "circuit_retention_mode": "Circuit Retention Mode"
       },
       "fallback_setting_label": "Setting: {setting_key}",
       "units": {
@@ -1004,8 +955,7 @@
         "dual_phase": "Dual Phase",
         "power_quality": "Power Quality",
         "mains_balance": "Mains Balance",
-        "solar_flow": "Solar Flow",
-        "hvac_efficiency": "HVAC Efficiency"
+        "solar_flow": "Solar Flow"
       },
       "reasons": {
         "energy_usage": "Observed {observed_days} complete days of energy usage; the 95th percentile daily usage was {p95_daily_kwh} kWh.",
@@ -1020,11 +970,7 @@
         "minimum_apparent_power": "The observed apparent-power range supports a circuit specific minimum before metric consistency is evaluated.",
         "mains_balance": "Measured mains-minus-load balance has enough history to tune the negative balance tolerance while still surfacing mapping, solar, or CT-orientation problems.",
         "solar_surplus": "Solar surplus should start near the middle of observed export events.",
-        "high_solar_surplus": "High solar surplus should represent the upper end of observed export events.",
-        "hvac_thermostat": "{thermostat_name} overlapped {circuit_name} in at least 80% of {observation_count} comparable thermostat calls.",
-        "hvac_temperature": "{temperature_entity_id} moved toward the thermostat target in at least 80% of {observation_count} comparable calls.",
-        "hvac_gas_heat": "The blower overlapped heating calls without an electrical temperature driver in at least 80% of {observation_count} observations.",
-        "hvac_threshold": "Across {episode_count} non-alerted comparable HVAC episodes, the 95th-percentile response deviation was {p95}%."
+        "high_solar_surplus": "High solar surplus should represent the upper end of observed export events."
       }
     },
     "dashboard": {
@@ -1554,43 +1500,15 @@
           "possible_degradation": "Possible degradation",
           "not_applicable": "Not applicable"
         },
-      "predictive_health_reason": {
-        "shared_learning_active": "The appliance is still in its normal learning period.",
-        "insufficient_history": "More completed appliance history is needed before health trends can be compared.",
-        "insufficient_comparable_context": "More history under comparable operating conditions is needed.",
-        "within_comparable_range": "Retained behavior remains within its comparable learned range.",
-        "sustained_change": "Sustained efficiency change detected across recent comparable evidence.",
-        "unsupported_circuit": "Predictive health does not apply to this circuit type."
-      },
-      "hvac_efficiency": "HVAC Thermostat Efficiency",
-      "hvac_efficiency_score": "Efficiency score",
-      "hvac_efficiency_score_note": "100 is the learned baseline; higher is faster and lower is slower under comparable outdoor conditions.",
-      "hvac_efficiency_trend_label": "Response trend",
-      "hvac_efficiency_threshold": "Alert threshold",
-      "hvac_efficiency_baseline": "Learned response",
-      "hvac_efficiency_recent": "Recent response",
-      "hvac_efficiency_waiting": "HVAC response learning is waiting for completed thermostat episodes.",
-      "hvac_efficiency_supporting_blower": "Cooling blower supports air handling; the compressor drives temperature change.",
-      "hvac_efficiency_status": {
-        "learning": "Learning",
-        "tracking": "Tracking thermostat response",
-        "ready": "Learned"
-      },
-      "hvac_efficiency_trend": {
-        "stable": "Near learned baseline",
-        "slower": "Slower than learned baseline",
-        "faster": "Faster than learned baseline"
-      },
-      "hvac_efficiency_mode": {
-        "heating": "Heating",
-        "cooling": "Cooling"
-      },
-      "hvac_efficiency_attribution": {
-        "direct": "Direct temperature driver",
-        "assisted_system": "Assisted HVAC system",
-        "gas_furnace_proxy": "Gas-furnace blower proxy"
-      },
-      "what_to_check_first": "What To Check First",
+        "predictive_health_reason": {
+          "shared_learning_active": "The appliance is still in its normal learning period.",
+          "insufficient_history": "More completed appliance history is needed before health trends can be compared.",
+          "insufficient_comparable_context": "More history under comparable operating conditions is needed.",
+          "within_comparable_range": "Retained behavior remains within its comparable learned range.",
+          "sustained_change": "Sustained efficiency change detected across recent comparable evidence.",
+          "unsupported_circuit": "Predictive health does not apply to this circuit type."
+        },
+        "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
         "learning_ranges": "Learning normal ranges for this appliance.",
         "learning_progress": "{complete} days of learning out of {required} days complete",
