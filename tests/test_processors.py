@@ -20,13 +20,16 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_BLOWER_REPRESENTS_GAS_HEAT,
     CONF_LINKED_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.cost import CostSettings
 from custom_components.circuitsetup_energy_analyzer.demand import DemandSettings
 from custom_components.circuitsetup_energy_analyzer.goals import EnergyGoalSettings
 from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
+    HvacResponseEpisode,
     ThermostatObservation,
+    episode_to_dict,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -413,6 +416,368 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     assert len(history) == 256
     assert history[0]["marker"] == 1
     assert history[-1]["complete"] is True
+
+
+def _hvac_response_history(
+    stream_id: str,
+    *,
+    reference_rate: float = 10.0,
+    recent_rate: float = 12.5,
+    count: int = 12,
+) -> list[dict[str, object]]:
+    circuit_id, thermostat_id, mode = stream_id.split("|")
+    history: list[dict[str, object]] = []
+    for index in range(count):
+        minutes_per_degree = reference_rate if index < 9 else recent_rate
+        started = datetime(2026, 6, 1, 12, tzinfo=UTC) + timedelta(days=index)
+        target = 72.0 if mode == "cooling" else 70.0
+        start = 77.0 if mode == "cooling" else 65.0
+        history.append(
+            episode_to_dict(
+                HvacResponseEpisode(
+                    stream_id=stream_id,
+                    circuit_id=circuit_id,
+                    thermostat_entity_id=thermostat_id,
+                    mode=mode,
+                    started_at=started,
+                    ended_at=started
+                    + timedelta(minutes=minutes_per_degree * 5.0),
+                    start_temperature_f=start,
+                    target_temperature_f=target,
+                    latest_temperature_f=target,
+                    elapsed_minutes=minutes_per_degree * 5.0,
+                    active_minutes=minutes_per_degree * 5.0,
+                    outdoor_temperature_f=92.0,
+                    season="summer",
+                    weather_mode=mode,
+                    temperature_bin="very_hot",
+                    gap_bin="4-6F",
+                    participant_signature=(circuit_id,),
+                    supporting_blower_ids=(),
+                    complete=True,
+                )
+            )
+        )
+    return history
+
+
+@pytest.mark.parametrize(
+    ("recent_rate", "feature", "severity"),
+    [
+        (12.5, "hvac_response_slower", Severity.WARNING),
+        (7.5, "hvac_response_faster", Severity.INFO),
+    ],
+)
+def test_hvac_response_change_emits_mature_alert(
+    recent_rate: float,
+    feature: str,
+    severity: Severity,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(stream_id, recent_rate=recent_rate)
+    )
+    policy = ConservativeAlertPolicy(
+        min_repeated=1,
+        min_total_score=1.5,
+        min_average_score=1.5,
+        min_baseline_confidence=0.0,
+    )
+
+    processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy
+    )
+    result = processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert [alert.feature for alert in result.alerts] == [feature]
+    assert result.notifications == result.alerts
+    assert result.alerts[0].severity is severity
+    assert result.alerts[0].features["health_feature"] == (
+        "hvac_thermostat_efficiency"
+    )
+    assert result.alerts[0].features["reference_episode_count"] == 9
+    assert result.alerts[0].features["recent_episode_count"] == 3
+    assert result.alerts[0].features["thermostat_entity_id"] == thermostat
+    assert result.alerts[0].features["outdoor_temperature_f"] == 92.0
+    evidence = _state_update_values(result, "hvac_efficiency_by_circuit")[
+        "heat_pump"
+    ]
+    assert evidence["finding"] == (
+        "slower" if feature.endswith("slower") else "faster"
+    )
+    assert evidence["score"] == pytest.approx(
+        80.0 if feature.endswith("slower") else 133.33333333333334
+    )
+    assert result.repairs == []
+    context.state.active_alerts_by_circuit = {"heat_pump": result.alerts}
+    duplicate = processor.process([(heat_pump, SimpleNamespace())], context)
+    assert duplicate.alerts == duplicate.notifications == []
+    assert duplicate.preserved_alerts == result.alerts
+
+
+def test_hvac_response_requires_maturity_and_never_scores_cooling_blower() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    blower = _hvac_config("blower", ApplianceProfile.HVAC_BLOWER)
+    context = _hvac_context(
+        configs=(blower,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "blower": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"blower|{thermostat}|cooling"
+    policy = ConservativeAlertPolicy(
+        min_repeated=1,
+        min_total_score=1.5,
+        min_average_score=1.5,
+        min_baseline_confidence=0.0,
+    )
+    processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy
+    )
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(stream_id, count=11)
+    )
+
+    immature = processor.process([(blower, SimpleNamespace())], context)
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(stream_id)
+    )
+    mature = processor.process([(blower, SimpleNamespace())], context)
+
+    assert immature.alerts == immature.notifications == []
+    assert mature.alerts == mature.notifications == []
+
+
+def test_hvac_response_evaluation_uses_only_current_baseline_era() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(stream_id)
+    )
+    context.store_data.hvac_baseline_era_by_stream[stream_id] = "era-2"
+    processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(
+            min_repeated=1,
+            min_total_score=1.5,
+            min_average_score=1.5,
+            min_baseline_confidence=0.0,
+        )
+    )
+
+    result = processor.process([(heat_pump, SimpleNamespace())], context)
+    evidence = _state_update_values(result, "hvac_efficiency_by_circuit")[
+        "heat_pump"
+    ]
+
+    assert result.alerts == result.notifications == []
+    assert evidence["finding"] is None
+    assert evidence["streams"][stream_id]["status"] == "no_data"
+
+
+@pytest.mark.parametrize(
+    ("observation", "reason_fragment"),
+    [
+        (
+            ThermostatObservation(
+                "climate.downstairs",
+                None,
+                None,
+                None,
+                None,
+                None,
+                (),
+            ),
+            "unavailable",
+        ),
+        (
+            ThermostatObservation(
+                "climate.downstairs",
+                None,
+                72.0,
+                None,
+                "cool",
+                "idle",
+                ("current_temperature",),
+            ),
+            "setpoint",
+        ),
+        (
+            ThermostatObservation(
+                "climate.downstairs",
+                None,
+                None,
+                72.0,
+                "cool",
+                "idle",
+                ("temperature",),
+            ),
+            "current temperature",
+        ),
+        (
+            ThermostatObservation(
+                "climate.downstairs",
+                "sensor.downstairs_temperature",
+                72.0,
+                72.0,
+                "cool",
+                "idle",
+                ("current_temperature", "temperature"),
+            ),
+            "override",
+        ),
+    ],
+)
+def test_hvac_selected_unusable_thermostat_reports_setup_issue(
+    observation: ThermostatObservation,
+    reason_fragment: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    heat_pump = replace(
+        _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP),
+        name="Downstairs Heat Pump",
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=observation,
+        advanced_settings={
+            "heat_pump": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: [
+                    observation.thermostat_entity_id
+                ]
+            }
+        },
+        running_circuit_ids=set(),
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+    issues = _state_update_values(
+        result,
+        "hvac_thermostat_setup_issues_by_circuit",
+    )["heat_pump"]
+
+    assert issues[0]["issue_kind"] == "missing_required_sensor"
+    assert issues[0]["circuit_name"] == "Downstairs Heat Pump"
+    assert "Downstairs Heat Pump" in issues[0]["reason"]
+    assert reason_fragment in issues[0]["reason"].lower()
+
+
+def test_hvac_multiple_thermostats_require_explicit_circuit_mapping() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    heat_pump = replace(
+        _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP),
+        name="Downstairs Heat Pump",
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            "climate.downstairs",
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature"),
+        ),
+        advanced_settings={"heat_pump": {}},
+        running_circuit_ids=set(),
+    )
+    context = replace(
+        context,
+        entry_data={
+            CONF_THERMOSTAT_ENTITIES: [
+                "climate.downstairs",
+                "climate.upstairs",
+            ]
+        },
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+    issue = _state_update_values(
+        result,
+        "hvac_thermostat_setup_issues_by_circuit",
+    )["heat_pump"][0]
+
+    assert issue["issue_kind"] == "missing_required_sensor"
+    assert issue["circuit_name"] == "Downstairs Heat Pump"
+    assert "choose a thermostat" in issue["reason"].lower()
 
 
 class _CaptureAlertPolicy:

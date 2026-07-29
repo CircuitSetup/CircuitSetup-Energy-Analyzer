@@ -332,3 +332,21 @@ def test_efficiency_returns_bounded_score_and_learning_status() -> None:
         threshold_pct=25.0,
     )
     assert ready.score == 200.0
+
+
+def test_persistent_response_change_does_not_age_into_reference_baseline() -> None:
+    evaluation = evaluate_efficiency(
+        [
+            *[_completed_episode(index, minutes_per_degree=10.0) for index in range(9)],
+            *[
+                _completed_episode(index, minutes_per_degree=12.5)
+                for index in range(9, 21)
+            ],
+        ],
+        threshold_pct=25.0,
+    )
+
+    assert evaluation.reference_count == 9
+    assert evaluation.baseline_minutes_per_degree == pytest.approx(10.0)
+    assert evaluation.recent_minutes_per_degree == pytest.approx(12.5)
+    assert evaluation.finding == "slower"

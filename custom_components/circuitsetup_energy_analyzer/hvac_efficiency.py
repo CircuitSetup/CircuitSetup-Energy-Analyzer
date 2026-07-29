@@ -197,8 +197,18 @@ def evaluate_efficiency(
             recent_count=min(len(comparable), _RECENT_EPISODE_COUNT),
         )
 
+    reference = comparable[:_REFERENCE_EPISODE_COUNT]
     recent = comparable[-_RECENT_EPISODE_COUNT:]
-    reference = comparable[:-_RECENT_EPISODE_COUNT]
+    context.update(
+        {
+            "reference_episode_ids": [
+                _episode_identifier(item[0]) for item in reference
+            ],
+            "recent_episode_ids": [
+                _episode_identifier(item[0]) for item in recent
+            ],
+        }
+    )
     baseline_metric = median(item[1] for item in reference)
     recent_metric = median(item[1] for item in recent)
     change_ratio = recent_metric / baseline_metric - 1.0
@@ -444,7 +454,12 @@ def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
         "weather_mode": episode.weather_mode,
         "gap_bin": episode.gap_bin,
         "participant_signature": list(episode.participant_signature),
+        "outdoor_temperature_f": episode.outdoor_temperature_f,
     }
+
+
+def _episode_identifier(episode: HvacResponseEpisode) -> str:
+    return episode.started_at.isoformat()
 
 
 def _empty_evaluation(

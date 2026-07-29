@@ -275,7 +275,11 @@ def initialize_runtime(
             self.store_data.solar_flow_settings_by_circuit.get(circuit_id, {})
         ),
     )
-    self._hvac_efficiency_processor = HvacEfficiencyProcessor()
+    self._hvac_efficiency_processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=(
+            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
+        )
+    )
     self.pipeline.configure_processors(
         event_processor=self._event_processor,
         power_quality_processor=self._power_quality_processor,

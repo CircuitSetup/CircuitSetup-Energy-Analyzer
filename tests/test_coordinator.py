@@ -9321,6 +9321,123 @@ async def test_runtime_missing_electrical_metrics_does_not_create_repair(
 
 
 @pytest.mark.asyncio
+async def test_runtime_hvac_thermostat_and_slow_response_create_repairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        del hass, severity
+        issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
+
+    monkeypatch.setattr(repairs, "async_create_circuit_issue", fake_issue)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "mode": "dual_phase",
+                    "appliance_profile": "heat_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.heat_pump_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+    coordinator.state.hvac_thermostat_setup_issues_by_circuit["heat_pump"] = [
+        {
+            "issue_kind": "missing_required_sensor",
+            "circuit_name": "Downstairs Heat Pump",
+            "reason": (
+                "Downstairs Heat Pump cannot use climate.downstairs because "
+                "it is unavailable."
+            ),
+            "source_entities": ["climate.downstairs"],
+        }
+    ]
+    coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
+        "finding": "slower",
+        "score": 80.0,
+    }
+    coordinator.state.learning_by_circuit["heat_pump"] = False
+
+    await coordinator._sync_setup_health_repairs("heat_pump")
+
+    assert {problem for _, problem, _ in issues} == {
+        "hvac_thermostat_source",
+        "hvac_response_slower",
+    }
+    thermostat_data = next(
+        data for _, problem, data in issues if problem == "hvac_thermostat_source"
+    )
+    assert thermostat_data["circuit_name"] == "Downstairs Heat Pump"
+    assert thermostat_data["issue_kind"] == "missing_required_sensor"
+    assert "Downstairs Heat Pump" in thermostat_data["reason"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_faster_hvac_response_creates_no_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(hass, circuit_id, problem, **kwargs) -> None:
+        del hass, kwargs
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(repairs, "async_create_circuit_issue", fake_issue)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "mode": "dual_phase",
+                    "appliance_profile": "heat_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.heat_pump_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+    coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
+        "finding": "faster",
+        "score": 133.3,
+    }
+
+    await coordinator._sync_setup_health_repairs("heat_pump")
+
+    assert ("heat_pump", "hvac_response_slower") not in issues
+
+
+@pytest.mark.asyncio
 async def test_runtime_ct_direction_setup_health_issue_creates_repair(
     monkeypatch,
 ) -> None:

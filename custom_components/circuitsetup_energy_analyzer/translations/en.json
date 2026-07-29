@@ -781,6 +781,14 @@
       "title": "Energy Analyzer water-flow context needs a flow source",
       "description": "Water-flow correlation is enabled for {circuit_name}, but no linked or global water-flow source is configured. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
+    "hvac_thermostat_source": {
+      "title": "Energy Analyzer thermostat source needs attention for {circuit_name}",
+      "description": "{reason} Next step: {recommended_action}. Suggested fix: {fix}"
+    },
+    "hvac_response_slower": {
+      "title": "Energy Analyzer found slower HVAC response for {circuit_name}",
+      "description": "{reason} This is an inspection prompt, not a component diagnosis or safety control. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
     "utility_comparison_source_mismatch": {
       "title": "Energy Analyzer utility comparison needs source settings",
       "description": "Utility comparison is enabled for {circuit_name}, but the utility source, measured kWh source, or recorder period cannot be compared. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
@@ -884,6 +892,7 @@
           "current": "A",
           "starts": "starts",
           "starts_per_hour": "starts/h",
+          "minutes_per_degree": "min/\u00b0F",
           "seconds": "s"
         },
         "value_metrics": {
@@ -909,6 +918,7 @@
           "average_cycle_duration": "Average cycle duration",
           "starts_per_runtime_hour": "Starts per runtime hour",
           "session_duration_seconds": "Session duration",
+          "minutes_per_degree": "Thermostat response time",
           "nilm_appliance_unusual_energy": "NILM appliance unusual energy",
           "nilm_appliance_confidence": "NILM confidence",
           "nilm_appliance_unusual_runtime": "NILM appliance unusual runtime",
