@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from ..alerting import Observation
@@ -15,6 +16,7 @@ from ..appliance_health import (
 )
 from ..contextual_baseline import stored_contextual_samples
 from ..models import (
+    AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
@@ -51,9 +53,13 @@ class ApplianceHealthProcessor:
         self,
         *,
         alert_policy_for_circuit: HealthAlertPolicyProvider,
+        short_cycle_alert_policy_for_circuit: HealthAlertPolicyProvider | None = None,
         merge_gap_seconds_for_config: MergeGapProvider,
     ) -> None:
         self._alert_policy_for_circuit = alert_policy_for_circuit
+        self._short_cycle_alert_policy_for_circuit = (
+            short_cycle_alert_policy_for_circuit or alert_policy_for_circuit
+        )
         self._merge_gap_seconds_for_config = merge_gap_seconds_for_config
 
     def process(
@@ -108,7 +114,7 @@ class ApplianceHealthProcessor:
             days=days,
             sessions=sessions,
         )
-        evidence = _evaluation_evidence(evaluation, days, sessions)
+        evidence = _evaluation_evidence(evaluation)
         result = FeatureResult(
             state_updates=_state_updates(
                 circuit_id,
@@ -136,10 +142,25 @@ class ApplianceHealthProcessor:
             features=_finding_features(finding),
         )
         result.observations.append(observation)
-        alert = self._alert_policy_for_circuit(circuit_id).observe(observation)
-        if alert is not None:
-            result.alerts.append(alert)
-            result.notifications.append(alert)
+        policy_provider = (
+            self._short_cycle_alert_policy_for_circuit
+            if finding.feature == "repeated_short_cycle"
+            else self._alert_policy_for_circuit
+        )
+        alert = policy_provider(circuit_id).observe(observation)
+        if alert is None:
+            active_alert = _matching_active_health_alert(
+                context.state,
+                circuit_id,
+                finding,
+            )
+            if active_alert is not None:
+                result.alerts.append(active_alert)
+            return result
+        if finding.feature == "repeated_short_cycle":
+            alert = replace(alert, repeated_count=finding.recent_count)
+        result.alerts.append(alert)
+        result.notifications.append(alert)
         return result
 
 
@@ -174,8 +195,6 @@ def _state_updates(
 
 def _evaluation_evidence(
     evaluation: ApplianceHealthEvaluation,
-    days: tuple[Any, ...],
-    sessions: tuple[Any, ...],
 ) -> dict[str, Any]:
     evidence: dict[str, Any] = {
         "status": evaluation.status,
@@ -186,11 +205,6 @@ def _evaluation_evidence(
     if finding is None:
         return evidence
 
-    last_evidence = (
-        days[-1].date.isoformat()
-        if finding.feature == "efficiency_degradation" and days
-        else sessions[-1].stopped_at
-    )
     evidence.update(
         {
             "feature": finding.feature,
@@ -202,7 +216,7 @@ def _evaluation_evidence(
             "reference_count": finding.reference_count,
             "recent_count": finding.recent_count,
             "context": dict(finding.context),
-            "last_eligible_date_or_session": last_evidence,
+            "last_eligible_date_or_session": finding.last_evidence_at,
         }
     )
     return evidence
@@ -219,10 +233,25 @@ def _finding_features(finding: ApplianceHealthFinding) -> dict[str, Any]:
         "recent_value": finding.recent_median,
         "change_percent": round(finding.change_ratio * 100.0, 1),
         "confidence": round(finding.confidence, 3),
+        "health_evidence_key": finding.last_evidence_at,
         f"reference_{count_scope}_count": finding.reference_count,
         f"recent_{count_scope}_count": finding.recent_count,
         **dict(finding.context),
     }
+
+
+def _matching_active_health_alert(
+    state: Any,
+    circuit_id: str,
+    finding: ApplianceHealthFinding,
+) -> AlertEvidence | None:
+    for alert in getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ()):
+        if (
+            alert.feature == finding.feature
+            and alert.features.get("health_evidence_key") == finding.last_evidence_at
+        ):
+            return alert
+    return None
 
 
 def _finding_message(finding: ApplianceHealthFinding) -> str:

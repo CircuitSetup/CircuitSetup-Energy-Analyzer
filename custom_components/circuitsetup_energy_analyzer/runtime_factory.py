@@ -176,6 +176,9 @@ def initialize_runtime(
     )
     self._appliance_health_processor = ApplianceHealthProcessor(
         alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
+        short_cycle_alert_policy_for_circuit=(
+            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
+        ),
         merge_gap_seconds_for_config=lambda config: (
             resolve_operating_detection_from_settings(
                 config,

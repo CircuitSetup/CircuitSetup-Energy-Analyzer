@@ -77,6 +77,7 @@ def test_sustained_energy_per_runtime_degradation_requires_three_days() -> None:
     assert result.primary_finding.reference_median == 1.0
     assert result.primary_finding.recent_median == 1.5
     assert result.primary_finding.change_ratio == 0.5
+    assert result.primary_finding.last_evidence_at == "2026-07-17"
     assert result.primary_finding.context == {
         "temperature_bin": "hot",
         "weather_mode": "cooling",
@@ -229,6 +230,9 @@ def test_three_repeated_short_sessions_create_health_finding() -> None:
     assert result.primary_finding.feature == "repeated_short_cycle"
     assert result.primary_finding.reference_median == 720.0
     assert result.primary_finding.recent_median == 120.0
+    assert result.primary_finding.last_evidence_at == (
+        "2026-07-12T10:12:00+00:00"
+    )
 
 
 def test_two_recent_short_sessions_are_insufficient() -> None:

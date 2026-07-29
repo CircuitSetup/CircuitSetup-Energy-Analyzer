@@ -84,6 +84,7 @@ class ApplianceHealthFinding:
     reference_count: int
     recent_count: int
     confidence: float
+    last_evidence_at: str
     context: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -172,6 +173,7 @@ def evaluate_appliance_health(
                         reference_required=REFERENCE_DAY_COUNT,
                         recent_required=RECENT_DAY_COUNT,
                     ),
+                    last_evidence_at=recent[-1][0].date.isoformat(),
                     context=context,
                 )
             )
@@ -414,6 +416,7 @@ def _evaluate_short_sessions(
                 reference_required=REFERENCE_SESSION_COUNT,
                 recent_required=RECENT_SESSION_COUNT,
             ),
+            last_evidence_at=recent[-1].stopped_at,
         ),
         True,
     )

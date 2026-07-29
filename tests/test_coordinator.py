@@ -214,6 +214,11 @@ async def test_relearn_clears_appliance_health_state_and_policy() -> None:
     old_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
         "fridge"
     )
+    old_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
     old_policy.observe(
         Observation(
             circuit_id="fridge",
@@ -229,7 +234,13 @@ async def test_relearn_clears_appliance_health_state_and_policy() -> None:
     new_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
         "fridge"
     )
+    new_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
     assert new_policy is not old_policy
+    assert new_short_cycle_policy is not old_short_cycle_policy
     assert coordinator.state.appliance_health_status_by_circuit == {}
     assert coordinator.state.appliance_health_evidence_by_circuit == {}
 

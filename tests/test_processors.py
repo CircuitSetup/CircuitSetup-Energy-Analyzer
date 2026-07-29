@@ -6081,6 +6081,12 @@ def test_appliance_health_processor_requires_distinct_completed_dates() -> None:
     assert alert.features["recent_day_count"] == 3
     assert third.notifications == third.alerts
 
+    context.state.active_alerts_by_circuit["fridge"] = third.alerts
+    unchanged = processor.process(_energy_sample(120.5), config, context)
+
+    assert unchanged.alerts == third.alerts
+    assert unchanged.notifications == []
+
 
 def test_appliance_health_processor_deduplicates_same_completed_date() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
@@ -6113,6 +6119,104 @@ def test_appliance_health_processor_deduplicates_same_completed_date() -> None:
         for result in results
         if result.observations
     } == {"efficiency_degradation:2026-07-17"}
+
+
+def test_appliance_health_observation_key_ignores_noncontributing_days() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(17)
+    idle_days = [
+        {
+            "date": f"2026-07-{day:02d}",
+            "usage_kwh": 0.0,
+            "complete": True,
+            "baseline_eligible": True,
+        }
+        for day in (18, 19)
+    ]
+    context = _appliance_health_context(days=days, events=events, learning=False)
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    first = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days + idle_days[:1]
+    second = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days + idle_days
+    third = processor.process(_energy_sample(120.5), config, context)
+
+    observation_keys = [
+        result.observations[0].observation_key
+        for result in (first, second, third)
+    ]
+    assert observation_keys == [
+        "efficiency_degradation:2026-07-17",
+        "efficiency_degradation:2026-07-17",
+        "efficiency_degradation:2026-07-17",
+    ]
+    assert first.alerts == second.alerts == third.alerts == []
+
+
+def test_repeated_short_cycles_use_already_repeated_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    events: list[CircuitEvent] = []
+    for day in range(1, 13):
+        started_at = datetime(2026, 7, day, 10, 0, tzinfo=UTC)
+        duration = timedelta(minutes=12 if day <= 9 else 2)
+        events.extend(
+            (
+                CircuitEvent(started_at, "fridge", EventType.START),
+                CircuitEvent(started_at + duration, "fridge", EventType.STOP),
+            )
+        )
+    context = _appliance_health_context(days=[], events=events, learning=False)
+    short_cycle_policy = ConservativeAlertPolicy(
+        min_repeated=1,
+        min_total_score=1.5,
+        min_average_score=1.5,
+    )
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        short_cycle_alert_policy_for_circuit=lambda _circuit_id: short_cycle_policy,
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert [alert.feature for alert in result.alerts] == ["repeated_short_cycle"]
+    assert result.alerts[0].repeated_count == 3
+    assert result.alerts[0].features["reference_session_count"] == 9
+    assert result.alerts[0].features["recent_session_count"] == 3
+
+    context.state.active_alerts_by_circuit["fridge"] = result.alerts
+    unchanged = processor.process(_energy_sample(120.5), config, context)
+
+    assert unchanged.alerts == result.alerts
+    assert unchanged.notifications == []
 
 
 @pytest.mark.asyncio

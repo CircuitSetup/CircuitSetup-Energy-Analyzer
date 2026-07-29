@@ -116,6 +116,10 @@ class SettingsController:
             ConservativeAlertPolicy,
         ] = {}
         self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
+        self._appliance_health_short_cycle_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
         self._activity_alert_policies: dict[
             tuple[str, str],
             ConservativeAlertPolicy,
@@ -711,6 +715,23 @@ class SettingsController:
             min_average_score=1.5,
         )
 
+    def appliance_health_short_cycle_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the policy for findings that already contain three short runs."""
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        return self._cached_alert_policy(
+            self._appliance_health_short_cycle_alert_policies,
+            (circuit_id, policy_name),
+            lambda: ConservativeAlertPolicy(
+                min_repeated=1,
+                min_total_score=1.5,
+                min_average_score=1.5,
+                min_baseline_confidence=MIN_CYCLE_BASELINE_CONFIDENCE,
+            ),
+        )
+
     def activity_alert_policy_for_circuit(
         self,
         circuit_id: str,
@@ -756,9 +777,13 @@ class SettingsController:
 
     def clear_cycle_alert_policies(self, circuit_id: str) -> None:
         """Clear cached cycle and appliance-health policy evidence."""
-        for key in list(self._cycle_alert_policies):
-            if key[0] == circuit_id:
-                self._cycle_alert_policies.pop(key, None)
+        for policies in (
+            self._cycle_alert_policies,
+            self._appliance_health_short_cycle_alert_policies,
+        ):
+            for key in list(policies):
+                if key[0] == circuit_id:
+                    policies.pop(key, None)
 
     def _alert_policy_name_for_circuit(self, circuit_id: str) -> str:
         return alert_policy_name_for_sensitivity(

@@ -173,6 +173,16 @@ class AlertPolicyManager:
             )
         )
 
+    def appliance_health_short_cycle_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> FeedbackAwareAlertPolicy:
+        return self.feedback_aware_alert_policy(
+            self._coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+                circuit_id
+            )
+        )
+
     def activity_alert_policy_for_circuit(
         self,
         circuit_id: str,
