@@ -18,6 +18,7 @@ NOTIFICATION_CATEGORIES = (
     "electrical_issue",
     "capacity_demand_issue",
     "data_quality_issue",
+    "appliance_health_issue",
     "nilm_review_needed",
     "other_issue",
 )
@@ -29,6 +30,8 @@ _NOTIFICATION_CATEGORY_BY_FEATURE = {
     "billing_cycle_budget": "high_daily_energy",
     "daily_energy_spike": "high_daily_energy",
     "utility_energy_mismatch": "data_quality_issue",
+    "efficiency_degradation": "appliance_health_issue",
+    "repeated_short_cycle": "appliance_health_issue",
 }
 
 
@@ -42,6 +45,7 @@ class ApplianceNotificationPreferences:
     electrical_issue: bool = True
     capacity_demand_issue: bool = True
     data_quality_issue: bool = True
+    appliance_health_issue: bool = True
     nilm_review_needed: bool = True
     other_issue: bool = True
     delivery_mode: str = "immediate"

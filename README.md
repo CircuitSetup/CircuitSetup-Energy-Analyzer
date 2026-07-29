@@ -525,6 +525,7 @@ Suggested settings remember apply, deny, and dismiss decisions. Denying a sugges
 | **Energy usage spikes** | Compares today's kWh with a learned rolling window and reports repeated high-usage evidence. | Cumulative energy sensor. |
 | **Daily energy goals** | Lets you set a per-circuit daily kWh goal and receive repeated goal notices. | Cumulative energy sensor. |
 | **Run-cycle diagnostics** | Tracks start count, runtime, duty cycle, and running state for appliance-style circuits. | Real-power data and enough cycles. |
+| **Predictive appliance health** | Compares sustained efficiency and cycle changes with comparable learned appliance behavior. | Direct-meter energy/runtime evidence or completed run cycles. |
 | **HVAC weather context** | Compares HVAC runtime with similar outdoor temperatures before treating runtime as unusual. | HVAC-like circuit plus outdoor temperature sensor. |
 | **Rain and pump correlation** | Compares pump runtime with rain, optional rain intensity, and HVAC compressor activity before flagging unusual pump behavior. | Sump pump, water pump, or well pump plus rain sensor. |
 | **Water-flow correlation** | Compares binary or numeric water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
@@ -584,6 +585,26 @@ For appliance-style circuits, the analyzer tracks today's:
 - Current running state
 
 This is useful for refrigerators, freezers, pumps, HVAC, washers, dryers, and other loads where cycling behavior matters.
+
+### Predictive appliance health
+
+For directly metered appliance circuits, the analyzer can flag a sustained rise
+in energy per runtime hour, energy per completed cycle, average cycle duration,
+or starts per runtime hour. It compares three recent complete eligible days
+with up to fourteen prior comparable days, so the first efficiency comparison
+needs at least seventeen days. It can also flag three repeatedly short recent
+sessions after at least nine learned completed sessions.
+
+Maintenance-affected evidence is excluded. HVAC and heating comparisons require
+matching available season, weather mode, and temperature-bin context. Pumps and
+water-using appliances also require matching water-flow context when it is
+available. If comparable context is missing, the health result remains
+**Learning** instead of substituting unrelated history.
+
+Health findings use the normal feedback, cooldown, delivery, and per-appliance
+notification preferences under `appliance_health_issue`. Notifications include
+recent and reference values, confidence, and an evidence link. They are
+inspection prompts, not component diagnoses or safety controls.
 
 ### HVAC weather context
 

@@ -235,5 +235,6 @@ def _finding_message(finding: ApplianceHealthFinding) -> str:
         f"Possible issue: {_METRIC_LABELS[finding.metric]} has remained "
         f"{percent}% {direction} this appliance's comparable learned range "
         f"across {finding.recent_count} recent {recent_scope}. Check operating "
-        "conditions and service needs; this is not a component diagnosis."
+        "conditions and service needs; this is an inspection prompt, not a "
+        "component diagnosis or safety control."
     )

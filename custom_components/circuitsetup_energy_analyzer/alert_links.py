@@ -14,6 +14,14 @@ MAX_GRAPH_CONTEXT_PADDING = timedelta(hours=24)
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
+        ("efficiency_degradation",),
+        (SensorRole.ENERGY, SensorRole.REAL_POWER),
+    ),
+    (
+        ("repeated_short_cycle",),
+        (SensorRole.REAL_POWER,),
+    ),
+    (
         ("relationship",),
         (
             SensorRole.REACTIVE_POWER,

@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
+from time import perf_counter
 
 from custom_components.circuitsetup_energy_analyzer.appliance_health import (
     ApplianceHealthDay,
@@ -462,3 +463,44 @@ def test_health_builders_fall_back_to_utc_for_unknown_time_zone() -> None:
     )
 
     assert result[0].date == date(2026, 7, 1)
+
+
+def test_health_evaluation_stays_bounded_at_standard_retention() -> None:
+    first_day = date(2026, 6, 1)
+    days = tuple(
+        ApplianceHealthDay(
+            date=first_day + timedelta(days=index),
+            energy_kwh=2.0 if index < 42 else 3.0,
+            runtime_seconds=7200.0,
+            completed_cycles=4,
+            start_count=4,
+            context={
+                "season": "summer",
+                "weather_mode": "cooling",
+                "temperature_bin": "hot",
+            },
+        )
+        for index in range(45)
+    )
+    first_session = datetime(2026, 6, 1, tzinfo=UTC)
+    sessions = tuple(
+        ApplianceHealthSession(
+            started_at=(first_session + timedelta(minutes=index * 15)).isoformat(),
+            stopped_at=(
+                first_session + timedelta(minutes=index * 15 + 12)
+            ).isoformat(),
+            duration_seconds=720.0 if index < 1997 else 120.0,
+            gap_after_seconds=180.0,
+        )
+        for index in range(2000)
+    )
+
+    started = perf_counter()
+    for _ in range(100):
+        evaluate_appliance_health(
+            ApplianceProfile.HVAC,
+            days=days,
+            sessions=sessions,
+        )
+
+    assert perf_counter() - started < 1.0

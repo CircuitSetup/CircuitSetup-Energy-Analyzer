@@ -24,6 +24,7 @@ def test_default_preferences_use_safe_defaults_and_category_choices() -> None:
     assert preferences.finished_running is False
     assert preferences.lifecycle_update is False
     assert preferences.electrical_issue is True
+    assert preferences.appliance_health_issue is True
     assert preferences.data_quality_issue is True
     assert preferences.other_issue is True
     assert "other_issue" in preferences.as_dict()
@@ -159,6 +160,8 @@ def test_nilm_alert_categories_remain_independent() -> None:
         ("activity_left_on", "unusual_runtime"),
         ("activity_inactive_too_long", "unusual_runtime"),
         ("run_cycle_duration_s", "unusual_runtime"),
+        ("efficiency_degradation", "appliance_health_issue"),
+        ("repeated_short_cycle", "appliance_health_issue"),
         ("breaker_capacity", "capacity_demand_issue"),
         ("future_feature", "other_issue"),
     ],

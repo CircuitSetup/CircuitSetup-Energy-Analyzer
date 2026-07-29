@@ -39,12 +39,12 @@ _FLOW_AWARE_PROFILES = {
     ApplianceProfile.DISHWASHER,
 }
 _WEATHER_CONTEXT_KEYS = ("season", "weather_mode", "temperature_bin")
-_DAY_METRICS = (
-    "energy_per_runtime_hour",
-    "energy_per_completed_cycle",
-    "average_cycle_duration",
-    "starts_per_runtime_hour",
-)
+_DAY_METRIC_DIRECTIONS = {
+    "energy_per_runtime_hour": 1.0,
+    "energy_per_completed_cycle": 1.0,
+    "average_cycle_duration": 1.0,
+    "starts_per_runtime_hour": 1.0,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,7 +116,7 @@ def evaluate_appliance_health(
     context_blocked = False
     ordered_days = sorted(days, key=lambda item: item.date)
 
-    for metric in _DAY_METRICS:
+    for metric, adverse_direction in _DAY_METRIC_DIRECTIONS.items():
         metric_days = [
             (day, value)
             for day in ordered_days
@@ -151,8 +151,11 @@ def evaluate_appliance_health(
         recent_median = float(median(recent_values))
         change_ratio = (recent_median - reference_median) / reference_median
         if (
-            all(value > reference_median for value in recent_values)
-            and change_ratio >= DEGRADATION_CHANGE_RATIO
+            all(
+                (value - reference_median) * adverse_direction > 0.0
+                for value in recent_values
+            )
+            and change_ratio * adverse_direction >= DEGRADATION_CHANGE_RATIO
         ):
             findings.append(
                 ApplianceHealthFinding(
