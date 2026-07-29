@@ -230,6 +230,7 @@ def appliance_detail_for_circuit(
         next_step=str(health_attrs.get("next_step") or "") or None,
         what_to_check_first=first_checks,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
+        appliance_health=health_attrs["appliance_health_evidence"] or None,
         source_quality=_direct_source_quality(config, state),
         learning_readiness=_learning_readiness(state, config.circuit_id, config),
         assignment_id=(

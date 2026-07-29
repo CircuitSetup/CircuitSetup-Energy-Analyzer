@@ -201,6 +201,16 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     else:
         learning_days_complete = learning_days_required = 0
     learning_days_complete = min(learning_days_complete, learning_days_required)
+    raw_appliance_health = getattr(
+        state,
+        "appliance_health_evidence_by_circuit",
+        {},
+    ).get(circuit_id, {})
+    appliance_health_evidence = (
+        dict(raw_appliance_health)
+        if isinstance(raw_appliance_health, Mapping)
+        else {}
+    )
     return {
         "raw_status": _health_summary_raw_status(summary, readiness),
         "status_label": summary,
@@ -215,6 +225,13 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "maintenance_active": maintenance_active,
         "active_alert_count": active_alert_count,
         "evidence_path": _circuit_evidence_path(circuit_id),
+        "appliance_health_status": str(
+            getattr(state, "appliance_health_status_by_circuit", {}).get(
+                circuit_id,
+                "learning",
+            )
+        ),
+        "appliance_health_evidence": appliance_health_evidence,
         "electrical_summary": electrical["summary"],
         "metric_consistency_status": electrical["metric_consistency_status"],
         "metric_consistency_score": electrical["metric_consistency_score"],

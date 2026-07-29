@@ -237,6 +237,42 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     assert "Confidence: 82%." not in direct_message
 
 
+def test_alert_notification_message_explains_appliance_health_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+    from custom_components.circuitsetup_energy_analyzer.safety import (
+        ELECTRICAL_SAFETY_NOTICE,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 28, 12, 30, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue: energy per runtime hour has remained elevated.",
+        feature="efficiency_degradation",
+        value_metric="energy_per_runtime_hour",
+        observed_value=0.52,
+        baseline_value=0.4,
+        repeated_count=3,
+        features={
+            "notification_type": "appliance_health_issue",
+            "confidence": 0.88,
+        },
+    )
+
+    message = alert_notification_message(alert)
+
+    assert "Confidence: 88%." in message
+    assert "Recent value (Energy per runtime hour): 0.52 kWh/h" in message
+    assert "Reference value (Energy per runtime hour): 0.4 kWh/h" in message
+    assert (
+        "This is an inspection prompt, not a component diagnosis or safety control."
+        in message
+    )
+    assert ELECTRICAL_SAFETY_NOTICE not in message
+
+
 def test_power_quality_notification_labels_values_and_limits_interpretation() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,

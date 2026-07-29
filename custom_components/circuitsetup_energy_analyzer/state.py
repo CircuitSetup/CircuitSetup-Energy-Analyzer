@@ -109,6 +109,10 @@ class AnalyzerState:
     run_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    appliance_health_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    appliance_health_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
     billing_cycle_forecast_kwh_by_circuit: dict[str, float] = field(
         default_factory=dict

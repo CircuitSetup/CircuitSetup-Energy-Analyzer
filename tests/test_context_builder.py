@@ -115,6 +115,36 @@ def test_context_builder_normalizes_temperature_readings() -> None:
     }
 
 
+def test_context_builder_reads_weather_rain_temperature_and_humidity() -> None:
+    builder = _builder(
+        states={
+            "weather.home": SimpleNamespace(
+                state="rainy",
+                attributes={
+                    "temperature": 82,
+                    "temperature_unit": "°F",
+                    "humidity": 84,
+                    "precipitation": 0.2,
+                    "precipitation_unit": "in/h",
+                },
+            ),
+        },
+    )
+
+    assert builder.binary_entity_active("weather.home") is True
+    assert builder.temperature_reading_for_entity("weather.home") == {
+        "temperature_f": 82.0,
+        "display_temperature": 82.0,
+        "display_unit": "°F",
+        "source_unit": "°F",
+    }
+    assert builder.humidity_percent_for_entity("weather.home") == 84.0
+    assert builder.precipitation_reading_for_entity("weather.home") == {
+        "value": 0.2,
+        "unit": "in/h",
+    }
+
+
 def test_context_builder_reuses_contextual_samples_cache() -> None:
     now = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
     coordinator = SimpleNamespace(

@@ -39,8 +39,10 @@ from .managers.store_persistence import StorePersistenceManager
 from .managers.utility_energy_sources import UtilityEnergySourceManager
 from .managers.ux_state import UxStateManager
 from .nilm import NilmEdge, NilmEdgeDetector
+from .operating_detection import resolve_operating_detection_from_settings
 from .processors import (
     ActivityAlertProcessor,
+    ApplianceHealthProcessor,
     BillingCycleProcessor,
     CapacityProcessor,
     CircuitEventProcessor,
@@ -172,6 +174,21 @@ def initialize_runtime(
         alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
         learning_mature=self.processor_runtime.learning_mature,
     )
+    self._appliance_health_processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=self.alert_policies.cycle_alert_policy_for_circuit,
+        short_cycle_alert_policy_for_circuit=(
+            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
+        ),
+        merge_gap_seconds_for_config=lambda config: (
+            resolve_operating_detection_from_settings(
+                config,
+                self.store_data.operating_detection_settings_by_circuit.get(
+                    config.circuit_id,
+                    {},
+                ),
+            ).profile.merge_gap_seconds
+        ),
+    )
     self._activity_alert_processor = ActivityAlertProcessor(
         settings_for_config=(
             self.processor_runtime.activity_alert_settings_for_config
@@ -263,6 +280,7 @@ def initialize_runtime(
         energy_usage_processor=self._energy_usage_processor,
         energy_goal_processor=self._energy_goal_processor,
         run_cycle_processor=self._run_cycle_processor,
+        appliance_health_processor=self._appliance_health_processor,
         activity_alert_processor=self._activity_alert_processor,
         billing_cycle_processor=self._billing_cycle_processor,
         cost_processor=self._cost_processor,

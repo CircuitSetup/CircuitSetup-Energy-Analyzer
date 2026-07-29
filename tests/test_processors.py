@@ -228,6 +228,7 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         energy_usage_processor=_Processor("usage"),
         energy_goal_processor=_Processor("goal"),
         run_cycle_processor=_Processor("cycle"),
+        appliance_health_processor=_Processor("appliance_health"),
         activity_alert_processor=_Processor("activity"),
         billing_cycle_processor=_Processor("billing"),
         cost_processor=_Processor("cost"),
@@ -266,6 +267,7 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         "usage",
         "goal",
         "cycle",
+        "appliance_health",
         "activity",
         "billing",
         "cost",
@@ -359,6 +361,7 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
         energy_usage_processor=_Processor(),
         energy_goal_processor=_Processor(),
         run_cycle_processor=_Processor(),
+        appliance_health_processor=_Processor(),
         activity_alert_processor=_Processor(),
         billing_cycle_processor=_Processor(),
         cost_processor=_Processor(),
@@ -5934,3 +5937,474 @@ def test_utility_comparison_does_not_overwrite_a_valid_rate_with_zero_cost() -> 
     assert ("utility_cost_rate_by_circuit", "mains") not in {
         update.path for update in updates
     }
+
+
+def _appliance_health_history(
+    day_count: int,
+) -> tuple[list[dict[str, object]], list[CircuitEvent]]:
+    days: list[dict[str, object]] = []
+    events: list[CircuitEvent] = []
+    for day in range(1, day_count + 1):
+        day_start = datetime(2026, 7, day, 0, 0, tzinfo=UTC)
+        days.append(
+            {
+                "date": day_start.date().isoformat(),
+                "usage_kwh": 2.0 if day <= 14 else 3.0,
+                "complete": True,
+                "baseline_eligible": True,
+            }
+        )
+        for cycle in range(4):
+            started_at = day_start + timedelta(hours=cycle * 4 + 1)
+            events.extend(
+                (
+                    CircuitEvent(
+                        started_at,
+                        "fridge",
+                        EventType.START,
+                        features={"baseline_eligible": True},
+                    ),
+                    CircuitEvent(
+                        started_at + timedelta(minutes=30),
+                        "fridge",
+                        EventType.STOP,
+                        features={"baseline_eligible": True},
+                    ),
+                )
+            )
+    return days, events
+
+
+def _appliance_health_context(
+    *,
+    days: list[dict[str, object]],
+    events: list[CircuitEvent],
+    learning: bool,
+) -> object:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    state = AnalyzerState()
+    state.learning_by_circuit["fridge"] = learning
+    return ProcessingContext(
+        now=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=state,
+        store_data=FeatureStoreData(
+            events=events,
+            energy_usage_by_circuit={"fridge": {"days": days}},
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+        time_zone="UTC",
+    )
+
+
+def test_appliance_health_processor_stays_learning_with_shared_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        StateUpdate,
+    )
+
+    days, events = _appliance_health_history(17)
+    context = _appliance_health_context(days=days, events=events, learning=True)
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.state_updates == [
+        StateUpdate(("appliance_health_status_by_circuit", "fridge"), "learning"),
+        StateUpdate(
+            ("appliance_health_evidence_by_circuit", "fridge"),
+            {"status": "learning", "reason": "shared_learning_active"},
+        ),
+    ]
+    assert result.alerts == []
+    assert result.notifications == []
+
+
+def test_appliance_health_relearn_ignores_prior_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(19)
+    context = _appliance_health_context(days=days, events=events, learning=False)
+    context.store_data.learning_started_at_by_circuit["fridge"] = (
+        "2026-07-18T00:00:00+00:00"
+    )
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.state_updates[0].value == "learning"
+    assert result.state_updates[1].value["reason"] == "insufficient_history"
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+
+
+def test_appliance_health_feedback_fingerprint_includes_comparison_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.appliance_health import (
+        ApplianceHealthFinding,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        appliance_health as appliance_health_processor,
+    )
+
+    def fingerprint(context: dict[str, str]) -> tuple[dict[str, object], str]:
+        finding = ApplianceHealthFinding(
+            feature="efficiency_degradation",
+            metric="energy_per_runtime_hour",
+            reference_median=1.0,
+            recent_median=1.5,
+            change_ratio=0.5,
+            reference_count=14,
+            recent_count=3,
+            confidence=1.0,
+            last_evidence_at="2026-07-17",
+            context=context,
+        )
+        features = appliance_health_processor._finding_features(finding)
+        alert = AlertEvidence(
+            timestamp=datetime(2026, 7, 20, tzinfo=UTC),
+            circuit_id="appliance",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature=finding.feature,
+            value_metric=finding.metric,
+            observed_value=finding.recent_median,
+            baseline_value=finding.reference_median,
+            change_ratio=finding.change_ratio,
+            features=features,
+        )
+        return features, alert_feedback_fingerprint(alert)
+
+    summer_features, summer = fingerprint(
+        {
+            "season": "summer",
+            "weather_mode": "cooling",
+            "temperature_bin": "hot",
+        }
+    )
+    _, winter = fingerprint(
+        {
+            "season": "winter",
+            "weather_mode": "heating",
+            "temperature_bin": "cold",
+        }
+    )
+    _, active_flow = fingerprint({"water_flow_state": "active_flow"})
+    _, no_flow = fingerprint({"water_flow_state": "no_flow"})
+
+    assert summer_features["comparison_basis"] == "contextual"
+    assert summer_features["baseline_fallback_level"] == "exact_context"
+    assert len({summer, winter, active_flow, no_flow}) == 4
+
+
+def test_appliance_health_processor_requires_distinct_completed_dates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(19)
+    context = _appliance_health_context(
+        days=days[:17],
+        events=events,
+        learning=False,
+    )
+    policy = ConservativeAlertPolicy()
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    first = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days[:18]
+    second = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days
+    third = processor.process(_energy_sample(120.5), config, context)
+
+    assert first.alerts == []
+    assert second.alerts == []
+    assert len(third.alerts) == 1
+    alert = third.alerts[0]
+    assert alert.feature == "efficiency_degradation"
+    assert alert.value_metric == "energy_per_runtime_hour"
+    assert alert.features["notification_type"] == "appliance_health_issue"
+    assert alert.features["reference_day_count"] == 14
+    assert alert.features["recent_day_count"] == 3
+    assert third.notifications == third.alerts
+
+    context.state.active_alerts_by_circuit["fridge"] = third.alerts
+    unchanged = processor.process(_energy_sample(120.5), config, context)
+
+    assert unchanged.alerts == []
+    assert unchanged.preserved_alerts == third.alerts
+    assert unchanged.notifications == []
+
+
+def test_appliance_health_processor_deduplicates_same_completed_date() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(17)
+    context = _appliance_health_context(days=days, events=events, learning=False)
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    results = [
+        processor.process(_energy_sample(120.5), config, context) for _ in range(3)
+    ]
+
+    assert all(result.alerts == [] for result in results)
+    assert {
+        result.observations[0].observation_key
+        for result in results
+        if result.observations
+    } == {"efficiency_degradation:2026-07-17"}
+
+
+def test_appliance_health_observation_key_ignores_noncontributing_days() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(17)
+    idle_days = [
+        {
+            "date": f"2026-07-{day:02d}",
+            "usage_kwh": 0.0,
+            "complete": True,
+            "baseline_eligible": True,
+        }
+        for day in (18, 19)
+    ]
+    context = _appliance_health_context(days=days, events=events, learning=False)
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    first = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days + idle_days[:1]
+    second = processor.process(_energy_sample(120.5), config, context)
+    context.store_data.energy_usage_by_circuit["fridge"]["days"] = days + idle_days
+    third = processor.process(_energy_sample(120.5), config, context)
+
+    observation_keys = [
+        result.observations[0].observation_key
+        for result in (first, second, third)
+    ]
+    assert observation_keys == [
+        "efficiency_degradation:2026-07-17",
+        "efficiency_degradation:2026-07-17",
+        "efficiency_degradation:2026-07-17",
+    ]
+    assert first.alerts == second.alerts == third.alerts == []
+
+
+def test_repeated_short_cycles_use_already_repeated_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    events: list[CircuitEvent] = []
+    for day in range(1, 13):
+        started_at = datetime(2026, 7, day, 10, 0, tzinfo=UTC)
+        duration = timedelta(minutes=12 if day <= 9 else 2)
+        events.extend(
+            (
+                CircuitEvent(started_at, "fridge", EventType.START),
+                CircuitEvent(started_at + duration, "fridge", EventType.STOP),
+            )
+        )
+    context = _appliance_health_context(days=[], events=events, learning=False)
+    short_cycle_policy = ConservativeAlertPolicy(
+        min_repeated=1,
+        min_total_score=1.5,
+        min_average_score=1.5,
+    )
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        short_cycle_alert_policy_for_circuit=lambda _circuit_id: short_cycle_policy,
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert [alert.feature for alert in result.alerts] == ["repeated_short_cycle"]
+    assert result.alerts[0].repeated_count == 3
+    assert result.alerts[0].features["reference_session_count"] == 9
+    assert result.alerts[0].features["recent_session_count"] == 3
+
+    context.state.active_alerts_by_circuit["fridge"] = result.alerts
+    unchanged = processor.process(_energy_sample(120.5), config, context)
+
+    assert unchanged.alerts == []
+    assert unchanged.preserved_alerts == result.alerts
+    assert unchanged.notifications == []
+
+
+@pytest.mark.asyncio
+async def test_pipeline_applies_learning_transition_before_appliance_health() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+        power_quality,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+        StateUpdate,
+    )
+
+    days, events = _appliance_health_history(17)
+    context = _appliance_health_context(days=days, events=events, learning=True)
+    state_reducer = StateReducer()
+
+    class _Coordinator:
+        async def async_apply_feature_result(
+            self,
+            result: FeatureResult,
+        ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
+            applied = state_reducer.apply_feature_result(
+                context.state,
+                context.store_data,
+                result,
+                alert_feedback=lambda alert: alert,
+            )
+            return applied.events, applied.active_alerts
+
+    class _NoopProcessor:
+        def __init__(self, result: FeatureResult | None = None) -> None:
+            self.result = result or FeatureResult()
+
+        def process(self, *args: object, **kwargs: object) -> FeatureResult:
+            del args, kwargs
+            return self.result
+
+    pipeline = processing_pipeline.ProcessingPipeline(_Coordinator())
+    pipeline.configure_processors(
+        event_processor=_NoopProcessor(),
+        power_quality_processor=_NoopProcessor(power_quality.PowerQualityResult()),
+        energy_usage_processor=_NoopProcessor(
+            FeatureResult(
+                state_updates=[
+                    StateUpdate(("learning_by_circuit", "fridge"), False)
+                ]
+            )
+        ),
+        energy_goal_processor=_NoopProcessor(),
+        run_cycle_processor=_NoopProcessor(),
+        appliance_health_processor=ApplianceHealthProcessor(
+            alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+            merge_gap_seconds_for_config=lambda _config: 60.0,
+        ),
+        activity_alert_processor=_NoopProcessor(),
+        billing_cycle_processor=_NoopProcessor(),
+        cost_processor=_NoopProcessor(),
+        demand_processor=_NoopProcessor(),
+        capacity_processor=_NoopProcessor(),
+        leg_imbalance_processor=_NoopProcessor(),
+        metric_consistency_processor=_NoopProcessor(),
+        standby_processor=_NoopProcessor(),
+        mains_balance_processor=_NoopProcessor(),
+        solar_flow_processor=_NoopProcessor(),
+        utility_comparison_processor=_NoopProcessor(),
+        clear_power_quality_state=lambda circuit_id: None,
+        clear_standby_state=lambda circuit_id: None,
+        sync_setup_health_repairs=lambda circuit_id: None,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    _, alerts = await pipeline.async_process_circuit(
+        config,
+        NormalizedCircuitSample(
+            timestamp=context.now,
+            circuit_id="fridge",
+            real_power=180.0,
+        ),
+        context,
+    )
+
+    assert context.state.learning_by_circuit["fridge"] is False
+    assert context.state.appliance_health_status_by_circuit["fridge"] == (
+        "possible_degradation"
+    )
+    assert [alert.feature for alert in alerts] == ["efficiency_degradation"]

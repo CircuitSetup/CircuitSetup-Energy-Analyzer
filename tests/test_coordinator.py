@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
@@ -56,6 +57,192 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+@pytest.mark.asyncio
+async def test_appliance_health_expected_feedback_suppresses_delivery() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    previous = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="efficiency_degradation",
+        value_metric="energy_per_runtime_hour",
+        observed_value=1.5,
+        baseline_value=1.0,
+        change_ratio=0.5,
+    )
+    repeated = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue again",
+        feature="efficiency_degradation",
+        value_metric="energy_per_runtime_hour",
+        observed_value=1.52,
+        baseline_value=1.0,
+        change_ratio=0.52,
+    )
+    fingerprint = alert_feedback_fingerprint(previous)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "created_at": now.isoformat(),
+                    "decided_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "efficiency_degradation",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+    coordinator.state.learning_by_circuit["fridge"] = False
+
+    _, active_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(alerts=[repeated], notifications=[repeated])
+    )
+
+    assert active_alerts == []
+    assert coordinator.store_data.alerts[0].feedback_status == "expected"
+
+
+def test_appliance_health_unhelpful_feedback_raises_repetition() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        Observation,
+        alert_feedback_fingerprint_for_observation,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    observation = Observation(
+        circuit_id="fridge",
+        feature="efficiency_degradation",
+        score=2.5,
+        baseline_confidence=1.0,
+        observed_at=now,
+        observed_value=1.5,
+        baseline_value=1.0,
+        value_metric="energy_per_runtime_hour",
+    )
+    fingerprint = alert_feedback_fingerprint_for_observation(observation)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "created_at": now.isoformat(),
+                    "decided_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=45)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "efficiency_degradation",
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    policy = coordinator.alert_policies.cycle_alert_policy_for_circuit("fridge")
+
+    for index in range(4):
+        assert (
+            policy.observe(
+                replace(
+                    observation,
+                    observed_at=now + timedelta(days=index),
+                    observation_key=f"efficiency_degradation:2026-07-{17 + index:02d}",
+                )
+            )
+            is None
+        )
+    alert = policy.observe(
+        replace(
+            observation,
+            observed_at=now + timedelta(days=4),
+            observation_key="efficiency_degradation:2026-07-21",
+        )
+    )
+
+    assert alert is not None
+    assert alert.adjusted_min_repeated == 5
+
+
+@pytest.mark.asyncio
+async def test_relearn_clears_appliance_health_state_and_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator.refresh_ux_state_for_circuit = lambda circuit_id, refreshed_at: None
+    coordinator.async_set_updated_data = lambda state: None
+    coordinator._async_save_store = AsyncMock()
+    coordinator.state.appliance_health_status_by_circuit["fridge"] = (
+        "possible_degradation"
+    )
+    coordinator.state.appliance_health_evidence_by_circuit["fridge"] = {
+        "feature": "efficiency_degradation"
+    }
+    old_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
+        "fridge"
+    )
+    old_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
+    old_policy.observe(
+        Observation(
+            circuit_id="fridge",
+            feature="efficiency_degradation",
+            score=2.5,
+            baseline_confidence=1.0,
+            observed_at=now,
+        )
+    )
+
+    await coordinator.async_relearn_baseline("fridge")
+
+    new_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
+        "fridge"
+    )
+    new_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
+    assert new_policy is not old_policy
+    assert new_short_cycle_policy is not old_short_cycle_policy
+    assert coordinator.state.appliance_health_status_by_circuit == {}
+    assert coordinator.state.appliance_health_evidence_by_circuit == {}
 
 
 def test_apply_state_update_rejects_unknown_root_path() -> None:
@@ -580,6 +767,83 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
     assert evidence["rain_intensity_bin"] == "heavy"
     assert evidence["baseline_context"] == "heavy_rain, heavy"
     assert evidence["rain_context_issues"] == []
+
+
+def test_coordinator_uses_weather_entity_and_outdoor_humidity_for_sump_context() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    weather_attributes = {
+        "temperature": 84,
+        "temperature_unit": "°F",
+        "humidity": 85,
+        "precipitation": 0.1,
+        "precipitation_unit": "in/h",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {"weather.home": ("rainy", 0, weather_attributes)},
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "Air Conditioner",
+                    "appliance_profile": "hvac_compressor",
+                    "mode": "single_phase",
+                },
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "weather.home",
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "weather.home",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 20 * 60
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["hvac"] = 60 * 60
+    coordinator.state.run_cycle_duty_cycle_by_circuit["hvac"] = 50.0
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_sensor_active"] is True
+    assert evidence["rain_intensity_per_hour"] == 0.1
+    assert evidence["rain_intensity_unit"] == "in/h"
+    assert evidence["outdoor_temperature_f"] == 84.0
+    assert evidence["temperature_bin"] == "hot"
+    assert evidence["outdoor_humidity_percent"] == 85.0
+    assert evidence["outdoor_humidity_bin"] == "very_humid"
+    assert "outdoor_temperature" in evidence["contributing_factors"]
+    assert "outdoor_humidity" in evidence["contributing_factors"]
 
 
 def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
@@ -4464,6 +4728,79 @@ def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
     }
 
 
+def test_lightweight_retention_preserves_predictive_health_evidence_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    expired_at = now - timedelta(days=18, seconds=1)
+    oldest_complete_day_start = datetime(2026, 6, 1, tzinfo=UTC)
+    expired_event = CircuitEvent(
+        timestamp=expired_at,
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    boundary_event = CircuitEvent(
+        timestamp=oldest_complete_day_start,
+        circuit_id="fridge",
+        event_type=EventType.STOP,
+    )
+    boundary_context = {
+        "timestamp": oldest_complete_day_start.isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 1.0,
+        "context": {"season": "summer"},
+        "source": "test",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[expired_event, boundary_event],
+            energy_usage_by_circuit={
+                "fridge": {
+                    "days": [
+                        {"date": "2026-05-30", "usage_kwh": 1.0},
+                        {"date": "2026-06-01", "usage_kwh": 1.0},
+                    ]
+                }
+            },
+            contextual_baseline_samples_by_circuit={
+                "fridge": [
+                    {
+                        **boundary_context,
+                        "timestamp": expired_at.isoformat(),
+                    },
+                    boundary_context,
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.events == [boundary_event]
+    assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
+        {"date": "2026-06-01", "usage_kwh": 1.0}
+    ]
+    assert coordinator.store_data.contextual_baseline_samples_by_circuit == {
+        "fridge": [boundary_context]
+    }
+
+
 def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4488,16 +4825,16 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
             energy_usage_by_circuit={
                 "fridge": {
                     "days": [
-                        {"date": "2026-05-30", "usage_kwh": 6.0},
-                        {"date": "2026-05-31", "usage_kwh": 7.0},
+                        {"date": "2026-05-26", "usage_kwh": 6.0},
+                        {"date": "2026-05-27", "usage_kwh": 7.0},
                     ],
                 }
             },
             demand_by_circuit={
                 "fridge": {
                     "daily_peaks": [
-                        {"date": "2026-05-30", "peak_demand_w": 1000.0},
-                        {"date": "2026-05-31", "peak_demand_w": 1200.0},
+                        {"date": "2026-05-26", "peak_demand_w": 1000.0},
+                        {"date": "2026-05-27", "peak_demand_w": 1200.0},
                     ],
                 }
             },
@@ -4508,10 +4845,10 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     coordinator._apply_retention(now)
 
     assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
-        {"date": "2026-05-31", "usage_kwh": 7.0}
+        {"date": "2026-05-27", "usage_kwh": 7.0}
     ]
     assert coordinator.store_data.demand_by_circuit["fridge"]["daily_peaks"] == [
-        {"date": "2026-05-31", "peak_demand_w": 1200.0}
+        {"date": "2026-05-27", "peak_demand_w": 1200.0}
     ]
 
 
@@ -4522,7 +4859,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "standby_w": 8.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4544,7 +4881,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
                 "fridge": {
                     "samples": [
                         {
-                            "timestamp": "2026-05-31T03:00:00+00:00",
+                            "timestamp": "2026-05-28T03:00:00+00:00",
                             "standby_w": 9.0,
                         },
                         retained_sample,
@@ -4569,11 +4906,11 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_weather_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "outdoor_temperature_f": 78.0,
     }
     retained_water_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "rain_intensity_mm_per_hour": 0.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4595,7 +4932,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.weather_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-28T03:00:00+00:00",
                 "outdoor_temperature_f": 72.0,
             },
             retained_weather_sample,
@@ -4604,7 +4941,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.water_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-28T03:00:00+00:00",
                 "rain_intensity_mm_per_hour": 1.0,
             },
             retained_water_sample,

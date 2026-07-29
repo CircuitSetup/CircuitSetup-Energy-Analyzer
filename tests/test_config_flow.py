@@ -1556,6 +1556,19 @@ def test_water_flow_selector_allows_binary_and_numeric_sensor_entities() -> None
     }
 
 
+def test_weather_context_selectors_accept_weather_entities() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    assert config_flow._temperature_entity_selector_config()["entity"]["filter"] == [
+        {"domain": "sensor", "device_class": "temperature"},
+        {"domain": "weather"},
+    ]
+    assert config_flow._rain_context_entity_selector_config()["entity"]["filter"] == [
+        {"domain": "binary_sensor"},
+        {"domain": "weather"},
+    ]
+
+
 def test_optional_context_entity_selectors_do_not_default_to_blank_entity_ids() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 

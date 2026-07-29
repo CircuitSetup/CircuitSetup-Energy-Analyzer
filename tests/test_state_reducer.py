@@ -82,6 +82,13 @@ def test_state_reducer_applies_feature_result_payload() -> None:
         message="Possible issue.",
         feature="processor_test",
     )
+    preserved_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Existing issue.",
+        feature="preserved_test",
+    )
     observation = Observation(
         circuit_id="fridge",
         feature="cycle_duration",
@@ -98,6 +105,7 @@ def test_state_reducer_applies_feature_result_payload() -> None:
         FeatureResult(
             events=[event],
             alerts=[alert],
+            preserved_alerts=[preserved_alert],
             notifications=[alert],
             observations=[observation],
             state_updates=[
@@ -109,7 +117,7 @@ def test_state_reducer_applies_feature_result_payload() -> None:
     )
 
     assert applied.events == [event]
-    assert applied.active_alerts == [alert]
+    assert applied.active_alerts == [alert, preserved_alert]
     assert applied.notifications == [alert]
     assert applied.store_dirty is True
     assert store_data.events == [event]
@@ -315,6 +323,10 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     state.learning_by_circuit["fridge"] = False
     state.power_quality_score_by_circuit["fridge"] = 91.0
     state.power_factor_drift_by_circuit["fridge"] = 0.2
+    state.appliance_health_status_by_circuit["fridge"] = "possible_degradation"
+    state.appliance_health_evidence_by_circuit["fridge"] = {
+        "feature": "efficiency_degradation"
+    }
 
     reducer.reset_learning_state(state, "fridge")
 
@@ -323,6 +335,8 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     assert state.learning_by_circuit == {"fridge": True}
     assert state.power_quality_score_by_circuit == {}
     assert state.power_factor_drift_by_circuit == {}
+    assert state.appliance_health_status_by_circuit == {}
+    assert state.appliance_health_evidence_by_circuit == {}
 
 
 def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:

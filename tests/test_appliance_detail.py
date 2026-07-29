@@ -78,6 +78,13 @@ def _direct_state() -> AnalyzerState:
     state.energy_usage_evidence_by_circuit["fridge"] = {"status": "normal"}
     state.metric_consistency_status_by_circuit["fridge"] = "consistent"
     state.leg_imbalance_status_by_circuit["fridge"] = "balanced"
+    state.appliance_health_status_by_circuit["fridge"] = "watch"
+    state.appliance_health_evidence_by_circuit["fridge"] = {
+        "status": "watch",
+        "feature": "efficiency_degradation",
+        "recent_median": 0.52,
+        "reference_median": 0.4,
+    }
     return state
 
 
@@ -201,6 +208,15 @@ def test_existing_summary_fields_feed_appliance_story() -> None:
     assert health_summary_attributes(state, "fridge")["next_step"] == (
         "No action needed"
     )
+    assert health_summary_attributes(state, "fridge")["appliance_health_status"] == (
+        "watch"
+    )
+    assert health_summary_attributes(state, "fridge")["appliance_health_evidence"] == {
+        "status": "watch",
+        "feature": "efficiency_degradation",
+        "recent_median": 0.52,
+        "reference_median": 0.4,
+    }
 
 
 def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
@@ -243,6 +259,12 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["evidence_path"] == (
         "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge"
     )
+    assert detail["appliance_health"] == {
+        "status": "watch",
+        "feature": "efficiency_degradation",
+        "recent_median": 0.52,
+        "reference_median": 0.4,
+    }
     assert detail["active_alerts"][0]["feature"] == "daily_energy"
     assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}

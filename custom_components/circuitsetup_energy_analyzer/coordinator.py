@@ -689,6 +689,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._baseline_values,
             now,
         )
+        self.settings_controller.clear_cycle_alert_policies(circuit_id)
         self.state_reducer.reset_learning_state(self.state, circuit_id)
         self._clear_nilm_topology_state(circuit_id)
         self.refresh_ux_state_for_circuit(circuit_id, now)
@@ -1535,6 +1536,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             alerts=[
                 alert
                 for alert in result.alerts
+                if self.notification_controller.learning_allows_alert(alert)
+            ],
+            preserved_alerts=[
+                alert
+                for alert in result.preserved_alerts
                 if self.notification_controller.learning_allows_alert(alert)
             ],
             notifications=[
