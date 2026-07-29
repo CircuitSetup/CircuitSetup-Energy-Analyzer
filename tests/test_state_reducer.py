@@ -315,6 +315,10 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     state.learning_by_circuit["fridge"] = False
     state.power_quality_score_by_circuit["fridge"] = 91.0
     state.power_factor_drift_by_circuit["fridge"] = 0.2
+    state.appliance_health_status_by_circuit["fridge"] = "possible_degradation"
+    state.appliance_health_evidence_by_circuit["fridge"] = {
+        "feature": "efficiency_degradation"
+    }
 
     reducer.reset_learning_state(state, "fridge")
 
@@ -323,6 +327,8 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     assert state.learning_by_circuit == {"fridge": True}
     assert state.power_quality_score_by_circuit == {}
     assert state.power_factor_drift_by_circuit == {}
+    assert state.appliance_health_status_by_circuit == {}
+    assert state.appliance_health_evidence_by_circuit == {}
 
 
 def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:

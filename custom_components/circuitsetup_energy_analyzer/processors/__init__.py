@@ -1,6 +1,7 @@
 """Feature processors for CircuitSetup Energy Analyzer."""
 
 from .activity import ActivityAlertProcessor
+from .appliance_health import ApplianceHealthProcessor
 from .base import FeatureResult, ProcessingContext, StateUpdate
 from .billing import BillingCycleProcessor
 from .capacity import CapacityProcessor
@@ -23,6 +24,7 @@ from .water_context import WaterContextAlertProcessor
 
 __all__ = [
     "ActivityAlertProcessor",
+    "ApplianceHealthProcessor",
     "BillingCycleProcessor",
     "CapacityProcessor",
     "CircuitEventProcessor",

@@ -178,6 +178,8 @@ class StateReducer:
         state.anomaly_score_by_circuit[circuit_id] = 0.0
         state.learning_by_circuit[circuit_id] = True
         self.clear_power_quality_state(state, circuit_id)
+        state.appliance_health_status_by_circuit.pop(circuit_id, None)
+        state.appliance_health_evidence_by_circuit.pop(circuit_id, None)
 
     def refresh_alert_evidence_state(
         self,

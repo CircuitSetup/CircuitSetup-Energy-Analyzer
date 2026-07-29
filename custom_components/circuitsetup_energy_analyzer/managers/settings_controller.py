@@ -754,6 +754,12 @@ class SettingsController:
             if key[0] == circuit_id:
                 self._nilm_topology_alert_policies.pop(key, None)
 
+    def clear_cycle_alert_policies(self, circuit_id: str) -> None:
+        """Clear cached cycle and appliance-health policy evidence."""
+        for key in list(self._cycle_alert_policies):
+            if key[0] == circuit_id:
+                self._cycle_alert_policies.pop(key, None)
+
     def _alert_policy_name_for_circuit(self, circuit_id: str) -> str:
         return alert_policy_name_for_sensitivity(
             self.sensitivity_for_circuit(circuit_id)
