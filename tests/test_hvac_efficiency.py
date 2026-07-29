@@ -175,6 +175,52 @@ def test_cooling_episode_completes_within_half_degree_of_target() -> None:
     assert completed.latest_temperature_f == 72.4
 
 
+def test_first_driver_off_interval_counts_toward_completed_episode() -> None:
+    current, _ = _advance(None, _observation(actual=78.0, target=72.0))
+
+    active, completed = _advance(
+        current,
+        _observation(actual=72.0, target=72.0, action="idle"),
+        now=START + timedelta(minutes=20),
+        driver_active=False,
+        active_minutes_delta=20.0,
+    )
+
+    assert active is None
+    assert completed is not None
+    assert completed.active_minutes == 20.0
+    assert episode_to_dict(completed)["active_minutes"] == 20.0
+
+
+def test_inactive_intervals_are_not_charged_when_driver_restarts() -> None:
+    current, _ = _advance(None, _observation(actual=78.0, target=72.0))
+    inactive, _ = _advance(
+        current,
+        _observation(actual=77.0, target=72.0),
+        now=START + timedelta(minutes=10),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+    still_inactive, _ = _advance(
+        inactive,
+        _observation(actual=77.0, target=72.0),
+        now=START + timedelta(minutes=20),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+
+    restarted, _ = _advance(
+        still_inactive,
+        _observation(actual=77.0, target=72.0),
+        now=START + timedelta(minutes=30),
+        driver_active=True,
+        active_minutes_delta=10.0,
+    )
+
+    assert restarted is not None
+    assert restarted.active_minutes == 10.0
+
+
 def test_target_change_inactivity_and_timeout_exclude_episode() -> None:
     current, _ = _advance(None, _observation(actual=78.0, target=72.0))
 

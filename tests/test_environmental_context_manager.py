@@ -51,25 +51,35 @@ def test_coordinator_wires_environmental_context_manager() -> None:
     assert isinstance(coordinator.environment_context, EnvironmentalContextManager)
 
 
-def test_hvac_compressor_context_includes_mini_split_runtime() -> None:
+def test_hvac_compressor_context_includes_bidirectional_refrigerant_runtime() -> None:
     coordinator = SimpleNamespace(
         circuit_configs=[
             SimpleNamespace(
                 circuit_id="mini_split",
                 appliance_profile=ApplianceProfile.MINI_SPLIT,
-            )
+            ),
+            SimpleNamespace(
+                circuit_id="heat_pump",
+                appliance_profile=ApplianceProfile.HEAT_PUMP,
+            ),
         ],
         state=SimpleNamespace(
-            run_cycle_runtime_seconds_by_circuit={"mini_split": 1800.0},
-            run_cycle_duty_cycle_by_circuit={"mini_split": 25.0},
+            run_cycle_runtime_seconds_by_circuit={
+                "mini_split": 1800.0,
+                "heat_pump": 1200.0,
+            },
+            run_cycle_duty_cycle_by_circuit={
+                "mini_split": 25.0,
+                "heat_pump": 40.0,
+            },
         ),
     )
 
     context = EnvironmentalContextManager(coordinator).hvac_compressor_context()
 
-    assert context["circuit_ids"] == ["mini_split"]
-    assert context["runtime_minutes"] == 30.0
-    assert context["duty_cycle_percent"] == 25.0
+    assert context["circuit_ids"] == ["mini_split", "heat_pump"]
+    assert context["runtime_minutes"] == 50.0
+    assert context["duty_cycle_percent"] == 40.0
 
 
 def test_mini_split_weather_context_separates_heating_history() -> None:
@@ -105,6 +115,50 @@ def test_mini_split_weather_context_separates_heating_history() -> None:
     )
 
     assert [sample.temperature for sample in samples] == [40.0]
+
+
+def test_heat_pump_weather_context_keeps_heating_history_separate() -> None:
+    now = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(
+            run_cycle_runtime_seconds_by_circuit={"heat_pump": 1800.0},
+            run_cycle_duty_cycle_by_circuit={"heat_pump": 25.0},
+            run_cycle_count_by_circuit={"heat_pump": 2},
+            weather_context_by_circuit={},
+        ),
+        store_data=SimpleNamespace(
+            weather_context_history_by_circuit={},
+            weather_context_by_circuit={},
+        ),
+        demo_data=SimpleNamespace(
+            seed_weather_context_history=lambda *args, **kwargs: None
+        ),
+        context_builder=SimpleNamespace(
+            outdoor_temperature_entity=lambda: "sensor.outdoor_temperature",
+            temperature_reading_for_entity=lambda _entity_id: {
+                "temperature_f": 40.0,
+                "display_temperature": 40.0,
+                "display_unit": "°F",
+                "source_unit": "°F",
+            },
+            time_zone=lambda: None,
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    manager = EnvironmentalContextManager(coordinator)
+
+    manager.refresh_weather_context_state(
+        SimpleNamespace(
+            circuit_id="heat_pump",
+            appliance_profile=ApplianceProfile.HEAT_PUMP,
+        ),
+        now,
+    )
+
+    evidence = coordinator.store_data.weather_context_by_circuit["heat_pump"]
+    history = coordinator.store_data.weather_context_history_by_circuit["heat_pump"]
+    assert evidence["mode"] == "heating"
+    assert history[0]["mode"] == "heating"
 
 
 def test_mini_split_weather_history_keeps_per_mode_runtime() -> None:

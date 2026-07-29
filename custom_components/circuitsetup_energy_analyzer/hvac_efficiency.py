@@ -138,6 +138,7 @@ def advance_episode(
     ):
         return None, _exclude_episode(current, now, elapsed)
 
+    previous_interval_active = current.inactive_since is None
     inactive_since = None if driver_active else current.inactive_since or now
     updated = replace(
         current,
@@ -145,7 +146,11 @@ def advance_episode(
         elapsed_minutes=elapsed,
         active_minutes=(
             current.active_minutes
-            + (_valid_duration(active_minutes_delta) if driver_active else 0.0)
+            + (
+                _valid_duration(active_minutes_delta)
+                if previous_interval_active
+                else 0.0
+            )
         ),
         participant_signature=_sorted_unique(
             (*current.participant_signature, *participant_signature)

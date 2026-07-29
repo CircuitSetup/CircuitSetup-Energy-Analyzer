@@ -543,8 +543,8 @@ def _thermostat_target(
         return targets.get("target_temp_high")
     low = targets.get("target_temp_low")
     high = targets.get("target_temp_high")
-    if actual is not None and low is not None and actual < low:
+    if actual is not None and low is not None and actual <= low:
         return low
-    if actual is not None and high is not None and actual > high:
+    if actual is not None and high is not None and actual >= high:
         return high
     return None

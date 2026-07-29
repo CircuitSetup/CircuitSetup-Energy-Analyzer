@@ -1670,6 +1670,26 @@ def test_processing_context_builder_snapshots_configured_thermostats_only() -> N
     assert "sensor.unconfigured_temperature" not in accessed
 
 
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [(68.0, 68.0), (74.0, 74.0)],
+)
+def test_range_thermostat_keeps_boundary_target_when_idle(
+    actual: float,
+    expected: float,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        _thermostat_target,
+    )
+
+    assert _thermostat_target(
+        {"temperature": None, "target_temp_low": 68.0, "target_temp_high": 74.0},
+        mode="heat_cool",
+        action="idle",
+        actual=actual,
+    ) == expected
+
+
 def test_thermostat_snapshot_resolves_single_range_and_unavailable_targets() -> None:
     from custom_components.circuitsetup_energy_analyzer.managers.context import (
         ProcessingContextBuilder,
