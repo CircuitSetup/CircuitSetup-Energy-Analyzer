@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from math import isfinite
 from statistics import median
 from types import MappingProxyType
@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .baseline import build_baseline
 from .contextual_baseline import ContextualBaselineSample
-from .cycles import build_normalized_run_sessions, summarize_circuit_cycles
-from .local_time import TimeZone, local_date, local_day_end
+from .cycles import build_normalized_run_sessions
+from .local_time import TimeZone, local_date, local_day_end, local_day_time
 from .models import ApplianceProfile, CircuitEvent
 
 REFERENCE_DAY_COUNT = 14
@@ -31,7 +31,6 @@ _WEATHER_AWARE_PROFILES = {
     ApplianceProfile.ELECTRIC_HEAT,
 }
 _FLOW_AWARE_PROFILES = {
-    ApplianceProfile.SUMP_PUMP,
     ApplianceProfile.WATER_PUMP,
     ApplianceProfile.WELL_PUMP,
     ApplianceProfile.WATER_HEATER,
@@ -39,6 +38,13 @@ _FLOW_AWARE_PROFILES = {
     ApplianceProfile.DISHWASHER,
 }
 _WEATHER_CONTEXT_KEYS = ("season", "weather_mode", "temperature_bin")
+_SUMP_CONTEXT_KEYS = (
+    "season",
+    "rain_state",
+    "rain_intensity_bin",
+    "temperature_bin",
+    "outdoor_humidity_bin",
+)
 _DAY_METRIC_DIRECTIONS = {
     "energy_per_runtime_hour": 1.0,
     "energy_per_completed_cycle": 1.0,
@@ -231,8 +237,7 @@ def build_appliance_health_days(
         contextual_samples,
         resolved_time_zone,
     )
-    result: list[ApplianceHealthDay] = []
-
+    eligible_days: list[tuple[date, float]] = []
     for raw_day in energy_days:
         day = _health_day_date(raw_day)
         energy = _nonnegative_float_or_none(raw_day.get("usage_kwh"))
@@ -244,24 +249,62 @@ def build_appliance_health_days(
             or energy is None
         ):
             continue
-        summary = summarize_circuit_cycles(
-            circuit_events,
-            circuit_id=circuit_id,
-            now=local_day_end(day, resolved_time_zone),
-            merge_gap_seconds=merge_gap_seconds,
-            time_zone=resolved_time_zone,
+        eligible_days.append((day, energy))
+    if not eligible_days:
+        return ()
+
+    target_dates = {day for day, _energy in eligible_days}
+    runtime_by_date = dict.fromkeys(target_dates, 0.0)
+    starts_by_date = dict.fromkeys(target_dates, 0)
+    completions_by_date = dict.fromkeys(target_dates, 0)
+    now = local_day_end(max(target_dates), resolved_time_zone)
+    sessions = build_normalized_run_sessions(
+        circuit_events,
+        circuit_id=circuit_id,
+        merge_gap_seconds=merge_gap_seconds,
+        now=now,
+    )
+    for session in sessions:
+        started_on = local_date(session.started_at, resolved_time_zone)
+        if started_on in starts_by_date:
+            starts_by_date[started_on] += 1
+        if session.stopped_at is not None:
+            stopped_on = local_date(session.stopped_at, resolved_time_zone)
+            if stopped_on in completions_by_date:
+                completions_by_date[stopped_on] += 1
+        for interval_start, interval_stop in session.active_intervals:
+            interval_end = interval_stop or now
+            interval_day = local_date(interval_start, resolved_time_zone)
+            final_day = local_date(interval_end, resolved_time_zone)
+            while interval_day <= final_day:
+                if interval_day in runtime_by_date:
+                    day_start = local_day_time(
+                        interval_day,
+                        time.min,
+                        resolved_time_zone,
+                    )
+                    next_day_start = local_day_time(
+                        interval_day + timedelta(days=1),
+                        time.min,
+                        resolved_time_zone,
+                    )
+                    runtime_by_date[interval_day] += _elapsed_seconds(
+                        max(interval_start, day_start),
+                        min(interval_end, next_day_start),
+                    )
+                interval_day += timedelta(days=1)
+
+    return tuple(
+        ApplianceHealthDay(
+            date=day,
+            energy_kwh=energy,
+            runtime_seconds=round(runtime_by_date[day], 3),
+            completed_cycles=completions_by_date[day],
+            start_count=starts_by_date[day],
+            context=context_by_date.get(day, {}),
         )
-        result.append(
-            ApplianceHealthDay(
-                date=day,
-                energy_kwh=energy,
-                runtime_seconds=summary.runtime_seconds,
-                completed_cycles=summary.completed_cycle_count,
-                start_count=summary.start_count,
-                context=context_by_date.get(day, {}),
-            )
-        )
-    return tuple(sorted(result, key=lambda item: item.date))
+        for day, energy in sorted(eligible_days)
+    )
 
 
 def build_appliance_health_sessions(
@@ -342,6 +385,12 @@ def _comparison_context(
         if weather is None or not weather:
             return None
         context.update(weather)
+
+    if profile is ApplianceProfile.SUMP_PUMP:
+        sump_context = _shared_context(recent_days, _SUMP_CONTEXT_KEYS)
+        if sump_context is None or not sump_context:
+            return None
+        context.update(sump_context)
 
     if profile in _FLOW_AWARE_PROFILES and any(
         day.context.get("water_flow_state") for day in recent_days

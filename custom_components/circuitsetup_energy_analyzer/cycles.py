@@ -52,6 +52,7 @@ class RunSession:
     stopped_at: datetime | None
     duration_seconds: float
     merged_transition_count: int
+    active_intervals: tuple[tuple[datetime, datetime | None], ...] = ()
     start_event_id: str | None = None
     stop_event_id: str | None = None
     start_known: bool = True
@@ -336,6 +337,7 @@ def build_normalized_run_sessions(
                 stopped_at=event.timestamp,
                 duration_seconds=_round_seconds(duration),
                 merged_transition_count=2,
+                active_intervals=((active_start, event.timestamp),),
             )
         )
         active_start = None
@@ -349,6 +351,7 @@ def build_normalized_run_sessions(
                     _elapsed_seconds(active_start, now)
                 ),
                 merged_transition_count=1,
+                active_intervals=((active_start, None),),
             )
         )
 
@@ -374,6 +377,7 @@ def build_normalized_run_sessions(
                 merged_transition_count=(
                     previous.merged_transition_count + session.merged_transition_count
                 ),
+                active_intervals=previous.active_intervals + session.active_intervals,
                 start_known=previous.start_known,
             )
             continue

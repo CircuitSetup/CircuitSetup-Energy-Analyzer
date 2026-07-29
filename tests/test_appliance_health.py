@@ -291,6 +291,37 @@ def test_health_day_builder_joins_complete_energy_and_cycle_days() -> None:
     assert result[0].start_count == 1
 
 
+def test_health_day_builder_splits_cross_midnight_runtime_by_local_day() -> None:
+    events = (
+        CircuitEvent(
+            datetime(2026, 7, 1, 23, 50, tzinfo=UTC),
+            "fridge",
+            EventType.START,
+        ),
+        CircuitEvent(
+            datetime(2026, 7, 2, 0, 10, tzinfo=UTC),
+            "fridge",
+            EventType.STOP,
+        ),
+    )
+
+    result = build_appliance_health_days(
+        circuit_id="fridge",
+        energy_days=(
+            {"date": "2026-07-01", "usage_kwh": 1.0, "complete": True},
+            {"date": "2026-07-02", "usage_kwh": 1.0, "complete": True},
+        ),
+        events=events,
+        contextual_samples=(),
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert [day.runtime_seconds for day in result] == [600.0, 600.0]
+    assert [day.start_count for day in result] == [1, 0]
+    assert [day.completed_cycles for day in result] == [0, 1]
+
+
 def test_health_day_builder_excludes_incomplete_and_maintenance_event_days() -> None:
     days = [
         {
@@ -508,3 +539,71 @@ def test_health_evaluation_stays_bounded_at_standard_retention() -> None:
         )
 
     assert perf_counter() - started < 1.0
+
+
+def test_health_day_builder_stays_bounded_at_diagnostic_retention() -> None:
+    first_day = datetime(2026, 1, 1, tzinfo=UTC)
+    energy_days = tuple(
+        {
+            "date": (first_day + timedelta(days=day)).date().isoformat(),
+            "usage_kwh": 2.0,
+            "complete": True,
+        }
+        for day in range(180)
+    )
+    events = tuple(
+        CircuitEvent(
+            first_day
+            + timedelta(days=day, hours=cycle, minutes=minute_offset),
+            "fridge",
+            event_type,
+        )
+        for day in range(180)
+        for cycle in range(20)
+        for minute_offset, event_type in (
+            (0, EventType.START),
+            (15, EventType.STOP),
+        )
+    )
+
+    started = perf_counter()
+    result = build_appliance_health_days(
+        circuit_id="fridge",
+        energy_days=energy_days,
+        events=events,
+        contextual_samples=(),
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert len(result) == 180
+    assert perf_counter() - started < 1.0
+
+
+def test_sump_health_compares_matching_rain_humidity_and_season_context() -> None:
+    context = {
+        "season": "summer",
+        "rain_state": "dry",
+        "rain_intensity_bin": "none",
+        "temperature_bin": "hot",
+        "outdoor_humidity_bin": "very_humid",
+    }
+    days = tuple(
+        _day(
+            index,
+            energy=2.0 if index <= 14 else 2.6,
+            runtime_hours=2.0,
+            context=context,
+        )
+        for index in range(1, 18)
+    )
+
+    result = evaluate_appliance_health(
+        ApplianceProfile.SUMP_PUMP,
+        days=days,
+        sessions=(),
+    )
+
+    assert result.status == "possible_degradation"
+    assert result.primary_finding is not None
+    assert result.primary_finding.context == context

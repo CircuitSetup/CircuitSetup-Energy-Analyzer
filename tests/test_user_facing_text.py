@@ -194,8 +194,8 @@ EXPECTED_FLOW_LABELS = {
     "demo_source_bundle_enabled": "Load Bundled Demo Sources",
     "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
-    "outdoor_temperature_entity": "Outdoor Temperature Entity",
-    "rain_sensor_entity": "Rain Sensor",
+    "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
+    "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
     "sensitivity": "Sensitivity",
@@ -206,8 +206,8 @@ EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-    "outdoor_temperature_entity": "Outdoor Temperature Entity",
-    "rain_sensor_entity": "Rain Sensor",
+    "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
+    "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
     "sensitivity": "Sensitivity",
@@ -2012,6 +2012,48 @@ for (const removed of [
   "Relearn Baseline",
 ]) {
   if (html.includes(removed)) throw new Error(`unexpected appliance-detail control ${removed}: ${html}`);
+}
+"""
+    )
+
+
+def test_appliance_detail_renders_predictive_health_evidence() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const learning = panel._renderApplianceHealth({
+  status: "learning",
+  reason: "insufficient_history",
+  confidence: 0,
+});
+assert.ok(learning.includes('data-appliance-health'));
+assert.ok(learning.includes("Predictive Health"));
+assert.ok(learning.includes("Learning"));
+assert.ok(learning.includes("More completed appliance history is needed"));
+
+const possibleIssue = panel._renderApplianceHealth({
+  status: "possible_degradation",
+  reason: "sustained_change",
+  confidence: 0.91,
+  feature: "efficiency_degradation",
+  metric: "energy_per_runtime_hour",
+  change_percent: 30,
+  reference_count: 14,
+  recent_count: 3,
+  context: { season: "summer", weather_mode: "cooling" },
+  last_eligible_date_or_session: "2026-07-27",
+});
+for (const expected of [
+  "Possible degradation",
+  "Sustained efficiency change",
+  "30%",
+  "14 reference days",
+  "3 recent days",
+  "season: summer",
+  "weather mode: cooling",
+  "2026-07-27",
+]) {
+  assert.ok(possibleIssue.includes(expected), `missing ${expected}: ${possibleIssue}`);
 }
 """
     )

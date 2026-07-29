@@ -596,11 +596,55 @@ export function createApplianceViewMethods({
         <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
       </section>
+      ${this._renderApplianceHealth(detail.appliance_health)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
     `;
+  }
+
+  _renderApplianceHealth(health) {
+    if (!health || typeof health !== "object") return "";
+    const humanize = (value) => String(value || "")
+      .replaceAll("_", " ")
+      .replace(/^\w/, (letter) => letter.toUpperCase());
+    const status = String(health.status || "learning");
+    const reason = String(health.reason || "");
+    const statusLabel = this._panelText(`appliance_detail.predictive_health_status.${status}`) || humanize(status);
+    const reasonLabel = this._panelText(`appliance_detail.predictive_health_reason.${reason}`) || humanize(reason);
+    const sessionEvidence = health.feature === "repeated_short_cycle";
+    const scope = sessionEvidence ? "sessions" : "days";
+    const facts = [
+      Number.isFinite(Number(health.confidence))
+        ? this._metric(this._panelText("common.confidence"), this._formatConfidence(health.confidence), "mdi:chart-bell-curve-cumulative")
+        : "",
+      health.feature
+        ? this._metric(this._panelText("appliance_detail.predictive_health_finding"), humanize(health.feature), "mdi:stethoscope")
+        : "",
+      Number.isFinite(Number(health.change_percent))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_change"), `${Number(health.change_percent)}%`, "mdi:percent")
+        : "",
+      Number.isFinite(Number(health.reference_count))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_reference"), `${Number(health.reference_count)} reference ${scope}`, "mdi:database-clock-outline")
+        : "",
+      Number.isFinite(Number(health.recent_count))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_recent"), `${Number(health.recent_count)} recent ${scope}`, "mdi:history")
+        : "",
+      health.last_eligible_date_or_session
+        ? this._metric(this._panelText("appliance_detail.predictive_health_latest"), health.last_eligible_date_or_session, "mdi:calendar-check-outline")
+        : "",
+    ].filter(Boolean);
+    const context = Object.entries(
+      health.context && typeof health.context === "object" ? health.context : {},
+    ).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
+    return `<section class="panel" data-appliance-health>
+      <h2>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h2>
+      <p><strong>${this._escape(statusLabel)}</strong></p>
+      ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
+      ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}
+    </section>`;
   }
 
   _renderApplianceDailyCost(payload, detail) {

@@ -225,6 +225,19 @@ def weather_mode_for_temperature(temperature_f: float | None) -> str:
     return "neutral"
 
 
+def humidity_bin(humidity_percent: float | None) -> str:
+    """Return a stable outdoor-relative-humidity context bucket."""
+    if humidity_percent is None:
+        return "unknown"
+    if humidity_percent < 40.0:
+        return "dry"
+    if humidity_percent < 60.0:
+        return "moderate"
+    if humidity_percent < 80.0:
+        return "humid"
+    return "very_humid"
+
+
 def normalize_rain_intensity_per_hour(
     intensity_per_hour: float | None,
     *,
@@ -544,6 +557,12 @@ def build_context_for_sample(
     rain_active = _bool_or_none(rain.get("rain_sensor_active"))
     rain_intensity, rain_unit = _rain_intensity_for_context(rain)
     rain_issues = _rain_issues_for_context(rain)
+    outdoor_temperature = _float_or_none(rain.get("outdoor_temperature_f"))
+    if outdoor_temperature is not None:
+        values["temperature_bin"] = temperature_bin(outdoor_temperature)
+    humidity = _float_or_none(rain.get("outdoor_humidity_percent"))
+    if humidity is not None:
+        values["outdoor_humidity_bin"] = humidity_bin(humidity)
     if rain_active is not None or rain_intensity is not None or rain_issues:
         rain_info = rain_context(rain_active, rain_intensity, unit=rain_unit)
         issues = _unique_issue_tuple((*rain_issues, *rain_info.issues))
@@ -953,11 +972,17 @@ def _filter_context_for_profile(
         ApplianceProfile.ELECTRIC_HEAT,
     }:
         allowed.update({"temperature_bin", "time_of_day", "weather_mode"})
-    elif profile in {
-        ApplianceProfile.SUMP_PUMP,
-        ApplianceProfile.WATER_PUMP,
-        ApplianceProfile.WELL_PUMP,
-    }:
+    elif profile is ApplianceProfile.SUMP_PUMP:
+        allowed.update(
+            {
+                "outdoor_humidity_bin",
+                "rain_context_issue",
+                "rain_intensity_bin",
+                "rain_state",
+                "temperature_bin",
+            }
+        )
+    elif profile in {ApplianceProfile.WATER_PUMP, ApplianceProfile.WELL_PUMP}:
         allowed.update(
             {
                 "rain_context_issue",

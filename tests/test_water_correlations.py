@@ -55,6 +55,45 @@ def test_rain_and_compressor_together_explain_higher_sump_runtime() -> None:
     assert evidence["compressor_adjustment_minutes"] > 0.0
 
 
+def test_hot_humid_weather_strengthens_condensate_context_for_sump_pump() -> None:
+    common = {
+        "circuit_id": "sump_pump",
+        "appliance_profile": "sump_pump",
+        "pump_runtime_minutes": 12.0,
+        "dry_baseline_minutes": 6.0,
+        "comparable_window_count": 18,
+        "rain_active": False,
+        "rain_intensity_per_hour": None,
+        "compressor_runtime_minutes": 60.0,
+        "compressor_duty_cycle_percent": 50.0,
+    }
+    moderate = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            **common,
+            outdoor_temperature_f=70.0,
+            outdoor_humidity_percent=50.0,
+        )
+    )
+    hot_humid = evaluate_rain_pump_correlation(
+        RainPumpCorrelationInput(
+            **common,
+            outdoor_temperature_f=90.0,
+            outdoor_humidity_percent=85.0,
+        )
+    )
+
+    assert (
+        hot_humid["compressor_adjustment_minutes"]
+        > moderate["compressor_adjustment_minutes"]
+    )
+    assert "outdoor_temperature" in hot_humid["contributing_factors"]
+    assert "outdoor_humidity" in hot_humid["contributing_factors"]
+    assert hot_humid["outdoor_temperature_f"] == 90.0
+    assert hot_humid["temperature_bin"] == "very_hot"
+    assert hot_humid["outdoor_humidity_percent"] == 85.0
+    assert hot_humid["outdoor_humidity_bin"] == "very_humid"
+
+
 def test_rain_outweighs_compressor_only_context_for_pump_runtime() -> None:
     common = {
         "circuit_id": "water_pump",

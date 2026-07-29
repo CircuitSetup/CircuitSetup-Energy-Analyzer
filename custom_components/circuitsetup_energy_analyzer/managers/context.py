@@ -61,9 +61,38 @@ class ProcessingContextBuilder:
         if raw_state is None:
             return None
         state = str(getattr(raw_state, "state", "")).strip().lower()
-        if state in {"on", "true", "1", "wet", "rain", "raining", "detected"}:
+        if state in {
+            "on",
+            "true",
+            "1",
+            "wet",
+            "rain",
+            "raining",
+            "detected",
+            "hail",
+            "lightning-rainy",
+            "pouring",
+            "rainy",
+            "snowy-rainy",
+        }:
             return True
-        if state in {"off", "false", "0", "dry", "clear", "none"}:
+        if state in {
+            "off",
+            "false",
+            "0",
+            "dry",
+            "clear",
+            "none",
+            "clear-night",
+            "cloudy",
+            "exceptional",
+            "fog",
+            "lightning",
+            "partlycloudy",
+            "sunny",
+            "windy",
+            "windy-variant",
+        }:
             return False
         return None
 
@@ -155,15 +184,19 @@ class ProcessingContextBuilder:
         raw_state = self.raw_state_for_entity(entity_id)
         if raw_state is None:
             return None
+        attributes = getattr(raw_state, "attributes", {}) or {}
+        if not isinstance(attributes, Mapping):
+            attributes = {}
         state = str(getattr(raw_state, "state", "")).strip()
-        if state.lower() in {"unknown", "unavailable", ""}:
-            return None
         value = _float_or_none(state)
+        raw_unit = str(attributes.get("unit_of_measurement") or "").strip()
+        if value is None:
+            value = _float_or_none(attributes.get("temperature"))
+            raw_unit = str(attributes.get("temperature_unit") or "").strip()
         if value is None:
             return None
-        attributes = getattr(raw_state, "attributes", {}) or {}
         source_unit = self.temperature_source_unit(
-            str(attributes.get("unit_of_measurement") or "").strip(),
+            raw_unit,
         )
         temperature_f = _temperature_to_fahrenheit(value, source_unit)
         display_unit = self.temperature_display_unit(source_unit)
@@ -177,6 +210,46 @@ class ProcessingContextBuilder:
             "display_unit": display_unit,
             "source_unit": source_unit,
         }
+
+    def humidity_percent_for_entity(self, entity_id: str | None) -> float | None:
+        """Return an optional relative-humidity attribute."""
+        value = self._numeric_entity_attribute(entity_id, "humidity")
+        return value if value is not None and 0.0 <= value <= 100.0 else None
+
+    def precipitation_reading_for_entity(
+        self,
+        entity_id: str | None,
+    ) -> dict[str, float | str | None] | None:
+        """Return precipitation from a numeric sensor or weather entity."""
+        if not entity_id:
+            return None
+        raw_state = self.raw_state_for_entity(entity_id)
+        if raw_state is None:
+            return None
+        attributes = getattr(raw_state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            attributes = {}
+        value = _float_or_none(getattr(raw_state, "state", None))
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        if value is None:
+            value = _float_or_none(attributes.get("precipitation"))
+            unit = str(attributes.get("precipitation_unit") or "").strip()
+        if value is None or value < 0.0:
+            return None
+        return {"value": value, "unit": unit or None}
+
+    def _numeric_entity_attribute(
+        self,
+        entity_id: str | None,
+        key: str,
+    ) -> float | None:
+        if not entity_id:
+            return None
+        raw_state = self.raw_state_for_entity(entity_id)
+        attributes = getattr(raw_state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            return None
+        return _float_or_none(attributes.get(key))
 
     def temperature_source_unit(self, raw_unit: str) -> str:
         """Return normalized source temperature unit, falling back to HA unit."""

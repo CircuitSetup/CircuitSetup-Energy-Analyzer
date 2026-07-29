@@ -59,8 +59,11 @@ You need:
 - Active-power sensors are enough for the analyzer to derive daily energy, goals, billing-cycle usage, and cost. Home Assistant Energy Dashboard readiness still requires a native cumulative kWh sensor.
 - Current sensors, or power plus shared mains voltage, if you want capacity/amp checks.
 - Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
-- An outdoor temperature sensor if you want HVAC weather context.
-- A rain sensor if you want sump, well, or water-pump activity compared with rainfall and HVAC condensate context.
+- An outdoor temperature sensor or weather entity if you want HVAC weather
+  context. If it exposes outdoor humidity, sump-pump context also uses that
+  when air-conditioner condensate may drain into the sump.
+- A binary rain sensor or weather entity if you want sump, well, or water-pump
+  activity compared with rainfall and HVAC condensate context.
 - A binary water-flow sensor or numeric flow-rate sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity. Numeric flow sensors are treated as off at `0` and active when greater than `0`.
 
 These context sources are opt-in. Leaving one unconfigured disables its related correlation instead of treating the missing source as negative evidence or a setup problem.
@@ -100,8 +103,8 @@ During setup, you choose:
 | **Source Devices** | ESPHome meter devices, such as a CircuitSetup ATM90E32 meter. The integration expands selected devices into matching electrical sensors. |
 | **Extra Source Entities** | Individual sensors that are not attached to a selected source device, or sensors you want to add manually. |
 | **Mains Source Entities** | Optional whole-panel or aggregate sensors that create a separate mains analysis entity for mains balance, solar-flow, and utility comparison. Experimental NILM can be enabled separately. |
-| **Outdoor Temperature Entity** | Optional outdoor temperature source used only for HVAC weather context. |
-| **Rain Sensor** | Optional boolean rain sensor used to explain expected sump, well-pump, or water-pump activity. |
+| **Outdoor Temperature or Weather Entity** | Optional outdoor temperature source used for HVAC context. An available humidity attribute also provides condensate context for sump pumps. |
+| **Rain or Weather Entity** | Optional binary rain sensor or Home Assistant weather entity used to explain expected sump, well-pump, or water-pump activity. |
 | **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |
 | **Water Flow Sensors** | Optional binary or numeric water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. Binary sensors are active when on; numeric flow-rate sensors are active when greater than `0`. |
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
@@ -133,7 +136,8 @@ You do not need to enable every diagnostic entity. For behavior alerts, let the 
 The generated dashboard and evidence panel are organized around appliance
 questions instead of raw diagnostic entity lists:
 
-- **Appliance Detail** combines current activity, health, energy state,
+- **Appliance Detail** combines current activity, health, predictive-health
+  status and retained evidence, energy state,
   Today vs Normal comparisons, behavior expectations, and active alerts for one
   appliance or circuit. The compact activity facts share one summary panel
   beside the recent timeline, and the history graph moves between 24 hours,
@@ -211,7 +215,9 @@ questions instead of raw diagnostic entity lists:
 4. Leave **Mains Source Entities** empty unless you have whole-panel or aggregate measurements.
 5. Add mains sources if you want Mains NILM, mains balance, solar-flow, or utility/Opower comparison.
 6. Add an outdoor temperature entity if you want HVAC activity compared with outdoor conditions.
-7. Add a rain sensor if you want sump, well, or water-pump activity adjusted for rainfall.
+7. Add a rain sensor or weather entity if you want sump, well, or water-pump
+   activity adjusted for rainfall. A configured outdoor source with humidity
+   also improves sump-pump condensate context.
 8. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
 9. Open **Appliance Circuit Assignments**.
 10. For each detected group, confirm:
@@ -527,7 +533,7 @@ Suggested settings remember apply, deny, and dismiss decisions. Denying a sugges
 | **Run-cycle diagnostics** | Tracks start count, runtime, duty cycle, and running state for appliance-style circuits. | Real-power data and enough cycles. |
 | **Predictive appliance health** | Compares sustained efficiency and cycle changes with comparable learned appliance behavior. | Direct-meter energy/runtime evidence or completed run cycles. |
 | **HVAC weather context** | Compares HVAC runtime with similar outdoor temperatures before treating runtime as unusual. | HVAC-like circuit plus outdoor temperature sensor. |
-| **Rain and pump correlation** | Compares pump runtime with rain, optional rain intensity, and HVAC compressor activity before flagging unusual pump behavior. | Sump pump, water pump, or well pump plus rain sensor. |
+| **Rain and pump correlation** | Compares pump runtime with rain, optional precipitation intensity, HVAC compressor activity, and outdoor humidity for sump-pump condensate context before flagging unusual behavior. | Sump pump, water pump, or well pump plus a rain sensor or weather entity; outdoor humidity is optional. |
 | **Water-flow correlation** | Compares binary or numeric water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
 | **Recent activity timeline** | Keeps recent start/stop/steady-window events and recent possible-issue evidence. | Configured circuit with retained evidence. |
 | **Billing-cycle forecasts** | Tracks current-cycle kWh and projected end-of-cycle usage. | Cumulative energy sensor. |
@@ -596,8 +602,10 @@ needs at least seventeen days. It can also flag three repeatedly short recent
 sessions after at least nine learned completed sessions.
 
 Maintenance-affected evidence is excluded. HVAC and heating comparisons require
-matching available season, weather mode, and temperature-bin context. Pumps and
-water-using appliances also require matching water-flow context when it is
+matching available season, weather mode, and temperature-bin context. Sump-pump
+comparisons use available rain, outdoor-temperature, outdoor-humidity, and HVAC
+compressor context instead of domestic water-flow sensors; other water-using
+appliances preserve water-flow context when it is
 available. If comparable context is missing, the health result remains
 **Learning** instead of substituting unrelated history.
 
@@ -610,7 +618,10 @@ inspection prompts, not component diagnoses or safety controls.
 
 HVAC runtime depends strongly on outdoor temperature. A compressor running longer on a very hot afternoon may be normal, while the same runtime on a mild day may deserve review.
 
-Add an outdoor temperature entity during setup or later from **Configure**. Use a real outdoor sensor, weather-station sensor, or reliable outdoor helper. Indoor thermostat temperature is usually not a good source for this feature.
+Add an outdoor temperature sensor or Home Assistant weather entity during setup
+or later from **Configure**. Use a real outdoor sensor, weather station, or
+reliable outdoor helper. Indoor thermostat temperature is usually not a good
+source for this feature.
 
 This context applies only to HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
 
@@ -618,9 +629,22 @@ Mini-Split inverter operation can remain at low power; tune the default `100 W` 
 
 ### Rain and pump correlation
 
-Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump` circuits. It compares the current day's pump runtime with the learned dry-weather baseline, current rain state or the configured response window after rain stops, optional rain intensity, and the current day's HVAC compressor runtime.
+Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump`
+circuits. It compares the current day's pump runtime with the learned
+dry-weather baseline, current rain state or the configured response window
+after rain stops, optional rain intensity, and the current day's HVAC
+compressor runtime. The rain source can be a binary rain sensor or a Home
+Assistant weather entity; an available current-precipitation attribute is used
+as intensity evidence.
 
-This matters because a sump pump may run more during rain, and it may also run more when an AC compressor is removing humidity and sending condensate to a drain or sump. When both rain and AC activity are present, higher pump activity can be expected instead of automatically becoming a possible issue. Rain evidence carries more weight than compressor-only context; the compressor adjustment is capped below the base rain adjustment.
+This matters because a sump pump may run more during rain, and it may also run
+more when an AC compressor is removing humidity and sending condensate to a
+drain or sump. If the configured outdoor temperature or weather entity exposes
+humidity, humid conditions strengthen that sump-only condensate context and are
+retained as a predictive-health comparison dimension. When rain and AC activity
+are present, higher pump activity can be expected instead of automatically
+becoming a possible issue. Rain evidence still carries more weight than
+compressor-only context.
 
 Configure the global rain source during setup or later from **Configure**. Tune the per-circuit rain response window and activity threshold from:
 

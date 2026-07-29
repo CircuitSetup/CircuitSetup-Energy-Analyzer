@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 from .contextual_baseline import (
     RainContext,
+    humidity_bin,
     rain_context,
+    temperature_bin,
     water_flow_state,
 )
 
@@ -32,6 +35,8 @@ class RainPumpCorrelationInput:
     rain_intensity_per_hour: float | None
     compressor_runtime_minutes: float
     compressor_duty_cycle_percent: float
+    outdoor_temperature_f: float | None = None
+    outdoor_humidity_percent: float | None = None
     rain_intensity_unit: str | None = "mm/h"
     sensitivity_delta_threshold_pct: float = RAIN_THRESHOLD_PCT
 
@@ -99,6 +104,17 @@ def evaluate_rain_pump_correlation(inputs: RainPumpCorrelationInput) -> dict[str
             dry_baseline * 1.5,
         )
         contributing_factors.append("compressor")
+        temperature = _temperature_f_or_none(inputs.outdoor_temperature_f)
+        humidity = _humidity_percent_or_none(inputs.outdoor_humidity_percent)
+        if profile == "sump_pump":
+            environment_adjustment = 0.0
+            if temperature is not None and temperature > 75.0:
+                environment_adjustment += min((temperature - 75.0) / 100.0, 0.15)
+                contributing_factors.append("outdoor_temperature")
+            if humidity is not None and humidity > 60.0:
+                environment_adjustment += min((humidity - 60.0) / 100.0, 0.25)
+                contributing_factors.append("outdoor_humidity")
+            compressor_adjustment *= 1.0 + min(environment_adjustment, 0.4)
 
     expected_runtime = _round_minutes(
         dry_baseline + rain_adjustment + compressor_adjustment
@@ -326,6 +342,18 @@ def _rain_result(
         "actual_minus_expected_minutes": _round_minutes(actual_minus_expected_minutes),
         "contributing_factors": contributing_factors or ["baseline"],
         "confidence": round(float(confidence), 2),
+        "outdoor_temperature_f": _temperature_f_or_none(
+            inputs.outdoor_temperature_f
+        ),
+        "temperature_bin": temperature_bin(
+            _temperature_f_or_none(inputs.outdoor_temperature_f)
+        ),
+        "outdoor_humidity_percent": _humidity_percent_or_none(
+            inputs.outdoor_humidity_percent
+        ),
+        "outdoor_humidity_bin": humidity_bin(
+            _humidity_percent_or_none(inputs.outdoor_humidity_percent)
+        ),
     }
     result.update(_rain_context_attributes(inputs, result))
     result["friendly_summary"] = _rain_summary(result)
@@ -551,6 +579,20 @@ def _normalize_profile(profile: str) -> str:
 
 def _round_minutes(value: float) -> float:
     return round(float(value), 1)
+
+
+def _humidity_percent_or_none(value: float | None) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    return round(parsed, 1) if 0.0 <= parsed <= 100.0 else None
+
+
+def _temperature_f_or_none(value: float | None) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    return round(parsed, 1) if isfinite(parsed) else None
 
 
 def _format_minutes(value: float) -> str:

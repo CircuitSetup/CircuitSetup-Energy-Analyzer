@@ -13,6 +13,7 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     contextual_sample_from_dict,
     contextual_sample_to_dict,
     day_type_for_datetime,
+    humidity_bin,
     rain_intensity_bin,
     rain_state,
     season_for_datetime,
@@ -81,6 +82,11 @@ def test_context_bucket_helpers() -> None:
     assert weather_mode_for_temperature(50.0) == "heating"
     assert weather_mode_for_temperature(62.0) == "neutral"
     assert weather_mode_for_temperature(80.0) == "cooling"
+    assert humidity_bin(None) == "unknown"
+    assert humidity_bin(35.0) == "dry"
+    assert humidity_bin(55.0) == "moderate"
+    assert humidity_bin(75.0) == "humid"
+    assert humidity_bin(85.0) == "very_humid"
     assert rain_intensity_bin(None) == "unknown"
     assert rain_intensity_bin(0.0) == "none"
     assert rain_intensity_bin(0.08) == "light"
@@ -702,6 +708,41 @@ def test_build_context_for_sample_carries_rain_context_issue() -> None:
         "rain_state": "ambiguous",
         "season": "summer",
     }
+
+
+def test_build_context_for_sump_pump_carries_outdoor_humidity() -> None:
+    now = datetime(2026, 7, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "outdoor_temperature_f": 86.0,
+                "outdoor_humidity_percent": 84.0,
+            }
+        },
+        water_flow_context_by_circuit={
+            "sump": {"flow_sensor_active": True, "flow_active_minutes": 10.0}
+        },
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict()["temperature_bin"] == "hot"
+    assert context.as_dict()["outdoor_humidity_bin"] == "very_humid"
+    assert "water_flow_state" not in context.as_dict()
 
 
 def test_build_context_preserves_raw_rain_conflict_when_unit_unknown() -> None:

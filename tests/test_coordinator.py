@@ -769,6 +769,83 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
     assert evidence["rain_context_issues"] == []
 
 
+def test_coordinator_uses_weather_entity_and_outdoor_humidity_for_sump_context() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    weather_attributes = {
+        "temperature": 84,
+        "temperature_unit": "°F",
+        "humidity": 85,
+        "precipitation": 0.1,
+        "precipitation_unit": "in/h",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {"weather.home": ("rainy", 0, weather_attributes)},
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "Air Conditioner",
+                    "appliance_profile": "hvac_compressor",
+                    "mode": "single_phase",
+                },
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "weather.home",
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "weather.home",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 20 * 60
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["hvac"] = 60 * 60
+    coordinator.state.run_cycle_duty_cycle_by_circuit["hvac"] = 50.0
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_sensor_active"] is True
+    assert evidence["rain_intensity_per_hour"] == 0.1
+    assert evidence["rain_intensity_unit"] == "in/h"
+    assert evidence["outdoor_temperature_f"] == 84.0
+    assert evidence["temperature_bin"] == "hot"
+    assert evidence["outdoor_humidity_percent"] == 85.0
+    assert evidence["outdoor_humidity_bin"] == "very_humid"
+    assert "outdoor_temperature" in evidence["contributing_factors"]
+    assert "outdoor_humidity" in evidence["contributing_factors"]
+
+
 def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

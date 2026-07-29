@@ -1176,28 +1176,36 @@ def _optional_entity_marker(key: str, default: Any = None) -> vol.Optional:
     return vol.Optional(key)
 
 
+def _temperature_entity_selector_config() -> dict[str, Any]:
+    return {
+        "entity": {
+            "multiple": False,
+            "filter": [
+                {"domain": "sensor", "device_class": "temperature"},
+                {"domain": "weather"},
+            ],
+        }
+    }
+
+
 def _temperature_entity_selector() -> Any:
-    return _selector(
-        {
-            "entity": {
-                "multiple": False,
-                "filter": [{"domain": "sensor", "device_class": "temperature"}],
-            }
-        },
-        str,
-    )
+    return _selector(_temperature_entity_selector_config(), str)
 
 
-def _binary_sensor_entity_selector(*, multiple: bool = False) -> Any:
-    return _selector(
-        {
-            "entity": {
-                "multiple": multiple,
-                "filter": [{"domain": "binary_sensor"}],
-            }
-        },
-        str,
-    )
+def _rain_context_entity_selector_config() -> dict[str, Any]:
+    return {
+        "entity": {
+            "multiple": False,
+            "filter": [
+                {"domain": "binary_sensor"},
+                {"domain": "weather"},
+            ],
+        }
+    }
+
+
+def _rain_context_entity_selector() -> Any:
+    return _selector(_rain_context_entity_selector_config(), str)
 
 
 def _water_flow_entity_selector_config(*, multiple: bool = True) -> dict[str, Any]:
@@ -1421,7 +1429,7 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
             ): _temperature_entity_selector(),
             _optional_entity_marker(
                 CONF_RAIN_SENSOR_ENTITY,
-            ): _binary_sensor_entity_selector(),
+            ): _rain_context_entity_selector(),
             _optional_entity_marker(
                 CONF_RAIN_INTENSITY_ENTITY,
             ): _single_sensor_entity_selector(),
@@ -4929,7 +4937,7 @@ def _options_schema(
             _optional_entity_marker(
                 CONF_RAIN_SENSOR_ENTITY,
                 rain_sensor_entity,
-            ): _binary_sensor_entity_selector(),
+            ): _rain_context_entity_selector(),
             _optional_entity_marker(
                 CONF_RAIN_INTENSITY_ENTITY,
                 rain_intensity_entity,
