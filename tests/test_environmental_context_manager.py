@@ -27,6 +27,9 @@ def test_environmental_context_profile_boundaries_are_explicit() -> None:
     assert ApplianceProfile.SUMP_PUMP in (
         environmental_context.PUMP_WATER_CONTEXT_PROFILES
     )
+    assert ApplianceProfile.SUMP_PUMP not in (
+        environmental_context.FLOW_WATER_CONTEXT_PROFILES
+    )
     assert ApplianceProfile.WATER_HEATER in (
         environmental_context.FLOW_WATER_CONTEXT_PROFILES
     )

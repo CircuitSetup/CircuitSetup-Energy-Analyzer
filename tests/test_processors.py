@@ -426,6 +426,105 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     )
 
 
+def test_hvac_efficiency_main_loop_uses_only_bounded_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+    import urllib.request
+
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("blocking I/O is forbidden in the HVAC processor")
+
+    thermostat_ids = tuple(f"climate.zone_{index}" for index in range(32))
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    starting = {
+        thermostat_id: ThermostatObservation(
+            thermostat_id,
+            None,
+            78.0,
+            72.0,
+            "cool",
+            "cooling",
+            ("current_temperature", "temperature", "hvac_action"),
+        )
+        for thermostat_id in thermostat_ids
+    }
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=next(iter(starting.values())),
+        advanced_settings={
+            "heat_pump": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: list(thermostat_ids)
+            }
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+    context = replace(
+        context,
+        hass=SimpleNamespace(
+            states=SimpleNamespace(get=forbidden),
+            async_add_executor_job=forbidden,
+        ),
+        thermostat_observations=MappingProxyType(
+            {
+                f"heat_pump|{thermostat_id}": observation
+                for thermostat_id, observation in starting.items()
+            }
+        ),
+    )
+    processor = HvacEfficiencyProcessor()
+    started = processor.process([(heat_pump, SimpleNamespace())], context)
+    for update in started.state_updates:
+        if update.path[0] == "hvac_current_episode_by_stream":
+            context.state.hvac_current_episode_by_stream[update.path[-1]] = (
+                update.value
+            )
+    for thermostat_id in thermostat_ids:
+        stream_id = f"heat_pump|{thermostat_id}|cooling"
+        context.store_data.hvac_response_history_by_stream[stream_id] = [
+            {"marker": index} for index in range(256)
+        ]
+
+    completed = {
+        f"heat_pump|{thermostat_id}": replace(
+            observation,
+            actual_temperature_f=72.4,
+        )
+        for thermostat_id, observation in starting.items()
+    }
+    context = replace(
+        context,
+        now=context.now + timedelta(minutes=12),
+        thermostat_observations=MappingProxyType(completed),
+    )
+    with monkeypatch.context() as guards:
+        guards.setattr("builtins.open", forbidden)
+        guards.setattr(asyncio, "to_thread", forbidden)
+        guards.setattr(socket, "create_connection", forbidden)
+        guards.setattr(urllib.request, "urlopen", forbidden)
+        result = processor.process([(heat_pump, SimpleNamespace())], context)
+
+    histories = context.store_data.hvac_response_history_by_stream
+    assert result.store_dirty is True
+    assert len(histories) == len(thermostat_ids)
+    assert max(len(history) for history in histories.values()) == 256
+    assert all(
+        history[-1]["thermostat_entity_id"] == thermostat_id
+        for thermostat_id, history in (
+            (
+                stream_id.split("|")[1],
+                stream_history,
+            )
+            for stream_id, stream_history in histories.items()
+        )
+    )
+
+
 def _hvac_response_history(
     stream_id: str,
     *,

@@ -62,6 +62,11 @@ You need:
 - An outdoor temperature sensor or weather entity if you want HVAC weather
   context. If it exposes outdoor humidity, sump-pump context also uses that
   when air-conditioner condensate may drain into the sump.
+- One or more Home Assistant climate entities if you want thermostat-response
+  efficiency for HVAC, Heat Pump, Mini-Split, blower, or electric-heat
+  circuits. Ecobee, Nest, and other integrations work through standard climate
+  state attributes. Optional indoor temperature sensors can replace a climate
+  entity's current-temperature attribute for a mapped zone.
 - A binary rain sensor or weather entity if you want sump, well, or water-pump
   activity compared with rainfall and HVAC condensate context.
 - A binary water-flow sensor or numeric flow-rate sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity. Numeric flow sensors are treated as off at `0` and active when greater than `0`.
@@ -107,6 +112,8 @@ During setup, you choose:
 | **Rain or Weather Entity** | Optional binary rain sensor or Home Assistant weather entity used to explain expected sump, well-pump, or water-pump activity. |
 | **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |
 | **Water Flow Sensors** | Optional binary or numeric water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. Binary sensors are active when on; numeric flow-rate sensors are active when greater than `0`. |
+| **Thermostats** | Optional climate entities used to learn how quickly mapped HVAC appliances move each zone toward its active setpoint. Multiple thermostats remain separate. |
+| **Indoor Temperature Sensors** | Optional zone temperature sources used only when a mapped thermostat does not provide a usable current temperature or another sensor is preferred. |
 | **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
 | **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
 
@@ -215,12 +222,14 @@ questions instead of raw diagnostic entity lists:
 4. Leave **Mains Source Entities** empty unless you have whole-panel or aggregate measurements.
 5. Add mains sources if you want Mains NILM, mains balance, solar-flow, or utility/Opower comparison.
 6. Add an outdoor temperature entity if you want HVAC activity compared with outdoor conditions.
-7. Add a rain sensor or weather entity if you want sump, well, or water-pump
+7. Add thermostat climate entities, plus optional candidate indoor temperature
+   sensors, if you want HVAC setpoint-response efficiency.
+8. Add a rain sensor or weather entity if you want sump, well, or water-pump
    activity adjusted for rainfall. A configured outdoor source with humidity
    also improves sump-pump condensate context.
-8. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
-9. Open **Appliance Circuit Assignments**.
-10. For each detected group, confirm:
+9. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
+10. Open **Appliance Circuit Assignments**.
+11. For each detected group, confirm:
    - Whether to analyze the appliance.
    - The circuit name.
    - The appliance type.
@@ -231,9 +240,9 @@ Each source sensor can belong to only one appliance. Removing a sensor or an
 appliance returns its source sensors to the assignment picker so they can be
 assigned again. Existing appliances use the explicit **Remove From Analysis**
 action instead of a second include/exclude control.
-11. Save the configuration.
-12. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
-13. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, or other feature settings.
+12. Save the configuration.
+13. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
+14. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, HVAC thermostat mapping, or other feature settings.
 
 ![Setup Health checklist showing recommended setup actions for configured circuits](docs/images/readme/setup-health.png)
 
@@ -282,6 +291,7 @@ Supported profile values include:
 | `freezer` | Single phase | Load |
 | `hvac` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `hvac_compressor` | Dual phase when both legs are selected; otherwise single phase | Load |
+| `heat_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `mini_split` | Dual phase when both legs are selected; otherwise single phase | Load |
 | `hvac_blower` | Single phase | Load |
 | `electric_heat` | Dual phase when both legs are selected; otherwise single phase | Load |
@@ -303,7 +313,7 @@ Supported profile values include:
 | `resistive_load` | Single phase | Load |
 | `mixed` | Mixed | Load |
 
-Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. `3d_printer` targets consumer FDM printers. Automatic source parsing treats explicit `gas_dryer` names as single phase and explicit `electric_dryer` names as dual phase. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
+Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. Use `heat_pump` for equipment that drives both refrigerant heating and cooling, `hvac_compressor` for a separately metered compressor, and `hvac_blower` for the air handler. The legacy `hvac` profile means a combined or otherwise unspecified HVAC system; it is retained for compatibility rather than duplicating those explicit component profiles. `3d_printer` targets consumer FDM printers. Automatic source parsing treats explicit `gas_dryer` names as single phase and explicit `electric_dryer` names as dual phase. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
 
 ## Summary-First Diagnostics
 
@@ -454,6 +464,7 @@ bound:
 | Settings suggestions | 200 recommendations or 180 days, pending suggestions kept first |
 | Settings suggestion decisions | 500 decisions or 365 days |
 | Settings suggestion notification history | 100 notification episode keys |
+| HVAC thermostat response history | 256 completed episodes per circuit, thermostat, and heating/cooling stream |
 
 ## Optional features
 
@@ -479,6 +490,8 @@ Use **Advanced Circuit Settings** to configure circuit-specific options such as:
 - Standby and Always On settings
 - Activity-alert sensitivity
 - Rain, pump, and water-flow context
+- HVAC thermostat links, temperature-source mappings, gas-heat blower role,
+  and response-change threshold
 
 Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and **Sensitive**.
 
@@ -626,6 +639,56 @@ source for this feature.
 This context applies only to HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
 
 Mini-Split inverter operation can remain at low power; tune the default `100 W` on and `40 W` off thresholds in Advanced Circuit Settings when equipment or metering differs.
+
+### HVAC thermostat response efficiency
+
+Thermostat response learning measures how many elapsed minutes an HVAC
+temperature driver needs to move a zone one degree toward its active setpoint.
+It supports combined HVAC systems, compressors, Heat Pumps, Mini-Splits,
+electric heat, and gas-furnace blowers. Cooling is attributed to the compressor
+or combined refrigerant system; a blower is supporting air handling and is
+never scored as the independent cooling driver. Electric heat is measured
+directly. A blower can represent heating only when **Blower Represents
+Gas-Furnace Operation** is enabled and no metered electric heating driver
+participates.
+
+Choose climate entities under the integration's source settings, then link the
+thermostat zones served by each HVAC appliance in **Advanced Circuit
+Settings**. One globally configured thermostat is used automatically when no
+per-circuit link is set. With multiple thermostats, link each applicable zone
+explicitly; every thermostat, circuit, and heating/cooling mode learns
+separately. Standard climate attributes are used when available, so integrations
+such as Ecobee and Nest can expose different capability sets without
+brand-specific handling. A configured indoor temperature mapping overrides the
+climate entity's current-temperature attribute for that zone.
+
+An eligible response episode starts at least 1°F from the setpoint and completes
+within 0.5°F. Evaluation requires nine older and three recent complete episodes
+with the same thermostat, mode, season, weather mode, outdoor-temperature bin,
+two-degree starting-gap bin, and participating equipment. The default
+weather-adjusted response-change threshold is `25%` and can be set from `5%` to
+`100%`. A sustained slower result creates warning evidence and a Repair prompt;
+a faster result is informational and creates no Repair. Missing or incomparable
+data remains **Learning**.
+
+Appliance Detail shows heating and cooling separately, including each
+thermostat, learned and recent minutes per degree, outdoor context, sample
+counts, and attribution. The efficiency score is
+`100 × learned response / recent response`, capped from `0` to `200`: `100`
+matches the learned baseline, below `100` is slower, and above `100` is faster.
+
+Suggested Settings can recommend thermostat links, indoor-temperature
+mappings, the gas-heat blower role, and a noise-aware response threshold after
+enough consistent evidence. Applied suggestions use the normal undo and reset
+paths. Confirmed problem feedback excludes the affected recent episodes;
+expected, corrected, or improved feedback starts a new baseline era so repaired
+behavior does not get mixed with the old system.
+
+The update path reads only Home Assistant's current in-memory state snapshot.
+It does not query Recorder, call a network service, write files, or save
+synchronously on the Home Assistant event loop. Completed histories are capped
+at 256 records per circuit/thermostat/mode stream, and persistence uses the
+integration's existing deferred dirty-save path.
 
 ### Rain and pump correlation
 
@@ -805,6 +868,12 @@ Open the separate NILM workspace route from the evidence panel to label signatur
 ## Suggested settings
 
 After enough history, the analyzer can suggest advanced settings based on observed evidence. These are tuning recommendations for thresholds and windows, not appliance diagnoses.
+
+For HVAC circuits, suggestions can also propose one thermostat zone at a time,
+an indoor-temperature override, the gas-heat role for a blower, or a learned
+response-change threshold. Thermostat/source suggestions require at least nine
+consistent calls with 80% agreement; threshold suggestions require at least 20
+complete, comparable, non-alerted episodes.
 
 Review them from:
 
