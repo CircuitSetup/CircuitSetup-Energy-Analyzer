@@ -87,6 +87,15 @@ class AnalyzerState:
     water_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    hvac_current_episode_by_stream: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    hvac_efficiency_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    hvac_thermostat_setup_issues_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     daily_energy_usage_by_circuit: dict[str, float] = field(default_factory=dict)
     average_kwh_per_day_by_circuit: dict[str, float | None] = field(
         default_factory=dict

@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..alerting import Observation
+from ..hvac_efficiency import ThermostatObservation
 from ..models import AlertEvidence, CircuitEvent
 
 if TYPE_CHECKING:
@@ -42,6 +44,9 @@ class ProcessingContext:
     known_load_circuit_ids: frozenset[str]
     sensitivity: str
     time_zone: str | None = None
+    thermostat_observations: Mapping[str, ThermostatObservation] = field(
+        default_factory=lambda: MappingProxyType({}),
+    )
     contextual_samples_cache: dict[tuple[str, tuple[int, ...]], Any] = field(
         default_factory=dict,
         compare=False,

@@ -37,6 +37,7 @@ class ProcessingPipeline:
         clear_power_quality_state: Any,
         clear_standby_state: Any,
         sync_setup_health_repairs: Any,
+        hvac_efficiency_processor: Any | None = None,
     ) -> None:
         self._event_processor = event_processor
         self._power_quality_processor = power_quality_processor
@@ -52,6 +53,7 @@ class ProcessingPipeline:
         self._leg_imbalance_processor = leg_imbalance_processor
         self._metric_consistency_processor = metric_consistency_processor
         self._standby_processor = standby_processor
+        self._hvac_efficiency_processor = hvac_efficiency_processor
         self._mains_balance_processor = mains_balance_processor
         self._solar_flow_processor = solar_flow_processor
         self._utility_comparison_processor = utility_comparison_processor
@@ -211,6 +213,11 @@ class ProcessingPipeline:
     ) -> list[Any]:
         coordinator = self._coordinator
         alerts: list[Any] = []
+
+        if self._hvac_efficiency_processor is not None:
+            hvac_result = self._hvac_efficiency_processor.process(samples, context)
+            _, hvac_alerts = await self._async_apply_feature_result(hvac_result)
+            alerts.extend(hvac_alerts)
 
         balance_result = self._mains_balance_processor.process(
             samples,

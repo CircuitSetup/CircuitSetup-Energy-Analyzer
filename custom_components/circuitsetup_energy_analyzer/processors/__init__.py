@@ -11,6 +11,7 @@ from .demand import DemandProcessor
 from .energy_goal import EnergyGoalProcessor
 from .energy_usage import EnergyUsageProcessor
 from .events import CircuitEventProcessor
+from .hvac_efficiency import HvacEfficiencyProcessor
 from .leg_imbalance import LegImbalanceProcessor
 from .mains_balance import MainsBalanceProcessor
 from .metric_consistency import MetricConsistencyProcessor
@@ -33,6 +34,7 @@ __all__ = [
     "EnergyGoalProcessor",
     "EnergyUsageProcessor",
     "FeatureResult",
+    "HvacEfficiencyProcessor",
     "LegImbalanceProcessor",
     "MainsBalanceProcessor",
     "MetricConsistencyProcessor",

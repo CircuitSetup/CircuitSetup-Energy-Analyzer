@@ -91,6 +91,10 @@ class FeatureStoreData:
     water_context_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    hvac_response_history_by_stream: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    hvac_baseline_era_by_stream: dict[str, str] = field(default_factory=dict)
     contextual_baseline_samples_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -341,6 +345,13 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "water_context_history_by_circuit": _dict_of_list_dicts(
             data.water_context_history_by_circuit
         ),
+        "hvac_response_history_by_stream": _dict_of_list_dicts(
+            data.hvac_response_history_by_stream
+        ),
+        "hvac_baseline_era_by_stream": {
+            str(stream_id): str(era)
+            for stream_id, era in data.hvac_baseline_era_by_stream.items()
+        },
         "contextual_baseline_samples_by_circuit": _dict_of_list_dicts(
             data.contextual_baseline_samples_by_circuit
         ),
@@ -473,6 +484,16 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         water_context_history_by_circuit=_dict_of_list_dicts(
             raw.get("water_context_history_by_circuit", {})
         ),
+        hvac_response_history_by_stream=_dict_of_list_dicts(
+            raw.get("hvac_response_history_by_stream", {})
+        ),
+        hvac_baseline_era_by_stream={
+            str(stream_id): str(era)
+            for stream_id, era in _mapping_items(
+                raw.get("hvac_baseline_era_by_stream", {})
+            )
+            if str(stream_id) and str(era)
+        },
         contextual_baseline_samples_by_circuit=(
             _contextual_samples_by_circuit(
                 raw.get("contextual_baseline_samples_by_circuit", {})
@@ -697,6 +718,8 @@ def prune_events(
         rain_pump_context_by_circuit=data.rain_pump_context_by_circuit,
         water_flow_context_by_circuit=data.water_flow_context_by_circuit,
         water_context_history_by_circuit=data.water_context_history_by_circuit,
+        hvac_response_history_by_stream=data.hvac_response_history_by_stream,
+        hvac_baseline_era_by_stream=data.hvac_baseline_era_by_stream,
         contextual_baseline_samples_by_circuit=contextual_samples,
         contextual_baselines_by_circuit=contextual_stats,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
@@ -781,8 +804,17 @@ class FeatureStore:
                 self,
                 old_major_version: int,
                 old_minor_version: int,
-                _old_data: dict[str, Any],
+                old_data: dict[str, Any],
             ) -> dict[str, Any]:
+                if old_major_version == STORAGE_VERSION - 1:
+                    _LOGGER.info(
+                        "Migrating %s storage schema %s.%s to schema %s",
+                        self.key,
+                        old_major_version,
+                        old_minor_version,
+                        STORAGE_VERSION,
+                    )
+                    return old_data
                 _LOGGER.warning(
                     "Discarding unsupported %s storage schema %s.%s; "
                     "starting with schema %s",

@@ -222,8 +222,16 @@ def evaluate_efficiency(
     )
 
 
-def episode_to_dict(episode: HvacResponseEpisode) -> dict[str, Any]:
-    if not _is_valid_completed_episode(episode):
+def episode_to_dict(
+    episode: HvacResponseEpisode,
+    *,
+    allow_incomplete: bool = False,
+) -> dict[str, Any]:
+    if not (
+        _is_valid_runtime_episode(episode)
+        if allow_incomplete
+        else _is_valid_completed_episode(episode)
+    ):
         raise ValueError("Only valid completed HVAC response episodes can be stored")
     payload = asdict(episode)
     for key in ("started_at", "ended_at", "inactive_since"):
@@ -234,7 +242,11 @@ def episode_to_dict(episode: HvacResponseEpisode) -> dict[str, Any]:
     return payload
 
 
-def episode_from_dict(raw: Mapping[str, Any]) -> HvacResponseEpisode | None:
+def episode_from_dict(
+    raw: Mapping[str, Any],
+    *,
+    allow_incomplete: bool = False,
+) -> HvacResponseEpisode | None:
     try:
         episode = HvacResponseEpisode(
             stream_id=str(raw["stream_id"]),
@@ -269,7 +281,23 @@ def episode_from_dict(raw: Mapping[str, Any]) -> HvacResponseEpisode | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
-    return episode if _is_valid_completed_episode(episode) else None
+    valid = (
+        _is_valid_runtime_episode(episode)
+        if allow_incomplete
+        else _is_valid_completed_episode(episode)
+    )
+    return episode if valid else None
+
+
+def observation_response_mode(
+    observation: ThermostatObservation,
+) -> str | None:
+    """Return the normalized heating/cooling direction for one observation."""
+    return _response_mode(
+        observation,
+        actual=_finite_float(observation.actual_temperature_f),
+        target=_finite_float(observation.target_temperature_f),
+    )
 
 
 def _response_mode(
@@ -344,10 +372,27 @@ def _minutes_per_degree(episode: HvacResponseEpisode) -> float | None:
 
 
 def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
+    if not _is_valid_runtime_episode(episode):
+        return False
     if (
         not episode.complete
         or episode.ended_at is None
-        or not episode.stream_id
+    ):
+        return False
+    if episode.elapsed_minutes <= 0.0 or episode.active_minutes <= 0.0:
+        return False
+    target_gap = _directional_gap(
+        episode.mode,
+        actual=episode.start_temperature_f,
+        target=episode.target_temperature_f,
+    )
+    degrees_closed = _degrees_closed(episode)
+    return target_gap >= _MINIMUM_START_GAP_F and degrees_closed > 0.0
+
+
+def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
+    if (
+        not episode.stream_id
         or not episode.circuit_id
         or not episode.thermostat_entity_id
         or episode.mode not in {"heating", "cooling"}
@@ -361,17 +406,17 @@ def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
         episode.elapsed_minutes,
         episode.active_minutes,
     )
-    if not all(math.isfinite(value) for value in numeric_values):
-        return False
-    if episode.elapsed_minutes <= 0.0 or episode.active_minutes <= 0.0:
-        return False
-    target_gap = _directional_gap(
-        episode.mode,
-        actual=episode.start_temperature_f,
-        target=episode.target_temperature_f,
+    return bool(
+        all(math.isfinite(value) for value in numeric_values)
+        and episode.elapsed_minutes >= 0.0
+        and episode.active_minutes >= 0.0
+        and _directional_gap(
+            episode.mode,
+            actual=episode.start_temperature_f,
+            target=episode.target_temperature_f,
+        )
+        >= _MINIMUM_START_GAP_F
     )
-    degrees_closed = _degrees_closed(episode)
-    return target_gap >= _MINIMUM_START_GAP_F and degrees_closed > 0.0
 
 
 def _degrees_closed(episode: HvacResponseEpisode) -> float:
