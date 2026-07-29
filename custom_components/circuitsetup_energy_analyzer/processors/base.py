@@ -55,6 +55,7 @@ class FeatureResult:
 
     events: list[CircuitEvent] = field(default_factory=list)
     alerts: list[AlertEvidence] = field(default_factory=list)
+    preserved_alerts: list[AlertEvidence] = field(default_factory=list)
     observations: list[Observation] = field(default_factory=list)
     state_updates: list[StateUpdate] = field(default_factory=list)
     repairs: list[Any] = field(default_factory=list)

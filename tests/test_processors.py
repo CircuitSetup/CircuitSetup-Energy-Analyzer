@@ -6175,7 +6175,8 @@ def test_appliance_health_processor_requires_distinct_completed_dates() -> None:
     context.state.active_alerts_by_circuit["fridge"] = third.alerts
     unchanged = processor.process(_energy_sample(120.5), config, context)
 
-    assert unchanged.alerts == third.alerts
+    assert unchanged.alerts == []
+    assert unchanged.preserved_alerts == third.alerts
     assert unchanged.notifications == []
 
 
@@ -6306,7 +6307,8 @@ def test_repeated_short_cycles_use_already_repeated_policy() -> None:
     context.state.active_alerts_by_circuit["fridge"] = result.alerts
     unchanged = processor.process(_energy_sample(120.5), config, context)
 
-    assert unchanged.alerts == result.alerts
+    assert unchanged.alerts == []
+    assert unchanged.preserved_alerts == result.alerts
     assert unchanged.notifications == []
 
 

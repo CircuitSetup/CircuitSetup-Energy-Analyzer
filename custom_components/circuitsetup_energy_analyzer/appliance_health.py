@@ -509,7 +509,11 @@ def _context_by_date(
     samples: Iterable[ContextualBaselineSample],
     time_zone: TimeZone,
 ) -> dict[date, dict[str, str]]:
-    relevant_keys = (*_WEATHER_CONTEXT_KEYS, "water_flow_state")
+    relevant_keys = tuple(
+        dict.fromkeys(
+            (*_WEATHER_CONTEXT_KEYS, *_SUMP_CONTEXT_KEYS, "water_flow_state")
+        )
+    )
     grouped: dict[date, dict[str, set[tuple[tuple[str, str], ...]]]] = {}
     for sample in samples:
         if (

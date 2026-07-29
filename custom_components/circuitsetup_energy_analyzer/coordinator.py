@@ -1538,6 +1538,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for alert in result.alerts
                 if self.notification_controller.learning_allows_alert(alert)
             ],
+            preserved_alerts=[
+                alert
+                for alert in result.preserved_alerts
+                if self.notification_controller.learning_allows_alert(alert)
+            ],
             notifications=[
                 alert
                 for alert in result.notifications

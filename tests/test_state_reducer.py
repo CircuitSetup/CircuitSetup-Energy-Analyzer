@@ -82,6 +82,13 @@ def test_state_reducer_applies_feature_result_payload() -> None:
         message="Possible issue.",
         feature="processor_test",
     )
+    preserved_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Existing issue.",
+        feature="preserved_test",
+    )
     observation = Observation(
         circuit_id="fridge",
         feature="cycle_duration",
@@ -98,6 +105,7 @@ def test_state_reducer_applies_feature_result_payload() -> None:
         FeatureResult(
             events=[event],
             alerts=[alert],
+            preserved_alerts=[preserved_alert],
             notifications=[alert],
             observations=[observation],
             state_updates=[
@@ -109,7 +117,7 @@ def test_state_reducer_applies_feature_result_payload() -> None:
     )
 
     assert applied.events == [event]
-    assert applied.active_alerts == [alert]
+    assert applied.active_alerts == [alert, preserved_alert]
     assert applied.notifications == [alert]
     assert applied.store_dirty is True
     assert store_data.events == [event]

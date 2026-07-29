@@ -369,6 +369,9 @@ def test_health_day_builder_retains_agreed_environment_context() -> None:
             "season": "summer",
             "weather_mode": "cooling",
             "temperature_bin": "hot",
+            "rain_state": "raining",
+            "rain_intensity_bin": "moderate",
+            "outdoor_humidity_bin": "very_humid",
             "water_flow_state": "active_flow",
         }
     )
@@ -400,6 +403,9 @@ def test_health_day_builder_retains_agreed_environment_context() -> None:
 
     assert result[0].context == {
         "season": "summer",
+        "outdoor_humidity_bin": "very_humid",
+        "rain_intensity_bin": "moderate",
+        "rain_state": "raining",
         "temperature_bin": "hot",
         "water_flow_state": "active_flow",
         "weather_mode": "cooling",

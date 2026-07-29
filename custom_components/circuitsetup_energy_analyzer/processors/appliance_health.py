@@ -172,7 +172,7 @@ class ApplianceHealthProcessor:
                 finding,
             )
             if active_alert is not None:
-                result.alerts.append(active_alert)
+                result.preserved_alerts.append(active_alert)
             return result
         if finding.feature == "repeated_short_cycle":
             alert = replace(alert, repeated_count=finding.recent_count)

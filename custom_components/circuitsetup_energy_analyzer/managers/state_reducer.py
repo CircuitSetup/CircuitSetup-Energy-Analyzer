@@ -93,8 +93,13 @@ class StateReducer:
     ) -> AppliedFeatureResult:
         """Apply processor output to analyzer state and persistent store."""
         stored_alerts = [alert_feedback(alert) for alert in result.alerts]
+        preserved_alerts = [
+            alert_feedback(alert) for alert in result.preserved_alerts
+        ]
         active_alerts = [
-            alert for alert in stored_alerts if alert.feedback_status != "expected"
+            alert
+            for alert in (*stored_alerts, *preserved_alerts)
+            if alert.feedback_status != "expected"
         ]
         if result.events:
             store_data.events.extend(result.events)
