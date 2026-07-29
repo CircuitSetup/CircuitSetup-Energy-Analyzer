@@ -916,6 +916,7 @@ def _hvac_response_history(
     reference_rate: float = 10.0,
     recent_rate: float = 12.5,
     count: int = 12,
+    appliance_profile: str = "heat_pump",
 ) -> list[dict[str, object]]:
     circuit_id, thermostat_id, mode = stream_id.split("|")
     history: list[dict[str, object]] = []
@@ -947,6 +948,7 @@ def _hvac_response_history(
                     participant_signature=(circuit_id,),
                     supporting_blower_ids=(),
                     complete=True,
+                    appliance_profile=appliance_profile,
                 )
             )
         )
@@ -1082,6 +1084,60 @@ def test_hvac_efficiency_ignores_history_for_unlinked_thermostat() -> None:
     assert payload["score"] is None
     assert result.alerts == result.notifications == []
     assert retired_stream in context.store_data.hvac_response_history_by_stream
+
+
+def test_hvac_efficiency_ignores_history_from_previous_appliance_profile() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(
+            stream_id,
+            recent_rate=15.0,
+            appliance_profile="hvac_compressor",
+        )
+    )
+
+    result = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(
+            min_repeated=1,
+            min_total_score=1.5,
+            min_average_score=1.5,
+            min_baseline_confidence=0.0,
+        )
+    ).process([(heat_pump, SimpleNamespace())], context)
+    payload = _state_update_values(
+        result,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]
+
+    assert payload["streams"][stream_id]["status"] == "no_data"
+    assert payload["score"] is None
+    assert result.alerts == result.notifications == []
+    assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 12
 
 
 def test_hvac_efficiency_uses_only_the_current_temperature_source() -> None:

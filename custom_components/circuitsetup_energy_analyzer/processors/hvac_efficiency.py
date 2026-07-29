@@ -202,6 +202,7 @@ class HvacEfficiencyProcessor:
                     current_observation,
                     now=context.now,
                     circuit_id=config.circuit_id,
+                    appliance_profile=config.appliance_profile.value,
                     driver_active=config.circuit_id in drivers,
                     active_minutes_delta=active_delta,
                     participant_signature=participant_signature,
@@ -838,6 +839,8 @@ def _circuit_efficiency_payload(
             for raw in raw_history[-_HISTORY_LIMIT:]
             if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
             == baseline_era
+            if str(raw.get("appliance_profile") or "")
+            == config.appliance_profile.value
             if (str(raw.get("temperature_entity_id") or "").strip() or None)
             == thermostat_mappings[stream_parts[1]]
             if (episode := episode_from_dict(raw)) is not None

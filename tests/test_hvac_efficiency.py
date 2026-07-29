@@ -52,12 +52,14 @@ def _advance(
     now: datetime = START,
     driver_active: bool = True,
     active_minutes_delta: float = 0.0,
+    appliance_profile: str = "heat_pump",
 ) -> tuple[HvacResponseEpisode | None, HvacResponseEpisode | None]:
     return advance_episode(
         current,
         observation,
         now=now,
         circuit_id="heat_pump",
+        appliance_profile=appliance_profile,
         driver_active=driver_active,
         active_minutes_delta=active_minutes_delta,
         participant_signature=("heat_pump",),
@@ -98,6 +100,7 @@ def _completed_episode(
         participant_signature=participants,
         supporting_blower_ids=("blower",),
         complete=True,
+        appliance_profile="heat_pump",
     )
 
 
@@ -141,6 +144,22 @@ def test_temperature_source_change_excludes_the_active_episode() -> None:
         changed_source,
         now=START + timedelta(minutes=5),
         active_minutes_delta=5.0,
+    )
+
+    assert active is None
+    assert excluded is not None
+    assert excluded.excluded_from_baseline is True
+
+
+def test_appliance_profile_change_excludes_the_active_episode() -> None:
+    current, _ = _advance(None, _observation(actual=78.0, target=72.0))
+
+    active, excluded = _advance(
+        current,
+        _observation(actual=77.0, target=72.0),
+        now=START + timedelta(minutes=5),
+        active_minutes_delta=5.0,
+        appliance_profile="electric_heat",
     )
 
     assert active is None

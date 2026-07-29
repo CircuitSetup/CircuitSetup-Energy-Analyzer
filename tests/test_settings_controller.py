@@ -489,6 +489,7 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
             {
                 "stream_id": stream_id,
                 "circuit_id": "heat_pump",
+                "appliance_profile": "heat_pump",
                 "thermostat_entity_id": "climate.downstairs",
                 "temperature_entity_id": "sensor.downstairs_temperature",
                 "mode": "cooling",
@@ -543,7 +544,7 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     assert episode["complete"] is True
     assert episode["alerted"] is False
     assert episode["context_key"] == (
-        "heat_pump|climate.downstairs|sensor.downstairs_temperature|"
+        "heat_pump|heat_pump|climate.downstairs|sensor.downstairs_temperature|"
         "cooling|very_hot|summer|cooling|4-6F|heat_pump"
     )
 

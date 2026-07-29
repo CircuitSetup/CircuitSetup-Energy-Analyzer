@@ -51,6 +51,7 @@ class HvacResponseEpisode:
     excluded_from_baseline: bool = False
     inactive_since: datetime | None = None
     temperature_entity_id: str | None = None
+    appliance_profile: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,7 @@ def advance_episode(
     *,
     now: datetime,
     circuit_id: str,
+    appliance_profile: str,
     driver_active: bool,
     active_minutes_delta: float,
     participant_signature: tuple[str, ...],
@@ -131,6 +133,7 @@ def advance_episode(
             supporting_blower_ids=_sorted_unique(supporting_blower_ids),
             complete=False,
             temperature_entity_id=observation.temperature_entity_id,
+            appliance_profile=_optional_text(appliance_profile),
         )
         return episode, None
 
@@ -142,6 +145,7 @@ def advance_episode(
         or observation.thermostat_entity_id != current.thermostat_entity_id
         or observation.temperature_entity_id != current.temperature_entity_id
         or circuit_id != current.circuit_id
+        or appliance_profile != current.appliance_profile
         or mode != current.mode
         or not math.isclose(target, current.target_temperature_f, abs_tol=0.01)
     ):
@@ -325,6 +329,7 @@ def episode_from_dict(
             temperature_entity_id=_optional_text(
                 raw.get("temperature_entity_id")
             ),
+            appliance_profile=_optional_text(raw.get("appliance_profile")),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -403,6 +408,7 @@ def _exclude_episode(
 def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
     return (
         episode.circuit_id,
+        episode.appliance_profile,
         episode.thermostat_entity_id,
         episode.temperature_entity_id,
         episode.mode,
@@ -487,6 +493,7 @@ def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
     return {
         "stream_id": episode.stream_id,
         "circuit_id": episode.circuit_id,
+        "appliance_profile": episode.appliance_profile,
         "thermostat_entity_id": episode.thermostat_entity_id,
         "temperature_entity_id": episode.temperature_entity_id,
         "mode": episode.mode,

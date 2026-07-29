@@ -2369,6 +2369,7 @@ def _hvac_advisor_history(
         "hvac_correlation_history_by_circuit",
         {},
     )
+    profile = str(getattr(config.appliance_profile, "value", ""))
     calls = [
         dict(call)
         for call in stored_calls.get(circuit_id, ())[-256:]
@@ -2382,6 +2383,7 @@ def _hvac_advisor_history(
         if isinstance(raw, Mapping)
         and str(raw.get("baseline_era", "initial"))
         == str(eras.get(stream_id, "initial"))
+        and str(raw.get("appliance_profile") or "") == profile
         and episode_from_dict(raw) is not None
     ][-256:]
 
@@ -2397,7 +2399,6 @@ def _hvac_advisor_history(
         if alert.features.get("health_feature") == "hvac_thermostat_efficiency"
         for episode_id in alert.features.get("recent_episode_ids", ())
     }
-    profile = str(getattr(config.appliance_profile, "value", ""))
     episodes: list[dict[str, Any]] = []
     for raw in raw_episodes:
         episode = episode_from_dict(raw)
@@ -2446,6 +2447,7 @@ def _hvac_advisor_history(
         context_key = "|".join(
             (
                 episode.circuit_id,
+                str(episode.appliance_profile or ""),
                 episode.thermostat_entity_id,
                 str(episode.temperature_entity_id or ""),
                 episode.mode,
