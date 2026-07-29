@@ -90,6 +90,9 @@ class AnalyzerState:
     hvac_current_episode_by_stream: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    hvac_correlation_active_by_pair: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     hvac_efficiency_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )

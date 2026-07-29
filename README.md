@@ -679,16 +679,19 @@ matches the learned baseline, below `100` is slower, and above `100` is faster.
 
 Suggested Settings can recommend thermostat links, indoor-temperature
 mappings, the gas-heat blower role, and a noise-aware response threshold after
-enough consistent evidence. Applied suggestions use the normal undo and reset
-paths. Confirmed problem feedback excludes the affected recent episodes;
+enough consistent evidence. Call/overlap correlation is learned before a
+per-circuit thermostat link exists so the link itself can be suggested.
+Applied suggestions use the normal undo and reset paths. Confirmed problem
+feedback excludes the affected recent episodes;
 expected, corrected, or improved feedback starts a new baseline era so repaired
 behavior does not get mixed with the old system.
 
 The update path reads only Home Assistant's current in-memory state snapshot.
 It does not query Recorder, call a network service, write files, or save
 synchronously on the Home Assistant event loop. Completed histories are capped
-at 256 records per circuit/thermostat/mode stream, and persistence uses the
-integration's existing deferred dirty-save path.
+at 256 records per circuit/thermostat/mode stream, pre-link correlation is
+capped at 256 calls per circuit, and persistence uses the integration's existing
+deferred dirty-save path.
 
 ### Rain and pump correlation
 

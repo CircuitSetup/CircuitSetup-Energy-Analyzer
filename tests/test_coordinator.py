@@ -1732,6 +1732,52 @@ def test_thermostat_snapshot_resolves_single_range_and_unavailable_targets() -> 
     assert unavailable.mode is None
 
 
+def test_thermostat_snapshot_includes_unmapped_temperature_candidates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    thermostat = "climate.downstairs"
+    temperature = "sensor.downstairs_temperature"
+    states = {
+        thermostat: SimpleNamespace(
+            state="cool",
+            attributes={
+                "current_temperature": 78.0,
+                "temperature": 72.0,
+                "hvac_action": "cooling",
+                "temperature_unit": "°F",
+            },
+        ),
+        temperature: SimpleNamespace(
+            state="76.5",
+            attributes={"unit_of_measurement": "°F"},
+        ),
+    }
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            config=SimpleNamespace(
+                units=SimpleNamespace(temperature_unit="°F")
+            ),
+        ),
+        entry_data={
+            CONF_THERMOSTAT_ENTITIES: [thermostat],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [temperature],
+        },
+        options={},
+        circuit_configs=(),
+    )
+
+    observations = ProcessingContextBuilder(coordinator).thermostat_observations()
+    candidate = observations[f"candidate|{thermostat}|{temperature}"]
+
+    assert candidate.thermostat_entity_id == thermostat
+    assert candidate.temperature_entity_id == temperature
+    assert candidate.actual_temperature_f == 76.5
+    assert "temperature_override" in candidate.available_capabilities
+
+
 def test_coordinator_exposes_processing_pipeline() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

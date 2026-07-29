@@ -94,6 +94,9 @@ class FeatureStoreData:
     hvac_response_history_by_stream: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    hvac_correlation_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     hvac_baseline_era_by_stream: dict[str, str] = field(default_factory=dict)
     contextual_baseline_samples_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
@@ -348,6 +351,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "hvac_response_history_by_stream": _dict_of_list_dicts(
             data.hvac_response_history_by_stream
         ),
+        "hvac_correlation_history_by_circuit": _dict_of_list_dicts(
+            data.hvac_correlation_history_by_circuit
+        ),
         "hvac_baseline_era_by_stream": {
             str(stream_id): str(era)
             for stream_id, era in data.hvac_baseline_era_by_stream.items()
@@ -486,6 +492,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         hvac_response_history_by_stream=_dict_of_list_dicts(
             raw.get("hvac_response_history_by_stream", {})
+        ),
+        hvac_correlation_history_by_circuit=_dict_of_list_dicts(
+            raw.get("hvac_correlation_history_by_circuit", {})
         ),
         hvac_baseline_era_by_stream={
             str(stream_id): str(era)
@@ -719,6 +728,9 @@ def prune_events(
         water_flow_context_by_circuit=data.water_flow_context_by_circuit,
         water_context_history_by_circuit=data.water_context_history_by_circuit,
         hvac_response_history_by_stream=data.hvac_response_history_by_stream,
+        hvac_correlation_history_by_circuit=(
+            data.hvac_correlation_history_by_circuit
+        ),
         hvac_baseline_era_by_stream=data.hvac_baseline_era_by_stream,
         contextual_baseline_samples_by_circuit=contextual_samples,
         contextual_baselines_by_circuit=contextual_stats,

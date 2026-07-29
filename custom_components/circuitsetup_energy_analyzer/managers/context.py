@@ -9,6 +9,7 @@ from ..const import (
     CONF_ADVANCED_SETTINGS,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
 )
 from ..context_sources import (
     configured_context_entities,
@@ -101,6 +102,20 @@ class ProcessingContextBuilder:
             )
             for entity_id in configured
         }
+        temperature_candidates = configured_context_entities(
+            entry_data,
+            options,
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+        )
+        for thermostat_id in configured:
+            for temperature_id in temperature_candidates:
+                observations[
+                    f"candidate|{thermostat_id}|{temperature_id}"
+                ] = self._thermostat_observation(
+                    thermostat_id,
+                    temperature_id,
+                    state_for=state_for,
+                )
         for config in getattr(coordinator, "circuit_configs", ()):
             if (
                 getattr(config, "appliance_profile", None)

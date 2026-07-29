@@ -547,6 +547,68 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     )
 
 
+def test_settings_controller_uses_hvac_correlation_without_response_episodes() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        settings_advisor as advisor,
+    )
+
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    config = coordinator.circuit_configs[0]
+    config.circuit_id = "heat_pump"
+    config.name = "Downstairs Heat Pump"
+    config.appliance_profile = ApplianceProfile.HEAT_PUMP
+    calls = [
+        {
+            "thermostat_entity_id": "climate.downstairs",
+            "thermostat_name": "Downstairs",
+            "temperature_entity_id": None,
+            "mode": "cooling",
+            "driver_mode": "cooling",
+            "overlap_ratio": 0.9,
+            "candidate_moved_toward_target": False,
+            "climate_has_current_temperature": True,
+            "electrical_driver_present": True,
+            "weather_mode": "cooling",
+            "temperature_bin": "very_hot",
+        }
+        for _ in range(9)
+    ]
+    coordinator.store_data.hvac_correlation_history_by_circuit = {
+        "heat_pump": calls
+    }
+    coordinator.store_data.hvac_response_history_by_stream = {}
+    coordinator.store_data.hvac_baseline_era_by_stream = {}
+    coordinator.store_data.alerts = []
+
+    history = settings_controller.SettingsController(
+        coordinator
+    ).advisor_feature_history_for_circuit(config, coordinator.now)
+
+    assert history["hvac_response_episodes"] == []
+    assert history["hvac_correlation_calls"] == calls
+    recommendations = advisor.build_settings_recommendations(
+        advisor.AdvisorInputs(
+            now=coordinator.now,
+            context=advisor.AdvisorCircuitContext(
+                circuit_id="heat_pump",
+                circuit_name="Downstairs Heat Pump",
+                appliance_profile="heat_pump",
+                circuit_mode="dual_phase",
+                power_flow="load",
+                advanced_settings={},
+            ),
+            feature_history=history,
+        )
+    )
+    link = next(
+        item
+        for item in recommendations
+        if item.setting_key == "linked_thermostat_entities"
+    )
+    assert link.suggested_value == ["climate.downstairs"]
+
+
 def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)

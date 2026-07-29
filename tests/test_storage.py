@@ -437,6 +437,29 @@ def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None
     }
 
 
+def test_feature_store_schema_nine_round_trips_hvac_correlation_history() -> None:
+    history = {
+        "heat_pump": [
+            {
+                "thermostat_entity_id": "climate.downstairs",
+                "mode": "cooling",
+                "overlap_ratio": 0.9,
+            }
+        ]
+    }
+    restored = feature_store_data_from_dict(
+        {
+            "schema_version": 9,
+            "hvac_correlation_history_by_circuit": history,
+        }
+    )
+
+    assert getattr(restored, "hvac_correlation_history_by_circuit", None) == history
+    assert feature_store_data_to_dict(restored)[
+        "hvac_correlation_history_by_circuit"
+    ] == history
+
+
 def test_feature_store_schema_eight_loads_with_empty_hvac_history() -> None:
     restored = feature_store_data_from_dict(
         {

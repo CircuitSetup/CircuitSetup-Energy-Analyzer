@@ -80,6 +80,14 @@ def advance_episode(
     actual = _finite_float(observation.actual_temperature_f)
     target = _finite_float(observation.target_temperature_f)
     mode = _response_mode(observation, actual=actual, target=target)
+    if (
+        current is not None
+        and mode is None
+        and actual is not None
+        and target is not None
+        and _target_reached(current.mode, actual=actual, target=target)
+    ):
+        mode = current.mode
 
     if current is None:
         if not driver_active or actual is None or target is None or mode is None:
@@ -180,16 +188,28 @@ def evaluate_efficiency(
     if not groups:
         return _empty_evaluation("no_data")
 
-    comparable = max(
-        groups.values(),
-        key=lambda values: (
-            len(values),
-            max(_episode_sort_time(item[0]) for item in values),
-        ),
-    )
+    required_count = _REFERENCE_EPISODE_COUNT + _RECENT_EPISODE_COUNT
+    mature_groups = [
+        values for values in groups.values() if len(values) >= required_count
+    ]
+    if mature_groups:
+        comparable = max(
+            mature_groups,
+            key=lambda values: max(
+                _episode_sort_time(item[0]) for item in values
+            ),
+        )
+    else:
+        comparable = max(
+            groups.values(),
+            key=lambda values: (
+                len(values),
+                max(_episode_sort_time(item[0]) for item in values),
+            ),
+        )
     comparable.sort(key=lambda item: _episode_sort_time(item[0]))
     context = _evaluation_context(comparable[-1][0])
-    if len(comparable) < _REFERENCE_EPISODE_COUNT + _RECENT_EPISODE_COUNT:
+    if len(comparable) < required_count:
         return _empty_evaluation(
             "learning",
             context=context,

@@ -2364,6 +2364,16 @@ def _hvac_advisor_history(
         "hvac_baseline_era_by_stream",
         {},
     )
+    stored_calls = getattr(
+        coordinator.store_data,
+        "hvac_correlation_history_by_circuit",
+        {},
+    )
+    calls = [
+        dict(call)
+        for call in stored_calls.get(circuit_id, ())[-256:]
+        if isinstance(call, Mapping)
+    ]
     raw_episodes = [
         dict(raw)
         for stream_id, history in histories.items()
@@ -2374,11 +2384,6 @@ def _hvac_advisor_history(
         == str(eras.get(stream_id, "initial"))
         and episode_from_dict(raw) is not None
     ][-256:]
-    if not raw_episodes:
-        return {
-            "hvac_correlation_calls": [],
-            "hvac_response_episodes": [],
-        }
 
     observations_for = getattr(
         coordinator.context_builder,
@@ -2393,7 +2398,6 @@ def _hvac_advisor_history(
         for episode_id in alert.features.get("recent_episode_ids", ())
     }
     profile = str(getattr(config.appliance_profile, "value", ""))
-    calls: list[dict[str, Any]] = []
     episodes: list[dict[str, Any]] = []
     for raw in raw_episodes:
         episode = episode_from_dict(raw)

@@ -108,6 +108,7 @@ class StorePersistenceManager:
             for key, value in store_data.hvac_response_history_by_stream.items()
             if not key.startswith(hvac_prefix)
         }
+        store_data.hvac_correlation_history_by_circuit.pop(circuit_id, None)
         store_data.hvac_baseline_era_by_stream = {
             key: value
             for key, value in store_data.hvac_baseline_era_by_stream.items()

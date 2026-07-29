@@ -191,6 +191,11 @@ class StateReducer:
             for key, value in state.hvac_current_episode_by_stream.items()
             if not key.startswith(hvac_prefix)
         }
+        state.hvac_correlation_active_by_pair = {
+            key: value
+            for key, value in state.hvac_correlation_active_by_pair.items()
+            if not key.startswith(hvac_prefix)
+        }
         state.hvac_efficiency_by_circuit.pop(circuit_id, None)
         state.hvac_thermostat_setup_issues_by_circuit.pop(circuit_id, None)
 

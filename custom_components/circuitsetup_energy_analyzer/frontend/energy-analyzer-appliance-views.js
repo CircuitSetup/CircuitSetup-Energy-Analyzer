@@ -650,7 +650,10 @@ export function createApplianceViewMethods({
 
   _renderHvacEfficiency(efficiency) {
     if (!efficiency || typeof efficiency !== "object") return "";
-    const finite = (value) => Number.isFinite(Number(value));
+    const finite = (value) => value !== null
+      && value !== undefined
+      && value !== ""
+      && Number.isFinite(Number(value));
     const status = String(efficiency.status || "learning");
     const statusLabel = this._panelText(`appliance_detail.hvac_efficiency_status.${status}`)
       || this._panelText("appliance_detail.hvac_efficiency_status.learning");

@@ -313,6 +313,37 @@ def test_efficiency_uses_comparable_medians_and_ignores_excluded_records() -> No
     assert evaluation.context["thermostat_entity_id"] == "climate.downstairs"
 
 
+def test_efficiency_uses_the_latest_mature_weather_context() -> None:
+    summer = [
+        _completed_episode(index, minutes_per_degree=10.0)
+        for index in range(20)
+    ]
+    winter = [
+        replace(
+            _completed_episode(
+                index,
+                minutes_per_degree=10.0 if index < 29 else 15.0,
+            ),
+            outdoor_temperature_f=28.0,
+            season="winter",
+            temperature_bin="cold",
+        )
+        for index in range(20, 32)
+    ]
+
+    evaluation = evaluate_efficiency(
+        [*summer, *winter],
+        threshold_pct=25.0,
+    )
+
+    assert evaluation.status == "ready"
+    assert evaluation.finding == "slower"
+    assert evaluation.baseline_minutes_per_degree == pytest.approx(10.0)
+    assert evaluation.recent_minutes_per_degree == pytest.approx(15.0)
+    assert evaluation.context["season"] == "winter"
+    assert evaluation.context["temperature_bin"] == "cold"
+
+
 def test_efficiency_returns_bounded_score_and_learning_status() -> None:
     learning = evaluate_efficiency(
         [_completed_episode(0, minutes_per_degree=10.0)],
