@@ -435,7 +435,7 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     "profile",
     [ApplianceProfile.HEAT_PUMP, ApplianceProfile.HVAC_BLOWER],
 )
-def test_hvac_efficiency_completes_auto_episode_when_idle_at_setpoint(
+def test_hvac_efficiency_completes_auto_episode_when_idle_in_deadband(
     profile: ApplianceProfile,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
@@ -490,8 +490,9 @@ def test_hvac_efficiency_completes_auto_episode_when_idle_at_setpoint(
     completed = replace(
         starting,
         actual_temperature_f=(
-            70.0 if response_mode == "heating" else 72.0
+            70.2 if response_mode == "heating" else 71.8
         ),
+        target_temperature_f=None,
         action="idle",
     )
     context = replace(

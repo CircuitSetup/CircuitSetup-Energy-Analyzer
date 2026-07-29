@@ -1797,6 +1797,18 @@ def test_thermostat_snapshot_includes_unmapped_temperature_candidates() -> None:
     assert candidate.actual_temperature_f == 76.5
     assert "temperature_override" in candidate.available_capabilities
 
+    states[temperature] = SimpleNamespace(
+        state="unavailable",
+        attributes={"unit_of_measurement": "°F"},
+    )
+    unavailable = ProcessingContextBuilder(
+        coordinator
+    ).thermostat_observations()[f"candidate|{thermostat}|{temperature}"]
+
+    assert unavailable.temperature_entity_id == temperature
+    assert unavailable.actual_temperature_f is None
+    assert "temperature_override" not in unavailable.available_capabilities
+
 
 def test_coordinator_exposes_processing_pipeline() -> None:
     from custom_components.circuitsetup_energy_analyzer import (

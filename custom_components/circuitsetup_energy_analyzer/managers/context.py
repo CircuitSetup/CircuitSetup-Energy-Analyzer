@@ -196,8 +196,8 @@ class ProcessingContextBuilder:
                 override_state,
                 self.ha_temperature_unit(),
             )
+            actual = override
             if override is not None:
-                actual = override
                 capabilities.add("temperature_override")
 
         target = _thermostat_target(

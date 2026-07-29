@@ -80,6 +80,12 @@ def advance_episode(
 ) -> tuple[HvacResponseEpisode | None, HvacResponseEpisode | None]:
     actual = _finite_float(observation.actual_temperature_f)
     target = _finite_float(observation.target_temperature_f)
+    if (
+        current is not None
+        and target is None
+        and str(observation.action or "").lower() == "idle"
+    ):
+        target = current.target_temperature_f
     mode = _response_mode(observation, actual=actual, target=target)
     if (
         current is not None
