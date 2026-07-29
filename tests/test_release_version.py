@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.13.8"
+EXPECTED_VERSION = "0.13.9"
 
 
 def test_release_version_files_are_bumped_together() -> None:
