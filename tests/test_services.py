@@ -3274,6 +3274,9 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
         async def async_mark_alert_expected(self, alert_id: str) -> bool:
             return False
 
+        async def async_mark_alert_confirmed(self, alert_id: str) -> bool:
+            return False
+
         async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
             return False
 
@@ -3294,6 +3297,7 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
     for service in (
         services_module.SERVICE_ACKNOWLEDGE_ALERT,
         services_module.SERVICE_MARK_ALERT_EXPECTED,
+        services_module.SERVICE_MARK_ALERT_CONFIRMED,
         services_module.SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_APPLIANCE_CORRECT,
         SERVICE_MARK_NILM_APPLIANCE_WRONG,
@@ -3368,6 +3372,10 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
             self.calls.append(("async_mark_alert_expected", alert_id))
             return True
 
+        async def async_mark_alert_confirmed(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_alert_confirmed", alert_id))
+            return True
+
         async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
             self.calls.append(("async_mark_alert_unhelpful", alert_id))
             return True
@@ -3392,6 +3400,7 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
     for service in (
         services_module.SERVICE_ACKNOWLEDGE_ALERT,
         services_module.SERVICE_MARK_ALERT_EXPECTED,
+        services_module.SERVICE_MARK_ALERT_CONFIRMED,
         services_module.SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_APPLIANCE_CORRECT,
         SERVICE_MARK_NILM_APPLIANCE_WRONG,
@@ -3404,6 +3413,7 @@ async def test_alert_feedback_services_accept_single_alert_entity_target() -> No
     assert coordinator.calls == [
         ("async_acknowledge_alert", expected_alert_id),
         ("async_mark_alert_expected", expected_alert_id),
+        ("async_mark_alert_confirmed", expected_alert_id),
         ("async_mark_alert_unhelpful", expected_alert_id),
         ("async_mark_nilm_appliance_correct", expected_alert_id),
         ("async_mark_nilm_appliance_wrong", expected_alert_id),
@@ -3469,6 +3479,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_END_MAINTENANCE,
         SERVICE_EXPORT_HISTORY_CSV,
+        SERVICE_MARK_ALERT_CONFIRMED,
         SERVICE_MARK_ALERT_EXPECTED,
         SERVICE_MARK_ALERT_UNHELPFUL,
         SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
@@ -3759,6 +3770,10 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             self.calls.append(("async_mark_alert_expected", (alert_id,)))
             return True
 
+        async def async_mark_alert_confirmed(self, alert_id: str) -> bool:
+            self.calls.append(("async_mark_alert_confirmed", (alert_id,)))
+            return True
+
         async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
             self.calls.append(("async_mark_alert_unhelpful", (alert_id,)))
             return True
@@ -3939,6 +3954,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_EXPECTED)](
         SimpleNamespace(data={"alert_id": "alert-1"})
     )
+    await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_CONFIRMED)](
+        SimpleNamespace(data={"alert_id": "alert-confirmed"})
+    )
     await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_UNHELPFUL)](
         SimpleNamespace(data={"alert_id": "alert-2"})
     )
@@ -3991,6 +4009,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_start_maintenance", ("fridge", "Changed filter", "02:00:00", True)),
         ("async_end_maintenance", ("fridge", True)),
         ("async_mark_alert_expected", ("alert-1",)),
+        ("async_mark_alert_confirmed", ("alert-confirmed",)),
         ("async_mark_alert_unhelpful", ("alert-2",)),
         ("async_mark_nilm_signature_expected", ("mains", "signature_1")),
         ("async_merge_nilm_signatures", ("mains", "signature_2", "signature_1")),

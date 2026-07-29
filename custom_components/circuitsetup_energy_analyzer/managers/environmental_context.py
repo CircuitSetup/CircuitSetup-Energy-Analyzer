@@ -43,10 +43,14 @@ HVAC_WEATHER_CONTEXT_PROFILES = frozenset(
     {
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
     }
+)
+MODE_PARTITIONED_HVAC_PROFILES = frozenset(
+    {ApplianceProfile.HEAT_PUMP, ApplianceProfile.MINI_SPLIT}
 )
 PUMP_WATER_CONTEXT_PROFILES = frozenset(
     {
@@ -125,13 +129,13 @@ class EnvironmentalContextManager:
             now,
             mode=(
                 weather_mode
-                if config.appliance_profile is ApplianceProfile.MINI_SPLIT
+                if config.appliance_profile in MODE_PARTITIONED_HVAC_PROFILES
                 else None
             ),
         )
         weather_runtime_minutes = runtime_minutes
         weather_duty_cycle_percent = duty_cycle_percent
-        if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+        if config.appliance_profile in MODE_PARTITIONED_HVAC_PROFILES:
             (
                 weather_runtime_minutes,
                 weather_duty_cycle_percent,
@@ -186,7 +190,7 @@ class EnvironmentalContextManager:
                 duty_cycle_percent=duty_cycle_percent,
                 mode=(
                     weather_mode
-                    if config.appliance_profile is ApplianceProfile.MINI_SPLIT
+                    if config.appliance_profile in MODE_PARTITIONED_HVAC_PROFILES
                     else None
                 ),
             )
@@ -610,6 +614,7 @@ class EnvironmentalContextManager:
             if config.appliance_profile not in {
                 ApplianceProfile.HVAC,
                 ApplianceProfile.HVAC_COMPRESSOR,
+                ApplianceProfile.HEAT_PUMP,
                 ApplianceProfile.MINI_SPLIT,
             }:
                 continue
@@ -964,7 +969,7 @@ def _weather_context_mode(
 ) -> str:
     if config.appliance_profile is ApplianceProfile.ELECTRIC_HEAT:
         return "heating"
-    if config.appliance_profile is ApplianceProfile.MINI_SPLIT:
+    if config.appliance_profile in MODE_PARTITIONED_HVAC_PROFILES:
         return weather_mode_for_temperature(outdoor_temperature)
     return "cooling"
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,7 +8,9 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_SENSITIVITY,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_UTILITY_COMPARISON_SETTINGS,
 )
 from custom_components.circuitsetup_energy_analyzer.cycles import (
@@ -289,6 +291,78 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     ]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("setting_key", "current_value", "suggested_value", "default_value"),
+    [
+        (
+            "linked_thermostat_entities",
+            [],
+            ["climate.downstairs"],
+            [],
+        ),
+        (
+            "thermostat_temperature_sensor_map",
+            {},
+            {"climate.downstairs": "sensor.downstairs_temperature"},
+            {},
+        ),
+        ("blower_represents_gas_heat", False, True, False),
+        ("hvac_efficiency_change_threshold_pct", 25.0, 30.0, 25.0),
+    ],
+)
+async def test_settings_controller_applies_hvac_recommendation_values(
+    setting_key: str,
+    current_value: Any,
+    suggested_value: Any,
+    default_value: Any,
+) -> None:
+    recommendation = _recommendation(
+        recommendation_id=f"fridge:{setting_key}:v1",
+        unique_key=f"fridge:{setting_key}",
+        setting_key=setting_key,
+        setting_label=setting_key,
+        current_value=current_value,
+        suggested_value=suggested_value,
+        apply_payload={setting_key: suggested_value},
+    )
+    coordinator = _SettingsCoordinator(recommendation)
+    coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"].pop(
+        "daily_spike_ratio",
+        None,
+    )
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_apply_setting_recommendation(
+        recommendation.recommendation_id
+    )
+    assert (
+        coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"][setting_key]
+        == suggested_value
+    )
+
+    assert await controller.async_undo_setting_recommendation(
+        recommendation.recommendation_id
+    )
+    restored = coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"].get(
+        setting_key,
+        default_value,
+    )
+    assert restored == current_value
+
+    await controller.async_apply_setting_recommendation(
+        recommendation.recommendation_id
+    )
+    assert await controller.async_reset_setting_recommendation(
+        recommendation.recommendation_id
+    )
+    reset = coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"].get(
+        setting_key,
+        default_value,
+    )
+    assert reset == default_value
+
+
 def test_settings_controller_builds_advisor_inputs() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
@@ -397,6 +471,220 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     assert history["apparent_power_samples_va"] == [720.0]
     assert history["negative_balance_w"] == [-120.0]
     assert history["solar_export_w"] == [250.0]
+
+
+def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
+        ThermostatObservation,
+    )
+
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    config = coordinator.circuit_configs[0]
+    config.circuit_id = "heat_pump"
+    config.name = "Downstairs Heat Pump"
+    config.appliance_profile = ApplianceProfile.HEAT_PUMP
+    stream_id = "heat_pump|climate.downstairs|cooling"
+    coordinator.entry_data[CONF_ADVANCED_SETTINGS]["heat_pump"] = {
+        CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+            "climate.downstairs": "sensor.downstairs_temperature"
+        },
+    }
+    coordinator.store_data.hvac_baseline_era_by_stream = {stream_id: "era-2"}
+    coordinator.store_data.hvac_response_history_by_stream = {
+        stream_id: [
+            {
+                "stream_id": stream_id,
+                "circuit_id": "heat_pump",
+                "appliance_profile": "heat_pump",
+                "thermostat_entity_id": "climate.downstairs",
+                "temperature_entity_id": "sensor.downstairs_temperature",
+                "mode": "cooling",
+                "started_at": (
+                    datetime(2026, 1, 1, tzinfo=UTC)
+                    + timedelta(hours=index)
+                ).isoformat(),
+                "ended_at": (
+                    datetime(2026, 1, 1, 1, tzinfo=UTC)
+                    + timedelta(hours=index)
+                ).isoformat(),
+                "start_temperature_f": 77.0,
+                "target_temperature_f": 72.0,
+                "latest_temperature_f": 70.0,
+                "elapsed_minutes": 50.0,
+                "active_minutes": 45.0,
+                "outdoor_temperature_f": 92.0,
+                "season": "summer",
+                "weather_mode": "cooling",
+                "temperature_bin": "very_hot",
+                "gap_bin": "4-6F",
+                "participant_signature": ["heat_pump"],
+                "supporting_blower_ids": [],
+                "complete": True,
+                "excluded_from_baseline": False,
+                "baseline_era": "era-2",
+            }
+            for index in range(300)
+        ]
+    }
+    retained_history = coordinator.store_data.hvac_response_history_by_stream[
+        stream_id
+    ]
+    alerted_episode_ids = []
+    for raw in retained_history[44:49]:
+        raw["elapsed_minutes"] = 500.0
+        raw["active_minutes"] = 450.0
+        alerted_episode_ids.append(raw["started_at"])
+    retired_stream = "heat_pump|climate.retired|cooling"
+    coordinator.store_data.hvac_response_history_by_stream[retired_stream] = [
+        {
+            **raw,
+            "stream_id": retired_stream,
+            "thermostat_entity_id": "climate.retired",
+        }
+        for raw in retained_history
+    ]
+    duplicate_observed_at = (
+        datetime(2026, 1, 1, 1, tzinfo=UTC) + timedelta(hours=299)
+    ).isoformat()
+    coordinator.store_data.hvac_correlation_history_by_circuit = {
+        "heat_pump": [
+            {
+                "observed_at": duplicate_observed_at,
+                "appliance_profile": "heat_pump",
+                "thermostat_entity_id": "climate.downstairs",
+                "thermostat_name": "Downstairs",
+                "temperature_entity_id": "sensor.downstairs_temperature",
+                "mode": "cooling",
+                "driver_mode": "cooling",
+                "overlap_ratio": 0.9,
+                "candidate_moved_toward_target": True,
+                "climate_has_current_temperature": True,
+                "electrical_driver_present": True,
+                "weather_mode": "cooling",
+                "temperature_bin": "very_hot",
+            }
+        ]
+    }
+    coordinator.store_data.alerts = [
+        SimpleNamespace(
+            features={
+                "health_feature": "hvac_thermostat_efficiency",
+                "recent_episode_ids": alerted_episode_ids,
+            }
+        )
+    ]
+    coordinator.context_builder.thermostat_observations = lambda: {
+        "climate.downstairs": ThermostatObservation(
+            "climate.downstairs",
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature"),
+        )
+    }
+
+    history = settings_controller.SettingsController(
+        coordinator
+    ).advisor_feature_history_for_circuit(config, coordinator.now)
+
+    assert len(history["hvac_correlation_calls"]) == 256
+    assert sum(
+        call.get("observed_at") == duplicate_observed_at
+        for call in history["hvac_correlation_calls"]
+    ) == 1
+    assert len(history["hvac_response_episodes"]) == 256
+    call = history["hvac_correlation_calls"][0]
+    assert call["thermostat_entity_id"] == "climate.downstairs"
+    assert call["temperature_entity_id"] == "sensor.downstairs_temperature"
+    assert call["climate_has_current_temperature"] is True
+    assert call["overlap_ratio"] == pytest.approx(0.9)
+    assert all(
+        call["thermostat_entity_id"] == "climate.downstairs"
+        for call in history["hvac_correlation_calls"]
+    )
+    assert history["hvac_response_episodes"][0]["alerted"] is True
+    episode = next(
+        item for item in history["hvac_response_episodes"] if not item["alerted"]
+    )
+    assert episode["complete"] is True
+    assert episode["alerted"] is False
+    assert episode["context_key"] == (
+        "heat_pump|heat_pump|climate.downstairs|sensor.downstairs_temperature|"
+        "cooling|very_hot|summer|cooling|4-6F|heat_pump|"
+    )
+    assert episode["minutes_per_degree"] == 10.0
+    assert episode["absolute_deviation_percent"] == 0.0
+    assert all(
+        "climate.retired" not in item["context_key"]
+        for item in history["hvac_response_episodes"]
+    )
+
+
+def test_settings_controller_uses_hvac_correlation_without_response_episodes() -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        settings_advisor as advisor,
+    )
+
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    config = coordinator.circuit_configs[0]
+    config.circuit_id = "heat_pump"
+    config.name = "Downstairs Heat Pump"
+    config.appliance_profile = ApplianceProfile.HEAT_PUMP
+    calls = [
+        {
+            "appliance_profile": "heat_pump",
+            "thermostat_entity_id": "climate.downstairs",
+            "thermostat_name": "Downstairs",
+            "temperature_entity_id": None,
+            "mode": "cooling",
+            "driver_mode": "cooling",
+            "overlap_ratio": 0.9,
+            "candidate_moved_toward_target": False,
+            "climate_has_current_temperature": True,
+            "electrical_driver_present": True,
+            "weather_mode": "cooling",
+            "temperature_bin": "very_hot",
+        }
+        for _ in range(9)
+    ]
+    coordinator.store_data.hvac_correlation_history_by_circuit = {
+        "heat_pump": calls
+    }
+    coordinator.store_data.hvac_response_history_by_stream = {}
+    coordinator.store_data.hvac_baseline_era_by_stream = {}
+    coordinator.store_data.alerts = []
+
+    history = settings_controller.SettingsController(
+        coordinator
+    ).advisor_feature_history_for_circuit(config, coordinator.now)
+
+    assert history["hvac_response_episodes"] == []
+    assert history["hvac_correlation_calls"] == calls
+    recommendations = advisor.build_settings_recommendations(
+        advisor.AdvisorInputs(
+            now=coordinator.now,
+            context=advisor.AdvisorCircuitContext(
+                circuit_id="heat_pump",
+                circuit_name="Downstairs Heat Pump",
+                appliance_profile="heat_pump",
+                circuit_mode="dual_phase",
+                power_flow="load",
+                advanced_settings={},
+            ),
+            feature_history=history,
+        )
+    )
+    link = next(
+        item
+        for item in recommendations
+        if item.setting_key == "linked_thermostat_entities"
+    )
+    assert link.suggested_value == ["climate.downstairs"]
 
 
 def test_settings_controller_builds_unhelpful_feedback_recommendation() -> None:

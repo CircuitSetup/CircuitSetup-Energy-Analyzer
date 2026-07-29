@@ -198,6 +198,8 @@ EXPECTED_FLOW_LABELS = {
     "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
+    "thermostat_entities": "Thermostats",
+    "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -210,6 +212,8 @@ EXPECTED_OPTIONS_LABELS = {
     "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
+    "thermostat_entities": "Thermostats",
+    "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -285,6 +289,12 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "linked_flow_sensor_entities": "Linked Flow Sensors",
     "expects_water_flow": "Expects Water Flow",
     "flow_mismatch_threshold_minutes": "Flow Mismatch Threshold Minutes",
+    "reset_hvac_efficiency_settings_to_defaults": (
+        "Reset HVAC Efficiency Settings To Defaults"
+    ),
+    "linked_thermostat_entities": "Linked Thermostats",
+    "hvac_efficiency_change_threshold_pct": "Response Change Alert Percent",
+    "blower_represents_gas_heat": "Blower Represents Gas-Furnace Operation",
     "reset_dual_phase_settings_to_defaults": "Reset Dual-Phase Settings To Defaults",
     "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
     "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
@@ -310,6 +320,7 @@ EXPECTED_ADVANCED_SECTION_LABELS = {
     "demand_capacity_settings": "Demand And Capacity",
     "standby_settings": "Always On And Standby",
     "water_context_settings": "Water Context",
+    "hvac_efficiency_settings": "HVAC Thermostat Efficiency",
     "dual_phase_settings": "Dual-Phase Leg Imbalance",
     "power_quality_settings": "Power Metric Consistency",
     "mains_balance_settings": "Mains Balance",
@@ -1506,6 +1517,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'callService("circuitsetup_energy_analyzer"',
         "acknowledge_alert",
         "mark_alert_expected",
+        "mark_alert_confirmed",
         "mark_alert_unhelpful",
         "pause_alerts",
         "relearn_baseline",
@@ -2059,6 +2071,99 @@ for (const expected of [
     )
 
 
+def test_appliance_detail_renders_hvac_thermostat_efficiency() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const ready = panel._renderHvacEfficiency({
+  status: "ready",
+  summary_score: 80,
+  trend: "slower",
+  threshold_pct: 25,
+  learning: {
+    reference_count: 9,
+    recent_count: 3,
+    required_reference: 9,
+    required_recent: 3,
+  },
+  heating: [{
+    thermostat_entity_id: "climate.upstairs",
+    thermostat_name: "Upstairs",
+    status: "ready",
+    score: 110,
+    trend: "faster",
+    change_percent: -9.1,
+    baseline_minutes_per_degree: 11,
+    recent_minutes_per_degree: 10,
+    reference_count: 9,
+    recent_count: 3,
+    outdoor_temperature_f: 28,
+    season: "winter",
+    weather_mode: "heating",
+    attribution: "gas_furnace_proxy",
+    supporting_blower_ids: [],
+  }],
+  cooling: [{
+    thermostat_entity_id: "climate.downstairs",
+    thermostat_name: "Downstairs",
+    status: "ready",
+    score: 80,
+    trend: "slower",
+    change_percent: 25,
+    baseline_minutes_per_degree: 10,
+    recent_minutes_per_degree: 12.5,
+    reference_count: 9,
+    recent_count: 3,
+    outdoor_temperature_f: 95,
+    season: "summer",
+    weather_mode: "cooling",
+    attribution: "direct",
+    supporting_blower_ids: ["blower"],
+  }],
+});
+for (const expected of [
+  'data-hvac-efficiency',
+  "HVAC Thermostat Efficiency",
+  "80 / 100",
+  "100 is the learned baseline",
+  "25% response-change threshold",
+  "Heating",
+  "Cooling",
+  "Upstairs",
+  "Downstairs",
+  "10 min/°F",
+  "12.5 min/°F",
+  "9 of 9 reference episodes",
+  "3 of 3 recent episodes",
+  "Outdoor: 95°F",
+  "season: summer",
+  "Gas-furnace blower proxy",
+  "Cooling blower supports air handling",
+]) {
+  assert.ok(ready.includes(expected), `missing ${expected}: ${ready}`);
+}
+
+const learning = panel._renderHvacEfficiency({
+  status: "learning",
+  summary_score: null,
+  trend: null,
+  threshold_pct: 25,
+  heating: [],
+  cooling: [],
+  learning: {
+    reference_count: 0,
+    recent_count: 0,
+    required_reference: 9,
+    required_recent: 3,
+  },
+});
+assert.ok(learning.includes("Learning"));
+assert.ok(learning.includes("waiting for completed thermostat episodes"));
+assert.ok(!learning.toLowerCase().includes("fault"));
+"""
+    )
+
+
 def test_appliance_detail_hides_empty_guidance_and_uses_split_overview() -> None:
     _run_panel_node_script(
         r"""
@@ -2510,7 +2615,7 @@ def test_alert_decision_render_contracts() -> None:
     name = "test_alert_feedback_uses_one_semantic_decision_flow";
     {
       const panel = makePanel({
-        _payload: { actions: { acknowledge: {}, mark_expected: {}, mark_unhelpful: {} } },
+        _payload: { actions: { acknowledge: {}, mark_expected: {}, mark_confirmed: {}, mark_unhelpful: {} } },
         _inlineFeedback: { scope: "alert-response", kind: "success", message: "Saved" },
       });
       const html = panel._renderAlertResponse();
@@ -2519,13 +2624,14 @@ def test_alert_decision_render_contracts() -> None:
         'name="alert_decision"',
         'value="acknowledge"',
         'value="mark_expected"',
+        'value="mark_confirmed"',
         'value="mark_unhelpful"',
         'id="apply_alert_decision"',
         'aria-live="polite"',
       ]) assert.ok(html.includes(expected), expected);
       assert.equal((html.match(/id="apply_alert_decision"/g) || []).length, 1);
       assert.equal((html.match(/aria-live="polite"/g) || []).length, 1);
-      for (const duplicate of ["acknowledge", "mark_expected", "mark_unhelpful"]) {
+      for (const duplicate of ["acknowledge", "mark_expected", "mark_confirmed", "mark_unhelpful"]) {
         assert.ok(!html.includes(`id="${duplicate}"`));
       }
     }
@@ -6852,6 +6958,7 @@ def test_alert_feedback_services_document_entity_targets() -> None:
     for service_name in (
         "acknowledge_alert",
         "mark_alert_expected",
+        "mark_alert_confirmed",
         "mark_alert_unhelpful",
     ):
         fields = services[service_name]["fields"]

@@ -102,6 +102,18 @@ class StorePersistenceManager:
         store_data.alerts = [
             alert for alert in store_data.alerts if alert.circuit_id != circuit_id
         ]
+        hvac_prefix = f"{circuit_id}|"
+        store_data.hvac_response_history_by_stream = {
+            key: value
+            for key, value in store_data.hvac_response_history_by_stream.items()
+            if not key.startswith(hvac_prefix)
+        }
+        store_data.hvac_correlation_history_by_circuit.pop(circuit_id, None)
+        store_data.hvac_baseline_era_by_stream = {
+            key: value
+            for key, value in store_data.hvac_baseline_era_by_stream.items()
+            if not key.startswith(hvac_prefix)
+        }
         store_data.learning_started_at_by_circuit[circuit_id] = now.isoformat()
         self.mark_dirty()
 

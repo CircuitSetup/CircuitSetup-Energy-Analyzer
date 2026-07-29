@@ -20,6 +20,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -30,6 +31,9 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_RETENTION_MODE,
     CONF_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -1569,6 +1573,241 @@ def test_processing_context_builder_uses_manager_boundaries() -> None:
 
     assert context.known_load_circuit_ids == frozenset({"fridge"})
     assert context.sensitivity == "quiet"
+
+
+def test_processing_context_builder_snapshots_configured_thermostats_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    accessed: list[str] = []
+    states = {
+        "climate.downstairs": SimpleNamespace(
+            state="heat_cool",
+            attributes={
+                "current_temperature": 20.0,
+                "target_temp_low": 21.0,
+                "target_temp_high": 24.0,
+                "hvac_action": "heating",
+                "temperature_unit": "°C",
+            },
+        ),
+        "sensor.downstairs_temperature": SimpleNamespace(
+            state="19.5",
+            attributes={"unit_of_measurement": "°C"},
+        ),
+        "sensor.unconfigured_temperature": SimpleNamespace(
+            state="18.0",
+            attributes={"unit_of_measurement": "°C"},
+        ),
+    }
+
+    class FakeStates:
+        def get(self, entity_id: str) -> Any:
+            accessed.append(entity_id)
+            return states.get(entity_id)
+
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(
+            states=FakeStates(),
+            config=SimpleNamespace(
+                time_zone="UTC",
+                units=SimpleNamespace(temperature_unit="°C"),
+            ),
+        ),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={
+            CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [
+                "sensor.downstairs_temperature"
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "heat_pump": {
+                    CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                        "climate.downstairs": "sensor.downstairs_temperature"
+                    },
+                }
+            },
+        },
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="heat_pump",
+                name="Downstairs Heat Pump",
+                appliance_profile=ApplianceProfile.HEAT_PUMP,
+                mode=CircuitMode.DUAL_PHASE,
+            ),
+        ),
+        circuit_registry=SimpleNamespace(known_load_circuit_ids=frozenset()),
+        settings_controller=SimpleNamespace(default_sensitivity="balanced"),
+    )
+
+    context = ProcessingContextBuilder(coordinator).build(now)
+    observation = context.thermostat_observations[
+        "heat_pump|climate.downstairs"
+    ]
+
+    assert isinstance(context.thermostat_observations, MappingProxyType)
+    assert observation.actual_temperature_f == pytest.approx(67.1)
+    assert observation.target_temperature_f == pytest.approx(69.8)
+    assert observation.mode == "heat_cool"
+    assert observation.action == "heating"
+    assert observation.temperature_entity_id == "sensor.downstairs_temperature"
+    assert observation.available_capabilities == (
+        "current_temperature",
+        "hvac_action",
+        "target_temp_high",
+        "target_temp_low",
+        "temperature_override",
+    )
+    assert set(accessed) == {
+        "climate.downstairs",
+        "sensor.downstairs_temperature",
+    }
+    assert "sensor.unconfigured_temperature" not in accessed
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [(68.0, 68.0), (74.0, 74.0)],
+)
+def test_range_thermostat_keeps_boundary_target_when_idle(
+    actual: float,
+    expected: float,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        _thermostat_target,
+    )
+
+    assert _thermostat_target(
+        {"temperature": None, "target_temp_low": 68.0, "target_temp_high": 74.0},
+        mode="heat_cool",
+        action="idle",
+        actual=actual,
+    ) == expected
+
+
+def test_thermostat_snapshot_resolves_single_range_and_unavailable_targets() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    states = {
+        "climate.single": SimpleNamespace(
+            state="cool",
+            attributes={
+                "current_temperature": 78.0,
+                "temperature": 72.0,
+                "hvac_action": "cooling",
+                "temperature_unit": "°F",
+            },
+        ),
+        "climate.range": SimpleNamespace(
+            state="heat_cool",
+            attributes={
+                "current_temperature": 78.0,
+                "target_temp_low": 68.0,
+                "target_temp_high": 74.0,
+                "hvac_action": "cooling",
+                "temperature_unit": "°F",
+            },
+        ),
+        "climate.unavailable": SimpleNamespace(
+            state="unavailable",
+            attributes={
+                "current_temperature": 78.0,
+                "temperature": 72.0,
+                "temperature_unit": "°F",
+            },
+        ),
+    }
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            config=SimpleNamespace(
+                units=SimpleNamespace(temperature_unit="°F")
+            ),
+        ),
+        entry_data={
+            CONF_THERMOSTAT_ENTITIES: [
+                "climate.single",
+                "climate.range",
+                "climate.unavailable",
+            ]
+        },
+        options={},
+        circuit_configs=(),
+    )
+
+    observations = ProcessingContextBuilder(coordinator).thermostat_observations()
+
+    assert observations["climate.single"].target_temperature_f == 72.0
+    assert observations["climate.range"].target_temperature_f == 74.0
+    unavailable = observations["climate.unavailable"]
+    assert unavailable.actual_temperature_f is None
+    assert unavailable.target_temperature_f is None
+    assert unavailable.mode is None
+
+
+def test_thermostat_snapshot_includes_unmapped_temperature_candidates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.context import (
+        ProcessingContextBuilder,
+    )
+
+    thermostat = "climate.downstairs"
+    temperature = "sensor.downstairs_temperature"
+    states = {
+        thermostat: SimpleNamespace(
+            state="cool",
+            attributes={
+                "current_temperature": 78.0,
+                "temperature": 72.0,
+                "hvac_action": "cooling",
+                "temperature_unit": "°F",
+            },
+        ),
+        temperature: SimpleNamespace(
+            state="76.5",
+            attributes={"unit_of_measurement": "°F"},
+        ),
+    }
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(
+            states=SimpleNamespace(get=states.get),
+            config=SimpleNamespace(
+                units=SimpleNamespace(temperature_unit="°F")
+            ),
+        ),
+        entry_data={
+            CONF_THERMOSTAT_ENTITIES: [thermostat],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: [temperature],
+        },
+        options={},
+        circuit_configs=(),
+    )
+
+    observations = ProcessingContextBuilder(coordinator).thermostat_observations()
+    candidate = observations[f"candidate|{thermostat}|{temperature}"]
+
+    assert candidate.thermostat_entity_id == thermostat
+    assert candidate.temperature_entity_id == temperature
+    assert candidate.actual_temperature_f == 76.5
+    assert "temperature_override" in candidate.available_capabilities
+
+    states[temperature] = SimpleNamespace(
+        state="unavailable",
+        attributes={"unit_of_measurement": "°F"},
+    )
+    unavailable = ProcessingContextBuilder(
+        coordinator
+    ).thermostat_observations()[f"candidate|{thermostat}|{temperature}"]
+
+    assert unavailable.temperature_entity_id == temperature
+    assert unavailable.actual_temperature_f is None
+    assert "temperature_override" not in unavailable.available_capabilities
 
 
 def test_coordinator_exposes_processing_pipeline() -> None:
@@ -9157,6 +9396,123 @@ async def test_runtime_missing_electrical_metrics_does_not_create_repair(
     await coordinator._sync_setup_health_repairs("hvac")
 
     assert ("hvac", "missing_electrical_metrics") not in issues
+
+
+@pytest.mark.asyncio
+async def test_runtime_hvac_thermostat_and_slow_response_create_repairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def fake_issue(
+        hass,
+        circuit_id,
+        problem,
+        severity=Severity.WARNING,
+        **kwargs,
+    ) -> None:
+        del hass, severity
+        issues.append((circuit_id, problem, dict(kwargs.get("data") or {})))
+
+    monkeypatch.setattr(repairs, "async_create_circuit_issue", fake_issue)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "mode": "dual_phase",
+                    "appliance_profile": "heat_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.heat_pump_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+    coordinator.state.hvac_thermostat_setup_issues_by_circuit["heat_pump"] = [
+        {
+            "issue_kind": "missing_required_sensor",
+            "circuit_name": "Downstairs Heat Pump",
+            "reason": (
+                "Downstairs Heat Pump cannot use climate.downstairs because "
+                "it is unavailable."
+            ),
+            "source_entities": ["climate.downstairs"],
+        }
+    ]
+    coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
+        "finding": "slower",
+        "score": 80.0,
+    }
+    coordinator.state.learning_by_circuit["heat_pump"] = False
+
+    await coordinator._sync_setup_health_repairs("heat_pump")
+
+    assert {problem for _, problem, _ in issues} == {
+        "hvac_thermostat_source",
+        "hvac_response_slower",
+    }
+    thermostat_data = next(
+        data for _, problem, data in issues if problem == "hvac_thermostat_source"
+    )
+    assert thermostat_data["circuit_name"] == "Downstairs Heat Pump"
+    assert thermostat_data["issue_kind"] == "missing_required_sensor"
+    assert "Downstairs Heat Pump" in thermostat_data["reason"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_faster_hvac_response_creates_no_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    issues: list[tuple[str, str]] = []
+
+    async def fake_issue(hass, circuit_id, problem, **kwargs) -> None:
+        del hass, kwargs
+        issues.append((circuit_id, problem))
+
+    monkeypatch.setattr(repairs, "async_create_circuit_issue", fake_issue)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "mode": "dual_phase",
+                    "appliance_profile": "heat_pump",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.heat_pump_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+        now_fn=lambda: datetime(2026, 7, 29, 12, tzinfo=UTC),
+    )
+    coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
+        "finding": "faster",
+        "score": 133.3,
+    }
+
+    await coordinator._sync_setup_health_repairs("heat_pump")
+
+    assert ("heat_pump", "hvac_response_slower") not in issues
 
 
 @pytest.mark.asyncio

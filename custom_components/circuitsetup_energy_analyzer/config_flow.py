@@ -125,6 +125,7 @@ except (ImportError, ModuleNotFoundError):
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .const import (
     CONF_ADVANCED_SETTINGS,
+    CONF_BLOWER_REPRESENTS_GAS_HEAT,
     CONF_CIRCUIT_ASSIGNMENTS,
     CONF_CIRCUITS,
     CONF_DASHBOARD_LAYOUT,
@@ -134,8 +135,10 @@ from .const import (
     CONF_EXPECTS_WATER_FLOW,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -148,6 +151,9 @@ from .const import (
     CONF_SENSITIVITY,
     CONF_SOURCE_DEVICES,
     CONF_SOURCE_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_CORRELATION_ENABLED,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
@@ -158,6 +164,7 @@ from .const import (
     DEFAULT_ENABLE_EXPERIMENTAL_NILM,
     DEFAULT_ENTITY_DETAIL_LEVEL,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
+    DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
     DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
@@ -379,6 +386,7 @@ FIELD_RECOMMENDATION_ACTION = "recommendation_action"
 FIELD_APPLY_ENTITY_DETAIL_PROFILE = "apply_entity_detail_profile"
 FIELD_REMOVE_DASHBOARD = "remove_dashboard"
 FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS = "reset_advanced_settings_to_defaults"
+FIELD_THERMOSTAT_TEMPERATURE_SENSOR_ENTITY = "thermostat_temperature_sensor_entity"
 RECOMMENDATION_ACTION_APPLY = "apply"
 RECOMMENDATION_ACTION_DENY = "deny"
 RECOMMENDATION_ACTION_DISMISS = "dismiss"
@@ -396,6 +404,7 @@ SECTION_POWER_QUALITY_SETTINGS = "power_quality_settings"
 SECTION_MAINS_BALANCE_SETTINGS = "mains_balance_settings"
 SECTION_SOLAR_FLOW_SETTINGS = "solar_flow_settings"
 SECTION_WATER_CONTEXT_SETTINGS = "water_context_settings"
+SECTION_HVAC_EFFICIENCY_SETTINGS = "hvac_efficiency_settings"
 _ADVANCED_SECTION_RESET_FIELDS = {
     SECTION_OPERATING_DETECTION_SETTINGS: (
         "reset_operating_detection_settings_to_defaults"
@@ -406,6 +415,7 @@ _ADVANCED_SECTION_RESET_FIELDS = {
     SECTION_DEMAND_CAPACITY_SETTINGS: "reset_demand_capacity_settings_to_defaults",
     SECTION_STANDBY_SETTINGS: "reset_standby_settings_to_defaults",
     SECTION_WATER_CONTEXT_SETTINGS: "reset_water_context_settings_to_defaults",
+    SECTION_HVAC_EFFICIENCY_SETTINGS: ("reset_hvac_efficiency_settings_to_defaults"),
     SECTION_DUAL_PHASE_SETTINGS: "reset_dual_phase_settings_to_defaults",
     SECTION_POWER_QUALITY_SETTINGS: "reset_power_quality_settings_to_defaults",
     SECTION_MAINS_BALANCE_SETTINGS: "reset_mains_balance_settings_to_defaults",
@@ -457,6 +467,12 @@ _ADVANCED_RESET_SETTING_KEYS = {
         CONF_EXPECTS_WATER_FLOW,
         CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     ),
+    "reset_hvac_efficiency_settings_to_defaults": (
+        CONF_LINKED_THERMOSTAT_ENTITIES,
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
+        CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+        CONF_BLOWER_REPRESENTS_GAS_HEAT,
+    ),
     "reset_dual_phase_settings_to_defaults": (
         FIELD_LEG_IMBALANCE_WARNING_RATIO,
         FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
@@ -487,6 +503,7 @@ _ADVANCED_SECTION_KEYS = {
     SECTION_MAINS_BALANCE_SETTINGS,
     SECTION_SOLAR_FLOW_SETTINGS,
     SECTION_WATER_CONTEXT_SETTINGS,
+    SECTION_HVAC_EFFICIENCY_SETTINGS,
 }
 _ASSIGNMENT_PROFILE_OPTIONS = (
     "exclude",
@@ -494,6 +511,7 @@ _ASSIGNMENT_PROFILE_OPTIONS = (
     ApplianceProfile.FREEZER.value,
     ApplianceProfile.HVAC.value,
     ApplianceProfile.HVAC_COMPRESSOR.value,
+    ApplianceProfile.HEAT_PUMP.value,
     ApplianceProfile.MINI_SPLIT.value,
     ApplianceProfile.HVAC_BLOWER.value,
     ApplianceProfile.ELECTRIC_HEAT.value,
@@ -519,8 +537,9 @@ _GUIDED_ASSIGNMENT_PROFILE_OPTIONS = tuple(
 )
 _APPLIANCE_PROFILE_LABELS = {
     "exclude": "Exclude",
-    ApplianceProfile.HVAC.value: "HVAC",
+    ApplianceProfile.HVAC.value: "HVAC System (combined/unspecified)",
     ApplianceProfile.HVAC_COMPRESSOR.value: "HVAC Compressor",
+    ApplianceProfile.HEAT_PUMP.value: "Heat Pump",
     ApplianceProfile.MINI_SPLIT.value: "Mini-Split",
     ApplianceProfile.HVAC_BLOWER.value: "HVAC Blower",
     ApplianceProfile.EV_CHARGER.value: "EV Charger",
@@ -772,6 +791,25 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         for entity_id in water_flow_sensor_entities
         if entity_id.strip()
     ]
+    thermostat_entities = list(
+        dict.fromkeys(
+            _strict_string_list(
+                user_input.get(CONF_THERMOSTAT_ENTITIES, []),
+                invalid_error_key="invalid_thermostat_entities",
+            )
+        )
+    )
+    thermostat_temperature_sensor_entities = list(
+        dict.fromkeys(
+            _strict_string_list(
+                user_input.get(
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                    [],
+                ),
+                invalid_error_key="invalid_thermostat_temperature_sensor_entities",
+            )
+        )
+    )
 
     validated = {
         CONF_SOURCE_DEVICES: source_devices,
@@ -801,6 +839,12 @@ def validate_setup_input(user_input: Mapping[str, Any]) -> dict[str, Any]:
         validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
     if water_flow_sensor_entities:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
+    if thermostat_entities:
+        validated[CONF_THERMOSTAT_ENTITIES] = thermostat_entities
+    if thermostat_temperature_sensor_entities:
+        validated[CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES] = (
+            thermostat_temperature_sensor_entities
+        )
     return validated
 
 
@@ -843,6 +887,25 @@ def validate_options_input(
         for entity_id in water_flow_sensor_entities
         if entity_id.strip()
     ]
+    thermostat_entities = list(
+        dict.fromkeys(
+            _strict_string_list(
+                user_input.get(CONF_THERMOSTAT_ENTITIES, []),
+                invalid_error_key="invalid_thermostat_entities",
+            )
+        )
+    )
+    thermostat_temperature_sensor_entities = list(
+        dict.fromkeys(
+            _strict_string_list(
+                user_input.get(
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                    [],
+                ),
+                invalid_error_key="invalid_thermostat_temperature_sensor_entities",
+            )
+        )
+    )
     mains_source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
             user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
@@ -871,6 +934,10 @@ def validate_options_input(
     validated[CONF_OUTDOOR_TEMPERATURE_ENTITY] = outdoor_temperature_entity
     validated[CONF_RAIN_SENSOR_ENTITY] = rain_sensor_entity
     validated[CONF_RAIN_INTENSITY_ENTITY] = rain_intensity_entity
+    validated[CONF_THERMOSTAT_ENTITIES] = thermostat_entities
+    validated[CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES] = (
+        thermostat_temperature_sensor_entities
+    )
     if water_flow_sensor_entities:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     source_entities = _normalize_demo_source_entity_ids(
@@ -1192,6 +1259,50 @@ def _temperature_entity_selector() -> Any:
     return _selector(_temperature_entity_selector_config(), str)
 
 
+def _thermostat_entity_selector_config(*, multiple: bool = True) -> dict[str, Any]:
+    return {
+        "entity": {
+            "multiple": multiple,
+            "filter": [{"domain": "climate"}],
+        }
+    }
+
+
+def _thermostat_entity_selector(*, multiple: bool = True) -> Any:
+    return _selector(_thermostat_entity_selector_config(multiple=multiple), str)
+
+
+def _indoor_temperature_entity_selector_config(
+    *,
+    multiple: bool = True,
+    include_entities: Iterable[str] = (),
+) -> dict[str, Any]:
+    config = {
+        "entity": {
+            "multiple": multiple,
+            "filter": [{"domain": "sensor", "device_class": "temperature"}],
+        }
+    }
+    entities = list(dict.fromkeys(include_entities))
+    if entities:
+        config["entity"]["include_entities"] = entities
+    return config
+
+
+def _indoor_temperature_entity_selector(
+    *,
+    multiple: bool = True,
+    include_entities: Iterable[str] = (),
+) -> Any:
+    return _selector(
+        _indoor_temperature_entity_selector_config(
+            multiple=multiple,
+            include_entities=include_entities,
+        ),
+        str,
+    )
+
+
 def _rain_context_entity_selector_config() -> dict[str, Any]:
     return {
         "entity": {
@@ -1437,6 +1548,14 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
                 CONF_WATER_FLOW_SENSOR_ENTITIES,
                 default=[],
             ): _water_flow_entity_selector(multiple=True),
+            vol.Optional(
+                CONF_THERMOSTAT_ENTITIES,
+                default=[],
+            ): _thermostat_entity_selector(multiple=True),
+            vol.Optional(
+                CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                default=[],
+            ): _indoor_temperature_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=normalize_sensitivity(DEFAULT_SENSITIVITY),
@@ -1798,6 +1917,12 @@ def _advanced_settings_schema(
             SECTION_WATER_CONTEXT_SETTINGS,
             _water_context_fields(settings, circuit_context),
         )
+    if _advanced_show_hvac_efficiency_settings(circuit_context):
+        _add_advanced_section(
+            schema,
+            SECTION_HVAC_EFFICIENCY_SETTINGS,
+            _hvac_efficiency_fields(settings, circuit_context),
+        )
     if _advanced_show_dual_phase_settings(circuit_context):
         _add_advanced_section(
             schema,
@@ -2023,6 +2148,52 @@ def _water_context_fields(
     return fields
 
 
+def _hvac_efficiency_fields(
+    settings: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[Any, Any]:
+    fields: dict[Any, Any] = {
+        vol.Optional(
+            CONF_LINKED_THERMOSTAT_ENTITIES,
+            default=list(settings.get(CONF_LINKED_THERMOSTAT_ENTITIES, [])),
+        ): _thermostat_entity_selector(multiple=True),
+        vol.Optional(
+            CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+            default=float(
+                settings.get(
+                    CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+                    DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+                )
+            ),
+        ): _number_selector(minimum=5.0, maximum=100.0, step=1.0),
+    }
+    if context.get("profile") == ApplianceProfile.HVAC_BLOWER.value:
+        fields[
+            vol.Optional(
+                CONF_BLOWER_REPRESENTS_GAS_HEAT,
+                default=bool(settings.get(CONF_BLOWER_REPRESENTS_GAS_HEAT, False)),
+            )
+        ] = bool
+    return fields
+
+
+def _thermostat_mapping_schema(
+    candidate_entities: Iterable[str],
+    current_entity: str = "",
+) -> Any:
+    return vol.Schema(
+        {
+            _optional_entity_marker(
+                FIELD_THERMOSTAT_TEMPERATURE_SENSOR_ENTITY,
+                current_entity,
+            ): _indoor_temperature_entity_selector(
+                multiple=False,
+                include_entities=candidate_entities,
+            )
+        }
+    )
+
+
 def _dual_phase_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
     return {
         vol.Optional(
@@ -2204,6 +2375,19 @@ def _advanced_show_water_context_settings(context: Mapping[str, str]) -> bool:
         ApplianceProfile.WATER_HEATER.value,
         ApplianceProfile.WASHER.value,
         ApplianceProfile.DISHWASHER.value,
+    }
+
+
+def _advanced_show_hvac_efficiency_settings(
+    context: Mapping[str, str],
+) -> bool:
+    return context.get("profile") in {
+        ApplianceProfile.HVAC.value,
+        ApplianceProfile.HVAC_COMPRESSOR.value,
+        ApplianceProfile.HEAT_PUMP.value,
+        ApplianceProfile.MINI_SPLIT.value,
+        ApplianceProfile.HVAC_BLOWER.value,
+        ApplianceProfile.ELECTRIC_HEAT.value,
     }
 
 
@@ -2410,6 +2594,7 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
     if profile in {
         ApplianceProfile.HVAC.value,
         ApplianceProfile.HVAC_COMPRESSOR.value,
+        ApplianceProfile.HEAT_PUMP.value,
         ApplianceProfile.MINI_SPLIT.value,
         ApplianceProfile.ELECTRIC_HEAT.value,
         ApplianceProfile.WATER_HEATER.value,
@@ -2598,9 +2783,7 @@ def _automatic_assignment_sensor_excluded(
     entity_id: str,
     source_name: str = "",
 ) -> bool:
-    tokens = set(
-        _slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_")
-    )
+    tokens = set(_slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_"))
     return bool(tokens & {"harmonic", "total"})
 
 
@@ -3370,10 +3553,13 @@ def _suggest_assignment_profile_mode(
             profile,
             entity_id_list,
         )
-    if any(
-        token in text
-        for token in ("_compressor_", "_heat_pump_", "_air_conditioner_", "_ac_")
-    ):
+    if "_heat_pump_" in text:
+        profile = ApplianceProfile.HEAT_PUMP.value
+        return profile, _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_id_list,
+        )
+    if any(token in text for token in ("_compressor_", "_air_conditioner_", "_ac_")):
         profile = ApplianceProfile.HVAC_COMPRESSOR.value
         return profile, _assignment_mode_for_profile_and_entities(
             profile,
@@ -3416,9 +3602,7 @@ def _suggest_assignment_profile_mode(
             ApplianceProfile.DISHWASHER.value,
             CircuitMode.SINGLE_PHASE.value,
         )
-    if any(
-        token in text for token in ("_3d_printer_", "_3dprinter_", "_3_d_printer_")
-    ):
+    if any(token in text for token in ("_3d_printer_", "_3dprinter_", "_3_d_printer_")):
         return (
             ApplianceProfile.THREE_D_PRINTER.value,
             CircuitMode.SINGLE_PHASE.value,
@@ -3682,6 +3866,9 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self._config_entry = config_entry
         self._pending_config: dict[str, Any] | None = None
         self._advanced_circuit_id: str | None = None
+        self._pending_advanced_settings: dict[str, Any] | None = None
+        self._thermostat_mapping_entities: list[str] = []
+        self._thermostat_mapping_index = 0
         self._assignment_groups: list[dict[str, Any]] = []
         self._assignment_index = 0
         self._reviewed_circuits: list[dict[str, Any]] = []
@@ -3949,9 +4136,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     _source_entities_after_assignment_update(
                         self._pending_config or final_config,
                         final_config.get(CONF_CIRCUITS, []),
-                        removed_source_entities=(
-                            self._refresh_stale_source_entities
-                        ),
+                        removed_source_entities=(self._refresh_stale_source_entities),
                     )
                 )
                 await _async_save_options_flow_config(self, final_config)
@@ -4142,9 +4327,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         config = _entry_config(self._config_entry)
         context = _advanced_circuit_context_from_config(config, circuit_id)
         if user_input is not None:
+            flattened_input = _flatten_advanced_settings_input(user_input)
+            reset_temperature_map = bool(
+                flattened_input.get(
+                    FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS,
+                    False,
+                )
+                or flattened_input.get(
+                    "reset_hvac_efficiency_settings_to_defaults",
+                    False,
+                )
+            )
             try:
                 settings = _advanced_settings_from_input(
-                    user_input,
+                    flattened_input,
                     context=context,
                 )
             except SetupValidationError as err:
@@ -4152,31 +4348,143 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     circuit_id,
                     {"base": err.error_key},
                 )
-            settings_by_circuit = _settings_map_for_entry(
+            current_settings = _settings_map_for_entry(
                 self._config_entry,
                 CONF_ADVANCED_SETTINGS,
             )
-            settings_by_circuit[circuit_id] = settings
-            coordinator = _options_flow_coordinator(self)
-            if coordinator is not None:
-                replace_settings = getattr(
-                    coordinator,
-                    "async_replace_advanced_settings",
-                    None,
+            previous = current_settings.get(circuit_id, {})
+            if (
+                not reset_temperature_map
+                and CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP not in settings
+                and isinstance(previous, Mapping)
+                and isinstance(
+                    previous.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP),
+                    Mapping,
                 )
-                if callable(replace_settings):
-                    result = replace_settings(circuit_id, settings)
-                    if hasattr(result, "__await__"):
-                        await result
-            return self.async_create_entry(
-                title="",
-                data=_options_with_updates(
-                    self._config_entry,
-                    {CONF_ADVANCED_SETTINGS: settings_by_circuit},
-                ),
+            ):
+                settings[CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP] = dict(
+                    previous[CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP]
+                )
+            linked = list(
+                dict.fromkeys(
+                    _strict_string_list(
+                        settings.get(CONF_LINKED_THERMOSTAT_ENTITIES, []),
+                        invalid_error_key="invalid_thermostat_entities",
+                    )
+                )
             )
+            if linked:
+                self._pending_advanced_settings = settings
+                self._thermostat_mapping_entities = linked
+                self._thermostat_mapping_index = 0
+                return await self.async_step_thermostat_mapping()
+            return await self._async_save_advanced_settings(circuit_id, settings)
 
         return await self._async_show_advanced_settings_form(circuit_id)
+
+    async def async_step_thermostat_mapping(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        """Map each linked thermostat to an optional indoor temperature sensor."""
+        settings = self._pending_advanced_settings
+        if settings is None or not self._thermostat_mapping_entities:
+            return await self.async_step_advanced_settings()
+
+        thermostat_entity = self._thermostat_mapping_entities[
+            self._thermostat_mapping_index
+        ]
+        temperature_map = dict(settings.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP, {}))
+        candidates = _strict_string_list(
+            _entry_value(
+                self._config_entry,
+                CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                [],
+            ),
+            invalid_error_key="invalid_thermostat_temperature_sensor_entities",
+        )
+        current = str(temperature_map.get(thermostat_entity) or "").strip()
+        allowed = set(candidates)
+        if current:
+            allowed.add(current)
+
+        if user_input is not None:
+            selected = str(
+                user_input.get(FIELD_THERMOSTAT_TEMPERATURE_SENSOR_ENTITY) or ""
+            ).strip()
+            if selected and allowed and selected not in allowed:
+                return self._show_thermostat_mapping_form(
+                    thermostat_entity,
+                    candidates,
+                    current,
+                    {"base": "invalid_thermostat_temperature_sensor_entity"},
+                )
+            if selected:
+                temperature_map[thermostat_entity] = selected
+            else:
+                temperature_map.pop(thermostat_entity, None)
+            settings[CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP] = temperature_map
+            self._thermostat_mapping_index += 1
+            if self._thermostat_mapping_index < len(self._thermostat_mapping_entities):
+                return await self.async_step_thermostat_mapping()
+
+            circuit_id = self._advanced_circuit_id or "mains"
+            self._pending_advanced_settings = None
+            self._thermostat_mapping_entities = []
+            self._thermostat_mapping_index = 0
+            return await self._async_save_advanced_settings(circuit_id, settings)
+
+        return self._show_thermostat_mapping_form(
+            thermostat_entity,
+            candidates,
+            current,
+        )
+
+    def _show_thermostat_mapping_form(
+        self,
+        thermostat_entity: str,
+        candidates: Iterable[str],
+        current: str,
+        errors: dict[str, str] | None = None,
+    ) -> config_entries.ConfigFlowResult:
+        return self.async_show_form(
+            step_id="thermostat_mapping",
+            data_schema=_thermostat_mapping_schema(candidates, current),
+            errors=errors or {},
+            description_placeholders={
+                "thermostat_entity": thermostat_entity,
+                "circuit_name": self._advanced_circuit_id or "selected",
+            },
+        )
+
+    async def _async_save_advanced_settings(
+        self,
+        circuit_id: str,
+        settings: dict[str, Any],
+    ) -> config_entries.ConfigFlowResult:
+        settings_by_circuit = _settings_map_for_entry(
+            self._config_entry,
+            CONF_ADVANCED_SETTINGS,
+        )
+        settings_by_circuit[circuit_id] = settings
+        coordinator = _options_flow_coordinator(self)
+        if coordinator is not None:
+            replace_settings = getattr(
+                coordinator,
+                "async_replace_advanced_settings",
+                None,
+            )
+            if callable(replace_settings):
+                result = replace_settings(circuit_id, settings)
+                if hasattr(result, "__await__"):
+                    await result
+        return self.async_create_entry(
+            title="",
+            data=_options_with_updates(
+                self._config_entry,
+                {CONF_ADVANCED_SETTINGS: settings_by_circuit},
+            ),
+        )
 
     async def async_step_recommendations(
         self,
@@ -4882,6 +5190,14 @@ def _options_schema(
         CONF_WATER_FLOW_SENSOR_ENTITIES,
         data.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
     )
+    thermostat_entities = options.get(
+        CONF_THERMOSTAT_ENTITIES,
+        data.get(CONF_THERMOSTAT_ENTITIES, []),
+    )
+    thermostat_temperature_sensor_entities = options.get(
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+        data.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES, []),
+    )
     extra_source_entities = options.get(
         CONF_EXTRA_SOURCE_ENTITIES,
         data.get(CONF_EXTRA_SOURCE_ENTITIES, source_entities),
@@ -4946,6 +5262,14 @@ def _options_schema(
                 CONF_WATER_FLOW_SENSOR_ENTITIES,
                 default=water_flow_sensor_entities,
             ): _water_flow_entity_selector(multiple=True),
+            vol.Optional(
+                CONF_THERMOSTAT_ENTITIES,
+                default=thermostat_entities,
+            ): _thermostat_entity_selector(multiple=True),
+            vol.Optional(
+                CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                default=thermostat_temperature_sensor_entities,
+            ): _indoor_temperature_entity_selector(multiple=True),
             vol.Optional(
                 CONF_SENSITIVITY,
                 default=normalize_sensitivity(
@@ -5130,6 +5454,20 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
                 data.get(CONF_WATER_FLOW_SENSOR_ENTITIES, []),
             ),
             invalid_error_key="invalid_water_flow_sensor_entities",
+        ),
+        CONF_THERMOSTAT_ENTITIES: _strict_string_list(
+            options.get(
+                CONF_THERMOSTAT_ENTITIES,
+                data.get(CONF_THERMOSTAT_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_thermostat_entities",
+        ),
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES: _strict_string_list(
+            options.get(
+                CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+                data.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES, []),
+            ),
+            invalid_error_key="invalid_thermostat_temperature_sensor_entities",
         ),
         CONF_SENSITIVITY: normalize_sensitivity(
             options.get(
@@ -5762,6 +6100,19 @@ def _advanced_settings_from_input(
         CONF_LINKED_FLOW_SENSOR_ENTITIES,
         invalid_error_key="invalid_water_flow_sensor_entities",
     )
+    _set_optional_string_list(
+        settings,
+        user_input,
+        CONF_LINKED_THERMOSTAT_ENTITIES,
+        invalid_error_key="invalid_thermostat_entities",
+    )
+    _set_optional_string_mapping(
+        settings,
+        user_input,
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
+    )
+    _set_hvac_efficiency_change_threshold(settings, user_input)
+    _set_optional_bool(settings, user_input, CONF_BLOWER_REPRESENTS_GAS_HEAT)
     _reset_advanced_setting_sections(settings, user_input)
     return settings
 
@@ -5905,6 +6256,41 @@ def _set_optional_string_list(
         user_input.get(key, []),
         invalid_error_key=invalid_error_key,
     )
+
+
+def _set_optional_string_mapping(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+    key: str,
+) -> None:
+    if key not in user_input:
+        return
+    raw = user_input.get(key)
+    if not isinstance(raw, Mapping):
+        raise SetupValidationError("invalid_advanced_settings")
+    values: dict[str, str] = {}
+    for raw_key, raw_value in raw.items():
+        item_key = str(raw_key).strip()
+        item_value = str(raw_value or "").strip()
+        if item_key and item_value:
+            values[item_key] = item_value
+    settings[key] = values
+
+
+def _set_hvac_efficiency_change_threshold(
+    settings: dict[str, Any],
+    user_input: Mapping[str, Any],
+) -> None:
+    key = CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
+    if key not in user_input:
+        return
+    try:
+        value = float(user_input[key])
+    except (TypeError, ValueError):
+        raise SetupValidationError("invalid_advanced_settings") from None
+    if not 5.0 <= value <= 100.0:
+        raise SetupValidationError("invalid_advanced_settings")
+    settings[key] = value
 
 
 def _set_optional_int(

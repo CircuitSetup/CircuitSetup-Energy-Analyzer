@@ -23,6 +23,7 @@ SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_a
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.HEAT_PUMP,
     ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,
@@ -706,6 +707,7 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
         quality_issue = _setup_health_data_quality_issue(state, circuit)
         if quality_issue is not None:
             issues.append(quality_issue)
+        issues.extend(_setup_health_hvac_thermostat_issues(state, circuit))
 
         energy_usage_status = _setup_health_status(
             state,
@@ -804,6 +806,35 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
             issues.append(utility_comparison_issue)
 
     return _dedupe_setup_health_issues(issues)
+
+
+def _setup_health_hvac_thermostat_issues(
+    state: Any,
+    circuit: Any,
+) -> list[dict[str, Any]]:
+    raw_issues = getattr(
+        state,
+        "hvac_thermostat_setup_issues_by_circuit",
+        {},
+    ).get(circuit.circuit_id, ())
+    issues: list[dict[str, Any]] = []
+    for raw in raw_issues:
+        if not isinstance(raw, Mapping):
+            continue
+        issue = _setup_health_issue(
+            "Review thermostat source",
+            f"Review thermostat settings for {circuit.name}",
+            circuit,
+            str(raw.get("reason") or f"Review thermostat data for {circuit.name}."),
+            issue="hvac_thermostat_source",
+            source_entities=raw.get("source_entities", ()),
+        )
+        issue["issue_kind"] = str(
+            raw.get("issue_kind") or "missing_required_sensor"
+        )
+        issue["circuit_name"] = str(raw.get("circuit_name") or circuit.name)
+        issues.append(issue)
+    return issues
 
 
 def _setup_health_circuits(coordinator: Any) -> tuple[tuple[Any, Any], ...]:

@@ -31,6 +31,8 @@ _NOTIFICATION_CATEGORY_BY_FEATURE = {
     "daily_energy_spike": "high_daily_energy",
     "utility_energy_mismatch": "data_quality_issue",
     "efficiency_degradation": "appliance_health_issue",
+    "hvac_response_faster": "appliance_health_issue",
+    "hvac_response_slower": "appliance_health_issue",
     "repeated_short_cycle": "appliance_health_issue",
 }
 

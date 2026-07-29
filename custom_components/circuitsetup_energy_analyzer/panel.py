@@ -85,6 +85,7 @@ from .services import (
     SERVICE_APPLY_SETTING_RECOMMENDATION,
     SERVICE_DISMISS_SETTING_RECOMMENDATION,
     SERVICE_END_MAINTENANCE,
+    SERVICE_MARK_ALERT_CONFIRMED,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
     SERVICE_MARK_NILM_APPLIANCE_CORRECT,
@@ -1247,6 +1248,11 @@ def _actions_for_context(
                 "mark_expected": {
                     "domain": DOMAIN,
                     "service": SERVICE_MARK_ALERT_EXPECTED,
+                    "data": alert_data,
+                },
+                "mark_confirmed": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_MARK_ALERT_CONFIRMED,
                     "data": alert_data,
                 },
                 "mark_unhelpful": {

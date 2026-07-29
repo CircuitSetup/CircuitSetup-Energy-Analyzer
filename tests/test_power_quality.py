@@ -33,6 +33,8 @@ RELATIONSHIP_EVIDENCE_FEATURES = {
 def test_mini_split_is_a_motor_not_resistive_load() -> None:
     assert ApplianceProfile.MINI_SPLIT in MOTOR_PROFILES
     assert ApplianceProfile.MINI_SPLIT not in RESISTIVE_PROFILES
+    assert ApplianceProfile.HEAT_PUMP in MOTOR_PROFILES
+    assert ApplianceProfile.HEAT_PUMP not in RESISTIVE_PROFILES
 
 
 def sample(

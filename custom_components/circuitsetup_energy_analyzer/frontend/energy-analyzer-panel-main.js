@@ -25,6 +25,7 @@ export const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
 export const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
+  mark_confirmed: "mark_alert_confirmed",
   mark_unhelpful: "mark_alert_unhelpful",
   pause_alerts: "pause_alerts",
   relearn_baseline: "relearn_baseline",

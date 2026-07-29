@@ -42,6 +42,7 @@ def test_area_suggestion_uses_default_when_no_existing_area_matches() -> None:
         == "Workshop"
     )
     assert suggested_area_for_profile(ApplianceProfile.MINI_SPLIT, []) == "HVAC"
+    assert suggested_area_for_profile(ApplianceProfile.HEAT_PUMP, []) == "HVAC"
     assert (
         suggested_area_for_profile(
             ApplianceProfile.MINI_SPLIT,
@@ -63,4 +64,5 @@ def test_appliance_icons_are_profile_specific() -> None:
         == "mdi:printer-3d"
     )
     assert appliance_icon_for_profile(ApplianceProfile.MINI_SPLIT) == "mdi:heat-pump"
+    assert appliance_icon_for_profile(ApplianceProfile.HEAT_PUMP) == "mdi:heat-pump"
     assert appliance_icon_for_profile(ApplianceProfile.MIXED) is None

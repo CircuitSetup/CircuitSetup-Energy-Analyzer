@@ -3545,6 +3545,64 @@ test("Appliance Detail omits session timeline and page-level controls", async ({
   await expect(panel.locator("[data-appliance-detail-action]")).toHaveCount(0);
 });
 
+test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  const efficiency = panel.locator("[data-hvac-efficiency]");
+
+  await expect(efficiency).toBeVisible();
+  await expect(efficiency).toContainText("80 / 100");
+  await expect(efficiency).toContainText("100 is the learned baseline");
+  await expect(efficiency).toContainText("Upstairs");
+  await expect(efficiency).toContainText("Downstairs");
+  await expect(efficiency).toContainText("10 min/°F");
+  await expect(efficiency).toContainText("12.5 min/°F");
+  await expect(efficiency).toContainText("Outdoor: 95°F");
+  await expect(efficiency).toContainText("Gas-furnace blower proxy");
+  await expect(efficiency).toContainText("Cooling blower supports air handling");
+});
+
+test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_detail")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.detail.hvac_efficiency = {
+      status: "learning",
+      summary_score: null,
+      trend: null,
+      threshold_pct: 25,
+      learning: {
+        reference_count: 2,
+        recent_count: 0,
+        required_reference: 9,
+        required_recent: 3,
+      },
+      heating: [{
+        thermostat_entity_id: "climate.upstairs",
+        thermostat_name: "Upstairs",
+        status: "learning",
+        score: null,
+        baseline_minutes_per_degree: null,
+        recent_minutes_per_degree: null,
+        outdoor_temperature_f: null,
+        attribution: "direct",
+        supporting_blower_ids: [],
+      }],
+      cooling: [],
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  const efficiency = panel.locator("[data-hvac-efficiency]");
+
+  await expect(efficiency).toContainText("Upstairs");
+  await expect(efficiency).toContainText("2 of 9 reference episodes");
+  await expect(efficiency).not.toContainText("0 / 100");
+  await expect(efficiency).not.toContainText("0 min/°F");
+  await expect(efficiency).not.toContainText("Outdoor: 0°F");
+});
+
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
@@ -3888,6 +3946,8 @@ test("alert responses and setting preview actions call their services", async ({
 
   await panel.locator('[data-alert-decision][value="mark_expected"]').check();
   await panel.locator("#apply_alert_decision").click();
+  await panel.locator('[data-alert-decision][value="mark_confirmed"]').check();
+  await panel.locator("#apply_alert_decision").click();
   await panel.locator('[data-alert-decision][value="mark_unhelpful"]').check();
   await panel.locator("#apply_alert_decision").click();
 
@@ -3902,6 +3962,7 @@ test("alert responses and setting preview actions call their services", async ({
   await panel.locator('[data-recommendation-action="reset"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
     "mark_alert_expected",
+    "mark_alert_confirmed",
     "mark_alert_unhelpful",
     "apply_setting_recommendation",
     "reset_setting_recommendation",

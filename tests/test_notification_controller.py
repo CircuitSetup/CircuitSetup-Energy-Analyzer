@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.appliance_notifications import (
+    alert_notification_category,
+)
 from custom_components.circuitsetup_energy_analyzer.managers import (
     notification_controller,
 )
@@ -828,6 +831,65 @@ async def test_alert_notifications_wait_for_live_learning_state(
     await controller.async_notify_alert(obvious_alert)
     await controller.async_notify_alert(error_alert)
     assert created == [routine_alert, obvious_alert, error_alert]
+
+
+@pytest.mark.asyncio
+async def test_hvac_response_notification_obeys_shared_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[AlertEvidence] = []
+    paused = {"value": False}
+    suppressed = {"value": False}
+
+    async def create_notification(hass, alert, *, config=None) -> None:
+        del hass, config
+        created.append(alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="heat_pump",
+        severity=Severity.WARNING,
+        message="HVAC response slowed.",
+        feature="hvac_response_slower",
+        features={"notification_type": "appliance_health_issue"},
+    )
+    state = SimpleNamespace(learning_by_circuit={"heat_pump": True})
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: paused["value"],
+            has_suppressed_alert_feedback=lambda candidate: suppressed["value"],
+        ),
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda circuit_id: None),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={},
+            notification_delivery_state={},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(alert)
+    state.learning_by_circuit["heat_pump"] = False
+    paused["value"] = True
+    await controller.async_notify_alert(alert)
+    paused["value"] = False
+    suppressed["value"] = True
+    await controller.async_notify_alert(alert)
+    suppressed["value"] = False
+    await controller.async_notify_alert(alert)
+
+    assert alert_notification_category(alert.feature) == "appliance_health_issue"
+    assert created == [alert]
 
 
 @pytest.mark.asyncio

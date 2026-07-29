@@ -92,6 +92,7 @@ export function createEvidenceViewMethods({
     const messages = {
       acknowledge: "messages.alert_acknowledged",
       mark_expected: "messages.marked_expected",
+      mark_confirmed: "messages.marked_confirmed",
       mark_unhelpful: "messages.marked_unhelpful",
       pause_alerts: "messages.alert_pause_updated",
       relearn_baseline: "messages.baseline_relearn_requested",
@@ -174,6 +175,7 @@ export function createEvidenceViewMethods({
     const choices = [
       ["acknowledge", "mdi:check", "actions.labels.dismiss", "actions.helpers.dismiss"],
       ["mark_expected", "mdi:check-decagram", "actions.labels.mark_expected", "actions.helpers.mark_expected"],
+      ["mark_confirmed", "mdi:alert-circle-check-outline", "actions.labels.confirm_issue", "actions.helpers.mark_confirmed"],
       ["mark_unhelpful", "mdi:message-alert-outline", "actions.labels.not_helpful", "actions.helpers.mark_unhelpful"],
     ].filter(([key]) => actions[key]);
     if (!choices.length) {

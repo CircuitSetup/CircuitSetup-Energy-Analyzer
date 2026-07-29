@@ -119,6 +119,7 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
         "alert_id": notification_id_for_alert(alert)
     }
     assert payload["actions"]["mark_expected"]["service"] == "mark_alert_expected"
+    assert payload["actions"]["mark_confirmed"]["service"] == "mark_alert_confirmed"
     assert payload["actions"]["mark_unhelpful"]["service"] == "mark_alert_unhelpful"
     assert payload["actions"]["pause_alerts"] == {
         "domain": DOMAIN,
@@ -170,6 +171,7 @@ def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None
     (
         "async_acknowledge_alert",
         "async_mark_alert_expected",
+        "async_mark_alert_confirmed",
         "async_mark_alert_unhelpful",
     ),
 )

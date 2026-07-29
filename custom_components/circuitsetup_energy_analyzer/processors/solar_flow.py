@@ -43,6 +43,7 @@ FLEXIBLE_SOLAR_LOAD_PROFILES = frozenset(
         ApplianceProfile.EV_CHARGER,
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.POOL_PUMP,
         ApplianceProfile.WATER_HEATER,

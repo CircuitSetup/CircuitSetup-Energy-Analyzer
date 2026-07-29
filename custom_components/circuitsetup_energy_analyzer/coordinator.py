@@ -1052,6 +1052,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Mark an alert pattern as expected for future notifications."""
         return await self.evidence_actions.async_mark_alert_expected(alert_id)
 
+    async def async_mark_alert_confirmed(self: Self, alert_id: str) -> bool:
+        """Confirm an alert as a real issue."""
+        return await self.evidence_actions.async_mark_alert_confirmed(alert_id)
+
     async def async_mark_alert_unhelpful(self: Self, alert_id: str) -> bool:
         """Mark an alert pattern as unhelpful for future notifications."""
         return await self.evidence_actions.async_mark_alert_unhelpful(alert_id)
