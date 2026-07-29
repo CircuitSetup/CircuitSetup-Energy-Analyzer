@@ -1393,6 +1393,61 @@ def test_hvac_selected_unusable_thermostat_reports_setup_issue(
     assert reason_fragment in issues[0]["reason"].lower()
 
 
+@pytest.mark.parametrize(
+    "observation",
+    [
+        ThermostatObservation(
+            "climate.downstairs",
+            None,
+            72.0,
+            None,
+            "heat_cool",
+            None,
+            ("current_temperature", "target_temp_low", "target_temp_high"),
+        ),
+        ThermostatObservation(
+            "climate.downstairs",
+            None,
+            72.0,
+            None,
+            "off",
+            None,
+            ("current_temperature", "temperature"),
+        ),
+    ],
+)
+def test_hvac_idle_thermostat_with_setpoint_capability_has_no_setup_issue(
+    observation: ThermostatObservation,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=observation,
+        advanced_settings={
+            "heat_pump": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: [
+                    observation.thermostat_entity_id
+                ]
+            }
+        },
+        running_circuit_ids=set(),
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+
+    assert _state_update_values(
+        result,
+        "hvac_thermostat_setup_issues_by_circuit",
+    )["heat_pump"] == []
+
+
 def test_hvac_multiple_thermostats_require_explicit_circuit_mapping() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,

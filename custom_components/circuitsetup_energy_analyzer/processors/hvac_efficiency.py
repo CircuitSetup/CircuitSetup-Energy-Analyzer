@@ -642,7 +642,14 @@ def _thermostat_setup_issues(
                 f"{config.name} cannot use {thermostat_id} because no current "
                 "temperature is available."
             )
-        elif observation.target_temperature_f is None:
+        elif observation.target_temperature_f is None and (
+            str(observation.action or "").lower() in {"heating", "cooling"}
+            or not {
+                "temperature",
+                "target_temp_low",
+                "target_temp_high",
+            }.intersection(observation.available_capabilities)
+        ):
             reason = (
                 f"{config.name} cannot use {thermostat_id} because no active "
                 "temperature setpoint is available."
