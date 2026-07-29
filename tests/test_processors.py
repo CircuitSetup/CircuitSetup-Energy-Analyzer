@@ -6038,6 +6038,97 @@ def test_appliance_health_processor_stays_learning_with_shared_learning() -> Non
     assert result.notifications == []
 
 
+def test_appliance_health_relearn_ignores_prior_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        ApplianceHealthProcessor,
+    )
+
+    days, events = _appliance_health_history(19)
+    context = _appliance_health_context(days=days, events=events, learning=False)
+    context.store_data.learning_started_at_by_circuit["fridge"] = (
+        "2026-07-18T00:00:00+00:00"
+    )
+    processor = ApplianceHealthProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
+        merge_gap_seconds_for_config=lambda _config: 60.0,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(_energy_sample(120.5), config, context)
+
+    assert result.state_updates[0].value == "learning"
+    assert result.state_updates[1].value["reason"] == "insufficient_history"
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+
+
+def test_appliance_health_feedback_fingerprint_includes_comparison_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.appliance_health import (
+        ApplianceHealthFinding,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        appliance_health as appliance_health_processor,
+    )
+
+    def fingerprint(context: dict[str, str]) -> tuple[dict[str, object], str]:
+        finding = ApplianceHealthFinding(
+            feature="efficiency_degradation",
+            metric="energy_per_runtime_hour",
+            reference_median=1.0,
+            recent_median=1.5,
+            change_ratio=0.5,
+            reference_count=14,
+            recent_count=3,
+            confidence=1.0,
+            last_evidence_at="2026-07-17",
+            context=context,
+        )
+        features = appliance_health_processor._finding_features(finding)
+        alert = AlertEvidence(
+            timestamp=datetime(2026, 7, 20, tzinfo=UTC),
+            circuit_id="appliance",
+            severity=Severity.WARNING,
+            message="Possible issue",
+            feature=finding.feature,
+            value_metric=finding.metric,
+            observed_value=finding.recent_median,
+            baseline_value=finding.reference_median,
+            change_ratio=finding.change_ratio,
+            features=features,
+        )
+        return features, alert_feedback_fingerprint(alert)
+
+    summer_features, summer = fingerprint(
+        {
+            "season": "summer",
+            "weather_mode": "cooling",
+            "temperature_bin": "hot",
+        }
+    )
+    _, winter = fingerprint(
+        {
+            "season": "winter",
+            "weather_mode": "heating",
+            "temperature_bin": "cold",
+        }
+    )
+    _, active_flow = fingerprint({"water_flow_state": "active_flow"})
+    _, no_flow = fingerprint({"water_flow_state": "no_flow"})
+
+    assert summer_features["comparison_basis"] == "contextual"
+    assert summer_features["baseline_fallback_level"] == "exact_context"
+    assert len({summer, winter, active_flow, no_flow}) == 4
+
+
 def test_appliance_health_processor_requires_distinct_completed_dates() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         ConservativeAlertPolicy,

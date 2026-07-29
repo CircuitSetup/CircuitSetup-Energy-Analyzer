@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from ..alerting import Observation
@@ -15,6 +16,7 @@ from ..appliance_health import (
     evaluate_appliance_health,
 )
 from ..contextual_baseline import stored_contextual_samples
+from ..local_time import local_date
 from ..models import (
     AlertEvidence,
     ApplianceProfile,
@@ -76,6 +78,12 @@ class ApplianceHealthProcessor:
         if circuit_is_learning(context.state, circuit_id):
             return _status_result(circuit_id, "learning", "shared_learning_active")
 
+        learning_started_at = _learning_started_at(context, circuit_id)
+        events = tuple(
+            event
+            for event in context.store_data.events
+            if learning_started_at is None or event.timestamp >= learning_started_at
+        )
         merge_gap_seconds = self._merge_gap_seconds_for_config(circuit_config)
         energy_history = context.store_data.energy_usage_by_circuit.get(circuit_id, {})
         energy_days = (
@@ -94,17 +102,26 @@ class ApplianceHealthProcessor:
             raw_contextual_samples,
             cache=context.contextual_samples_cache,
         )
+        if learning_started_at is not None:
+            contextual_samples = [
+                item
+                for item in contextual_samples
+                if item.timestamp >= learning_started_at
+            ]
         days = build_appliance_health_days(
             circuit_id=circuit_id,
             energy_days=energy_days,
-            events=context.store_data.events,
+            events=events,
             contextual_samples=contextual_samples,
             merge_gap_seconds=merge_gap_seconds,
             time_zone=context.time_zone,
         )
+        if learning_started_at is not None:
+            learning_date = local_date(learning_started_at, context.time_zone)
+            days = tuple(day for day in days if day.date > learning_date)
         sessions = build_appliance_health_sessions(
             circuit_id=circuit_id,
-            events=context.store_data.events,
+            events=events,
             merge_gap_seconds=merge_gap_seconds,
             time_zone=context.time_zone,
             now=context.now,
@@ -226,7 +243,7 @@ def _finding_features(finding: ApplianceHealthFinding) -> dict[str, Any]:
     count_scope = (
         "day" if finding.feature == "efficiency_degradation" else "session"
     )
-    return {
+    features: dict[str, Any] = {
         "notification_type": "appliance_health_issue",
         "metric": finding.metric,
         "reference_value": finding.reference_median,
@@ -238,6 +255,34 @@ def _finding_features(finding: ApplianceHealthFinding) -> dict[str, Any]:
         f"recent_{count_scope}_count": finding.recent_count,
         **dict(finding.context),
     }
+    if finding.context:
+        features.update(
+            {
+                "comparison_basis": "contextual",
+                "baseline_context": ", ".join(
+                    f"{key}={value}"
+                    for key, value in sorted(finding.context.items())
+                ),
+                "baseline_fallback_level": "exact_context",
+            }
+        )
+    return features
+
+
+def _learning_started_at(
+    context: ProcessingContext,
+    circuit_id: str,
+) -> datetime | None:
+    raw = context.store_data.learning_started_at_by_circuit.get(circuit_id)
+    if not raw:
+        return None
+    try:
+        started_at = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=context.now.tzinfo)
+    return started_at
 
 
 def _matching_active_health_alert(
