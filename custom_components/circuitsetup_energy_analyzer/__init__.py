@@ -6,11 +6,15 @@ from typing import Any
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_INTENSITY_ENTITY,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_SOURCE_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DATA_RELOAD_COUNT,
     DOMAIN,
@@ -119,10 +123,7 @@ def _source_entities_for_entry(
     if outdoor_temperature_entity:
         entity_ids.append(outdoor_temperature_entity)
     for key in (CONF_RAIN_SENSOR_ENTITY, CONF_RAIN_INTENSITY_ENTITY):
-        entity_id = str(
-            entry_options.get(key, entry_data.get(key, ""))
-            or ""
-        ).strip()
+        entity_id = str(entry_options.get(key, entry_data.get(key, "")) or "").strip()
         if entity_id:
             entity_ids.append(entity_id)
     flow_entities = entry_options.get(
@@ -136,6 +137,13 @@ def _source_entities_for_entry(
         entity_ids.extend(
             entity_id for entity_id in flow_entities if isinstance(entity_id, str)
         )
+    for key in (
+        CONF_THERMOSTAT_ENTITIES,
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES,
+    ):
+        entity_ids.extend(
+            strings_from_any(entry_options.get(key, entry_data.get(key, [])))
+        )
     advanced_settings = entry_options.get(
         CONF_ADVANCED_SETTINGS,
         entry_data.get(CONF_ADVANCED_SETTINGS, {}),
@@ -144,10 +152,18 @@ def _source_entities_for_entry(
         for settings in advanced_settings.values():
             if isinstance(settings, Mapping):
                 entity_ids.extend(
-                    strings_from_any(
-                        settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES)
-                    )
+                    strings_from_any(settings.get(CONF_LINKED_FLOW_SENSOR_ENTITIES))
                 )
+                entity_ids.extend(
+                    strings_from_any(settings.get(CONF_LINKED_THERMOSTAT_ENTITIES))
+                )
+                temperature_map = settings.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP)
+                if isinstance(temperature_map, Mapping):
+                    entity_ids.extend(
+                        entity_id
+                        for entity_id in temperature_map.values()
+                        if isinstance(entity_id, str) and entity_id
+                    )
     entity_ids.extend(
         sensor.entity_id
         for config in getattr(coordinator, "circuit_configs", ())
@@ -212,9 +228,7 @@ def _registered_demo_source_entity_ids(
             continue
         if getattr(registry_entry, "platform", DOMAIN) != DOMAIN:
             continue
-        canonical_entity_id = (
-            f"sensor.{unique_id.removeprefix(unique_id_prefix)}"
-        )
+        canonical_entity_id = f"sensor.{unique_id.removeprefix(unique_id_prefix)}"
         registered[canonical_entity_id] = str(
             getattr(registry_entry, "entity_id", canonical_entity_id)
         )

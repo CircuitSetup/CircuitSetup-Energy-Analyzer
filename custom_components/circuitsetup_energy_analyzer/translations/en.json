@@ -15,6 +15,8 @@
           "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
+          "thermostat_entities": "Thermostats",
+          "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -28,6 +30,8 @@
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
+          "thermostat_entities": "Optional climate entities used to measure HVAC response to thermostat targets. Ecobee, Nest, and other integrations are supported through standard Home Assistant climate attributes.",
+          "thermostat_temperature_sensor_entities": "Optional indoor temperature sensors that can replace a thermostat's current-temperature attribute for a mapped zone.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -129,6 +133,8 @@
           "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
+          "thermostat_entities": "Thermostats",
+          "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
           "sensitivity": "Sensitivity",
           "retention_mode": "Retention Mode"
         },
@@ -140,6 +146,8 @@
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
+          "thermostat_entities": "Optional climate entities used to measure HVAC response to thermostat targets. Ecobee, Nest, and other integrations are supported through standard Home Assistant climate attributes.",
+          "thermostat_temperature_sensor_entities": "Optional indoor temperature sensors that can replace a thermostat's current-temperature attribute for a mapped zone.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
           "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
@@ -408,6 +416,22 @@
               "flow_mismatch_threshold_minutes": "Minutes of unexplained flow or appliance activity before the mismatch is considered evidence."
             }
           },
+          "hvac_efficiency_settings": {
+            "name": "HVAC Thermostat Efficiency",
+            "description": "Links this HVAC appliance to thermostat zones and controls how much weather-adjusted response time must change before notification.",
+            "data": {
+              "reset_hvac_efficiency_settings_to_defaults": "Reset HVAC Efficiency Settings To Defaults",
+              "linked_thermostat_entities": "Linked Thermostats",
+              "hvac_efficiency_change_threshold_pct": "Response Change Alert Percent",
+              "blower_represents_gas_heat": "Blower Represents Gas-Furnace Operation"
+            },
+            "data_description": {
+              "reset_hvac_efficiency_settings_to_defaults": "Turn this on when saving to remove thermostat links, temperature overrides, the response-change threshold, and the gas-heat blower role.",
+              "linked_thermostat_entities": "Choose the thermostat zones served by this appliance. With one globally configured thermostat, leaving this blank uses that thermostat automatically; multiple thermostats require explicit links.",
+              "hvac_efficiency_change_threshold_pct": "Alert when learned weather-adjusted time-to-setpoint becomes this percent slower or faster. Default 25%; allowed range 5–100%.",
+              "blower_represents_gas_heat": "Enable only when this blower's power is the available proxy for gas-furnace heating. It never receives independent cooling credit."
+            }
+          },
           "dual_phase_settings": {
             "name": "Dual-Phase Leg Imbalance",
             "description": "Split-phase imbalance thresholds for 240 V circuits.",
@@ -470,6 +494,16 @@
           }
         }
       },
+      "thermostat_mapping": {
+        "title": "Map Thermostat Temperature",
+        "description": "Choose the optional indoor temperature sensor for **{thermostat_entity}** on circuit **{circuit_name}**. Leave blank to use the thermostat's current-temperature attribute.",
+        "data": {
+          "thermostat_temperature_sensor_entity": "Indoor Temperature Sensor"
+        },
+        "data_description": {
+          "thermostat_temperature_sensor_entity": "Optional zone temperature override for this thermostat."
+        }
+      },
       "recommendations": {
         "title": "Review Suggested Settings",
         "description": "{recommendations}",
@@ -509,6 +543,7 @@
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
+      "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."

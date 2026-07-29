@@ -3157,6 +3157,7 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
     for profile in (
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
         ApplianceProfile.HVAC_BLOWER,
         ApplianceProfile.ELECTRIC_HEAT,
@@ -3191,6 +3192,16 @@ def test_weather_context_sensor_only_applies_to_hvac_with_temperature_source() -
         ),
         coordinator_with_options,
     )
+
+
+def test_heat_pump_uses_cyclic_and_high_power_entity_groups() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        _CYCLIC_APPLIANCE_PROFILES,
+        _HIGH_POWER_PROFILES,
+    )
+
+    assert ApplianceProfile.HEAT_PUMP in _CYCLIC_APPLIANCE_PROFILES
+    assert ApplianceProfile.HEAT_PUMP in _HIGH_POWER_PROFILES
 
 
 def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> None:

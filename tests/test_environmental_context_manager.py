@@ -14,6 +14,10 @@ EnvironmentalContextManager = environmental_context.EnvironmentalContextManager
 def test_environmental_context_profile_boundaries_are_explicit() -> None:
     assert ApplianceProfile.HVAC in environmental_context.HVAC_WEATHER_CONTEXT_PROFILES
     assert (
+        ApplianceProfile.HEAT_PUMP
+        in environmental_context.HVAC_WEATHER_CONTEXT_PROFILES
+    )
+    assert (
         ApplianceProfile.MINI_SPLIT
         in environmental_context.HVAC_WEATHER_CONTEXT_PROFILES
     )

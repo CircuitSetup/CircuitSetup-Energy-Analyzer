@@ -220,6 +220,19 @@ def test_config_parser_infers_mini_split_profile(entity_id: str) -> None:
     assert config.mode is CircuitMode.DUAL_PHASE
 
 
+def test_config_parser_infers_central_heat_pump_profile() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    config = circuit_configs_from_entry_data(
+        {CONF_SOURCE_ENTITIES: ["sensor.downstairs_heat_pump_active_power"]}
+    )[0]
+
+    assert config.appliance_profile is ApplianceProfile.HEAT_PUMP
+    assert config.mode is CircuitMode.DUAL_PHASE
+
+
 def test_config_parser_accepts_both_mini_split_modes() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
