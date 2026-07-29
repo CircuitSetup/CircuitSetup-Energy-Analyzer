@@ -180,18 +180,29 @@ class NotificationController:
                 )
         for circuit_id in sorted(recovered_by_circuit):
             alert_id, recovered_alert = recovered_by_circuit[circuit_id]
+            recovered_features = recovered_alert.features
+            appliance_key = str(
+                recovered_features.get("appliance_key")
+                or f"circuit:{circuit_id}"
+            )
+            display_name = str(recovered_features.get("display_name") or "")
+            source_type = str(recovered_features.get("source_type") or "")
             await self.async_notify_lifecycle_update(
                 circuit_id,
                 feature="alert_recovered",
                 message=self._lifecycle_message(
                     circuit_id,
                     "alert_recovered",
+                    display_name=display_name,
                 ),
                 episode_key=(
                     f"alert_recovered:{alert_id}:"
                     f"{recovered_alert.timestamp.isoformat()}"
                 ),
                 now=self._current_time(),
+                appliance_key=appliance_key,
+                display_name=display_name,
+                source_type=source_type,
             )
         if evaluated_circuit_ids is None:
             self._managed_alert_notification_ids.intersection_update(
@@ -262,6 +273,9 @@ class NotificationController:
         message: str,
         episode_key: str,
         now: datetime,
+        appliance_key: str | None = None,
+        display_name: str | None = None,
+        source_type: str | None = None,
     ) -> None:
         """Retain and deliver one opt-in appliance lifecycle update."""
         if not self._remember_lifecycle_episode(
@@ -279,7 +293,9 @@ class NotificationController:
             features={
                 "notification_type": "lifecycle_update",
                 "notification_key": episode_key,
-                "appliance_key": f"circuit:{circuit_id}",
+                "appliance_key": appliance_key or f"circuit:{circuit_id}",
+                **({"display_name": display_name} if display_name else {}),
+                **({"source_type": source_type} if source_type else {}),
             },
         )
         self._coordinator.store_data.alerts.append(alert)
@@ -770,15 +786,22 @@ class NotificationController:
     def _is_actionable_alert(alert: AlertEvidence) -> bool:
         return alert.severity in {Severity.WARNING, Severity.ERROR}
 
-    def _lifecycle_message(self, circuit_id: str, feature: str) -> str:
-        registry = getattr(self._coordinator, "circuit_registry", None)
-        config_for_circuit = getattr(registry, "config_for_circuit", None)
-        config = (
-            config_for_circuit(circuit_id)
-            if callable(config_for_circuit)
-            else None
-        )
-        display_name = str(getattr(config, "name", "") or circuit_id)
+    def _lifecycle_message(
+        self,
+        circuit_id: str,
+        feature: str,
+        *,
+        display_name: str = "",
+    ) -> str:
+        if not display_name:
+            registry = getattr(self._coordinator, "circuit_registry", None)
+            config_for_circuit = getattr(registry, "config_for_circuit", None)
+            config = (
+                config_for_circuit(circuit_id)
+                if callable(config_for_circuit)
+                else None
+            )
+            display_name = str(getattr(config, "name", "") or circuit_id)
         return _LIFECYCLE_MESSAGES[feature].format(
             appliance=display_name
         )

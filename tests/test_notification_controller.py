@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -331,6 +332,80 @@ async def test_summary_alert_resolution_records_lifecycle_recovery(
     assert [item.feature for item in coordinator.store_data.alerts].count(
         "alert_recovered"
     ) == 1
+
+
+@pytest.mark.asyncio
+async def test_nilm_recovery_uses_assignment_identity_and_preferences(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.WARNING,
+        message="Dishwasher energy changed.",
+        feature="nilm_unusual_energy",
+        features={
+            "appliance_key": "nilm:dishwasher",
+            "display_name": "Dishwasher",
+            "source_type": "nilm_estimate",
+            "notification_type": "unusual_energy",
+        },
+    )
+    created: list[AlertEvidence] = []
+
+    async def create_notification(hass, created_alert, *, config=None) -> None:
+        del hass, config
+        created.append(created_alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_dismiss_persistent_notification",
+        AsyncMock(),
+    )
+    state = SimpleNamespace(
+        learning_by_circuit={"mains": False},
+        energy_usage_evidence_by_circuit={},
+        active_alerts_by_circuit={"mains": [alert]},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda alert: False,
+        ),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: SimpleNamespace(name="Mains"),
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={
+                "nilm:dishwasher": {"lifecycle_update": True},
+            },
+            notification_delivery_state={},
+            learning_started_at_by_circuit={},
+            alerts=[alert],
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(alert)
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications({"mains"})
+
+    recovery = created[-1]
+    assert recovery.feature == "alert_recovered"
+    assert recovery.message == "Dishwasher returned to its expected behavior."
+    assert recovery.features["appliance_key"] == "nilm:dishwasher"
+    assert recovery.features["display_name"] == "Dishwasher"
 
 
 @pytest.mark.asyncio

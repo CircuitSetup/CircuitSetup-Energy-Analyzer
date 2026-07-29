@@ -479,6 +479,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if isinstance(utility_settings, Mapping)
             else set()
         )
+        schedule_circuit_ids = expected_schedule_circuit_ids(self)
         mains_context_sample = self._mains_context_sample(now)
         self.state_reducer.prune_recent_observations(
             self.state,
@@ -548,7 +549,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     utility_circuit_ids=(
                         utility_comparison_circuit_ids - processing_circuit_ids
                     ),
-                    schedule_circuit_ids=set(),
+                    schedule_circuit_ids=(
+                        schedule_circuit_ids - processing_circuit_ids
+                    ),
                 ),
             ],
             evaluated_circuit_ids=processing_circuit_ids,
@@ -586,7 +589,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
-        schedule_circuit_ids = expected_schedule_circuit_ids(self)
         alerts.extend(
             _alerts_outside_cross_circuit_features(
                 self.state,

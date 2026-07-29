@@ -12,6 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.weekly_digest import (
     build_weekly_digest,
     digest_idempotence_key,
     digest_items_for_coordinator,
+    weekly_digest_rollover_ready,
 )
 
 
@@ -94,6 +95,24 @@ def test_digest_uses_local_week_and_has_a_stable_idempotence_key() -> None:
             now=datetime(2026, 7, 12, 12, 0, tzinfo=UTC),
             time_zone=ZoneInfo("America/New_York"),
         )
+    )
+
+
+def test_rollover_wait_is_limited_to_the_first_local_day() -> None:
+    coordinator = _direct_digest_coordinator([])
+    coordinator.store_data.energy_usage_by_circuit["dryer"]["last_sample_at"] = (
+        "2026-07-12T23:55:00+00:00"
+    )
+
+    assert not weekly_digest_rollover_ready(
+        coordinator,
+        now=datetime(2026, 7, 13, 12, tzinfo=UTC),
+        time_zone=ZoneInfo("UTC"),
+    )
+    assert weekly_digest_rollover_ready(
+        coordinator,
+        now=datetime(2026, 7, 14, 12, tzinfo=UTC),
+        time_zone=ZoneInfo("UTC"),
     )
 
 

@@ -2581,7 +2581,7 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_update_clears_schedule_alerts_for_all_evaluated_schedules(
+async def test_source_update_clears_overlapping_schedule_and_utility_alerts(
     monkeypatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -2594,12 +2594,20 @@ async def test_source_update_clears_schedule_alerts_for_all_evaluated_schedules(
     coordinator.store_data.appliance_schedule_settings = {
         "circuit:hvac": {"enabled": True}
     }
+    coordinator.store_data.utility_comparison_settings_by_circuit = {"hvac": {}}
     schedule_alert = AlertEvidence(
         timestamp=now_holder["value"] - timedelta(minutes=5),
         circuit_id="hvac",
         severity=Severity.WARNING,
         message="HVAC ran outside its expected schedule.",
         feature="running_outside_expected_schedule",
+    )
+    utility_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Utility comparison mismatch.",
+        feature="utility_energy_mismatch",
     )
     runtime_alert = AlertEvidence(
         timestamp=now_holder["value"] - timedelta(minutes=5),
@@ -2609,9 +2617,11 @@ async def test_source_update_clears_schedule_alerts_for_all_evaluated_schedules(
         feature="run_cycle_duration_s",
     )
     coordinator.state.active_alerts_by_circuit = {
-        "hvac": [schedule_alert, runtime_alert]
+        "hvac": [schedule_alert, utility_alert, runtime_alert]
     }
-    coordinator.store_data.alerts.extend((schedule_alert, runtime_alert))
+    coordinator.store_data.alerts.extend(
+        (schedule_alert, utility_alert, runtime_alert)
+    )
     sync_notifications = AsyncMock()
     coordinator.notification_controller.async_sync_alert_notifications = (
         sync_notifications

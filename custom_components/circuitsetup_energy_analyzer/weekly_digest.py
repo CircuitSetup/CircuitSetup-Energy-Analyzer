@@ -133,6 +133,8 @@ def weekly_digest_rollover_ready(
 ) -> bool:
     """Return whether every mature direct circuit has processed week rollover."""
     _, week_end = completed_week_bounds(now, time_zone)
+    if now.astimezone(time_zone).date() != week_end + timedelta(days=1):
+        return True
     state = getattr(coordinator, "state", None)
     energy_history = getattr(
         getattr(coordinator, "store_data", None),
