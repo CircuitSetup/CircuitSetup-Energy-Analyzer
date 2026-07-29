@@ -1,11 +1,21 @@
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.appliance_health import (
     ApplianceHealthDay,
     ApplianceHealthSession,
+    build_appliance_health_days,
+    build_appliance_health_sessions,
     evaluate_appliance_health,
 )
-from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
+from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
+    ContextKey,
+    ContextualBaselineSample,
+)
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitEvent,
+    EventType,
+)
 
 
 def _day(
@@ -230,3 +240,225 @@ def test_two_recent_short_sessions_are_insufficient() -> None:
 
     assert result.status == "learning"
     assert result.primary_finding is None
+
+
+def test_health_day_builder_joins_complete_energy_and_cycle_days() -> None:
+    days = [
+        {
+            "date": "2026-07-01",
+            "usage_kwh": 2.4,
+            "complete": True,
+            "baseline_eligible": True,
+        },
+        {
+            "date": "2026-07-02",
+            "usage_kwh": 9.9,
+            "complete": True,
+            "baseline_eligible": False,
+        },
+    ]
+    events = (
+        CircuitEvent(
+            datetime(2026, 7, 1, 10, 0, tzinfo=UTC),
+            "fridge",
+            EventType.START,
+        ),
+        CircuitEvent(
+            datetime(2026, 7, 1, 10, 15, tzinfo=UTC),
+            "fridge",
+            EventType.STOP,
+        ),
+    )
+
+    result = build_appliance_health_days(
+        circuit_id="fridge",
+        energy_days=days,
+        events=events,
+        contextual_samples=(),
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert [item.date.isoformat() for item in result] == ["2026-07-01"]
+    assert result[0].energy_kwh == 2.4
+    assert result[0].runtime_seconds == 900.0
+    assert result[0].completed_cycles == 1
+    assert result[0].start_count == 1
+
+
+def test_health_day_builder_excludes_incomplete_and_maintenance_event_days() -> None:
+    days = [
+        {
+            "date": "2026-07-01",
+            "usage_kwh": 2.4,
+            "complete": False,
+        },
+        {
+            "date": "2026-07-02",
+            "usage_kwh": 2.5,
+            "complete": True,
+        },
+    ]
+    events = (
+        CircuitEvent(
+            datetime(2026, 7, 2, 10, 0, tzinfo=UTC),
+            "fridge",
+            EventType.START,
+            features={"baseline_eligible": False},
+        ),
+        CircuitEvent(
+            datetime(2026, 7, 2, 10, 15, tzinfo=UTC),
+            "fridge",
+            EventType.STOP,
+            features={"baseline_eligible": False},
+        ),
+    )
+
+    result = build_appliance_health_days(
+        circuit_id="fridge",
+        energy_days=days,
+        events=events,
+        contextual_samples=(),
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert result == ()
+
+
+def test_health_day_builder_retains_agreed_environment_context() -> None:
+    timestamp = datetime(2026, 7, 1, 23, 0, tzinfo=UTC)
+    context = ContextKey.from_mapping(
+        {
+            "season": "summer",
+            "weather_mode": "cooling",
+            "temperature_bin": "hot",
+            "water_flow_state": "active_flow",
+        }
+    )
+    samples = tuple(
+        ContextualBaselineSample(
+            timestamp=timestamp,
+            circuit_id="water_heater",
+            feature=feature,
+            value=1.0,
+            context=context,
+        )
+        for feature in ("daily_energy_kwh", "runtime_today_seconds")
+    )
+
+    result = build_appliance_health_days(
+        circuit_id="water_heater",
+        energy_days=(
+            {
+                "date": "2026-07-01",
+                "usage_kwh": 2.4,
+                "complete": True,
+            },
+        ),
+        events=(),
+        contextual_samples=samples,
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert result[0].context == {
+        "season": "summer",
+        "temperature_bin": "hot",
+        "water_flow_state": "active_flow",
+        "weather_mode": "cooling",
+    }
+
+
+def test_health_day_builder_drops_conflicting_environment_context() -> None:
+    timestamp = datetime(2026, 7, 1, 23, 0, tzinfo=UTC)
+    samples = (
+        ContextualBaselineSample(
+            timestamp=timestamp,
+            circuit_id="hvac",
+            feature="daily_energy_kwh",
+            value=2.0,
+            context=ContextKey.from_mapping(
+                {"weather_mode": "cooling", "temperature_bin": "hot"}
+            ),
+        ),
+        ContextualBaselineSample(
+            timestamp=timestamp,
+            circuit_id="hvac",
+            feature="runtime_today_seconds",
+            value=7200.0,
+            context=ContextKey.from_mapping(
+                {"weather_mode": "heating", "temperature_bin": "cold"}
+            ),
+        ),
+    )
+
+    result = build_appliance_health_days(
+        circuit_id="hvac",
+        energy_days=(
+            {
+                "date": "2026-07-01",
+                "usage_kwh": 2.4,
+                "complete": True,
+            },
+        ),
+        events=(),
+        contextual_samples=samples,
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+    )
+
+    assert result[0].context == {}
+
+
+def test_health_session_builder_reuses_merge_gap_and_excludes_maintenance() -> None:
+    start = datetime(2026, 7, 1, 10, 0, tzinfo=UTC)
+    events = (
+        CircuitEvent(start, "fridge", EventType.START),
+        CircuitEvent(start + timedelta(minutes=5), "fridge", EventType.STOP),
+        CircuitEvent(start + timedelta(minutes=6), "fridge", EventType.START),
+        CircuitEvent(start + timedelta(minutes=11), "fridge", EventType.STOP),
+        CircuitEvent(
+            start + timedelta(days=1),
+            "fridge",
+            EventType.START,
+            features={"baseline_eligible": False},
+        ),
+        CircuitEvent(
+            start + timedelta(days=1, minutes=5),
+            "fridge",
+            EventType.STOP,
+            features={"baseline_eligible": False},
+        ),
+    )
+
+    result = build_appliance_health_sessions(
+        circuit_id="fridge",
+        events=events,
+        merge_gap_seconds=60.0,
+        time_zone="UTC",
+        now=start + timedelta(days=2),
+    )
+
+    assert len(result) == 1
+    assert result[0].duration_seconds == 600.0
+    assert result[0].gap_after_seconds is None
+
+
+def test_health_builders_fall_back_to_utc_for_unknown_time_zone() -> None:
+    result = build_appliance_health_days(
+        circuit_id="fridge",
+        energy_days=(
+            {
+                "date": "2026-07-01",
+                "usage_kwh": 2.4,
+                "complete": True,
+            },
+        ),
+        events=(),
+        contextual_samples=(),
+        merge_gap_seconds=60.0,
+        time_zone="Not/A_Real_Zone",
+    )
+
+    assert result[0].date == date(2026, 7, 1)

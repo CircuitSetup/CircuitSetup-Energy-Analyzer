@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime
+from math import isfinite
 from statistics import median
 from types import MappingProxyType
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .baseline import build_baseline
-from .models import ApplianceProfile
+from .contextual_baseline import ContextualBaselineSample
+from .cycles import build_normalized_run_sessions, summarize_circuit_cycles
+from .local_time import TimeZone, local_date, local_day_end
+from .models import ApplianceProfile, CircuitEvent
 
 REFERENCE_DAY_COUNT = 14
 RECENT_DAY_COUNT = 3
@@ -200,6 +206,101 @@ def evaluate_appliance_health(
     )
 
 
+def build_appliance_health_days(
+    *,
+    circuit_id: str,
+    energy_days: Iterable[Mapping[str, Any]],
+    events: Iterable[CircuitEvent],
+    contextual_samples: Iterable[ContextualBaselineSample],
+    merge_gap_seconds: float,
+    time_zone: TimeZone,
+) -> tuple[ApplianceHealthDay, ...]:
+    """Join complete energy days with retained cycle and context evidence."""
+    resolved_time_zone = _resolved_time_zone(time_zone)
+    circuit_events = tuple(
+        event for event in events if event.circuit_id == circuit_id
+    )
+    ineligible_dates = _ineligible_event_dates(circuit_events, resolved_time_zone)
+    context_by_date = _context_by_date(
+        circuit_id,
+        contextual_samples,
+        resolved_time_zone,
+    )
+    result: list[ApplianceHealthDay] = []
+
+    for raw_day in energy_days:
+        day = _health_day_date(raw_day)
+        energy = _nonnegative_float_or_none(raw_day.get("usage_kwh"))
+        if (
+            day is None
+            or raw_day.get("complete") is not True
+            or raw_day.get("baseline_eligible") is False
+            or day in ineligible_dates
+            or energy is None
+        ):
+            continue
+        summary = summarize_circuit_cycles(
+            circuit_events,
+            circuit_id=circuit_id,
+            now=local_day_end(day, resolved_time_zone),
+            merge_gap_seconds=merge_gap_seconds,
+            time_zone=resolved_time_zone,
+        )
+        result.append(
+            ApplianceHealthDay(
+                date=day,
+                energy_kwh=energy,
+                runtime_seconds=summary.runtime_seconds,
+                completed_cycles=summary.completed_cycle_count,
+                start_count=summary.start_count,
+                context=context_by_date.get(day, {}),
+            )
+        )
+    return tuple(sorted(result, key=lambda item: item.date))
+
+
+def build_appliance_health_sessions(
+    *,
+    circuit_id: str,
+    events: Iterable[CircuitEvent],
+    merge_gap_seconds: float,
+    time_zone: TimeZone,
+    now: datetime,
+) -> tuple[ApplianceHealthSession, ...]:
+    """Convert existing normalized completed runs into health sessions."""
+    resolved_time_zone = _resolved_time_zone(time_zone)
+    circuit_events = tuple(
+        event for event in events if event.circuit_id == circuit_id
+    )
+    ineligible_dates = _ineligible_event_dates(circuit_events, resolved_time_zone)
+    completed = [
+        session
+        for session in build_normalized_run_sessions(
+            circuit_events,
+            circuit_id=circuit_id,
+            merge_gap_seconds=merge_gap_seconds,
+            now=now,
+        )
+        if session.stopped_at is not None
+        and local_date(session.started_at, resolved_time_zone) not in ineligible_dates
+        and local_date(session.stopped_at, resolved_time_zone) not in ineligible_dates
+    ]
+    return tuple(
+        ApplianceHealthSession(
+            started_at=session.started_at.isoformat(),
+            stopped_at=session.stopped_at.isoformat(),
+            duration_seconds=session.duration_seconds,
+            gap_after_seconds=(
+                _elapsed_seconds(session.stopped_at, completed[index + 1].started_at)
+                if index + 1 < len(completed)
+                else None
+            ),
+        )
+        for index, session in enumerate(completed)
+        if session.stopped_at is not None
+    )
+
+
 def _day_metric_value(day: ApplianceHealthDay, metric: str) -> float | None:
     energy = day.energy_kwh
     runtime_hours = day.runtime_seconds / 3600.0
@@ -326,3 +427,91 @@ def _confidence(
         1.0,
         recent_count / recent_required,
     )
+
+
+def _resolved_time_zone(time_zone: TimeZone) -> TimeZone:
+    if not isinstance(time_zone, str):
+        return time_zone
+    try:
+        return ZoneInfo(time_zone.strip()) if time_zone.strip() else UTC
+    except ZoneInfoNotFoundError:
+        return UTC
+
+
+def _ineligible_event_dates(
+    events: Iterable[CircuitEvent],
+    time_zone: TimeZone,
+) -> set[date]:
+    return {
+        local_date(event.timestamp, time_zone)
+        for event in events
+        if event.features.get("baseline_eligible") is False
+    }
+
+
+def _context_by_date(
+    circuit_id: str,
+    samples: Iterable[ContextualBaselineSample],
+    time_zone: TimeZone,
+) -> dict[date, dict[str, str]]:
+    relevant_keys = (*_WEATHER_CONTEXT_KEYS, "water_flow_state")
+    grouped: dict[date, dict[str, set[tuple[tuple[str, str], ...]]]] = {}
+    for sample in samples:
+        if (
+            sample.circuit_id != circuit_id
+            or sample.feature not in {"daily_energy_kwh", "runtime_today_seconds"}
+        ):
+            continue
+        context = sample.context.as_dict()
+        normalized = tuple(
+            (key, context[key])
+            for key in relevant_keys
+            if context.get(key)
+        )
+        grouped.setdefault(local_date(sample.timestamp, time_zone), {}).setdefault(
+            sample.feature,
+            set(),
+        ).add(normalized)
+
+    result: dict[date, dict[str, str]] = {}
+    for day, features in grouped.items():
+        energy = features.get("daily_energy_kwh", set())
+        runtime = features.get("runtime_today_seconds", set())
+        if len(energy) != 1 or len(runtime) != 1:
+            result[day] = {}
+            continue
+        energy_context = dict(next(iter(energy)))
+        runtime_context = dict(next(iter(runtime)))
+        shared: dict[str, str] = {}
+        conflict = False
+        for key in relevant_keys:
+            energy_value = energy_context.get(key)
+            runtime_value = runtime_context.get(key)
+            if energy_value is not None and runtime_value is not None:
+                if energy_value != runtime_value:
+                    conflict = True
+                    break
+                shared[key] = energy_value
+        result[day] = {} if conflict else shared
+    return result
+
+
+def _health_day_date(raw_day: Mapping[str, Any]) -> date | None:
+    try:
+        return date.fromisoformat(str(raw_day.get("date", "")))
+    except ValueError:
+        return None
+
+
+def _nonnegative_float_or_none(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isfinite(parsed) and parsed >= 0.0 else None
+
+
+def _elapsed_seconds(start: datetime, end: datetime) -> float:
+    if start.tzinfo is not None and end.tzinfo is not None:
+        return max((end.astimezone(UTC) - start.astimezone(UTC)).total_seconds(), 0.0)
+    return max((end - start).total_seconds(), 0.0)
