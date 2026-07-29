@@ -543,7 +543,8 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     assert episode["complete"] is True
     assert episode["alerted"] is False
     assert episode["context_key"] == (
-        "cooling|very_hot|summer|4-6F|heat_pump"
+        "heat_pump|climate.downstairs|sensor.downstairs_temperature|"
+        "cooling|very_hot|summer|cooling|4-6F|heat_pump"
     )
 
 

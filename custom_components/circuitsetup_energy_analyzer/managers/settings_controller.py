@@ -2445,9 +2445,13 @@ def _hvac_advisor_history(
             continue
         context_key = "|".join(
             (
+                episode.circuit_id,
+                episode.thermostat_entity_id,
+                str(episode.temperature_entity_id or ""),
                 episode.mode,
                 str(episode.temperature_bin or ""),
                 str(episode.season or ""),
+                str(episode.weather_mode or ""),
                 episode.gap_bin,
                 "+".join(participants),
             )
