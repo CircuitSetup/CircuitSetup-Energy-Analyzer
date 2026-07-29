@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -232,7 +231,6 @@ def appliance_detail_for_circuit(
         what_to_check_first=first_checks,
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
         appliance_health=health_attrs["appliance_health_evidence"] or None,
-        hvac_efficiency=_hvac_efficiency_detail(state, config),
         source_quality=_direct_source_quality(config, state),
         learning_readiness=_learning_readiness(state, config.circuit_id, config),
         assignment_id=(
@@ -1691,153 +1689,6 @@ def _mapping_for_circuit(state: Any, field: str, circuit_id: str) -> dict[str, A
         return {}
     value = values.get(circuit_id)
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-_HVAC_EFFICIENCY_PROFILES = frozenset(
-    {
-        ApplianceProfile.HVAC,
-        ApplianceProfile.HVAC_COMPRESSOR,
-        ApplianceProfile.HVAC_BLOWER,
-        ApplianceProfile.HEAT_PUMP,
-        ApplianceProfile.MINI_SPLIT,
-        ApplianceProfile.ELECTRIC_HEAT,
-    }
-)
-
-
-def _hvac_efficiency_detail(
-    state: Any,
-    config: CircuitConfig,
-) -> dict[str, Any] | None:
-    if config.appliance_profile not in _HVAC_EFFICIENCY_PROFILES:
-        return None
-    retained = _mapping_for_circuit(
-        state,
-        "hvac_efficiency_by_circuit",
-        config.circuit_id,
-    )
-    modes: dict[str, list[dict[str, Any]]] = {
-        "heating": [],
-        "cooling": [],
-    }
-    streams = retained.get("streams", {})
-    if isinstance(streams, Mapping):
-        for stream_id, raw in streams.items():
-            if not isinstance(raw, Mapping):
-                continue
-            context = raw.get("context", {})
-            context = context if isinstance(context, Mapping) else {}
-            mode = str(
-                context.get("mode") or str(stream_id).rsplit("|", 1)[-1]
-            )
-            if mode not in modes:
-                continue
-            thermostat_id = str(
-                context.get("thermostat_entity_id")
-                or str(stream_id).split("|")[1]
-            )
-            participants = sorted(
-                {
-                    str(item)
-                    for item in context.get("participant_signature", ())
-                    if str(item)
-                }
-            )
-            modes[mode].append(
-                {
-                    "thermostat_entity_id": thermostat_id,
-                    "thermostat_name": _entity_display_name(thermostat_id),
-                    "status": str(raw.get("status") or "learning"),
-                    "score": _rounded_number(raw.get("score")),
-                    "trend": str(raw.get("finding") or "") or None,
-                    "change_percent": _rounded_percent(raw.get("change_ratio")),
-                    "baseline_minutes_per_degree": _rounded_number(
-                        raw.get("baseline_minutes_per_degree")
-                    ),
-                    "recent_minutes_per_degree": _rounded_number(
-                        raw.get("recent_minutes_per_degree")
-                    ),
-                    "reference_count": int(raw.get("reference_count") or 0),
-                    "recent_count": int(raw.get("recent_count") or 0),
-                    "outdoor_temperature_f": _rounded_number(
-                        context.get("outdoor_temperature_f")
-                    ),
-                    "season": str(context.get("season") or "") or None,
-                    "weather_mode": (
-                        str(context.get("weather_mode") or "") or None
-                    ),
-                    "temperature_bin": (
-                        str(context.get("temperature_bin") or "") or None
-                    ),
-                    "gap_bin": str(context.get("gap_bin") or "") or None,
-                    "participant_signature": participants,
-                    "supporting_blower_ids": sorted(
-                        {
-                            str(item)
-                            for item in context.get("supporting_blower_ids", ())
-                            if str(item)
-                        }
-                    ),
-                    "attribution": (
-                        "gas_furnace_proxy"
-                        if config.appliance_profile
-                        is ApplianceProfile.HVAC_BLOWER
-                        else "assisted_system"
-                        if len(participants) > 1
-                        else "direct"
-                    ),
-                }
-            )
-    for rows in modes.values():
-        rows.sort(key=lambda row: row["thermostat_entity_id"])
-    all_rows = [*modes["heating"], *modes["cooling"]]
-    score = _rounded_number(retained.get("score"))
-    return {
-        "status": str(retained.get("status") or "learning"),
-        "summary_score": score,
-        "trend": (
-            str(retained.get("finding") or "")
-            or ("stable" if score is not None else None)
-        ),
-        "threshold_pct": (
-            _rounded_number(retained.get("threshold_pct")) or 25.0
-        ),
-        **modes,
-        "learning": {
-            "reference_count": max(
-                (row["reference_count"] for row in all_rows),
-                default=0,
-            ),
-            "recent_count": max(
-                (row["recent_count"] for row in all_rows),
-                default=0,
-            ),
-            "required_reference": 9,
-            "required_recent": 3,
-        },
-    }
-
-
-def _entity_display_name(entity_id: str) -> str:
-    return entity_id.rsplit(".", 1)[-1].replace("_", " ").title()
-
-
-def _rounded_number(value: Any) -> float | None:
-    parsed = _number_or_none(value)
-    return (
-        round(parsed, 2)
-        if parsed is not None and math.isfinite(parsed)
-        else None
-    )
-
-
-def _rounded_percent(value: Any) -> float | None:
-    parsed = _number_or_none(value)
-    return (
-        round(parsed * 100.0, 1)
-        if parsed is not None and math.isfinite(parsed)
-        else None
-    )
 
 
 def _recent_timeline(state: Any, circuit_id: str) -> dict[str, Any] | None:

@@ -409,47 +409,6 @@ def test_feature_store_round_trips_water_correlation_state() -> None:
     )
 
 
-def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None:
-    assert STORAGE_VERSION == 9
-    history = {
-        "heat_pump|climate.downstairs|heating": [
-            {
-                "stream_id": "heat_pump|climate.downstairs|heating",
-                "complete": True,
-                "elapsed_minutes": 42.0,
-            }
-        ]
-    }
-    data = FeatureStoreData(
-        hvac_response_history_by_stream=history,
-        hvac_baseline_era_by_stream={
-            "heat_pump|climate.downstairs|heating": "era-2"
-        },
-    )
-
-    payload = feature_store_data_to_dict(data)
-    restored = feature_store_data_from_dict(payload)
-
-    assert payload["schema_version"] == 9
-    assert restored.hvac_response_history_by_stream == history
-    assert restored.hvac_baseline_era_by_stream == {
-        "heat_pump|climate.downstairs|heating": "era-2"
-    }
-
-
-def test_feature_store_schema_eight_loads_with_empty_hvac_history() -> None:
-    restored = feature_store_data_from_dict(
-        {
-            "schema_version": 8,
-            "sensitivity_by_circuit": {"fridge": "quiet"},
-        }
-    )
-
-    assert restored.sensitivity_by_circuit == {"fridge": "quiet"}
-    assert restored.hvac_response_history_by_stream == {}
-    assert restored.hvac_baseline_era_by_stream == {}
-
-
 def test_feature_store_loads_without_contextual_baselines() -> None:
     restored = feature_store_data_from_dict({"events": []})
 
@@ -1278,7 +1237,7 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 9
+    assert STORAGE_VERSION == 8
     assert restored.appliance_notification_preferences == (
         data.appliance_notification_preferences
     )

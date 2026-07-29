@@ -142,30 +142,6 @@ def test_hvac_requires_comparable_weather_context() -> None:
     assert result.reason == "insufficient_comparable_context"
 
 
-def test_heat_pump_requires_comparable_weather_context() -> None:
-    reference = tuple(
-        _day(
-            index,
-            energy=2.0,
-            runtime_hours=2.0,
-            context={"weather_mode": "heating", "temperature_bin": "cold"},
-        )
-        for index in range(1, 15)
-    )
-    recent = tuple(
-        _day(index, energy=3.0, runtime_hours=2.0) for index in range(15, 18)
-    )
-
-    result = evaluate_appliance_health(
-        ApplianceProfile.HEAT_PUMP,
-        days=reference + recent,
-        sessions=(),
-    )
-
-    assert result.status == "learning"
-    assert result.reason == "insufficient_comparable_context"
-
-
 def test_flow_aware_appliance_requires_comparable_water_context() -> None:
     reference = tuple(
         _day(

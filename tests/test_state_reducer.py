@@ -327,14 +327,6 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     state.appliance_health_evidence_by_circuit["fridge"] = {
         "feature": "efficiency_degradation"
     }
-    state.hvac_current_episode_by_stream = {
-        "fridge|climate.kitchen|cooling": {"complete": False},
-        "washer|climate.laundry|cooling": {"complete": False},
-    }
-    state.hvac_efficiency_by_circuit["fridge"] = {"status": "ready"}
-    state.hvac_thermostat_setup_issues_by_circuit["fridge"] = [
-        {"issue": "missing"}
-    ]
 
     reducer.reset_learning_state(state, "fridge")
 
@@ -345,11 +337,6 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
     assert state.power_factor_drift_by_circuit == {}
     assert state.appliance_health_status_by_circuit == {}
     assert state.appliance_health_evidence_by_circuit == {}
-    assert state.hvac_current_episode_by_stream == {
-        "washer|climate.laundry|cooling": {"complete": False}
-    }
-    assert state.hvac_efficiency_by_circuit == {}
-    assert state.hvac_thermostat_setup_issues_by_circuit == {}
 
 
 def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:

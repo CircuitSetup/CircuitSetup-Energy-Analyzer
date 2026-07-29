@@ -26,16 +26,11 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 
 class _ActionCoordinator:
     def __init__(self) -> None:
-        self.state = SimpleNamespace(
-            hvac_current_episode_by_stream={},
-            hvac_efficiency_by_circuit={},
-        )
+        self.state = SimpleNamespace()
         self.store_data = SimpleNamespace(
             maintenance_by_circuit={},
             alert_feedback={},
             alerts=[],
-            hvac_baseline_era_by_stream={},
-            hvac_response_history_by_stream={},
             learning_started_at_by_circuit={},
         )
         self.paused_circuits: set[str] = set()
@@ -314,74 +309,6 @@ async def test_evidence_action_controller_stores_feedback_and_retires_alert() ->
     assert coordinator.refreshed == [coordinator.now]
     assert coordinator.updated == [coordinator.state]
     assert coordinator.saved == [coordinator.now]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["expected", "corrected", "improved"])
-async def test_hvac_feedback_starts_new_baseline_era(action: str) -> None:
-    coordinator = _ActionCoordinator()
-    stream_id = "heat_pump|climate.downstairs|cooling"
-    alert = replace(
-        _alert("heat_pump", "hvac_response_slower"),
-        features={
-            "health_feature": "hvac_thermostat_efficiency",
-            "stream_id": stream_id,
-            "recent_episode_ids": ["episode-10", "episode-11", "episode-12"],
-        },
-    )
-    alert_id = notification_id_for_alert(alert)
-    coordinator.store_data.alerts = [alert]
-    coordinator.state.active_alerts_by_circuit = {"heat_pump": [alert]}
-    coordinator.state.hvac_current_episode_by_stream[stream_id] = {
-        "complete": False
-    }
-    coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
-        "finding": "slower"
-    }
-
-    result = await EvidenceActionController(
-        coordinator
-    ).async_store_alert_feedback(alert_id, action)
-
-    assert result is True
-    assert coordinator.store_data.hvac_baseline_era_by_stream[stream_id] == (
-        coordinator.now.isoformat()
-    )
-    assert coordinator.state.hvac_current_episode_by_stream == {}
-    assert coordinator.state.hvac_efficiency_by_circuit == {}
-
-
-@pytest.mark.asyncio
-async def test_confirmed_hvac_feedback_excludes_recent_episode_range() -> None:
-    coordinator = _ActionCoordinator()
-    stream_id = "heat_pump|climate.downstairs|cooling"
-    recent_ids = ["episode-10", "episode-11", "episode-12"]
-    coordinator.store_data.hvac_response_history_by_stream[stream_id] = [
-        {"started_at": episode_id, "excluded_from_baseline": False}
-        for episode_id in ["episode-9", *recent_ids]
-    ]
-    alert = replace(
-        _alert("heat_pump", "hvac_response_slower"),
-        features={
-            "health_feature": "hvac_thermostat_efficiency",
-            "stream_id": stream_id,
-            "recent_episode_ids": recent_ids,
-        },
-    )
-    alert_id = notification_id_for_alert(alert)
-    coordinator.store_data.alerts = [alert]
-    coordinator.state.active_alerts_by_circuit = {"heat_pump": [alert]}
-
-    await EvidenceActionController(coordinator).async_store_alert_feedback(
-        alert_id,
-        "confirmed",
-    )
-
-    history = coordinator.store_data.hvac_response_history_by_stream[stream_id]
-    assert history[0]["excluded_from_baseline"] is False
-    assert all(
-        episode["excluded_from_baseline"] is True for episode in history[1:]
-    )
 
 
 @pytest.mark.asyncio

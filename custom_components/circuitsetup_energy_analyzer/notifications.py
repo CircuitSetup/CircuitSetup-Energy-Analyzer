@@ -23,12 +23,7 @@ POWER_QUALITY_ALERT_FEATURES = frozenset(
     }
 )
 APPLIANCE_HEALTH_ALERT_FEATURES = frozenset(
-    {
-        "efficiency_degradation",
-        "hvac_response_faster",
-        "hvac_response_slower",
-        "repeated_short_cycle",
-    }
+    {"efficiency_degradation", "repeated_short_cycle"}
 )
 _ALERT_VALUE_FORMATS = {
     "activity_inactive_too_long": ("minutes", "number"),
@@ -53,7 +48,6 @@ _ALERT_VALUE_FORMATS = {
     "average_cycle_duration": ("seconds", "number"),
     "starts_per_runtime_hour": ("starts_per_hour", "number"),
     "session_duration_seconds": ("seconds", "number"),
-    "minutes_per_degree": ("minutes_per_degree", "number"),
     "nilm_appliance_unusual_energy": ("energy", "number"),
     "nilm_appliance_confidence": ("percent", "percentage"),
     "nilm_appliance_unusual_runtime": ("minutes", "number"),

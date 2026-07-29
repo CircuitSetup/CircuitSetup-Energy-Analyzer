@@ -101,10 +101,6 @@ def test_resolve_operating_detection_profiles_are_valid() -> None:
             ApplianceProfile.MINI_SPLIT,
             (100.0, 40.0, 30.0, 180.0, 300.0, 600.0),
         ),
-        (
-            ApplianceProfile.HEAT_PUMP,
-            (500.0, 200.0, 10.0, 60.0, 120.0, 600.0),
-        ),
     ],
 )
 def test_signature_specific_operating_defaults(

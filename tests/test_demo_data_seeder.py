@@ -34,9 +34,8 @@ class _DirtyTracker:
         self.dirty = True
 
 
-def test_demo_weather_context_profiles_include_inverter_hvac() -> None:
+def test_demo_weather_context_profiles_include_mini_split() -> None:
     assert ApplianceProfile.MINI_SPLIT in demo_data._DEMO_WEATHER_CONTEXT_PROFILES
-    assert ApplianceProfile.HEAT_PUMP in demo_data._DEMO_WEATHER_CONTEXT_PROFILES
 
 
 class _ContextBuilder:

@@ -578,37 +578,6 @@ def test_build_context_for_mini_split_keeps_weather_dimensions() -> None:
     assert "time_of_day" in context
 
 
-def test_build_context_for_heat_pump_keeps_weather_dimensions() -> None:
-    now = datetime(2026, 1, 27, 14, tzinfo=UTC)
-    config = CircuitConfig(
-        circuit_id="heat_pump",
-        name="Heat Pump",
-        appliance_profile=ApplianceProfile.HEAT_PUMP,
-        mode=CircuitMode.DUAL_PHASE,
-    )
-    state = AnalyzerState(
-        weather_context_by_circuit={
-            "heat_pump": {
-                "temperature_f": 24.0,
-                "mode": "heating",
-            }
-        }
-    )
-
-    context = build_context_for_sample(
-        circuit_config=config,
-        sample=_sample("heat_pump", now),
-        state=state,
-        store_data=FeatureStoreData(),
-        now=now,
-        feature="daily_energy_kwh",
-    ).as_dict()
-
-    assert context["temperature_bin"] == "very_cold"
-    assert context["weather_mode"] == "heating"
-    assert "time_of_day" in context
-
-
 def test_build_context_excludes_completed_maintenance_date() -> None:
     now = datetime(2026, 7, 27, 14, tzinfo=UTC)
     config = CircuitConfig(
