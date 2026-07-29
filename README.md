@@ -430,7 +430,7 @@ Retention modes control time-based circuit evidence:
 
 | Retention mode | Time window |
 |---|---:|
-| Lightweight | 17 days |
+| Lightweight | 18 days |
 | Standard | 45 days |
 | Diagnostic | 180 days |
 
