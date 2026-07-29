@@ -2631,6 +2631,48 @@ async def test_source_update_clears_schedule_alerts_for_all_evaluated_schedules(
 
 
 @pytest.mark.asyncio
+async def test_source_update_clears_utility_alerts_for_all_comparison_circuits(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.utility_comparison_settings_by_circuit = {"hvac": {}}
+    utility_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Utility comparison mismatch.",
+        feature="utility_energy_mismatch",
+    )
+    runtime_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    coordinator.state.active_alerts_by_circuit = {
+        "hvac": [utility_alert, runtime_alert]
+    }
+    coordinator.store_data.alerts.extend((utility_alert, runtime_alert))
+    sync_notifications = AsyncMock()
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        sync_notifications
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["hvac"] == [runtime_alert]
+    sync_notifications.assert_awaited_once_with({"fridge", "hvac"})
+
+
+@pytest.mark.asyncio
 async def test_source_update_yields_between_ux_circuit_refreshes() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,

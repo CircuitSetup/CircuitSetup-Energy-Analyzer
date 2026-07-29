@@ -62,6 +62,7 @@ SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
 _EXPECTED_SCHEDULE_ALERT_FEATURES = frozenset(
     {"expected_schedule_missed", "running_outside_expected_schedule"}
 )
+_UTILITY_COMPARISON_ALERT_FEATURES = frozenset({"utility_energy_mismatch"})
 try:
     from homeassistant.helpers.event import (
         async_track_point_in_time,
@@ -104,17 +105,30 @@ def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
     }
 
 
-def _non_schedule_alerts_for_circuits(
+def _alerts_outside_cross_circuit_features(
     state: Any,
-    circuit_ids: set[str],
+    *,
+    utility_circuit_ids: set[str],
+    schedule_circuit_ids: set[str],
 ) -> list[AlertEvidence]:
     active_alerts = getattr(state, "active_alerts_by_circuit", {})
-    return [
-        alert
-        for circuit_id in circuit_ids
-        for alert in active_alerts.get(circuit_id, ())
-        if alert.feature not in _EXPECTED_SCHEDULE_ALERT_FEATURES
-    ]
+    preserved: list[AlertEvidence] = []
+    for circuit_id in utility_circuit_ids | schedule_circuit_ids:
+        evaluated_features = (
+            _UTILITY_COMPARISON_ALERT_FEATURES
+            if circuit_id in utility_circuit_ids
+            else frozenset()
+        ) | (
+            _EXPECTED_SCHEDULE_ALERT_FEATURES
+            if circuit_id in schedule_circuit_ids
+            else frozenset()
+        )
+        preserved.extend(
+            alert
+            for alert in active_alerts.get(circuit_id, ())
+            if alert.feature not in evaluated_features
+        )
+    return preserved
 
 
 def _source_circuit_ids_by_entity(
@@ -284,9 +298,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Evaluate local schedule boundaries without a source state change."""
         await self.evidence_actions.async_expire_maintenance_if_due(now)
         schedule_circuit_ids = expected_schedule_circuit_ids(self)
-        alerts = _non_schedule_alerts_for_circuits(
+        alerts = _alerts_outside_cross_circuit_features(
             self.state,
-            schedule_circuit_ids,
+            utility_circuit_ids=set(),
+            schedule_circuit_ids=schedule_circuit_ids,
         )
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
         if schedule_circuit_ids or alerts:
@@ -449,6 +464,21 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         processing_circuit_ids = {
             config.circuit_id for config in processing_configs
         }
+        utility_settings = getattr(
+            self.store_data,
+            "utility_comparison_settings_by_circuit",
+            {},
+        )
+        utility_comparison_circuit_ids = (
+            {
+                circuit_id
+                for raw_circuit_id in utility_settings
+                if (circuit_id := str(raw_circuit_id).strip())
+                and self.circuit_registry.config_for_circuit(circuit_id) is not None
+            }
+            if isinstance(utility_settings, Mapping)
+            else set()
+        )
         mains_context_sample = self._mains_context_sample(now)
         self.state_reducer.prune_recent_observations(
             self.state,
@@ -511,7 +541,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         process_events_into_state(
             self.state,
             events,
-            alerts,
+            [
+                *alerts,
+                *_alerts_outside_cross_circuit_features(
+                    self.state,
+                    utility_circuit_ids=(
+                        utility_comparison_circuit_ids - processing_circuit_ids
+                    ),
+                    schedule_circuit_ids=set(),
+                ),
+            ],
             evaluated_circuit_ids=processing_circuit_ids,
         )
         events_by_circuit = _items_by_circuit(self.store_data.events)
@@ -549,16 +588,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 await self._notify_alert(water_context_alert)
         schedule_circuit_ids = expected_schedule_circuit_ids(self)
         alerts.extend(
-            _non_schedule_alerts_for_circuits(
+            _alerts_outside_cross_circuit_features(
                 self.state,
-                schedule_circuit_ids - processing_circuit_ids,
+                utility_circuit_ids=(
+                    utility_comparison_circuit_ids - processing_circuit_ids
+                ),
+                schedule_circuit_ids=(
+                    schedule_circuit_ids - processing_circuit_ids
+                ),
             )
         )
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
         evaluated_alert_circuit_ids = (
-            processing_circuit_ids | schedule_circuit_ids
+            processing_circuit_ids
+            | utility_comparison_circuit_ids
+            | schedule_circuit_ids
         )
-        if alerts or schedule_circuit_ids:
+        if alerts or utility_comparison_circuit_ids or schedule_circuit_ids:
             process_events_into_state(
                 self.state,
                 events,
