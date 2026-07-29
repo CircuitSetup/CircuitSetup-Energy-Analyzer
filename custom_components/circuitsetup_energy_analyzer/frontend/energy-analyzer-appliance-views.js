@@ -373,6 +373,7 @@ export function createApplianceViewMethods({
     const sections = [
       ["biggest_changes", "weekly_digest.biggest_changes"],
       ["top_energy_users", "weekly_digest.top_energy_users"],
+      ["observed_alerts", "weekly_digest.observed_alerts"],
       ["unresolved_items", "weekly_digest.unresolved_items"],
       ["nilm_review_items", "weekly_digest.nilm_review_items"],
       ["load_shift_opportunities", "weekly_digest.load_shift_opportunities"],
@@ -392,7 +393,8 @@ export function createApplianceViewMethods({
       ${report.week_start ? `<p class="muted">${this._escape(this._panelTextFormat("weekly_digest.period", { start: report.week_start, end: report.week_end }))}</p>` : `<p class="muted">${this._escape(this._panelText("weekly_digest.no_report"))}</p>`}
       ${sections.map(([key, label]) => {
         const items = Array.isArray(report[key]) ? report[key] : [];
-        return items.length ? `<h3>${this._escape(this._panelText(label))}</h3>${this._renderSimpleList(items.map((item) => `${item.display_name}: ${this._formatKwh(item.energy_kwh)}`), "")}` : "";
+        const values = items.map((item) => key === "observed_alerts" ? item.display_name : `${item.display_name}: ${this._formatKwh(item.energy_kwh)}`);
+        return items.length ? `<h3>${this._escape(this._panelText(label))}</h3>${this._renderSimpleList(values, "")}` : "";
       }).join("")}
     </section>`;
   }

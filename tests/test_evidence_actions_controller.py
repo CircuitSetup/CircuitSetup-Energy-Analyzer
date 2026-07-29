@@ -31,6 +31,7 @@ class _ActionCoordinator:
             maintenance_by_circuit={},
             alert_feedback={},
             alerts=[],
+            learning_started_at_by_circuit={},
         )
         self.paused_circuits: set[str] = set()
         self.refreshed: list[tuple[str, datetime] | datetime] = []
@@ -38,6 +39,8 @@ class _ActionCoordinator:
         self.saved: list[datetime] = []
         self.dirty_count = 0
         self.relearned: list[str] = []
+        self.lifecycle_features: list[str] = []
+        self.lifecycle_sequence: list[str] = []
         self.dismissed_alert_ids: list[str] = []
         self.now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
         self.store_persistence = SimpleNamespace(
@@ -49,6 +52,7 @@ class _ActionCoordinator:
         )
         self.notification_controller = SimpleNamespace(
             async_dismiss_alert_notification=self._dismiss_alert_notification,
+            async_notify_lifecycle_update=self._notify_lifecycle_update,
         )
 
     def current_time(self) -> datetime:
@@ -73,6 +77,12 @@ class _ActionCoordinator:
     async def _dismiss_alert_notification(self, alert_id: str) -> None:
         self.dismissed_alert_ids.append(alert_id)
 
+    async def _notify_lifecycle_update(self, circuit_id: str, **kwargs: object) -> None:
+        del circuit_id
+        feature = str(kwargs["feature"])
+        self.lifecycle_features.append(feature)
+        self.lifecycle_sequence.append(feature)
+
     def _record_store_dirty(self) -> None:
         self.dirty_count += 1
 
@@ -90,6 +100,10 @@ class _ActionCoordinator:
 
     async def async_relearn_baseline(self, circuit_id: str) -> None:
         self.relearned.append(circuit_id)
+        self.lifecycle_sequence.append("baseline_reset")
+        self.store_data.learning_started_at_by_circuit[circuit_id] = (
+            self.now.isoformat()
+        )
 
 
 def _alert(circuit_id: str, feature: str) -> AlertEvidence:
@@ -201,8 +215,27 @@ async def test_evidence_action_controller_maintenance_and_feedback() -> None:
         "Changed filter"
     )
     assert coordinator.relearned == ["fridge"]
+    assert coordinator.lifecycle_features == [
+        "maintenance_completed",
+        "relearning_started",
+    ]
+    assert coordinator.lifecycle_sequence == [
+        "baseline_reset",
+        "maintenance_completed",
+        "relearning_started",
+    ]
     assert "fridge" not in coordinator.paused_circuits
     assert coordinator.dirty_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ending_inactive_maintenance_does_not_emit_completion() -> None:
+    coordinator = _ActionCoordinator()
+    controller = EvidenceActionController(coordinator)
+
+    await controller.async_end_maintenance("fridge")
+
+    assert coordinator.lifecycle_features == []
 
 
 @pytest.mark.asyncio

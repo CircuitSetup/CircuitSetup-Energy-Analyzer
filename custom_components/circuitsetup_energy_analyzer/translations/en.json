@@ -823,6 +823,7 @@
       "alert": {
         "title": "Energy Analyzer Alert",
         "open_evidence": "Open evidence",
+        "open_appliance_evidence": "Open appliance evidence",
         "observed_value": "Observed value",
         "repeated_observations": "Repeated observations",
         "safety_notice": "Safety notice",
@@ -873,6 +874,12 @@
           "water_flow_correlation": "Water flow correlation"
         }
       },
+      "lifecycle": {
+        "learning_completed": "{appliance} finished learning its normal behavior.",
+        "maintenance_completed": "{appliance} maintenance ended.",
+        "relearning_started": "{appliance} started relearning its normal behavior.",
+        "alert_recovered": "{appliance} returned to its expected behavior."
+      },
       "settings_recommendations": {
         "title": "CircuitSetup Energy Analyzer suggested settings",
         "singular_message": "There is 1 suggested Advanced Circuit Setting to review: [Review Suggested Settings]({settings_url}).",
@@ -886,11 +893,15 @@
         "no_changes": "- No meaningful changes from learned normal.",
         "top_energy_users": "Top energy users",
         "energy_item": "- {display_name}: {energy_kwh} kWh",
-        "no_energy_data": "- No retained appliance energy data."
+        "no_energy_data": "- No retained appliance energy data.",
+        "observed_alerts": "Observed alerts",
+        "unresolved_items": "Unresolved items",
+        "nilm_review": "NILM review",
+        "load_shift_opportunities": "Load-shifting opportunities"
       },
       "daily_summary": {
         "title": "Daily Appliance Summary",
-        "intro": "Appliance notifications queued for {summary_date}.",
+        "intro": "Alerts observed on {summary_date}.",
         "alert_item": "- {message}"
       }
     },
@@ -1534,6 +1545,7 @@
         "no_report": "No weekly report has been generated yet.",
         "biggest_changes": "Largest changes from normal",
         "top_energy_users": "Top energy users",
+        "observed_alerts": "Alerts observed this week",
         "unresolved_items": "Recurring unresolved issues",
         "nilm_review_items": "NILM assignments needing validation",
         "load_shift_opportunities": "Load-shifting opportunities",

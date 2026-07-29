@@ -20,7 +20,10 @@ from .config_parsing import (
 from .const import (
     DOMAIN,
 )
-from .expected_schedule import refresh_expected_schedule_contexts
+from .expected_schedule import (
+    expected_schedule_circuit_ids,
+    refresh_expected_schedule_contexts,
+)
 from .managers.source_samples import normalized_leg
 from .managers.utility_energy_sources import (
     _ha_recorder_get_instance,
@@ -42,6 +45,7 @@ from .processors import (
 from .runtime_factory import initialize_runtime
 from .state import (
     AnalyzerState,
+    circuit_is_learning,
     process_events_into_state,
 )
 from .storage import (
@@ -55,6 +59,10 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
+_EXPECTED_SCHEDULE_ALERT_FEATURES = frozenset(
+    {"expected_schedule_missed", "running_outside_expected_schedule"}
+)
+_UTILITY_COMPARISON_ALERT_FEATURES = frozenset({"utility_energy_mismatch"})
 try:
     from homeassistant.helpers.event import (
         async_track_point_in_time,
@@ -95,6 +103,32 @@ def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
         for entity_id in (str(entity_id).strip() for entity_id in entity_ids)
         if entity_id
     }
+
+
+def _alerts_outside_cross_circuit_features(
+    state: Any,
+    *,
+    utility_circuit_ids: set[str],
+    schedule_circuit_ids: set[str],
+) -> list[AlertEvidence]:
+    active_alerts = getattr(state, "active_alerts_by_circuit", {})
+    preserved: list[AlertEvidence] = []
+    for circuit_id in utility_circuit_ids | schedule_circuit_ids:
+        evaluated_features = (
+            _UTILITY_COMPARISON_ALERT_FEATURES
+            if circuit_id in utility_circuit_ids
+            else frozenset()
+        ) | (
+            _EXPECTED_SCHEDULE_ALERT_FEATURES
+            if circuit_id in schedule_circuit_ids
+            else frozenset()
+        )
+        preserved.extend(
+            alert
+            for alert in active_alerts.get(circuit_id, ())
+            if alert.feature not in evaluated_features
+        )
+    return preserved
 
 
 def _source_circuit_ids_by_entity(
@@ -263,9 +297,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_refresh_expected_schedules(self: Self, now: datetime) -> None:
         """Evaluate local schedule boundaries without a source state change."""
         await self.evidence_actions.async_expire_maintenance_if_due(now)
-        alerts = await self._async_apply_expected_schedule_contexts(now)
-        if alerts:
-            process_events_into_state(self.state, (), alerts)
+        schedule_circuit_ids = expected_schedule_circuit_ids(self)
+        alerts = _alerts_outside_cross_circuit_features(
+            self.state,
+            utility_circuit_ids=set(),
+            schedule_circuit_ids=schedule_circuit_ids,
+        )
+        alerts.extend(await self._async_apply_expected_schedule_contexts(now))
+        if schedule_circuit_ids or alerts:
+            process_events_into_state(
+                self.state,
+                (),
+                alerts,
+                evaluated_circuit_ids=schedule_circuit_ids,
+            )
+        if schedule_circuit_ids:
+            await self.notification_controller.async_sync_alert_notifications(
+                schedule_circuit_ids
+            )
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
 
@@ -284,6 +333,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.alerts.append(schedule_alert)
             self._mark_store_dirty()
             await self._notify_alert(schedule_alert)
+        current_appliance_keys = {
+            str(alert.features.get("appliance_key") or "")
+            for alert in active_alerts
+        }
+        contexts = getattr(self.state, "expected_schedule_by_appliance", {})
+        for circuit_alerts in getattr(
+            self.state,
+            "active_alerts_by_circuit",
+            {},
+        ).values():
+            for alert in circuit_alerts:
+                appliance_key = str(alert.features.get("appliance_key") or "")
+                context = (
+                    contexts.get(appliance_key, {})
+                    if isinstance(contexts, Mapping)
+                    else {}
+                )
+                if (
+                    alert.feature not in _EXPECTED_SCHEDULE_ALERT_FEATURES
+                    or appliance_key in current_appliance_keys
+                    or not isinstance(context, Mapping)
+                    or context.get("alert_ready") is not True
+                    or not self.notification_controller.learning_allows_alert(alert)
+                ):
+                    continue
+                alert = self.evidence_actions.alert_with_feedback(alert)
+                if alert.feedback_status != "expected":
+                    active_alerts.append(alert)
+                    current_appliance_keys.add(appliance_key)
         return active_alerts
 
     @property
@@ -397,17 +475,40 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
         now = self._now_fn()
+        processing_configs = self._processing_configs_for_changed_entities(
+            changed_entities
+        )
+        previous_learning = {
+            config.circuit_id: circuit_is_learning(
+                self.state,
+                config.circuit_id,
+            )
+            for config in processing_configs
+        }
         await self.evidence_actions.async_expire_maintenance_if_due(now)
         context = self.context_builder.build(now)
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
-        processing_configs = self._processing_configs_for_changed_entities(
-            changed_entities
-        )
         processing_circuit_ids = {
             config.circuit_id for config in processing_configs
         }
+        utility_settings = getattr(
+            self.store_data,
+            "utility_comparison_settings_by_circuit",
+            {},
+        )
+        utility_comparison_circuit_ids = (
+            {
+                circuit_id
+                for raw_circuit_id in utility_settings
+                if (circuit_id := str(raw_circuit_id).strip())
+                and self.circuit_registry.config_for_circuit(circuit_id) is not None
+            }
+            if isinstance(utility_settings, Mapping)
+            else set()
+        )
+        schedule_circuit_ids = expected_schedule_circuit_ids(self)
         mains_context_sample = self._mains_context_sample(now)
         self.state_reducer.prune_recent_observations(
             self.state,
@@ -467,7 +568,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
-        process_events_into_state(self.state, events, alerts)
+        intermediate_alerts = [
+            *alerts,
+            *_alerts_outside_cross_circuit_features(
+                self.state,
+                utility_circuit_ids=(
+                    utility_comparison_circuit_ids - processing_circuit_ids
+                ),
+                schedule_circuit_ids=(
+                    schedule_circuit_ids - processing_circuit_ids
+                ),
+            ),
+        ]
+        active_alerts_by_circuit = getattr(
+            self.state,
+            "active_alerts_by_circuit",
+            {},
+        )
+        intermediate_alerts.extend(
+            alert
+            for circuit_id in schedule_circuit_ids
+            for alert in active_alerts_by_circuit.get(circuit_id, ())
+            if alert.feature in _EXPECTED_SCHEDULE_ALERT_FEATURES
+        )
+        process_events_into_state(
+            self.state,
+            events,
+            intermediate_alerts,
+            evaluated_circuit_ids=processing_circuit_ids,
+        )
         events_by_circuit = _items_by_circuit(self.store_data.events)
         alerts_by_circuit = _items_by_circuit(self.store_data.alerts)
         for config, sample in samples:
@@ -501,9 +630,30 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self.store_data.alerts.append(water_context_alert)
                 self._mark_store_dirty()
                 await self._notify_alert(water_context_alert)
+        alerts.extend(
+            _alerts_outside_cross_circuit_features(
+                self.state,
+                utility_circuit_ids=(
+                    utility_comparison_circuit_ids - processing_circuit_ids
+                ),
+                schedule_circuit_ids=(
+                    schedule_circuit_ids - processing_circuit_ids
+                ),
+            )
+        )
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
-        if alerts:
-            process_events_into_state(self.state, events, alerts)
+        evaluated_alert_circuit_ids = (
+            processing_circuit_ids
+            | utility_comparison_circuit_ids
+            | schedule_circuit_ids
+        )
+        if alerts or utility_comparison_circuit_ids or schedule_circuit_ids:
+            process_events_into_state(
+                self.state,
+                events,
+                alerts,
+                evaluated_circuit_ids=evaluated_alert_circuit_ids,
+            )
         recommendation_refresh_due = self._settings_recommendation_refresh_due(
             now,
             changed_entities=changed_entities,
@@ -511,7 +661,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         if recommendation_refresh_due and self._rebuild_setting_recommendations(now):
             self._mark_store_dirty()
-        await self.notification_controller.async_sync_alert_notifications()
+        await self.notification_controller.async_notify_learning_transitions(
+            previous_learning,
+            now,
+        )
+        await self.notification_controller.async_sync_alert_notifications(
+            evaluated_alert_circuit_ids
+        )
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)
         self.async_set_updated_data(self.state)

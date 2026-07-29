@@ -242,6 +242,8 @@ def _coerce_days(raw_days: Any) -> list[dict[str, float | str | bool]]:
             day["complete"] = raw_day["complete"]
         if isinstance(raw_day.get("baseline_eligible"), bool):
             day["baseline_eligible"] = raw_day["baseline_eligible"]
+        if isinstance(raw_day.get("expected_context"), bool):
+            day["expected_context"] = raw_day["expected_context"]
         days.append(day)
     return days
 

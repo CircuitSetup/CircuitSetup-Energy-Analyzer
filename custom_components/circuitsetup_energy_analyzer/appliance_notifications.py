@@ -12,6 +12,7 @@ DELIVERY_MODES = frozenset(
 )
 NOTIFICATION_CATEGORIES = (
     "finished_running",
+    "lifecycle_update",
     "unusual_runtime",
     "high_daily_energy",
     "electrical_issue",
@@ -35,6 +36,7 @@ _NOTIFICATION_CATEGORY_BY_FEATURE = {
 class ApplianceNotificationPreferences:
     appliance_key: str
     finished_running: bool = False
+    lifecycle_update: bool = False
     unusual_runtime: bool = True
     high_daily_energy: bool = True
     electrical_issue: bool = True
