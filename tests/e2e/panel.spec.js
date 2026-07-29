@@ -3946,6 +3946,8 @@ test("alert responses and setting preview actions call their services", async ({
 
   await panel.locator('[data-alert-decision][value="mark_expected"]').check();
   await panel.locator("#apply_alert_decision").click();
+  await panel.locator('[data-alert-decision][value="mark_confirmed"]').check();
+  await panel.locator("#apply_alert_decision").click();
   await panel.locator('[data-alert-decision][value="mark_unhelpful"]').check();
   await panel.locator("#apply_alert_decision").click();
 
@@ -3960,6 +3962,7 @@ test("alert responses and setting preview actions call their services", async ({
   await panel.locator('[data-recommendation-action="reset"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
     "mark_alert_expected",
+    "mark_alert_confirmed",
     "mark_alert_unhelpful",
     "apply_setting_recommendation",
     "reset_setting_recommendation",

@@ -533,6 +533,8 @@ This keeps IDs inside the integration wherever possible. You should not need to 
 
 When you mark an alert as expected, the analyzer remembers that evidence pattern by a stable local fingerprint. Future matching evidence under similar conditions is retained for review, but it is shown as an expected pattern instead of repeatedly creating a new active possible-issue alert or notification. Expected alert feedback expires after about 90 days unless refreshed.
 
+When you confirm an alert as a real issue, the analyzer keeps that feedback with the evidence. For HVAC efficiency alerts, the affected abnormal response episodes are excluded from future learned baselines so a confirmed problem does not teach the analyzer that slower performance is normal.
+
 When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Future matching evidence must repeat more times before it can become a new alert, and the evidence panel shows the adjusted repeated-evidence requirement when it applies. If the same daily energy spike pattern is repeatedly marked not helpful, the analyzer can suggest a safer daily spike ratio change for you to approve, undo, or reset to the built-in default. Not-helpful feedback expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
 
 When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Review decisions follow a stable electrical fingerprint across future reclustering when the direction, value buckets, and split-phase topology still match; substantially different signatures are treated as new review items.
@@ -1055,7 +1057,7 @@ The service actions below are optional. They are useful when you want to call an
 | Dual-phase and electrical checks | `set_leg_imbalance_settings`, `set_metric_consistency_settings` |
 | Mains and solar | `set_mains_balance_settings`, `set_solar_flow_settings` |
 | Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
-| Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_unhelpful` |
+| Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_confirmed`, `mark_alert_unhelpful` |
 | Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
 | Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `convert_nilm_appliance_to_direct_meter`, `merge_nilm_assignments`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |

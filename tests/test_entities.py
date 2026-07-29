@@ -3326,8 +3326,13 @@ def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
     assert _setup_health_needs_capacity_settings(coordinator, circuit)
 
 
+@pytest.mark.parametrize(
+    "profile",
+    [ApplianceProfile.MINI_SPLIT, ApplianceProfile.HEAT_PUMP],
+)
 @pytest.mark.parametrize("mode", [CircuitMode.SINGLE_PHASE, CircuitMode.DUAL_PHASE])
-def test_mini_split_exposes_cycle_demand_and_capacity_behavior(
+def test_bidirectional_hvac_exposes_cycle_demand_and_capacity_behavior(
+    profile: ApplianceProfile,
     mode: CircuitMode,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.entities.setup_health import (
@@ -3339,14 +3344,15 @@ def test_mini_split_exposes_cycle_demand_and_capacity_behavior(
     )
 
     descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    circuit_id = profile.value
     circuit = CircuitConfig(
-        circuit_id="mini_split",
-        name="Mini-Split",
-        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        circuit_id=circuit_id,
+        name=profile.value.replace("_", " ").title(),
+        appliance_profile=profile,
         mode=mode,
         sensors=(
-            SensorRef("sensor.mini_split_power", SensorRole.REAL_POWER),
-            SensorRef("sensor.mini_split_current", SensorRole.CURRENT),
+            SensorRef(f"sensor.{circuit_id}_power", SensorRole.REAL_POWER),
+            SensorRef(f"sensor.{circuit_id}_current", SensorRole.CURRENT),
         ),
     )
     unconfigured = SimpleNamespace(
@@ -3358,7 +3364,7 @@ def test_mini_split_exposes_cycle_demand_and_capacity_behavior(
         options={},
         entry_data={},
         store_data=FeatureStoreData(
-            capacity_settings_by_circuit={"mini_split": {"breaker_amps": 20.0}},
+            capacity_settings_by_circuit={circuit_id: {"breaker_amps": 20.0}},
         ),
     )
 

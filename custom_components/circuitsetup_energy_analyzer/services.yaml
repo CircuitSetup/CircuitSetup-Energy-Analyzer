@@ -1717,6 +1717,29 @@ mark_alert_expected:
             - button
             - select
             - number
+mark_alert_confirmed:
+  name: Confirm alert issue
+  description: "Advanced/script action: confirm an alert as a real issue. For HVAC efficiency alerts, the affected abnormal episodes are excluded from future baselines. The normal user path is the evidence panel button."
+  fields:
+    alert_id:
+      name: Alert ID
+      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
+      required: false
+      example: circuitsetup_energy_analyzer_alert_hvac_hvac_response_slower
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for a circuit with exactly one active alert.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
 mark_alert_unhelpful:
   name: Mark alert unhelpful
   description: "Advanced/script action: mark an alert pattern as unhelpful so repeated notifications are suppressed. The normal user path is the evidence panel button."

@@ -1517,6 +1517,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         'callService("circuitsetup_energy_analyzer"',
         "acknowledge_alert",
         "mark_alert_expected",
+        "mark_alert_confirmed",
         "mark_alert_unhelpful",
         "pause_alerts",
         "relearn_baseline",
@@ -2614,7 +2615,7 @@ def test_alert_decision_render_contracts() -> None:
     name = "test_alert_feedback_uses_one_semantic_decision_flow";
     {
       const panel = makePanel({
-        _payload: { actions: { acknowledge: {}, mark_expected: {}, mark_unhelpful: {} } },
+        _payload: { actions: { acknowledge: {}, mark_expected: {}, mark_confirmed: {}, mark_unhelpful: {} } },
         _inlineFeedback: { scope: "alert-response", kind: "success", message: "Saved" },
       });
       const html = panel._renderAlertResponse();
@@ -2623,13 +2624,14 @@ def test_alert_decision_render_contracts() -> None:
         'name="alert_decision"',
         'value="acknowledge"',
         'value="mark_expected"',
+        'value="mark_confirmed"',
         'value="mark_unhelpful"',
         'id="apply_alert_decision"',
         'aria-live="polite"',
       ]) assert.ok(html.includes(expected), expected);
       assert.equal((html.match(/id="apply_alert_decision"/g) || []).length, 1);
       assert.equal((html.match(/aria-live="polite"/g) || []).length, 1);
-      for (const duplicate of ["acknowledge", "mark_expected", "mark_unhelpful"]) {
+      for (const duplicate of ["acknowledge", "mark_expected", "mark_confirmed", "mark_unhelpful"]) {
         assert.ok(!html.includes(`id="${duplicate}"`));
       }
     }
@@ -6956,6 +6958,7 @@ def test_alert_feedback_services_document_entity_targets() -> None:
     for service_name in (
         "acknowledge_alert",
         "mark_alert_expected",
+        "mark_alert_confirmed",
         "mark_alert_unhelpful",
     ):
         fields = services[service_name]["fields"]

@@ -34,6 +34,11 @@ export const evidence = {
       service: "mark_alert_expected",
       data: { alert_id: "alert-kitchen-energy" },
     },
+    mark_confirmed: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_alert_confirmed",
+      data: { alert_id: "alert-kitchen-energy" },
+    },
     mark_unhelpful: {
       domain: "circuitsetup_energy_analyzer",
       service: "mark_alert_unhelpful",

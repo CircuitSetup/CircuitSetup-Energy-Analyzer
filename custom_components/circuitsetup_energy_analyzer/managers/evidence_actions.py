@@ -207,6 +207,10 @@ class EvidenceActionController:
         """Mark an alert pattern as expected for future notifications."""
         return await self.async_store_alert_feedback(alert_id, "expected")
 
+    async def async_mark_alert_confirmed(self, alert_id: str) -> bool:
+        """Confirm an alert as a real issue."""
+        return await self.async_store_alert_feedback(alert_id, "confirmed")
+
     async def async_mark_alert_unhelpful(self, alert_id: str) -> bool:
         """Mark an alert pattern as unhelpful for future notifications."""
         return await self.async_store_alert_feedback(alert_id, "unhelpful")
@@ -281,7 +285,7 @@ class EvidenceActionController:
         if not stream_id.startswith(f"{alert.circuit_id}|"):
             return
         store_data = self._coordinator.store_data
-        if action in {"expected", "corrected", "improved"}:
+        if action == "expected":
             store_data.hvac_baseline_era_by_stream[stream_id] = now.isoformat()
             state = self._coordinator.state
             getattr(state, "hvac_current_episode_by_stream", {}).pop(

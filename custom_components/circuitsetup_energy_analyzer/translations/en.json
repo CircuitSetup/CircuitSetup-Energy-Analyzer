@@ -1406,6 +1406,7 @@
         "assigned_signature": "Assigned signature to {label}.",
         "alert_acknowledged": "Alert acknowledged.",
         "marked_expected": "Marked as expected behavior.",
+        "marked_confirmed": "Confirmed as a real issue.",
         "marked_unhelpful": "Marked as not helpful.",
         "alert_pause_updated": "Alert pause updated.",
         "baseline_relearn_requested": "Baseline relearn requested.",
@@ -1454,6 +1455,7 @@
           "apply": "Apply",
           "assign_appliance": "Assign Appliance",
           "confirm_appliance": "Confirm Appliance",
+          "confirm_issue": "Confirm Issue",
           "correct": "Correct",
           "create_ha_device": "Create HA Device",
           "delete_label": "Delete Label",
@@ -1497,6 +1499,7 @@
         },
         "helpers": {
           "dismiss": "Clear this alert for now without teaching the analyzer.",
+          "mark_confirmed": "Confirm this is a real issue. For HVAC efficiency alerts, exclude these abnormal episodes from future baselines.",
           "mark_expected": "Teach the analyzer this behavior is expected so similar alerts are less likely.",
           "mark_unhelpful": "Tell the analyzer this alert was inaccurate or not useful. This does not mark the behavior as normal."
         }

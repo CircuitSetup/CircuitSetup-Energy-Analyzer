@@ -23,6 +23,7 @@ SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_a
 _HIGH_POWER_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.HEAT_PUMP,
     ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.ELECTRIC_HEAT,
     ApplianceProfile.WATER_HEATER,

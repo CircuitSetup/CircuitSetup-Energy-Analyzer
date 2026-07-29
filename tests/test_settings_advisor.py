@@ -563,6 +563,7 @@ def test_hvac_efficiency_threshold_uses_nearest_rank_p95() -> None:
         }
         for deviation in deviations
     ]
+    episodes.append({**episodes[0], "alerted": True})
     recommendation = _only_setting(
         advisor.build_settings_recommendations(
             _hvac_advisor_inputs(

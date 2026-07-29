@@ -1134,13 +1134,11 @@ def _hvac_threshold_recommendation(
         dict(episode)
         for episode in inputs.feature_history.get("hvac_response_episodes", ())
         if isinstance(episode, Mapping)
+        and bool(episode.get("complete"))
+        and not bool(episode.get("excluded_from_baseline"))
+        and not bool(episode.get("alerted"))
     ]
-    if len(episodes) < 20 or any(
-        not bool(episode.get("complete"))
-        or bool(episode.get("excluded_from_baseline"))
-        or bool(episode.get("alerted"))
-        for episode in episodes
-    ):
+    if len(episodes) < 20:
         return None
     groups: dict[str, list[dict[str, Any]]] = {}
     for episode in episodes:

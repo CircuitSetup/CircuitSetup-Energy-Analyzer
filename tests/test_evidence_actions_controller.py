@@ -317,8 +317,7 @@ async def test_evidence_action_controller_stores_feedback_and_retires_alert() ->
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action", ["expected", "corrected", "improved"])
-async def test_hvac_feedback_starts_new_baseline_era(action: str) -> None:
+async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
     coordinator = _ActionCoordinator()
     stream_id = "heat_pump|climate.downstairs|cooling"
     alert = replace(
@@ -341,7 +340,7 @@ async def test_hvac_feedback_starts_new_baseline_era(action: str) -> None:
 
     result = await EvidenceActionController(
         coordinator
-    ).async_store_alert_feedback(alert_id, action)
+    ).async_mark_alert_expected(alert_id)
 
     assert result is True
     assert coordinator.store_data.hvac_baseline_era_by_stream[stream_id] == (
@@ -372,10 +371,7 @@ async def test_confirmed_hvac_feedback_excludes_recent_episode_range() -> None:
     coordinator.store_data.alerts = [alert]
     coordinator.state.active_alerts_by_circuit = {"heat_pump": [alert]}
 
-    await EvidenceActionController(coordinator).async_store_alert_feedback(
-        alert_id,
-        "confirmed",
-    )
+    await EvidenceActionController(coordinator).async_mark_alert_confirmed(alert_id)
 
     history = coordinator.store_data.hvac_response_history_by_stream[stream_id]
     assert history[0]["excluded_from_baseline"] is False

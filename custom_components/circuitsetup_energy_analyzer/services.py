@@ -65,6 +65,7 @@ SERVICE_SET_UTILITY_COMPARISON_SETTINGS = "set_utility_comparison_settings"
 SERVICE_START_MAINTENANCE = "start_maintenance"
 SERVICE_END_MAINTENANCE = "end_maintenance"
 SERVICE_MARK_ALERT_EXPECTED = "mark_alert_expected"
+SERVICE_MARK_ALERT_CONFIRMED = "mark_alert_confirmed"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
 SERVICE_MARK_NILM_APPLIANCE_CORRECT = "mark_nilm_appliance_correct"
 SERVICE_MARK_NILM_APPLIANCE_WRONG = "mark_nilm_appliance_wrong"
@@ -508,6 +509,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_START_MAINTENANCE: MAINTENANCE_START_SERVICE_SCHEMA,
     SERVICE_END_MAINTENANCE: MAINTENANCE_END_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_EXPECTED: ALERT_FEEDBACK_SERVICE_SCHEMA,
+    SERVICE_MARK_ALERT_CONFIRMED: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_APPLIANCE_CORRECT: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_APPLIANCE_WRONG: ALERT_FEEDBACK_SERVICE_SCHEMA,
@@ -588,6 +590,14 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             data,
             method_name="async_mark_alert_expected",
+        )
+        return
+
+    if service == SERVICE_MARK_ALERT_CONFIRMED:
+        await _dispatch_alert_id_action(
+            hass,
+            data,
+            method_name="async_mark_alert_confirmed",
         )
         return
 
