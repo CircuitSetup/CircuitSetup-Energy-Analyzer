@@ -454,6 +454,7 @@ def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
         "weather_mode": episode.weather_mode,
         "gap_bin": episode.gap_bin,
         "participant_signature": list(episode.participant_signature),
+        "supporting_blower_ids": list(episode.supporting_blower_ids),
         "outdoor_temperature_f": episode.outdoor_temperature_f,
     }
 

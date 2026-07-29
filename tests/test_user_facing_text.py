@@ -2070,6 +2070,99 @@ for (const expected of [
     )
 
 
+def test_appliance_detail_renders_hvac_thermostat_efficiency() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const ready = panel._renderHvacEfficiency({
+  status: "ready",
+  summary_score: 80,
+  trend: "slower",
+  threshold_pct: 25,
+  learning: {
+    reference_count: 9,
+    recent_count: 3,
+    required_reference: 9,
+    required_recent: 3,
+  },
+  heating: [{
+    thermostat_entity_id: "climate.upstairs",
+    thermostat_name: "Upstairs",
+    status: "ready",
+    score: 110,
+    trend: "faster",
+    change_percent: -9.1,
+    baseline_minutes_per_degree: 11,
+    recent_minutes_per_degree: 10,
+    reference_count: 9,
+    recent_count: 3,
+    outdoor_temperature_f: 28,
+    season: "winter",
+    weather_mode: "heating",
+    attribution: "gas_furnace_proxy",
+    supporting_blower_ids: [],
+  }],
+  cooling: [{
+    thermostat_entity_id: "climate.downstairs",
+    thermostat_name: "Downstairs",
+    status: "ready",
+    score: 80,
+    trend: "slower",
+    change_percent: 25,
+    baseline_minutes_per_degree: 10,
+    recent_minutes_per_degree: 12.5,
+    reference_count: 9,
+    recent_count: 3,
+    outdoor_temperature_f: 95,
+    season: "summer",
+    weather_mode: "cooling",
+    attribution: "direct",
+    supporting_blower_ids: ["blower"],
+  }],
+});
+for (const expected of [
+  'data-hvac-efficiency',
+  "HVAC Thermostat Efficiency",
+  "80 / 100",
+  "100 is the learned baseline",
+  "25% response-change threshold",
+  "Heating",
+  "Cooling",
+  "Upstairs",
+  "Downstairs",
+  "10 min/°F",
+  "12.5 min/°F",
+  "9 of 9 reference episodes",
+  "3 of 3 recent episodes",
+  "Outdoor: 95°F",
+  "season: summer",
+  "Gas-furnace blower proxy",
+  "Cooling blower supports air handling",
+]) {
+  assert.ok(ready.includes(expected), `missing ${expected}: ${ready}`);
+}
+
+const learning = panel._renderHvacEfficiency({
+  status: "learning",
+  summary_score: null,
+  trend: null,
+  threshold_pct: 25,
+  heating: [],
+  cooling: [],
+  learning: {
+    reference_count: 0,
+    recent_count: 0,
+    required_reference: 9,
+    required_recent: 3,
+  },
+});
+assert.ok(learning.includes("Learning"));
+assert.ok(learning.includes("waiting for completed thermostat episodes"));
+assert.ok(!learning.toLowerCase().includes("fault"));
+"""
+    )
+
+
 def test_appliance_detail_hides_empty_guidance_and_uses_split_overview() -> None:
     _run_panel_node_script(
         r"""

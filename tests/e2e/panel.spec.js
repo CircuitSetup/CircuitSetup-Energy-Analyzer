@@ -3545,6 +3545,23 @@ test("Appliance Detail omits session timeline and page-level controls", async ({
   await expect(panel.locator("[data-appliance-detail-action]")).toHaveCount(0);
 });
 
+test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  const efficiency = panel.locator("[data-hvac-efficiency]");
+
+  await expect(efficiency).toBeVisible();
+  await expect(efficiency).toContainText("80 / 100");
+  await expect(efficiency).toContainText("100 is the learned baseline");
+  await expect(efficiency).toContainText("Upstairs");
+  await expect(efficiency).toContainText("Downstairs");
+  await expect(efficiency).toContainText("10 min/°F");
+  await expect(efficiency).toContainText("12.5 min/°F");
+  await expect(efficiency).toContainText("Outdoor: 95°F");
+  await expect(efficiency).toContainText("Gas-furnace blower proxy");
+  await expect(efficiency).toContainText("Cooling blower supports air handling");
+});
+
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
