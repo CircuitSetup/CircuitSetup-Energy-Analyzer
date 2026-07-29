@@ -375,12 +375,17 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
     starting = ThermostatObservation(
         thermostat,
-        None,
+        "sensor.downstairs_temperature",
         78.0,
         72.0,
         "cool",
         "cooling",
-        ("current_temperature", "temperature", "hvac_action"),
+        (
+            "current_temperature",
+            "temperature",
+            "temperature_override",
+            "hvac_action",
+        ),
     )
     context = _hvac_context(
         configs=(heat_pump,),
@@ -416,6 +421,9 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     assert len(history) == 256
     assert history[0]["marker"] == 1
     assert history[-1]["complete"] is True
+    assert history[-1]["temperature_entity_id"] == (
+        "sensor.downstairs_temperature"
+    )
 
 
 def _hvac_response_history(

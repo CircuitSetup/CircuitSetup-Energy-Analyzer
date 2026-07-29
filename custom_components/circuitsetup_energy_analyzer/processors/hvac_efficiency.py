@@ -236,6 +236,9 @@ class HvacEfficiencyProcessor:
                         )
                     )
                     stored_episode = episode_to_dict(finalized)
+                    stored_episode["temperature_entity_id"] = (
+                        current_observation.temperature_entity_id
+                    )
                     stored_episode["baseline_era"] = (
                         context.store_data.hvac_baseline_era_by_stream.get(
                             stream_id,

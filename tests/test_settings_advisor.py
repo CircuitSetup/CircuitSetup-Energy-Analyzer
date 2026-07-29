@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from typing import Any
 
+import pytest
+
 
 def _advisor() -> Any:
     return import_module(
@@ -367,6 +369,271 @@ def test_energy_usage_recommendation_uses_default_for_flat_usage() -> None:
     ]
 
     assert "daily_spike_ratio" not in setting_keys
+
+
+def _hvac_advisor_inputs(
+    advisor: Any,
+    *,
+    appliance_profile: str = "heat_pump",
+    advanced_settings: dict[str, Any] | None = None,
+    calls: list[dict[str, Any]] | None = None,
+    episodes: list[dict[str, Any]] | None = None,
+) -> Any:
+    return advisor.AdvisorInputs(
+        now=datetime(2026, 7, 29, 12, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="heat_pump",
+            circuit_name="Downstairs Heat Pump",
+            appliance_profile=appliance_profile,
+            circuit_mode="dual_phase",
+            power_flow="load",
+            advanced_settings=advanced_settings or {},
+        ),
+        feature_history={
+            "hvac_correlation_calls": calls or [],
+            "hvac_response_episodes": episodes or [],
+        },
+    )
+
+
+def _hvac_calls(
+    *,
+    thermostat: str = "climate.downstairs",
+    temperature_entity: str | None = None,
+    climate_has_current: bool = True,
+    matching: int = 8,
+    total: int = 10,
+    mode: str = "cooling",
+    driver_mode: str | None = None,
+    electrical_driver_present: bool = True,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "thermostat_entity_id": thermostat,
+            "thermostat_name": thermostat.replace("climate.", "").title(),
+            "temperature_entity_id": temperature_entity,
+            "mode": mode,
+            "driver_mode": driver_mode or mode,
+            "overlap_ratio": 0.9 if index < matching else 0.2,
+            "candidate_moved_toward_target": index < matching,
+            "climate_has_current_temperature": climate_has_current,
+            "electrical_driver_present": electrical_driver_present,
+            "weather_mode": mode,
+            "temperature_bin": "very_hot",
+        }
+        for index in range(total)
+    ]
+
+
+def test_hvac_thermostat_association_suggestion_uses_80_percent_boundary() -> None:
+    advisor = _advisor()
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(advisor, calls=_hvac_calls())
+        ),
+        "linked_thermostat_entities",
+    )
+
+    assert recommendation.current_value == []
+    assert recommendation.suggested_value == ["climate.downstairs"]
+    assert recommendation.apply_payload == {
+        "linked_thermostat_entities": ["climate.downstairs"]
+    }
+    assert recommendation.evidence["observation_count"] == 10
+    assert recommendation.evidence["confidence"] == pytest.approx(0.8)
+    assert recommendation.evidence["circuit_name"] == "Downstairs Heat Pump"
+    assert recommendation.evidence["thermostat_name"] == "Downstairs"
+    assert recommendation.evidence["mode"] == "cooling"
+    assert recommendation.evidence["weather_mode"] == "cooling"
+    assert advisor.recommendation_evidence_fingerprint(recommendation) == (
+        "hvac_thermostat_correlation:"
+        "thermostat=climate.downstairs;calls=10;confidence=0.8;mode=cooling"
+    )
+
+
+def test_hvac_thermostat_association_suggests_each_zone_separately() -> None:
+    advisor = _advisor()
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                advanced_settings={
+                    "linked_thermostat_entities": ["climate.downstairs"]
+                },
+                calls=[
+                    *_hvac_calls(),
+                    *_hvac_calls(thermostat="climate.upstairs"),
+                ],
+            )
+        ),
+        "linked_thermostat_entities",
+    )
+
+    assert recommendation.current_value == ["climate.downstairs"]
+    assert recommendation.suggested_value == [
+        "climate.downstairs",
+        "climate.upstairs",
+    ]
+    assert recommendation.evidence["thermostat_entity_id"] == "climate.upstairs"
+
+
+def test_hvac_thermostat_association_skips_low_confidence_or_cross_mode() -> None:
+    advisor = _advisor()
+    low_confidence = _setting_keys(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                calls=_hvac_calls(matching=7),
+            )
+        )
+    )
+    cross_mode = _setting_keys(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                calls=_hvac_calls(driver_mode="heating"),
+            )
+        )
+    )
+
+    assert "linked_thermostat_entities" not in low_confidence
+    assert "linked_thermostat_entities" not in cross_mode
+
+
+def test_hvac_candidate_temperature_and_gas_blower_suggestions() -> None:
+    advisor = _advisor()
+    temperature = _only_setting(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                calls=_hvac_calls(
+                    temperature_entity="sensor.downstairs_temperature",
+                    climate_has_current=False,
+                ),
+            )
+        ),
+        "thermostat_temperature_sensor_map",
+    )
+    gas_blower = _only_setting(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                appliance_profile="hvac_blower",
+                calls=_hvac_calls(
+                    mode="heating",
+                    electrical_driver_present=False,
+                ),
+            )
+        ),
+        "blower_represents_gas_heat",
+    )
+
+    assert temperature.suggested_value == {
+        "climate.downstairs": "sensor.downstairs_temperature"
+    }
+    assert temperature.evidence["observation_count"] == 10
+    assert gas_blower.current_value is False
+    assert gas_blower.suggested_value is True
+    assert gas_blower.evidence["mode"] == "heating"
+
+    has_climate_temperature = _setting_keys(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                calls=_hvac_calls(
+                    temperature_entity="sensor.downstairs_temperature",
+                    climate_has_current=True,
+                ),
+            )
+        )
+    )
+    assert "thermostat_temperature_sensor_map" not in has_climate_temperature
+
+
+def test_hvac_efficiency_threshold_uses_nearest_rank_p95() -> None:
+    advisor = _advisor()
+    deviations = [10.0] * 18 + [15.0, 15.0]
+    episodes = [
+        {
+            "complete": True,
+            "excluded_from_baseline": False,
+            "alerted": False,
+            "context_key": "cooling|very_hot|summer",
+            "absolute_deviation_percent": deviation,
+        }
+        for deviation in deviations
+    ]
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                advanced_settings={"hvac_efficiency_change_threshold_pct": 25.0},
+                episodes=episodes,
+            )
+        ),
+        "hvac_efficiency_change_threshold_pct",
+    )
+
+    assert recommendation.suggested_value == 20.0
+    assert recommendation.evidence["eligible_episode_count"] == 20
+    assert recommendation.evidence["p95_absolute_deviation_pct"] == 15.0
+    assert recommendation.evidence["weather_context"] == (
+        "cooling|very_hot|summer"
+    )
+    assert advisor.recommendation_evidence_fingerprint(recommendation) == (
+        "hvac_efficiency_threshold:"
+        "episodes=20;p95=15.0;context=cooling|very_hot|summer"
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_update",
+    [
+        {"complete": False},
+        {"excluded_from_baseline": True},
+        {"alerted": True},
+    ],
+)
+def test_hvac_efficiency_threshold_skips_invalid_or_near_current_evidence(
+    invalid_update: dict[str, bool],
+) -> None:
+    advisor = _advisor()
+    episodes = [
+        {
+            "complete": True,
+            "excluded_from_baseline": False,
+            "alerted": False,
+            "context_key": "cooling|very_hot|summer",
+            "absolute_deviation_percent": 15.0,
+        }
+        for _ in range(20)
+    ]
+    episodes[-1].update(invalid_update)
+    invalid_keys = _setting_keys(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(advisor, episodes=episodes)
+        )
+    )
+    near_keys = _setting_keys(
+        advisor.build_settings_recommendations(
+            _hvac_advisor_inputs(
+                advisor,
+                advanced_settings={"hvac_efficiency_change_threshold_pct": 22.0},
+                episodes=[
+                    {
+                        **episode,
+                        "complete": True,
+                        "excluded_from_baseline": False,
+                        "alerted": False,
+                    }
+                    for episode in episodes
+                ],
+            )
+        )
+    )
+
+    assert "hvac_efficiency_change_threshold_pct" not in invalid_keys
+    assert "hvac_efficiency_change_threshold_pct" not in near_keys
 
 
 def test_operating_detection_recommendations_use_idle_and_start_separation() -> None:
@@ -806,6 +1073,9 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
     from custom_components.circuitsetup_energy_analyzer.balance import (
         DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
     )
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+    )
     from custom_components.circuitsetup_energy_analyzer.load_shift import (
         FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
     )
@@ -840,6 +1110,12 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
         "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
         "flexible_load_running_threshold_w": FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+        "linked_thermostat_entities": [],
+        "thermostat_temperature_sensor_map": {},
+        "blower_represents_gas_heat": False,
+        "hvac_efficiency_change_threshold_pct": (
+            DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
+        ),
     }
 
     expected_effect_phrases = {
@@ -853,6 +1129,10 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "solar_surplus_threshold_w": "solar surplus",
         "high_solar_surplus_threshold_w": "high solar surplus",
         "flexible_load_running_threshold_w": "flexible load",
+        "linked_thermostat_entities": "thermostat zones",
+        "thermostat_temperature_sensor_map": "indoor sensor",
+        "blower_represents_gas_heat": "gas heat",
+        "hvac_efficiency_change_threshold_pct": "weather-adjusted",
     }
 
     for setting_key, default_value in expected_defaults.items():

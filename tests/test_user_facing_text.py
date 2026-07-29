@@ -198,6 +198,8 @@ EXPECTED_FLOW_LABELS = {
     "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
+    "thermostat_entities": "Thermostats",
+    "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -210,6 +212,8 @@ EXPECTED_OPTIONS_LABELS = {
     "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
     "water_flow_sensor_entities": "Water Flow Sensors",
+    "thermostat_entities": "Thermostats",
+    "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
     "sensitivity": "Sensitivity",
     "retention_mode": "Retention Mode",
 }
@@ -285,6 +289,12 @@ EXPECTED_ADVANCED_SETTINGS_LABELS = {
     "linked_flow_sensor_entities": "Linked Flow Sensors",
     "expects_water_flow": "Expects Water Flow",
     "flow_mismatch_threshold_minutes": "Flow Mismatch Threshold Minutes",
+    "reset_hvac_efficiency_settings_to_defaults": (
+        "Reset HVAC Efficiency Settings To Defaults"
+    ),
+    "linked_thermostat_entities": "Linked Thermostats",
+    "hvac_efficiency_change_threshold_pct": "Response Change Alert Percent",
+    "blower_represents_gas_heat": "Blower Represents Gas-Furnace Operation",
     "reset_dual_phase_settings_to_defaults": "Reset Dual-Phase Settings To Defaults",
     "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
     "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power W",
@@ -310,6 +320,7 @@ EXPECTED_ADVANCED_SECTION_LABELS = {
     "demand_capacity_settings": "Demand And Capacity",
     "standby_settings": "Always On And Standby",
     "water_context_settings": "Water Context",
+    "hvac_efficiency_settings": "HVAC Thermostat Efficiency",
     "dual_phase_settings": "Dual-Phase Leg Imbalance",
     "power_quality_settings": "Power Metric Consistency",
     "mains_balance_settings": "Mains Balance",

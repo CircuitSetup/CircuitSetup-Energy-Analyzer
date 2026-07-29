@@ -5,6 +5,7 @@ from typing import Any
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .capacity import DEFAULT_CAPACITY_WARNING_RATIO
+from .const import DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -46,6 +47,12 @@ _SETTING_DEFAULTS: dict[str, Any] = {
     "solar_surplus_threshold_w": SOLAR_SURPLUS_THRESHOLD_W,
     "high_solar_surplus_threshold_w": HIGH_SOLAR_SURPLUS_THRESHOLD_W,
     "flexible_load_running_threshold_w": FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
+    "linked_thermostat_entities": [],
+    "thermostat_temperature_sensor_map": {},
+    "blower_represents_gas_heat": False,
+    "hvac_efficiency_change_threshold_pct": (
+        DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
+    ),
 }
 
 _SETTING_EXPECTED_EFFECTS = {
@@ -128,6 +135,21 @@ _SETTING_EXPECTED_EFFECTS = {
         "idle/noise floor, so load-shift prompts do not treat standby draw as "
         "active use."
     ),
+    "linked_thermostat_entities": (
+        "Associate this appliance with the thermostat zones its activity serves."
+    ),
+    "thermostat_temperature_sensor_map": (
+        "Use the observed indoor sensor when it is a better temperature source "
+        "than the thermostat's current-temperature attribute."
+    ),
+    "blower_represents_gas_heat": (
+        "Measure this blower as the electrical proxy for gas heat while keeping "
+        "cooling response attributed to the compressor."
+    ),
+    "hvac_efficiency_change_threshold_pct": (
+        "Tune response-change alerts to normal weather-adjusted variation while "
+        "preserving meaningful slower or faster changes."
+    ),
 }
 
 _SETTING_CONTROL_DESCRIPTIONS = {
@@ -194,6 +216,20 @@ _SETTING_CONTROL_DESCRIPTIONS = {
     ),
     "flexible_load_running_threshold_w": (
         "Controls when a flexible load counts as active for load-shift guidance."
+    ),
+    "linked_thermostat_entities": (
+        "Controls which thermostat zones are associated with this HVAC appliance."
+    ),
+    "thermostat_temperature_sensor_map": (
+        "Controls the indoor temperature source used for each thermostat zone."
+    ),
+    "blower_represents_gas_heat": (
+        "Controls whether a blower is treated as the measurable proxy for "
+        "gas-furnace heating."
+    ),
+    "hvac_efficiency_change_threshold_pct": (
+        "Controls how far weather-adjusted HVAC response time may change before "
+        "an alert."
     ),
 }
 
