@@ -337,6 +337,14 @@ def _collect_hvac_correlation(
             mode = str(observation.action or "").lower()
             if mode not in {"heating", "cooling"}:
                 if current:
+                    current = _advance_hvac_correlation(
+                        context,
+                        configs,
+                        config,
+                        observation,
+                        str(current.get("mode") or ""),
+                        current,
+                    )
                     _finalize_hvac_correlation(
                         result,
                         context,
@@ -354,6 +362,14 @@ def _collect_hvac_correlation(
                     )
                 continue
             if current and current.get("mode") != mode:
+                current = _advance_hvac_correlation(
+                    context,
+                    configs,
+                    config,
+                    observation,
+                    str(current.get("mode") or ""),
+                    current,
+                )
                 _finalize_hvac_correlation(
                     result,
                     context,
@@ -398,6 +414,12 @@ def _advance_hvac_correlation(
             "observed_at": context.now.isoformat(),
             "active_minutes": 0.0,
             "electrical_driver_minutes": 0.0,
+            "circuit_running": _circuit_running(context, config.circuit_id),
+            "electrical_driver_running": _electrical_driver_running(
+                context,
+                configs,
+                mode,
+            ),
             "climate_has_current_temperature": (
                 "current_temperature" in observation.available_capabilities
             ),
@@ -414,14 +436,23 @@ def _advance_hvac_correlation(
         if observed_at is not None
         else 0.0
     )
-    if _circuit_running(context, config.circuit_id):
+    if bool(current.get("circuit_running")):
         updated["active_minutes"] = float(
             current.get("active_minutes", 0.0)
         ) + delta
-    if _electrical_driver_running(context, configs, mode):
+    if bool(current.get("electrical_driver_running")):
         updated["electrical_driver_minutes"] = float(
             current.get("electrical_driver_minutes", 0.0)
         ) + delta
+    updated["circuit_running"] = _circuit_running(
+        context,
+        config.circuit_id,
+    )
+    updated["electrical_driver_running"] = _electrical_driver_running(
+        context,
+        configs,
+        mode,
+    )
     updated["candidate_latest_temperatures"] = {
         **dict(current.get("candidate_latest_temperatures", {})),
         **candidates,
@@ -782,10 +813,22 @@ def _circuit_efficiency_payload(
         "hvac_response_history_by_stream",
         {},
     )
+    mapped_thermostats = set(
+        thermostat_mappings_for_settings(
+            context.entry_data,
+            context.options,
+            settings,
+        )
+    )
     for stream_id, raw_history in history_by_stream.items():
-        if not stream_id.startswith(f"{circuit_id}|"):
+        stream_parts = stream_id.split("|")
+        if (
+            len(stream_parts) != 3
+            or stream_parts[0] != circuit_id
+            or stream_parts[1] not in mapped_thermostats
+        ):
             continue
-        mode = stream_id.rsplit("|", 1)[-1]
+        mode = stream_parts[-1]
         if config.appliance_profile is ApplianceProfile.HVAC_BLOWER and (
             mode == "cooling"
             or not bool(settings.get(CONF_BLOWER_REPRESENTS_GAS_HEAT, False))

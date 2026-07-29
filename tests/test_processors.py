@@ -625,7 +625,7 @@ def test_hvac_correlation_history_learns_before_thermostat_link() -> None:
     assert calls[0]["marker"] == 1
     assert call["thermostat_entity_id"] == thermostat
     assert call["mode"] == call["driver_mode"] == "cooling"
-    assert call["overlap_ratio"] == pytest.approx(0.9)
+    assert call["overlap_ratio"] == pytest.approx(1.0)
     assert call["temperature_entity_id"] == temperature
     assert call["candidate_moved_toward_target"] is True
     assert call["climate_has_current_temperature"] is False
@@ -690,8 +690,82 @@ def test_hvac_correlation_history_identifies_unlinked_gas_blower() -> None:
     call = context.store_data.hvac_correlation_history_by_circuit["blower"][0]
 
     assert call["mode"] == call["driver_mode"] == "heating"
-    assert call["overlap_ratio"] == pytest.approx(0.9)
+    assert call["overlap_ratio"] == pytest.approx(1.0)
     assert call["electrical_driver_present"] is False
+
+
+def test_hvac_correlation_overlap_uses_prior_running_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    calling = ThermostatObservation(
+        thermostat,
+        None,
+        78.0,
+        72.0,
+        "cool",
+        "cooling",
+        ("current_temperature", "temperature", "hvac_action"),
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=calling,
+        advanced_settings={"heat_pump": {}},
+        running_circuit_ids=set(),
+    )
+    context = replace(
+        context,
+        entry_data={CONF_THERMOSTAT_ENTITIES: [thermostat]},
+        thermostat_observations=MappingProxyType({thermostat: calling}),
+    )
+    processor = HvacEfficiencyProcessor()
+    pair_id = f"heat_pump|{thermostat}"
+
+    started = processor.process([(heat_pump, SimpleNamespace())], context)
+    context.state.hvac_correlation_active_by_pair[pair_id] = (
+        _state_update_values(started, "hvac_correlation_active_by_pair")[
+            pair_id
+        ]
+    )
+    context = replace(context, now=context.now + timedelta(minutes=5))
+    context.state.operating_state_snapshot_by_circuit["heat_pump"] = {
+        "state": "running",
+        "stable_state": "running",
+    }
+    turned_on = processor.process([(heat_pump, SimpleNamespace())], context)
+    context.state.hvac_correlation_active_by_pair[pair_id] = (
+        _state_update_values(turned_on, "hvac_correlation_active_by_pair")[
+            pair_id
+        ]
+    )
+    context = replace(context, now=context.now + timedelta(minutes=20))
+    active = processor.process([(heat_pump, SimpleNamespace())], context)
+    context.state.hvac_correlation_active_by_pair[pair_id] = (
+        _state_update_values(active, "hvac_correlation_active_by_pair")[
+            pair_id
+        ]
+    )
+    context = replace(
+        context,
+        now=context.now + timedelta(minutes=10),
+        thermostat_observations=MappingProxyType(
+            {thermostat: replace(calling, action="idle")}
+        ),
+    )
+    context.state.operating_state_snapshot_by_circuit["heat_pump"] = {
+        "state": "off",
+        "stable_state": "off",
+    }
+
+    processor.process([(heat_pump, SimpleNamespace())], context)
+    call = context.store_data.hvac_correlation_history_by_circuit["heat_pump"][
+        0
+    ]
+
+    assert call["overlap_ratio"] == pytest.approx(30.0 / 35.0)
 
 
 def test_hvac_efficiency_main_loop_uses_only_bounded_snapshots(
@@ -954,6 +1028,58 @@ def test_hvac_response_change_emits_mature_alert(
     duplicate = processor.process([(heat_pump, SimpleNamespace())], context)
     assert duplicate.alerts == duplicate.notifications == []
     assert duplicate.preserved_alerts == result.alerts
+
+
+def test_hvac_efficiency_ignores_history_for_unlinked_thermostat() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    linked = "climate.upstairs"
+    retired = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            linked,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [linked]}
+        },
+        running_circuit_ids=set(),
+    )
+    retired_stream = f"heat_pump|{retired}|cooling"
+    context.store_data.hvac_response_history_by_stream[retired_stream] = (
+        _hvac_response_history(retired_stream, recent_rate=15.0)
+    )
+    policy = ConservativeAlertPolicy(
+        min_repeated=1,
+        min_total_score=1.5,
+        min_average_score=1.5,
+        min_baseline_confidence=0.0,
+    )
+
+    result = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy
+    ).process([(heat_pump, SimpleNamespace())], context)
+    payload = _state_update_values(
+        result,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]
+
+    assert payload["streams"] == {}
+    assert payload["score"] is None
+    assert result.alerts == result.notifications == []
+    assert retired_stream in context.store_data.hvac_response_history_by_stream
 
 
 def test_hvac_response_requires_maturity_and_never_scores_cooling_blower() -> None:
