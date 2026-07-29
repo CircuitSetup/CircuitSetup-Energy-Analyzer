@@ -29,7 +29,7 @@
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
-          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 17 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "assign": {
@@ -49,7 +49,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 17 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "nilm": {
@@ -141,7 +141,7 @@
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
-          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 17 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "refresh_sources": {
@@ -499,7 +499,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 17 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
     },

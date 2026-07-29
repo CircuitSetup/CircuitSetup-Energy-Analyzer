@@ -4651,6 +4651,79 @@ def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
     }
 
 
+def test_lightweight_retention_preserves_predictive_health_evidence_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    expired_at = now - timedelta(days=18)
+    boundary_at = now - timedelta(days=17)
+    expired_event = CircuitEvent(
+        timestamp=expired_at,
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    boundary_event = CircuitEvent(
+        timestamp=boundary_at,
+        circuit_id="fridge",
+        event_type=EventType.STOP,
+    )
+    boundary_context = {
+        "timestamp": boundary_at.isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 1.0,
+        "context": {"season": "summer"},
+        "source": "test",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[expired_event, boundary_event],
+            energy_usage_by_circuit={
+                "fridge": {
+                    "days": [
+                        {"date": "2026-05-31", "usage_kwh": 1.0},
+                        {"date": "2026-06-01", "usage_kwh": 1.0},
+                    ]
+                }
+            },
+            contextual_baseline_samples_by_circuit={
+                "fridge": [
+                    {
+                        **boundary_context,
+                        "timestamp": expired_at.isoformat(),
+                    },
+                    boundary_context,
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.events == [boundary_event]
+    assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
+        {"date": "2026-06-01", "usage_kwh": 1.0}
+    ]
+    assert coordinator.store_data.contextual_baseline_samples_by_circuit == {
+        "fridge": [boundary_context]
+    }
+
+
 def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4675,16 +4748,16 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
             energy_usage_by_circuit={
                 "fridge": {
                     "days": [
-                        {"date": "2026-05-30", "usage_kwh": 6.0},
-                        {"date": "2026-05-31", "usage_kwh": 7.0},
+                        {"date": "2026-05-27", "usage_kwh": 6.0},
+                        {"date": "2026-05-28", "usage_kwh": 7.0},
                     ],
                 }
             },
             demand_by_circuit={
                 "fridge": {
                     "daily_peaks": [
-                        {"date": "2026-05-30", "peak_demand_w": 1000.0},
-                        {"date": "2026-05-31", "peak_demand_w": 1200.0},
+                        {"date": "2026-05-27", "peak_demand_w": 1000.0},
+                        {"date": "2026-05-28", "peak_demand_w": 1200.0},
                     ],
                 }
             },
@@ -4695,10 +4768,10 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     coordinator._apply_retention(now)
 
     assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
-        {"date": "2026-05-31", "usage_kwh": 7.0}
+        {"date": "2026-05-28", "usage_kwh": 7.0}
     ]
     assert coordinator.store_data.demand_by_circuit["fridge"]["daily_peaks"] == [
-        {"date": "2026-05-31", "peak_demand_w": 1200.0}
+        {"date": "2026-05-28", "peak_demand_w": 1200.0}
     ]
 
 
@@ -4709,7 +4782,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-29T04:00:00+00:00",
         "standby_w": 8.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4731,7 +4804,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
                 "fridge": {
                     "samples": [
                         {
-                            "timestamp": "2026-05-31T03:00:00+00:00",
+                            "timestamp": "2026-05-29T03:00:00+00:00",
                             "standby_w": 9.0,
                         },
                         retained_sample,
@@ -4756,11 +4829,11 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_weather_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-29T04:00:00+00:00",
         "outdoor_temperature_f": 78.0,
     }
     retained_water_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-29T04:00:00+00:00",
         "rain_intensity_mm_per_hour": 0.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4782,7 +4855,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.weather_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-29T03:00:00+00:00",
                 "outdoor_temperature_f": 72.0,
             },
             retained_weather_sample,
@@ -4791,7 +4864,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.water_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-29T03:00:00+00:00",
                 "rain_intensity_mm_per_hour": 1.0,
             },
             retained_water_sample,

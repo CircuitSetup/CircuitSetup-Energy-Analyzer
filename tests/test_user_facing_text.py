@@ -410,7 +410,7 @@ def test_config_flow_labels_are_human_readable_and_described() -> None:
     assert "binary" in descriptions["water_flow_sensor_entities"].lower()
     assert "numeric" in descriptions["water_flow_sensor_entities"].lower()
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
-    for days in ("14 days", "45 days", "180 days"):
+    for days in ("17 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
     assert (
         "saves these source settings"
@@ -463,7 +463,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert "binary" in descriptions["water_flow_sensor_entities"].lower()
     assert "numeric" in descriptions["water_flow_sensor_entities"].lower()
     assert "greater than 0" in descriptions["water_flow_sensor_entities"].lower()
-    for days in ("14 days", "45 days", "180 days"):
+    for days in ("17 days", "45 days", "180 days"):
         assert days in descriptions["retention_mode"]
     assert (
         "saves these source settings"
@@ -636,7 +636,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
-        for days in ("14 days", "45 days", "180 days"):
+        for days in ("17 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
         assert strings[section]["step"]["assign"]["title"] == (
             "Appliance Circuit Assignments"

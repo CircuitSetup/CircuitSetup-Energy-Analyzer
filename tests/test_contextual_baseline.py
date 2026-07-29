@@ -824,6 +824,34 @@ def test_build_context_for_water_and_solar_state() -> None:
     assert solar_context.as_dict()["power_flow_mode"] == "mains_net"
 
 
+def test_washer_profiles_preserve_water_flow_context() -> None:
+    now = datetime(2026, 6, 17, 21, tzinfo=UTC)
+    for profile in (ApplianceProfile.WASHER, ApplianceProfile.DISHWASHER):
+        circuit_id = profile.value
+        context = build_context_for_sample(
+            circuit_config=CircuitConfig(
+                circuit_id=circuit_id,
+                name=profile.value.title(),
+                appliance_profile=profile,
+                mode=CircuitMode.SINGLE_PHASE,
+            ),
+            sample=_sample(circuit_id, now),
+            state=AnalyzerState(
+                water_flow_context_by_circuit={
+                    circuit_id: {
+                        "flow_sensor_active": True,
+                        "flow_active_minutes": 8.0,
+                    }
+                }
+            ),
+            store_data=FeatureStoreData(),
+            now=now,
+            feature="daily_energy_kwh",
+        )
+
+        assert context.as_dict()["water_flow_state"] == "active_flow"
+
+
 def test_load_context_uses_site_solar_flow_state() -> None:
     now = datetime(2026, 6, 20, 14, tzinfo=UTC)
     ev_config = CircuitConfig(

@@ -968,6 +968,8 @@ def _filter_context_for_profile(
         )
     elif profile is ApplianceProfile.WATER_HEATER:
         allowed.update({"day_type", "time_of_day", "water_flow_state"})
+    elif profile in {ApplianceProfile.WASHER, ApplianceProfile.DISHWASHER}:
+        allowed.update({"time_of_day", "water_flow_state"})
     elif profile in {ApplianceProfile.EV_CHARGER, ApplianceProfile.POOL_PUMP}:
         allowed.update({"day_type", "solar_flow_state", "time_of_day"})
     elif profile in {ApplianceProfile.SOLAR_INVERTER, ApplianceProfile.MAINS_NILM}:
