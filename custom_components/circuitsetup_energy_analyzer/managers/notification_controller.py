@@ -141,7 +141,10 @@ class NotificationController:
             notifications.notification_id_for_alert(alert): alert
             for alert in getattr(self._coordinator.store_data, "alerts", ())
         }
-        recovered_by_circuit: dict[str, tuple[str, AlertEvidence]] = {}
+        recovered_by_appliance: dict[
+            tuple[str, str],
+            tuple[str, AlertEvidence],
+        ] = {}
         for alert_id in sorted(tracked_alert_ids - active_alert_ids):
             recovered_alert = (
                 alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
@@ -174,17 +177,21 @@ class NotificationController:
                     ).get(recovered_alert.circuit_id, ())
                 )
             ):
-                recovered_by_circuit[recovered_alert.circuit_id] = (
+                appliance_key = str(
+                    recovered_alert.features.get("appliance_key")
+                    or f"circuit:{recovered_alert.circuit_id}"
+                )
+                recovered_by_appliance[
+                    (recovered_alert.circuit_id, appliance_key)
+                ] = (
                     alert_id,
                     recovered_alert,
                 )
-        for circuit_id in sorted(recovered_by_circuit):
-            alert_id, recovered_alert = recovered_by_circuit[circuit_id]
+        for (
+            circuit_id,
+            appliance_key,
+        ), (alert_id, recovered_alert) in sorted(recovered_by_appliance.items()):
             recovered_features = recovered_alert.features
-            appliance_key = str(
-                recovered_features.get("appliance_key")
-                or f"circuit:{circuit_id}"
-            )
             display_name = str(recovered_features.get("display_name") or "")
             source_type = str(recovered_features.get("source_type") or "")
             await self.async_notify_lifecycle_update(

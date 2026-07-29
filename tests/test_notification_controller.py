@@ -339,19 +339,26 @@ async def test_nilm_recovery_uses_assignment_identity_and_preferences(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = datetime(2026, 7, 28, 12, tzinfo=UTC)
-    alert = AlertEvidence(
-        timestamp=now,
-        circuit_id="mains",
-        severity=Severity.WARNING,
-        message="Dishwasher energy changed.",
-        feature="nilm_unusual_energy",
-        features={
-            "appliance_key": "nilm:dishwasher",
-            "display_name": "Dishwasher",
-            "source_type": "nilm_estimate",
-            "notification_type": "unusual_energy",
-        },
-    )
+    alerts = [
+        AlertEvidence(
+            timestamp=now,
+            circuit_id="mains",
+            severity=Severity.WARNING,
+            message=f"{display_name} energy changed.",
+            feature="nilm_unusual_energy",
+            features={
+                "appliance_key": f"nilm:{assignment_id}",
+                "display_name": display_name,
+                "source_type": "nilm_estimate",
+                "notification_type": "unusual_energy",
+                "notification_key": f"{assignment_id}:unusual_energy",
+            },
+        )
+        for assignment_id, display_name in (
+            ("dishwasher", "Dishwasher"),
+            ("dryer", "Dryer"),
+        )
+    ]
     created: list[AlertEvidence] = []
 
     async def create_notification(hass, created_alert, *, config=None) -> None:
@@ -371,7 +378,7 @@ async def test_nilm_recovery_uses_assignment_identity_and_preferences(
     state = SimpleNamespace(
         learning_by_circuit={"mains": False},
         energy_usage_evidence_by_circuit={},
-        active_alerts_by_circuit={"mains": [alert]},
+        active_alerts_by_circuit={"mains": alerts},
     )
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
@@ -388,24 +395,40 @@ async def test_nilm_recovery_uses_assignment_identity_and_preferences(
             settings_recommendation_notification_episode_key=(),
             appliance_notification_preferences={
                 "nilm:dishwasher": {"lifecycle_update": True},
+                "nilm:dryer": {"lifecycle_update": True},
             },
             notification_delivery_state={},
             learning_started_at_by_circuit={},
-            alerts=[alert],
+            alerts=list(alerts),
         ),
         store_persistence=SimpleNamespace(mark_dirty=lambda: None),
     )
     controller = notification_controller.NotificationController(coordinator)
 
-    await controller.async_notify_alert(alert)
+    for alert in alerts:
+        await controller.async_notify_alert(alert)
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications({"mains"})
 
-    recovery = created[-1]
-    assert recovery.feature == "alert_recovered"
-    assert recovery.message == "Dishwasher returned to its expected behavior."
-    assert recovery.features["appliance_key"] == "nilm:dishwasher"
-    assert recovery.features["display_name"] == "Dishwasher"
+    recoveries = [
+        alert for alert in created if alert.feature == "alert_recovered"
+    ]
+    assert {
+        recovery.features["appliance_key"]: (
+            recovery.features["display_name"],
+            recovery.message,
+        )
+        for recovery in recoveries
+    } == {
+        "nilm:dishwasher": (
+            "Dishwasher",
+            "Dishwasher returned to its expected behavior.",
+        ),
+        "nilm:dryer": (
+            "Dryer",
+            "Dryer returned to its expected behavior.",
+        ),
+    }
 
 
 @pytest.mark.asyncio
