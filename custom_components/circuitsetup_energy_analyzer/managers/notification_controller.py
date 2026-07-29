@@ -149,6 +149,9 @@ class NotificationController:
             recovered_alert = (
                 alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
             )
+            recovered_appliance_key = (
+                self._appliance_key(recovered_alert) if recovered_alert else ""
+            )
             if (
                 evaluated_circuit_ids is not None
                 and (
@@ -170,6 +173,8 @@ class NotificationController:
                 and self._is_actionable_alert(recovered_alert)
                 and not any(
                     self._is_actionable_alert(active_alert)
+                    and self._appliance_key(active_alert)
+                    == recovered_appliance_key
                     for active_alert in getattr(
                         self._coordinator.state,
                         "active_alerts_by_circuit",
@@ -177,12 +182,8 @@ class NotificationController:
                     ).get(recovered_alert.circuit_id, ())
                 )
             ):
-                appliance_key = str(
-                    recovered_alert.features.get("appliance_key")
-                    or f"circuit:{recovered_alert.circuit_id}"
-                )
                 recovered_by_appliance[
-                    (recovered_alert.circuit_id, appliance_key)
+                    (recovered_alert.circuit_id, recovered_appliance_key)
                 ] = (
                     alert_id,
                     recovered_alert,
@@ -792,6 +793,13 @@ class NotificationController:
     @staticmethod
     def _is_actionable_alert(alert: AlertEvidence) -> bool:
         return alert.severity in {Severity.WARNING, Severity.ERROR}
+
+    @staticmethod
+    def _appliance_key(alert: AlertEvidence) -> str:
+        return str(
+            alert.features.get("appliance_key")
+            or f"circuit:{alert.circuit_id}"
+        )
 
     def _lifecycle_message(
         self,

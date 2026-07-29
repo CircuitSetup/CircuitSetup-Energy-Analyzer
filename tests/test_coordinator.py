@@ -2092,6 +2092,64 @@ async def test_schedule_timer_rechecks_source_freshness_before_recording_miss() 
 
 
 @pytest.mark.asyncio
+async def test_schedule_refresh_preserves_alert_until_context_clears(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    alert_ready = {"value": True}
+    alert = AlertEvidence(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="pool_pump",
+        severity=Severity.WARNING,
+        message="Pool pump missed its expected schedule.",
+        feature="expected_schedule_missed",
+        features={"appliance_key": "circuit:pool_pump"},
+    )
+
+    def refresh(coordinator, timestamp):
+        del timestamp
+        coordinator.state.expected_schedule_by_appliance = {
+            "circuit:pool_pump": {"alert_ready": alert_ready["value"]}
+        }
+        return []
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        refresh,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={
+                "circuit:pool_pump": {"enabled": True}
+            },
+            alerts=[alert],
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["pool_pump"] = False
+    coordinator.state.active_alerts_by_circuit = {"pool_pump": [alert]}
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator._async_save_store = AsyncMock()
+
+    await coordinator.async_refresh_expected_schedules(now)
+    assert coordinator.state.active_alerts_by_circuit == {
+        "pool_pump": [alert]
+    }
+
+    alert_ready["value"] = False
+    await coordinator.async_refresh_expected_schedules(now)
+    assert coordinator.state.active_alerts_by_circuit == {}
+
+
+@pytest.mark.asyncio
 async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -2638,6 +2696,55 @@ async def test_source_update_clears_overlapping_schedule_and_utility_alerts(
 
     assert coordinator.state.active_alerts_by_circuit["hvac"] == [runtime_alert]
     sync_notifications.assert_awaited_once_with({"fridge", "hvac"})
+
+
+@pytest.mark.asyncio
+async def test_source_update_preserves_ongoing_schedule_alert(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:fridge": {"enabled": True}
+    }
+    alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge missed its expected schedule.",
+        feature="expected_schedule_missed",
+        features={"appliance_key": "circuit:fridge"},
+    )
+    coordinator.state.learning_by_circuit["fridge"] = False
+    coordinator.state.active_alerts_by_circuit = {"fridge": [alert]}
+    coordinator.store_data.alerts.append(alert)
+
+    def refresh(current_coordinator, timestamp):
+        del timestamp
+        current_coordinator.state.expected_schedule_by_appliance = {
+            "circuit:fridge": {"alert_ready": True}
+        }
+        return []
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        refresh,
+    )
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        AsyncMock()
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["fridge"] == [alert]
 
 
 @pytest.mark.asyncio

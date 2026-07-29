@@ -333,6 +333,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.store_data.alerts.append(schedule_alert)
             self._mark_store_dirty()
             await self._notify_alert(schedule_alert)
+        current_appliance_keys = {
+            str(alert.features.get("appliance_key") or "")
+            for alert in active_alerts
+        }
+        contexts = getattr(self.state, "expected_schedule_by_appliance", {})
+        for circuit_alerts in getattr(
+            self.state,
+            "active_alerts_by_circuit",
+            {},
+        ).values():
+            for alert in circuit_alerts:
+                appliance_key = str(alert.features.get("appliance_key") or "")
+                context = (
+                    contexts.get(appliance_key, {})
+                    if isinstance(contexts, Mapping)
+                    else {}
+                )
+                if (
+                    alert.feature not in _EXPECTED_SCHEDULE_ALERT_FEATURES
+                    or appliance_key in current_appliance_keys
+                    or not isinstance(context, Mapping)
+                    or context.get("alert_ready") is not True
+                    or not self.notification_controller.learning_allows_alert(alert)
+                ):
+                    continue
+                alert = self.evidence_actions.alert_with_feedback(alert)
+                if alert.feedback_status != "expected":
+                    active_alerts.append(alert)
+                    current_appliance_keys.add(appliance_key)
         return active_alerts
 
     @property
@@ -539,21 +568,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             )
         )
 
+        intermediate_alerts = [
+            *alerts,
+            *_alerts_outside_cross_circuit_features(
+                self.state,
+                utility_circuit_ids=(
+                    utility_comparison_circuit_ids - processing_circuit_ids
+                ),
+                schedule_circuit_ids=(
+                    schedule_circuit_ids - processing_circuit_ids
+                ),
+            ),
+        ]
+        active_alerts_by_circuit = getattr(
+            self.state,
+            "active_alerts_by_circuit",
+            {},
+        )
+        intermediate_alerts.extend(
+            alert
+            for circuit_id in schedule_circuit_ids
+            for alert in active_alerts_by_circuit.get(circuit_id, ())
+            if alert.feature in _EXPECTED_SCHEDULE_ALERT_FEATURES
+        )
         process_events_into_state(
             self.state,
             events,
-            [
-                *alerts,
-                *_alerts_outside_cross_circuit_features(
-                    self.state,
-                    utility_circuit_ids=(
-                        utility_comparison_circuit_ids - processing_circuit_ids
-                    ),
-                    schedule_circuit_ids=(
-                        schedule_circuit_ids - processing_circuit_ids
-                    ),
-                ),
-            ],
+            intermediate_alerts,
             evaluated_circuit_ids=processing_circuit_ids,
         )
         events_by_circuit = _items_by_circuit(self.store_data.events)

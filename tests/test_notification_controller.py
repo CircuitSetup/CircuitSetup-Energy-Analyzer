@@ -407,6 +407,16 @@ async def test_nilm_recovery_uses_assignment_identity_and_preferences(
 
     for alert in alerts:
         await controller.async_notify_alert(alert)
+    state.active_alerts_by_circuit = {"mains": [alerts[1]]}
+    await controller.async_sync_alert_notifications({"mains"})
+
+    first_recoveries = [
+        alert for alert in created if alert.feature == "alert_recovered"
+    ]
+    assert [
+        recovery.features["appliance_key"] for recovery in first_recoveries
+    ] == ["nilm:dishwasher"]
+
     state.active_alerts_by_circuit = {}
     await controller.async_sync_alert_notifications({"mains"})
 
