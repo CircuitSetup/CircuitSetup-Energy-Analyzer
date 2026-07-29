@@ -18,8 +18,14 @@ from ..weekly_digest import (
     completed_week_bounds,
     digest_idempotence_key,
     digest_items_for_coordinator,
+    weekly_digest_rollover_ready,
 )
 from .recommendation_episodes import compact_settings_recommendation_episode_key
+
+_LIFECYCLE_MESSAGES = {
+    "learning_completed": "{appliance} finished learning its normal behavior.",
+    "alert_recovered": "{appliance} returned to its expected behavior.",
+}
 
 
 class NotificationController:
@@ -85,7 +91,9 @@ class NotificationController:
 
     def learning_allows_alert(self, alert: AlertEvidence) -> bool:
         """Return whether learned evidence is ready for this alert."""
-        return not self._circuit_is_learning(alert.circuit_id)
+        return self._is_lifecycle_alert(alert) or not self._circuit_is_learning(
+            alert.circuit_id
+        )
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
         return circuit_is_learning(
@@ -93,21 +101,241 @@ class NotificationController:
             circuit_id,
         )
 
-    async def async_sync_alert_notifications(self) -> None:
+    async def async_sync_alert_notifications(
+        self,
+        evaluated_circuit_ids: set[str] | None = None,
+    ) -> None:
         """Dismiss alert notifications whose evidence is no longer active."""
+        delivery_state = self._delivery_state()
+        stored_summary_ids = delivery_state.get("summary_recovery_alert_ids", ())
+        summary_recovery_ids = {
+            str(alert_id)
+            for alert_id in (
+                stored_summary_ids if isinstance(stored_summary_ids, list) else ()
+            )
+            if isinstance(alert_id, str) and alert_id
+        }
+        for queue_key in ("daily", "weekly"):
+            queue = delivery_state.get(queue_key, ())
+            summary_recovery_ids.update(
+                str(item.get("alert_id") or "")
+                for item in (queue if isinstance(queue, list) else ())
+                if isinstance(item, dict)
+                if item.get("alert_id")
+            )
+        recoverable_ids = (
+            set(self._managed_alert_notification_ids) | summary_recovery_ids
+        )
         if not self._alert_notifications_initialized:
             self._managed_alert_notification_ids.update(
                 notifications.notification_id_for_alert(alert)
                 for alert in getattr(self._coordinator.store_data, "alerts", ())
+                if not self._is_lifecycle_alert(alert)
             )
             self._alert_notifications_initialized = True
+        tracked_alert_ids = (
+            self._managed_alert_notification_ids | summary_recovery_ids
+        )
         active_alert_ids = self._active_alert_ids()
-        for alert_id in sorted(
-            self._managed_alert_notification_ids - active_alert_ids
+        alerts_by_id = {
+            notifications.notification_id_for_alert(alert): alert
+            for alert in getattr(self._coordinator.store_data, "alerts", ())
+        }
+        recovered_by_appliance: dict[
+            tuple[str, str],
+            tuple[str, AlertEvidence],
+        ] = {}
+        for alert_id in sorted(tracked_alert_ids - active_alert_ids):
+            recovered_alert = (
+                alerts_by_id.get(alert_id) if alert_id in recoverable_ids else None
+            )
+            recovered_appliance_key = (
+                self._appliance_key(recovered_alert) if recovered_alert else ""
+            )
+            if (
+                evaluated_circuit_ids is not None
+                and (
+                    recovered_alert is None
+                    or recovered_alert.circuit_id not in evaluated_circuit_ids
+                )
+            ):
+                continue
+            if alert_id in self._managed_alert_notification_ids:
+                await self.async_dismiss_alert_notification(alert_id)
+            else:
+                self.notified_alert_ids.discard(alert_id)
+            if (
+                recovered_alert is not None
+                and not self._coordinator.evidence_actions.alerts_paused(
+                    recovered_alert.circuit_id
+                )
+                and not self._circuit_is_learning(recovered_alert.circuit_id)
+                and self._is_actionable_alert(recovered_alert)
+                and not any(
+                    self._is_actionable_alert(active_alert)
+                    and self._appliance_key(active_alert)
+                    == recovered_appliance_key
+                    for active_alert in getattr(
+                        self._coordinator.state,
+                        "active_alerts_by_circuit",
+                        {},
+                    ).get(recovered_alert.circuit_id, ())
+                )
+            ):
+                recovered_by_appliance[
+                    (recovered_alert.circuit_id, recovered_appliance_key)
+                ] = (
+                    alert_id,
+                    recovered_alert,
+                )
+        for (
+            circuit_id,
+            appliance_key,
+        ), (alert_id, recovered_alert) in sorted(recovered_by_appliance.items()):
+            recovered_features = recovered_alert.features
+            display_name = str(recovered_features.get("display_name") or "")
+            source_type = str(recovered_features.get("source_type") or "")
+            await self.async_notify_lifecycle_update(
+                circuit_id,
+                feature="alert_recovered",
+                message=self._lifecycle_message(
+                    circuit_id,
+                    "alert_recovered",
+                    display_name=display_name,
+                ),
+                episode_key=(
+                    f"alert_recovered:{alert_id}:"
+                    f"{recovered_alert.timestamp.isoformat()}"
+                ),
+                now=self._current_time(),
+                appliance_key=appliance_key,
+                display_name=display_name,
+                source_type=source_type,
+            )
+        if evaluated_circuit_ids is None:
+            self._managed_alert_notification_ids.intersection_update(
+                active_alert_ids
+            )
+            self.notified_alert_ids.intersection_update(active_alert_ids)
+            remaining_summary_ids = summary_recovery_ids & active_alert_ids
+            self._set_summary_recovery_alert_ids(
+                delivery_state,
+                remaining_summary_ids,
+            )
+            return
+        self._managed_alert_notification_ids = {
+            alert_id
+            for alert_id in self._managed_alert_notification_ids
+            if alert_id in active_alert_ids
+            or (alert := alerts_by_id.get(alert_id)) is None
+            or alert.circuit_id not in evaluated_circuit_ids
+        }
+        self.notified_alert_ids = {
+            alert_id
+            for alert_id in self.notified_alert_ids
+            if alert_id in active_alert_ids
+            or (alert := alerts_by_id.get(alert_id)) is None
+            or alert.circuit_id not in evaluated_circuit_ids
+        }
+        self._set_summary_recovery_alert_ids(
+            delivery_state,
+            {
+                alert_id
+                for alert_id in summary_recovery_ids
+                if alert_id in active_alert_ids
+                or (alert := alerts_by_id.get(alert_id)) is None
+                or alert.circuit_id not in evaluated_circuit_ids
+            },
+        )
+
+    async def async_notify_learning_transitions(
+        self,
+        previous_learning: dict[str, bool],
+        now: datetime,
+    ) -> None:
+        """Retain and optionally notify one completion per learning epoch."""
+        for circuit_id, was_learning in previous_learning.items():
+            if not was_learning or self._circuit_is_learning(circuit_id):
+                continue
+            epoch = getattr(
+                self._coordinator.store_data,
+                "learning_started_at_by_circuit",
+                {},
+            ).get(circuit_id, "initial")
+            await self.async_notify_lifecycle_update(
+                circuit_id,
+                feature="learning_completed",
+                message=self._lifecycle_message(
+                    circuit_id,
+                    "learning_completed",
+                ),
+                episode_key=f"learning_completed:{epoch}",
+                now=now,
+            )
+
+    async def async_notify_lifecycle_update(
+        self,
+        circuit_id: str,
+        *,
+        feature: str,
+        message: str,
+        episode_key: str,
+        now: datetime,
+        appliance_key: str | None = None,
+        display_name: str | None = None,
+        source_type: str | None = None,
+    ) -> None:
+        """Retain and deliver one opt-in appliance lifecycle update."""
+        if not self._remember_lifecycle_episode(
+            circuit_id,
+            feature,
+            episode_key,
         ):
-            await self.async_dismiss_alert_notification(alert_id)
-        self._managed_alert_notification_ids.intersection_update(active_alert_ids)
-        self.notified_alert_ids.intersection_update(active_alert_ids)
+            return
+        alert = AlertEvidence(
+            timestamp=now,
+            circuit_id=circuit_id,
+            severity=Severity.INFO,
+            message=message,
+            feature=feature,
+            features={
+                "notification_type": "lifecycle_update",
+                "notification_key": episode_key,
+                "appliance_key": appliance_key or f"circuit:{circuit_id}",
+                **({"display_name": display_name} if display_name else {}),
+                **({"source_type": source_type} if source_type else {}),
+            },
+        )
+        self._coordinator.store_data.alerts.append(alert)
+        self._mark_store_dirty()
+        alerts_paused = getattr(
+            getattr(self._coordinator, "evidence_actions", None),
+            "alerts_paused",
+            None,
+        )
+        if callable(alerts_paused) and alerts_paused(circuit_id):
+            return
+        decision, appliance_key, category = self._delivery_decision(alert)
+        if decision.action == "suppress":
+            return
+        alert_id = notifications.notification_id_for_alert(alert)
+        if decision.action != "send":
+            self._queue_notification(
+                alert_id=alert_id,
+                appliance_key=appliance_key,
+                category=category,
+                action=decision.action,
+                defer_until=decision.defer_until,
+            )
+            return
+        await notifications.async_create_alert_notification(
+            self._coordinator.hass,
+            alert,
+            config=self._coordinator.circuit_registry.config_for_circuit(
+                circuit_id
+            ),
+        )
+        self._record_delivery(appliance_key, category, now)
 
     async def async_dismiss_alert_notification(self, alert_id: str) -> None:
         """Dismiss one managed alert notification by its evidence id."""
@@ -172,7 +400,10 @@ class NotificationController:
                 remaining.append(item)
                 continue
             if (
-                alert_id not in active_alert_ids
+                (
+                    alert_id not in active_alert_ids
+                    and not self._is_lifecycle_alert(alert)
+                )
                 or not self.learning_allows_alert(alert)
             ):
                 continue
@@ -183,7 +414,8 @@ class NotificationController:
                     alert.circuit_id
                 ),
             )
-            self._managed_alert_notification_ids.add(alert_id)
+            if not self._is_lifecycle_alert(alert):
+                self._managed_alert_notification_ids.add(alert_id)
             self._record_delivery(
                 str(item.get("appliance_key") or f"circuit:{alert.circuit_id}"),
                 str(item.get("category") or "unusual_runtime"),
@@ -243,6 +475,12 @@ class NotificationController:
                 state["weekly"] = pending_weekly
                 self._mark_store_dirty()
             return
+        if not weekly_digest_rollover_ready(
+            self._coordinator,
+            now=now,
+            time_zone=time_zone,
+        ):
+            return
         digest_items = digest_items_for_coordinator(
             self._coordinator,
             now=now,
@@ -295,12 +533,13 @@ class NotificationController:
                 ready.append(item)
             elif isinstance(item, dict):
                 pending.append(item)
-        alerts = [
-            alerts_by_id[alert_id]
+        alerts_by_ready_id = {
+            alert_id: alerts_by_id[alert_id]
             for item in ready
             if (alert_id := str(item.get("alert_id") or "")) in alerts_by_id
             and self.learning_allows_alert(alerts_by_id[alert_id])
-        ]
+        }
+        alerts = list(alerts_by_ready_id.values())
         if alerts:
             await notifications.async_create_daily_summary_notification(
                 self._coordinator.hass,
@@ -468,9 +707,13 @@ class NotificationController:
         )
         notification_type = str(features.get("notification_type") or "")
         category = (
-            "finished_running"
-            if "finished" in notification_type or "finished" in alert.feature
-            else alert_notification_category(alert.feature)
+            "lifecycle_update"
+            if notification_type == "lifecycle_update"
+            else (
+                "finished_running"
+                if "finished" in notification_type or "finished" in alert.feature
+                else alert_notification_category(alert.feature)
+            )
         )
         preferences_by_appliance = getattr(
             self._coordinator.store_data,
@@ -518,6 +761,66 @@ class NotificationController:
             store_data.notification_delivery_state = state
         return state
 
+    def _remember_lifecycle_episode(
+        self,
+        circuit_id: str,
+        feature: str,
+        episode_key: str,
+    ) -> bool:
+        state = self._delivery_state()
+        episodes = state.setdefault("lifecycle_episodes", [])
+        if not isinstance(episodes, list):
+            episodes = []
+            state["lifecycle_episodes"] = episodes
+        stored_key = f"{circuit_id}|{episode_key}"
+        if stored_key in episodes:
+            return False
+        if feature == "learning_completed":
+            prefix = f"{circuit_id}|learning_completed:"
+            episodes[:] = [
+                item
+                for item in episodes
+                if not str(item).startswith(prefix)
+            ]
+        episodes.append(stored_key)
+        del episodes[:-100]
+        return True
+
+    @staticmethod
+    def _is_lifecycle_alert(alert: AlertEvidence) -> bool:
+        return alert.features.get("notification_type") == "lifecycle_update"
+
+    @staticmethod
+    def _is_actionable_alert(alert: AlertEvidence) -> bool:
+        return alert.severity in {Severity.WARNING, Severity.ERROR}
+
+    @staticmethod
+    def _appliance_key(alert: AlertEvidence) -> str:
+        return str(
+            alert.features.get("appliance_key")
+            or f"circuit:{alert.circuit_id}"
+        )
+
+    def _lifecycle_message(
+        self,
+        circuit_id: str,
+        feature: str,
+        *,
+        display_name: str = "",
+    ) -> str:
+        if not display_name:
+            registry = getattr(self._coordinator, "circuit_registry", None)
+            config_for_circuit = getattr(registry, "config_for_circuit", None)
+            config = (
+                config_for_circuit(circuit_id)
+                if callable(config_for_circuit)
+                else None
+            )
+            display_name = str(getattr(config, "name", "") or circuit_id)
+        return _LIFECYCLE_MESSAGES[feature].format(
+            appliance=display_name
+        )
+
     def _queue_notification(
         self,
         *,
@@ -547,6 +850,25 @@ class NotificationController:
             }
         )
         del queue[:-100]
+        if action in {"queue_daily", "queue_weekly"} and category != "lifecycle_update":
+            recovery_ids = state.setdefault("summary_recovery_alert_ids", [])
+            if not isinstance(recovery_ids, list):
+                recovery_ids = []
+                state["summary_recovery_alert_ids"] = recovery_ids
+            if alert_id not in recovery_ids:
+                recovery_ids.append(alert_id)
+                del recovery_ids[:-100]
+        self._mark_store_dirty()
+
+    def _set_summary_recovery_alert_ids(
+        self,
+        state: dict[str, Any],
+        alert_ids: set[str],
+    ) -> None:
+        retained = sorted(alert_ids)[-100:]
+        if state.get("summary_recovery_alert_ids") == retained:
+            return
+        state["summary_recovery_alert_ids"] = retained
         self._mark_store_dirty()
 
     def _record_delivery(
@@ -584,15 +906,23 @@ class NotificationController:
         call = getattr(services, "async_call", None)
         if not callable(call):
             return
+        counts = [
+            (len(digest.biggest_changes), "meaningful changes"),
+            (len(digest.top_energy_users), "top energy users"),
+            (len(digest.observed_alerts), "observed alerts"),
+            (len(digest.unresolved_items), "unresolved items"),
+            (len(digest.nilm_review_items), "NILM review items"),
+            (len(digest.load_shift_opportunities), "load-shifting opportunities"),
+        ]
+        message = "; ".join(
+            f"{count} {label}" for count, label in counts if count
+        )
         await call(
             "notify",
             service.split(".", 1)[1],
             {
                 "title": "Weekly Appliance Digest",
-                "message": (
-                    f"{len(digest.biggest_changes)} meaningful changes and "
-                    f"{len(digest.unresolved_items)} unresolved items."
-                ),
+                "message": f"{message}." if message else "No digest items.",
             },
         )
 
@@ -660,12 +990,11 @@ def _items_with_weekly_queue(
         if not appliance_key:
             continue
         category = str(queued.get("category") or "")
-        status = (
-            "nilm_review_needed" if category.startswith("nilm") else "unresolved"
-        )
+        status = "nilm_review_needed" if category.startswith("nilm") else "observed"
         item = by_key.get(appliance_key)
         if item is not None:
-            item["status"] = status
+            if str(item.get("status") or "normal") == "normal":
+                item["status"] = status
             continue
         item = {
             "appliance_key": appliance_key,
@@ -674,6 +1003,7 @@ def _items_with_weekly_queue(
             "normal_energy_kwh": 0.0,
             "confidence": 1.0,
             "status": status,
+            "comparable_energy": False,
         }
         combined.append(item)
         by_key[appliance_key] = item

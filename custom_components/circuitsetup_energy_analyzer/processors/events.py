@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
+from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
+from ..alert_feedback import mapping_datetime
 from ..events import CircuitEventDetector
-from ..models import CircuitConfig
+from ..models import CircuitConfig, CircuitEvent, EventType
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_snapshot_to_dict,
@@ -78,7 +81,20 @@ class CircuitEventProcessor:
             )
             self.detectors[circuit_config.circuit_id] = detector
             self._resolved_by_circuit[circuit_config.circuit_id] = key
-        events = detector.process(sample)
+        maintenance = context.store_data.maintenance_by_circuit.get(
+            circuit_config.circuit_id,
+            {},
+        )
+        events = [
+            replace(
+                event,
+                features={
+                    **event.features,
+                    "baseline_eligible": _baseline_eligible(event, maintenance),
+                },
+            )
+            for event in detector.process(sample)
+        ]
         snapshot = detector.last_snapshot
         state_updates: list[StateUpdate] = []
         if snapshot is not None:
@@ -102,4 +118,29 @@ class CircuitEventProcessor:
             state_updates=state_updates,
             store_dirty=bool(events),
         )
+
+
+def _baseline_eligible(event: CircuitEvent, maintenance: Any) -> bool:
+    if not isinstance(maintenance, Mapping):
+        return True
+    if maintenance.get("active") is True:
+        return False
+    if event.event_type is not EventType.STOP:
+        return True
+
+    started_at = mapping_datetime(maintenance.get("started_at"))
+    ended_at = mapping_datetime(maintenance.get("ended_at"))
+    if started_at is None or ended_at is None:
+        return True
+
+    event_end = event.timestamp
+    if started_at.tzinfo is None:
+        event_end = event_end.replace(tzinfo=None)
+    elif event_end.tzinfo is None:
+        started_at = started_at.replace(tzinfo=None)
+        ended_at = ended_at.replace(tzinfo=None)
+    event_start = event_end - timedelta(
+        seconds=float(event.features.get("run_duration_s", 0.0))
+    )
+    return not (event_start < ended_at and event_end > started_at)
 

@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
+from .state import circuit_is_learning
+
 
 @dataclass(frozen=True, slots=True)
 class DigestItem:
@@ -26,6 +28,7 @@ class WeeklyApplianceDigest:
     week_end: date
     biggest_changes: tuple[DigestItem, ...]
     top_energy_users: tuple[DigestItem, ...]
+    observed_alerts: tuple[DigestItem, ...]
     unresolved_items: tuple[DigestItem, ...]
     nilm_review_items: tuple[DigestItem, ...]
     load_shift_opportunities: tuple[DigestItem, ...]
@@ -36,6 +39,7 @@ class WeeklyApplianceDigest:
             "week_end": self.week_end.isoformat(),
             "biggest_changes": [item.as_dict() for item in self.biggest_changes],
             "top_energy_users": [item.as_dict() for item in self.top_energy_users],
+            "observed_alerts": [item.as_dict() for item in self.observed_alerts],
             "unresolved_items": [item.as_dict() for item in self.unresolved_items],
             "nilm_review_items": [item.as_dict() for item in self.nilm_review_items],
             "load_shift_opportunities": [
@@ -60,12 +64,18 @@ def build_weekly_digest(
         for raw in raw_items
         if isinstance(raw, Mapping) and raw.get("expected_context") is True
     }
+    comparable_keys = {
+        str(raw.get("appliance_key") or "")
+        for raw in raw_items
+        if isinstance(raw, Mapping) and raw.get("comparable_energy") is not False
+    }
     changes = tuple(
         sorted(
             (
                 item
                 for item in active
                 if item.appliance_key not in expected_keys
+                and item.appliance_key in comparable_keys
                 and item.normal_energy_kwh > 0.0
                 and item.change_ratio != 0.0
             ),
@@ -81,8 +91,17 @@ def build_weekly_digest(
         week_end=week_end,
         biggest_changes=changes,
         top_energy_users=tuple(
-            sorted(active, key=lambda item: item.energy_kwh, reverse=True)[:5]
+            sorted(
+                (
+                    item
+                    for item in active
+                    if item.appliance_key in comparable_keys
+                ),
+                key=lambda item: item.energy_kwh,
+                reverse=True,
+            )[:5]
         ),
+        observed_alerts=tuple(item for item in active if item.status == "observed")[:5],
         unresolved_items=tuple(item for item in active if item.status == "unresolved")[
             :5
         ],
@@ -104,6 +123,46 @@ def completed_week_bounds(now: datetime, time_zone: tzinfo) -> tuple[date, date]
     local_date = now.astimezone(time_zone).date()
     week_end = local_date - timedelta(days=local_date.weekday() + 1)
     return week_end - timedelta(days=6), week_end
+
+
+def weekly_digest_rollover_ready(
+    coordinator: Any,
+    *,
+    now: datetime,
+    time_zone: tzinfo,
+) -> bool:
+    """Return whether every mature direct circuit has processed week rollover."""
+    _, week_end = completed_week_bounds(now, time_zone)
+    if now.astimezone(time_zone).date() != week_end + timedelta(days=1):
+        return True
+    state = getattr(coordinator, "state", None)
+    energy_history = getattr(
+        getattr(coordinator, "store_data", None),
+        "energy_usage_by_circuit",
+        {},
+    )
+    for config in getattr(coordinator, "circuit_configs", ()):
+        circuit_id = str(getattr(config, "circuit_id", "") or "")
+        mode = str(getattr(getattr(config, "mode", ""), "value", ""))
+        history = (
+            energy_history.get(circuit_id, {})
+            if isinstance(energy_history, Mapping)
+            else {}
+        )
+        if (
+            circuit_id
+            and mode != "mains_nilm"
+            and not circuit_is_learning(state, circuit_id)
+            and isinstance(history, Mapping)
+            and _date_between(
+                history.get("last_sample_at"),
+                week_end,
+                week_end,
+                time_zone,
+            )
+        ):
+            return False
+    return True
 
 
 def digest_items_for_coordinator(
@@ -133,23 +192,82 @@ def digest_items_for_coordinator(
             else {}
         )
         days = history.get("days", ()) if isinstance(history, Mapping) else ()
-        week_values = _daily_values_between(days, week_start, week_end)
-        prior_values = _daily_values_between(days, prior_start, prior_end)
-        progress = learning.get(circuit_id, {}) if isinstance(learning, Mapping) else {}
-        items.append(
-            {
-                "appliance_key": f"circuit:{circuit_id}",
-                "display_name": str(getattr(config, "name", "") or circuit_id),
-                "energy_kwh": sum(week_values),
-                "normal_energy_kwh": sum(prior_values),
-                "confidence": 1.0
-                if isinstance(progress, Mapping) and progress.get("alert_ready")
-                else 0.6,
-                "status": "unresolved"
-                if isinstance(active_alerts, Mapping) and active_alerts.get(circuit_id)
-                else "normal",
-            }
+        week_values = _complete_daily_values_between(days, week_start, week_end)
+        prior_values = _complete_daily_values_between(days, prior_start, prior_end)
+        week_dates = {day.isoformat() for day in week_values}
+        if circuit_is_learning(state, circuit_id):
+            continue
+        has_active_alert = bool(
+            isinstance(active_alerts, Mapping)
+            and active_alerts.get(circuit_id)
         )
+        comparable_energy = len(week_values) == 7 and len(prior_values) == 7
+        if not comparable_energy and not has_active_alert:
+            continue
+        progress = learning.get(circuit_id, {}) if isinstance(learning, Mapping) else {}
+        item = {
+            "appliance_key": f"circuit:{circuit_id}",
+            "display_name": str(getattr(config, "name", "") or circuit_id),
+            "energy_kwh": sum(week_values.values()) if comparable_energy else 0.0,
+            "normal_energy_kwh": (
+                sum(prior_values.values()) if comparable_energy else 0.0
+            ),
+            "confidence": 1.0
+            if isinstance(progress, Mapping) and progress.get("alert_ready")
+            else 0.6,
+            "status": "unresolved" if has_active_alert else "normal",
+            "expected_context": any(
+                isinstance(day, Mapping)
+                and str(day.get("date") or "") in week_dates
+                and day.get("expected_context") is True
+                for day in (days if isinstance(days, list | tuple) else ())
+            ),
+        }
+        if not comparable_energy:
+            item["comparable_energy"] = False
+        items.append(item)
+    items_by_key = {item["appliance_key"]: item for item in items}
+    load_shift_evidence = getattr(state, "solar_load_shift_evidence_by_circuit", {})
+    candidate_budget = 100
+    if isinstance(load_shift_evidence, Mapping):
+        for index, evidence in enumerate(load_shift_evidence.values()):
+            if index >= 100 or candidate_budget == 0:
+                break
+            if (
+                not isinstance(evidence, Mapping)
+                or evidence.get("status") != "surplus_candidate"
+            ):
+                continue
+            candidates = evidence.get("candidate_loads")
+            for candidate in (
+                candidates[:candidate_budget] if isinstance(candidates, list) else ()
+            ):
+                candidate_budget -= 1
+                if (
+                    not isinstance(candidate, Mapping)
+                    or candidate.get("state") != "idle"
+                ):
+                    continue
+                circuit_id = str(candidate.get("circuit_id") or "").strip()
+                if not circuit_id:
+                    continue
+                appliance_key = f"circuit:{circuit_id}"
+                item = items_by_key.get(appliance_key)
+                if item is not None:
+                    if item["status"] == "normal":
+                        item["status"] = "load_shift_opportunity"
+                    continue
+                item = {
+                    "appliance_key": appliance_key,
+                    "display_name": str(candidate.get("name") or circuit_id),
+                    "energy_kwh": 0.0,
+                    "normal_energy_kwh": 0.0,
+                    "confidence": 1.0,
+                    "status": "load_shift_opportunity",
+                    "comparable_energy": False,
+                }
+                items.append(item)
+                items_by_key[appliance_key] = item
     assignments = getattr(store_data, "nilm_appliance_assignments_by_circuit", {})
     session_history = getattr(store_data, "nilm_session_history_by_circuit", {})
     if isinstance(assignments, Mapping):
@@ -197,8 +315,69 @@ def digest_items_for_coordinator(
                         if str(assignment.get("lifecycle_state") or "")
                         not in {"validated", "confirmed"}
                         else "normal",
+                        "comparable_energy": False,
                     }
                 )
+    items_by_key = {item["appliance_key"]: item for item in items}
+    retained_alerts = getattr(store_data, "alerts", ())
+    alert_candidates = (
+        retained_alerts
+        if isinstance(retained_alerts, list | tuple) and len(retained_alerts) <= 200
+        else (
+            (*retained_alerts[:100], *retained_alerts[-100:])
+            if isinstance(retained_alerts, list | tuple)
+            else ()
+        )
+    )
+    for alert in sorted(
+        alert_candidates,
+        key=_alert_timestamp,
+        reverse=True,
+    )[:100]:
+        severity = getattr(alert, "severity", "")
+        if (
+            str(getattr(severity, "value", severity)) not in {"warning", "error"}
+            or getattr(alert, "feedback_status", None) == "expected"
+            or not _date_between(
+                getattr(alert, "timestamp", None),
+                week_start,
+                week_end,
+                time_zone,
+            )
+        ):
+            continue
+        circuit_id = str(getattr(alert, "circuit_id", "") or "")
+        if not circuit_id or circuit_is_learning(state, circuit_id):
+            continue
+        features = getattr(alert, "features", {})
+        appliance_key = str(
+            features.get("appliance_key") or f"circuit:{circuit_id}"
+        )
+        unresolved = alert in (
+            active_alerts.get(circuit_id, ())
+            if isinstance(active_alerts, Mapping)
+            else ()
+        )
+        status = "unresolved" if unresolved else "observed"
+        item = items_by_key.get(appliance_key)
+        if item is not None:
+            if status == "unresolved" or item.get("status") == "normal":
+                item["status"] = status
+            continue
+        item = {
+            "appliance_key": appliance_key,
+            "display_name": str(
+                features.get("display_name")
+                or appliance_key.split(":", 1)[-1].replace("_", " ").title()
+            ),
+            "energy_kwh": 0.0,
+            "normal_energy_kwh": 0.0,
+            "confidence": 1.0,
+            "status": status,
+            "comparable_energy": False,
+        }
+        items.append(item)
+        items_by_key[appliance_key] = item
     return items[:100]
 
 
@@ -227,12 +406,17 @@ def _number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _daily_values_between(
+def _alert_timestamp(alert: Any) -> float:
+    timestamp = getattr(alert, "timestamp", None)
+    return timestamp.timestamp() if isinstance(timestamp, datetime) else float("-inf")
+
+
+def _complete_daily_values_between(
     days: Any,
     start: date,
     end: date,
-) -> list[float]:
-    values: list[float] = []
+) -> dict[date, float]:
+    values: dict[date, float] = {}
     for item in days if isinstance(days, list | tuple) else ():
         if not isinstance(item, Mapping):
             continue
@@ -240,8 +424,12 @@ def _daily_values_between(
             item_date = date.fromisoformat(str(item.get("date") or ""))
         except ValueError:
             continue
-        if start <= item_date <= end:
-            values.append(_number(item.get("usage_kwh")))
+        if (
+            start <= item_date <= end
+            and item.get("complete") is True
+            and item.get("baseline_eligible") is not False
+        ):
+            values[item_date] = _number(item.get("usage_kwh"))
     return values
 
 

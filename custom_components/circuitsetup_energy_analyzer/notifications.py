@@ -22,6 +22,9 @@ POWER_QUALITY_ALERT_FEATURES = frozenset(
         "resistive_load_became_reactive",
     }
 )
+APPLIANCE_HEALTH_ALERT_FEATURES = frozenset(
+    {"efficiency_degradation", "repeated_short_cycle"}
+)
 _ALERT_VALUE_FORMATS = {
     "activity_inactive_too_long": ("minutes", "number"),
     "activity_left_on": ("minutes", "number"),
@@ -40,6 +43,11 @@ _ALERT_VALUE_FORMATS = {
     "demand_limit": ("power", "number"),
     "demand_monthly_peak": ("power", "number"),
     "dual_phase_leg_imbalance": ("percent", "percentage"),
+    "energy_per_runtime_hour": ("energy_per_hour", "number"),
+    "energy_per_completed_cycle": ("energy_per_cycle", "number"),
+    "average_cycle_duration": ("seconds", "number"),
+    "starts_per_runtime_hour": ("starts_per_hour", "number"),
+    "session_duration_seconds": ("seconds", "number"),
     "nilm_appliance_unusual_energy": ("energy", "number"),
     "nilm_appliance_confidence": ("percent", "percentage"),
     "nilm_appliance_unusual_runtime": ("minutes", "number"),
@@ -104,15 +112,35 @@ def alert_notification_message(
     display_name = nilm_display_name or (
         config.name if config is not None and config.name else alert.circuit_id
     )
+    if alert.features.get("notification_type") == "lifecycle_update":
+        return "\n".join(
+            (
+                f"**{display_name}**",
+                "",
+                alert.message,
+                "",
+                f"[{_notification_text('alert', 'open_appliance_evidence')}]"
+                f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+            )
+        )
     lines = [f"**{display_name}**", "", alert.message]
     lines.extend(_power_quality_notice_lines(alert))
     lines.extend(_nilm_source_lines(alert))
+    lines.extend(_appliance_health_notice_lines(alert))
+    observed_label = _notification_text(
+        "alert",
+        (
+            "recent_value"
+            if alert.feature in APPLIANCE_HEALTH_ALERT_FEATURES
+            else "observed_value"
+        ),
+    )
     lines.extend(
         [
             "",
             f"- {
                 _notification_value_label(
-                    alert, _notification_text('alert', 'observed_value')
+                    alert, observed_label
                 )
             }: "
             f"{_format_notification_value(alert, alert.observed_value)}",
@@ -147,6 +175,24 @@ def _power_quality_notice_lines(alert: AlertEvidence) -> list[str]:
         "",
         _notification_text("alert", "power_quality_notice"),
     ]
+
+
+def _appliance_health_notice_lines(alert: AlertEvidence) -> list[str]:
+    if alert.feature not in APPLIANCE_HEALTH_ALERT_FEATURES:
+        return []
+    lines = [""]
+    confidence = _alert_confidence(alert)
+    if confidence is not None:
+        lines.append(
+            _notification_text_format(
+                "alert",
+                "confidence_line",
+                confidence=round(confidence * 100),
+            )
+        )
+    if "not a component diagnosis or safety control" not in alert.message.lower():
+        lines.append(_notification_text("alert", "health_notice"))
+    return lines
 
 
 def _notification_value_label(alert: AlertEvidence, label: str) -> str:
@@ -204,6 +250,10 @@ def _is_nilm_estimated_alert(alert: AlertEvidence) -> bool:
 
 
 def _nilm_confidence(alert: AlertEvidence) -> float | None:
+    return _alert_confidence(alert)
+
+
+def _alert_confidence(alert: AlertEvidence) -> float | None:
     for key in ("confidence", "nilm_confidence", "assignment_confidence"):
         raw = alert.features.get(key)
         if raw is None:
@@ -317,6 +367,10 @@ async def async_create_weekly_digest_notification(
         return
     biggest = list(getattr(digest, "biggest_changes", ()))
     top_energy = list(getattr(digest, "top_energy_users", ()))
+    observed = list(getattr(digest, "observed_alerts", ()))
+    unresolved = list(getattr(digest, "unresolved_items", ()))
+    nilm_review = list(getattr(digest, "nilm_review_items", ()))
+    load_shift = list(getattr(digest, "load_shift_opportunities", ()))
     lines = [
         _notification_text_format(
             "weekly_digest",
@@ -353,6 +407,30 @@ async def async_create_weekly_digest_notification(
             or [_notification_text("weekly_digest", "no_energy_data")]
         ),
     ]
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "observed_alerts"),
+            observed,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "unresolved_items"),
+            unresolved,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "nilm_review"),
+            nilm_review,
+        )
+    )
+    lines.extend(
+        _digest_section_lines(
+            _notification_text("weekly_digest", "load_shift_opportunities"),
+            load_shift,
+        )
+    )
     try:
         create(
             hass,
@@ -362,6 +440,21 @@ async def async_create_weekly_digest_notification(
         )
     except (AttributeError, TypeError):
         return
+
+
+def _digest_section_lines(
+    title: str,
+    items: list[Any],
+    *,
+    limit: int = 5,
+) -> list[str]:
+    if not items:
+        return []
+    return [
+        "",
+        f"**{title}**",
+        *[f"- {item.display_name}" for item in items[:limit]],
+    ]
 
 
 async def async_create_daily_summary_notification(
@@ -424,6 +517,8 @@ def _settings_recommendations_options_path(entry_id: str) -> str:
 
 
 def _comparison_value_label(alert: AlertEvidence) -> str:
+    if alert.feature in APPLIANCE_HEALTH_ALERT_FEATURES:
+        return _notification_text("alert", "reference_value")
     if alert.feature in {"demand_limit", "demand_monthly_peak"}:
         return _notification_text("alert", "comparison_value")
     return _notification_text("alert", "baseline_value")

@@ -318,11 +318,31 @@ class EnvironmentalContextManager:
             CONF_RAIN_INTENSITY_ENTITY
         )
         rain_active = coordinator.context_builder.binary_entity_active(rain_entity)
-        rain_intensity = coordinator.context_builder.numeric_entity_value(
-            rain_intensity_entity
+        rain_reading = coordinator.context_builder.precipitation_reading_for_entity(
+            rain_intensity_entity or rain_entity
         )
-        rain_intensity_unit = coordinator.context_builder.entity_unit_of_measurement(
-            rain_intensity_entity
+        rain_intensity = (
+            float(rain_reading["value"]) if rain_reading is not None else None
+        )
+        rain_intensity_unit = (
+            str(rain_reading["unit"]) if rain_reading and rain_reading["unit"] else None
+        )
+        rain_intensity_source = (
+            rain_intensity_entity or rain_entity if rain_reading is not None else ""
+        )
+        outdoor_entity = coordinator.context_builder.outdoor_temperature_entity()
+        outdoor_temperature_reading = (
+            coordinator.context_builder.temperature_reading_for_entity(outdoor_entity)
+            if outdoor_entity
+            else None
+        )
+        outdoor_temperature = (
+            float(outdoor_temperature_reading["temperature_f"])
+            if outdoor_temperature_reading is not None
+            else None
+        )
+        outdoor_humidity = coordinator.context_builder.humidity_percent_for_entity(
+            outdoor_entity
         )
         response_window_minutes = max(
             int(
@@ -342,7 +362,7 @@ class EnvironmentalContextManager:
             config.circuit_id,
             now,
             rain_entity,
-            rain_intensity_entity,
+            rain_intensity_source,
             rain_active,
             rain_intensity,
             rain_intensity_unit,
@@ -365,6 +385,8 @@ class EnvironmentalContextManager:
                 compressor_duty_cycle_percent=compressor_context[
                     "duty_cycle_percent"
                 ],
+                outdoor_temperature_f=outdoor_temperature,
+                outdoor_humidity_percent=outdoor_humidity,
                 sensitivity_delta_threshold_pct=float(
                     advanced_settings.get(
                         CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
@@ -375,9 +397,15 @@ class EnvironmentalContextManager:
         )
         evidence["rain_sensor_entity"] = rain_entity
         evidence["rain_sensor_active"] = rain_active
-        evidence["rain_intensity_entity"] = rain_intensity_entity
+        evidence["rain_intensity_entity"] = rain_intensity_source
         evidence["rain_intensity_per_hour"] = rain_intensity
         evidence["rain_intensity_unit"] = rain_intensity_unit
+        evidence["outdoor_temperature_source_entity"] = (
+            outdoor_entity if outdoor_temperature is not None else ""
+        )
+        evidence["outdoor_humidity_source_entity"] = (
+            outdoor_entity if outdoor_humidity is not None else ""
+        )
         evidence["rain_response_window_minutes"] = response_window_minutes
         evidence["rain_response_active"] = rain_response_active
         evidence["rain_last_active_at"] = _isoformat_or_none(
@@ -719,6 +747,10 @@ class EnvironmentalContextManager:
             "rain_intensity_mm_per_hour",
             "rain_intensity_bin",
             "rain_context_issues",
+            "outdoor_temperature_f",
+            "temperature_bin",
+            "outdoor_humidity_bin",
+            "outdoor_humidity_percent",
         ):
             if key in rain_evidence:
                 sample[key] = rain_evidence[key]

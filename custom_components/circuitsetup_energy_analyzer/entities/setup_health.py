@@ -77,6 +77,8 @@ _SETUP_HEALTH_ISSUE_OPTION_STEPS = {
     "stale_source": "sources",
     "missing_source_sensor": "assign",
     "invalid_source_state": "sources",
+    "invalid_source_sensor": "sources",
+    "invalid_source_timestamp": "sources",
     "source_data_quality": "assign",
     "utility_comparison_missing_utility_source": "utility",
     "utility_comparison_missing_measured_source": "utility",
@@ -286,6 +288,8 @@ def _setup_health_checklist(
             "missing_source_sensor",
             "stale_source",
             "invalid_source_state",
+            "invalid_source_sensor",
+            "invalid_source_timestamp",
             "source_data_quality",
         },
     )
@@ -869,7 +873,8 @@ def _setup_health_data_quality_issue(
             else []
         )
     ]
-    issue_text = " ".join([data_quality, *quality_issues]).lower()
+    issue_details = [data_quality, *quality_issues]
+    issue_text = " ".join(issue_details).lower()
 
     if "missing_source_entities" in issue_text:
         return _setup_health_issue(
@@ -892,6 +897,41 @@ def _setup_health_data_quality_issue(
         )
     if checklist is None or checklist.get("sample_observed") is False:
         return None
+    if "naive_timestamp" in issue_text or "future_timestamp" in issue_text:
+        return _setup_health_issue(
+            "Fix source sensor timestamps",
+            f"Fix source sensor timestamps for {circuit.name}",
+            circuit,
+            "One or more selected source sensors report an invalid update timestamp.",
+            issue="invalid_source_timestamp",
+            source_entities=_source_entities_mentioned_in_issues(
+                circuit,
+                _matching_quality_issue_text(
+                    issue_details,
+                    {"naive_timestamp", "future_timestamp"},
+                ),
+            ),
+        )
+    if (
+        checklist.get("numeric_states_valid") is False
+        or "non_numeric" in issue_text
+        or "non_finite" in issue_text
+        or "unavailable" in issue_text
+    ):
+        return _setup_health_issue(
+            "Fix unavailable or invalid source data",
+            f"Fix unavailable or invalid source data for {circuit.name}",
+            circuit,
+            "One or more selected source sensors are unavailable or invalid.",
+            issue="invalid_source_sensor",
+            source_entities=_source_entities_mentioned_in_issues(
+                circuit,
+                _matching_quality_issue_text(
+                    issue_details,
+                    {"non_numeric", "non_finite", "unavailable"},
+                ),
+            ),
+        )
     if checklist.get("source_data_fresh") is False or "stale" in issue_text:
         return _setup_health_issue(
             "Fix stale source sensor",
@@ -901,7 +941,7 @@ def _setup_health_data_quality_issue(
             issue="stale_source",
             source_entities=_source_entities_mentioned_in_issues(
                 circuit,
-                issue_text,
+                _matching_quality_issue_text(issue_details, {"stale"}),
             ),
         )
     if checklist.get("required_sensors_present") is False or "missing" in issue_text:
@@ -911,18 +951,6 @@ def _setup_health_data_quality_issue(
             circuit,
             "A configured circuit is missing a required source sensor.",
             issue="missing_source_sensor",
-        )
-    if (
-        checklist.get("numeric_states_valid") is False
-        or "non_numeric" in issue_text
-        or "unavailable" in issue_text
-    ):
-        return _setup_health_issue(
-            "Fix stale source sensor",
-            f"Fix unavailable or non-numeric source data for {circuit.name}",
-            circuit,
-            "One or more selected source sensors are unavailable or non-numeric.",
-            issue="invalid_source_state",
         )
     if quality_issues:
         return _setup_health_issue(
@@ -1230,6 +1258,17 @@ def _source_entities_mentioned_in_issues(circuit: Any, issue_text: str) -> list[
         entity_id for entity_id in source_entities if entity_id.lower() in issue_text
     ]
     return mentioned or source_entities
+
+
+def _matching_quality_issue_text(
+    issues: Iterable[str],
+    markers: set[str],
+) -> str:
+    return " ".join(
+        str(issue).lower()
+        for issue in issues
+        if any(marker in str(issue).lower() for marker in markers)
+    )
 
 
 def _source_entities(circuit: Any) -> list[str]:

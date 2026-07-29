@@ -144,6 +144,28 @@ def test_alert_graph_entities_prefer_feature_related_sources() -> None:
     )
 
 
+def test_appliance_health_graph_entities_keep_all_relevant_phases() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(
+        _alert("efficiency_degradation"),
+        _config(),
+    ) == (
+        "sensor.hvac_energy",
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+    assert alert_graph_entities(
+        _alert("repeated_short_cycle"),
+        _config(),
+    ) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+
+
 def test_alert_graph_entities_prefers_relationship_metrics_for_split_phase_change() -> (
     None
 ):

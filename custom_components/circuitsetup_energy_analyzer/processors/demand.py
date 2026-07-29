@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..alerting import Observation
@@ -51,6 +51,7 @@ class DemandProcessor:
         self._settings_for_config = settings_for_config
         self._alert_policy_for_circuit = alert_policy_for_circuit
         self._retention_days_for_circuit = retention_days_for_circuit
+        self._transient_samples_by_circuit: dict[str, list[dict[str, Any]]] = {}
 
     def process(
         self,
@@ -60,6 +61,7 @@ class DemandProcessor:
     ) -> FeatureResult:
         """Record demand state and return configured demand alerts."""
         circuit_id = circuit_config.circuit_id
+        maintenance = context.store_data.maintenance_by_circuit.get(circuit_id)
         result = record_demand_sample(
             context.store_data.demand_by_circuit.setdefault(circuit_id, {}),
             circuit_id=circuit_id,
@@ -68,6 +70,15 @@ class DemandProcessor:
             settings=self._settings_for_config(circuit_config, circuit_id),
             retention_days=self._retention_days_for_circuit(circuit_id),
             time_zone=context.time_zone,
+            baseline_eligible=not (
+                isinstance(maintenance, Mapping)
+                and maintenance.get("active") is True
+            ),
+            transient_samples=self._transient_samples_by_circuit.setdefault(
+                circuit_id,
+                [],
+            ),
+            maintenance=maintenance,
         )
         if result is None:
             return FeatureResult()
@@ -310,8 +321,10 @@ def _contextual_demand_comparison(
     )
 
     sample_recorded = False
-    if result.peak_demand_w > 0.0 and context_allows_baseline_learning(
-        context_key
+    if (
+        result.window_baseline_eligible
+        and result.peak_demand_w > 0.0
+        and context_allows_baseline_learning(context_key)
     ):
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_config.circuit_id,

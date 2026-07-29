@@ -15,6 +15,12 @@ _REPAIR_FIXES: dict[str, str] = {
     "missing_required_sensor": (
         "Review circuit assignments and replace the missing source sensor."
     ),
+    "invalid_source_sensor": (
+        "Restore valid numeric data from the unavailable or invalid source sensor."
+    ),
+    "invalid_source_timestamp": (
+        "Correct the source sensor update timestamp before using it for analysis."
+    ),
     "phase_mismatch": "Review the selected split-phase channels and CT orientation.",
     "stale_source_sensor": "Restore updates from the stale source sensor.",
     "missing_energy_source": "Add a cumulative kWh source for this circuit.",

@@ -93,8 +93,13 @@ class StateReducer:
     ) -> AppliedFeatureResult:
         """Apply processor output to analyzer state and persistent store."""
         stored_alerts = [alert_feedback(alert) for alert in result.alerts]
+        preserved_alerts = [
+            alert_feedback(alert) for alert in result.preserved_alerts
+        ]
         active_alerts = [
-            alert for alert in stored_alerts if alert.feedback_status != "expected"
+            alert
+            for alert in (*stored_alerts, *preserved_alerts)
+            if alert.feedback_status != "expected"
         ]
         if result.events:
             store_data.events.extend(result.events)
@@ -178,6 +183,8 @@ class StateReducer:
         state.anomaly_score_by_circuit[circuit_id] = 0.0
         state.learning_by_circuit[circuit_id] = True
         self.clear_power_quality_state(state, circuit_id)
+        state.appliance_health_status_by_circuit.pop(circuit_id, None)
+        state.appliance_health_evidence_by_circuit.pop(circuit_id, None)
 
     def refresh_alert_evidence_state(
         self,

@@ -22,6 +22,7 @@ class ProcessingPipeline:
         energy_usage_processor: Any,
         energy_goal_processor: Any,
         run_cycle_processor: Any,
+        appliance_health_processor: Any,
         activity_alert_processor: Any,
         billing_cycle_processor: Any,
         cost_processor: Any,
@@ -42,6 +43,7 @@ class ProcessingPipeline:
         self._energy_usage_processor = energy_usage_processor
         self._energy_goal_processor = energy_goal_processor
         self._run_cycle_processor = run_cycle_processor
+        self._appliance_health_processor = appliance_health_processor
         self._activity_alert_processor = activity_alert_processor
         self._billing_cycle_processor = billing_cycle_processor
         self._cost_processor = cost_processor
@@ -123,6 +125,14 @@ class ProcessingPipeline:
         cycle_result = self._run_cycle_processor.process(sample, config, context)
         _, cycle_alerts = await self._async_apply_feature_result(cycle_result)
         alerts.extend(cycle_alerts)
+
+        health_result = self._appliance_health_processor.process(
+            sample,
+            config,
+            context,
+        )
+        _, health_alerts = await self._async_apply_feature_result(health_result)
+        alerts.extend(health_alerts)
 
         activity_result = self._activity_alert_processor.process(
             sample,

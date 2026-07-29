@@ -40,7 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 RETENTION_WINDOWS: dict[RetentionMode, timedelta] = {
-    RetentionMode.LIGHTWEIGHT: timedelta(days=14),
+    RetentionMode.LIGHTWEIGHT: timedelta(days=18),
     RetentionMode.STANDARD: timedelta(days=45),
     RetentionMode.DIAGNOSTIC: timedelta(days=180),
 }

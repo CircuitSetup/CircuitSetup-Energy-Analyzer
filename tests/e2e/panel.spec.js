@@ -3531,6 +3531,11 @@ test("Appliance Detail omits session timeline and page-level controls", async ({
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
+  const predictiveHealth = panel.locator("[data-appliance-health]");
+  await expect(predictiveHealth).toBeVisible();
+  await expect(predictiveHealth).toContainText("Possible degradation");
+  await expect(predictiveHealth).toContainText("30%");
+  await expect(predictiveHealth).toContainText("season: summer");
   await expect(panel.getByText("Session Timeline")).toHaveCount(0);
   await expect(panel.locator(".session-strip")).toHaveCount(0);
   await expect(panel.getByText("Appliance Notifications")).toHaveCount(0);

@@ -1086,6 +1086,9 @@ def test_settings_controller_builds_feature_alert_policies() -> None:
 
     usage_policy = controller.usage_alert_policy_for_circuit("fridge")
     cycle_policy = controller.cycle_alert_policy_for_circuit("fridge")
+    short_cycle_policy = (
+        controller.appliance_health_short_cycle_alert_policy_for_circuit("fridge")
+    )
     water_policy = controller.water_context_alert_policy_for_circuit(
         "fridge",
         "pump_without_flow",
@@ -1094,6 +1097,8 @@ def test_settings_controller_builds_feature_alert_policies() -> None:
     assert usage_policy.min_repeated == 4
     assert usage_policy.min_baseline_confidence == pytest.approx(0.8)
     assert cycle_policy.min_total_score == pytest.approx(6.0)
+    assert short_cycle_policy.min_repeated == 1
+    assert short_cycle_policy.min_total_score == pytest.approx(1.5)
     assert water_policy.min_baseline_confidence == pytest.approx(0.7)
 
 

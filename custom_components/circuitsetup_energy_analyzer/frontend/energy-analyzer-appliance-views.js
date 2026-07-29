@@ -373,6 +373,7 @@ export function createApplianceViewMethods({
     const sections = [
       ["biggest_changes", "weekly_digest.biggest_changes"],
       ["top_energy_users", "weekly_digest.top_energy_users"],
+      ["observed_alerts", "weekly_digest.observed_alerts"],
       ["unresolved_items", "weekly_digest.unresolved_items"],
       ["nilm_review_items", "weekly_digest.nilm_review_items"],
       ["load_shift_opportunities", "weekly_digest.load_shift_opportunities"],
@@ -392,7 +393,8 @@ export function createApplianceViewMethods({
       ${report.week_start ? `<p class="muted">${this._escape(this._panelTextFormat("weekly_digest.period", { start: report.week_start, end: report.week_end }))}</p>` : `<p class="muted">${this._escape(this._panelText("weekly_digest.no_report"))}</p>`}
       ${sections.map(([key, label]) => {
         const items = Array.isArray(report[key]) ? report[key] : [];
-        return items.length ? `<h3>${this._escape(this._panelText(label))}</h3>${this._renderSimpleList(items.map((item) => `${item.display_name}: ${this._formatKwh(item.energy_kwh)}`), "")}` : "";
+        const values = items.map((item) => key === "observed_alerts" ? item.display_name : `${item.display_name}: ${this._formatKwh(item.energy_kwh)}`);
+        return items.length ? `<h3>${this._escape(this._panelText(label))}</h3>${this._renderSimpleList(values, "")}` : "";
       }).join("")}
     </section>`;
   }
@@ -594,11 +596,55 @@ export function createApplianceViewMethods({
         <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
         ${this._renderApplianceExpectations(detail.expectations)}
       </section>
+      ${this._renderApplianceHealth(detail.appliance_health)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
         ${this._renderApplianceAlerts(detail.active_alerts)}
       </section>
     `;
+  }
+
+  _renderApplianceHealth(health) {
+    if (!health || typeof health !== "object") return "";
+    const humanize = (value) => String(value || "")
+      .replaceAll("_", " ")
+      .replace(/^\w/, (letter) => letter.toUpperCase());
+    const status = String(health.status || "learning");
+    const reason = String(health.reason || "");
+    const statusLabel = this._panelText(`appliance_detail.predictive_health_status.${status}`) || humanize(status);
+    const reasonLabel = this._panelText(`appliance_detail.predictive_health_reason.${reason}`) || humanize(reason);
+    const sessionEvidence = health.feature === "repeated_short_cycle";
+    const scope = sessionEvidence ? "sessions" : "days";
+    const facts = [
+      Number.isFinite(Number(health.confidence))
+        ? this._metric(this._panelText("common.confidence"), this._formatConfidence(health.confidence), "mdi:chart-bell-curve-cumulative")
+        : "",
+      health.feature
+        ? this._metric(this._panelText("appliance_detail.predictive_health_finding"), humanize(health.feature), "mdi:stethoscope")
+        : "",
+      Number.isFinite(Number(health.change_percent))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_change"), `${Number(health.change_percent)}%`, "mdi:percent")
+        : "",
+      Number.isFinite(Number(health.reference_count))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_reference"), `${Number(health.reference_count)} reference ${scope}`, "mdi:database-clock-outline")
+        : "",
+      Number.isFinite(Number(health.recent_count))
+        ? this._metric(this._panelText("appliance_detail.predictive_health_recent"), `${Number(health.recent_count)} recent ${scope}`, "mdi:history")
+        : "",
+      health.last_eligible_date_or_session
+        ? this._metric(this._panelText("appliance_detail.predictive_health_latest"), health.last_eligible_date_or_session, "mdi:calendar-check-outline")
+        : "",
+    ].filter(Boolean);
+    const context = Object.entries(
+      health.context && typeof health.context === "object" ? health.context : {},
+    ).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
+    return `<section class="panel" data-appliance-health>
+      <h2>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h2>
+      <p><strong>${this._escape(statusLabel)}</strong></p>
+      ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
+      ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}
+    </section>`;
   }
 
   _renderApplianceDailyCost(payload, detail) {

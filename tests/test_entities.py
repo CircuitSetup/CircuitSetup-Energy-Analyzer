@@ -1455,6 +1455,132 @@ def test_setup_health_reports_missing_source_entities() -> None:
     assert checklist["source_data_found"]["title"] == "Source data needs attention"
 
 
+@pytest.mark.parametrize(
+    ("quality_issue", "numeric_states_valid"),
+    [
+        ("sensor.fridge_power unavailable", False),
+        ("sensor.fridge_power naive_timestamp", True),
+    ],
+)
+def test_setup_health_source_checklist_surfaces_invalid_source_issues(
+    quality_issue: str,
+    numeric_states_valid: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": numeric_states_valid,
+                    "source_data_fresh": True,
+                    "quality_issues": [quality_issue],
+                }
+            }
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+            ),
+        ),
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+
+    assert checklist["source_data_found"]["status"] == "needs_attention"
+    assert checklist["source_data_found"]["affected_circuits"] == ["fridge"]
+
+
+@pytest.mark.parametrize(
+    ("quality_issues", "checklist_overrides", "expected_issue", "expected_entity"),
+    [
+        (
+            [
+                "sensor.badtime future_timestamp",
+                "sensor.current stale",
+            ],
+            {"source_data_fresh": False},
+            "invalid_source_timestamp",
+            "sensor.badtime",
+        ),
+        (
+            [
+                "sensor.badvalue unavailable",
+                "sensor.current stale",
+            ],
+            {"numeric_states_valid": False, "source_data_fresh": False},
+            "invalid_source_sensor",
+            "sensor.badvalue",
+        ),
+        (
+            [
+                "sensor.current stale",
+                "sensor.missing missing",
+            ],
+            {"required_sensors_present": False, "source_data_fresh": False},
+            "stale_source",
+            "sensor.current",
+        ),
+    ],
+)
+def test_setup_health_filters_source_entities_for_selected_issue(
+    quality_issues: list[str],
+    checklist_overrides: dict[str, bool],
+    expected_issue: str,
+    expected_entity: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    checklist = {
+        "sample_observed": True,
+        "required_sensors_present": True,
+        "numeric_states_valid": True,
+        "source_data_fresh": True,
+        "quality_issues": quality_issues,
+        **checklist_overrides,
+    }
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={"fridge": checklist}
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Kitchen Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.SINGLE_PHASE,
+                sensors=tuple(
+                    SensorRef(entity_id, SensorRole.REAL_POWER)
+                    for entity_id in (
+                        "sensor.badtime",
+                        "sensor.badvalue",
+                        "sensor.current",
+                        "sensor.missing",
+                    )
+                ),
+            ),
+        ),
+    )
+
+    issue = setup_health_attributes(coordinator)["issues"][0]
+
+    assert issue["issue"] == expected_issue
+    assert issue["source_entities"] == [expected_entity]
+
+
 def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
@@ -1922,6 +2048,38 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
         ),
     )
     assert setup_health_value(stale) == "Fix stale source sensor"
+
+    invalid_source = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power non_finite"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": True,
+                    "numeric_states_valid": False,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(invalid_source) == (
+        "Fix unavailable or invalid source data"
+    )
+
+    invalid_timestamp = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "quality_issues": ["sensor.fridge_power future_timestamp"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": True,
+                    "numeric_states_valid": True,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(invalid_timestamp) == "Fix source sensor timestamps"
 
     negative_power = coordinator_for(
         fridge,

@@ -9,9 +9,11 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     ContextualBaselineSample,
     build_context_for_sample,
     build_contextual_baseline,
+    context_allows_baseline_learning,
     contextual_sample_from_dict,
     contextual_sample_to_dict,
     day_type_for_datetime,
+    humidity_bin,
     rain_intensity_bin,
     rain_state,
     season_for_datetime,
@@ -80,6 +82,11 @@ def test_context_bucket_helpers() -> None:
     assert weather_mode_for_temperature(50.0) == "heating"
     assert weather_mode_for_temperature(62.0) == "neutral"
     assert weather_mode_for_temperature(80.0) == "cooling"
+    assert humidity_bin(None) == "unknown"
+    assert humidity_bin(35.0) == "dry"
+    assert humidity_bin(55.0) == "moderate"
+    assert humidity_bin(75.0) == "humid"
+    assert humidity_bin(85.0) == "very_humid"
     assert rain_intensity_bin(None) == "unknown"
     assert rain_intensity_bin(0.0) == "none"
     assert rain_intensity_bin(0.08) == "light"
@@ -571,6 +578,47 @@ def test_build_context_for_mini_split_keeps_weather_dimensions() -> None:
     assert "time_of_day" in context
 
 
+def test_build_context_excludes_completed_maintenance_date() -> None:
+    now = datetime(2026, 7, 27, 14, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="mini_split",
+        name="Mini-Split",
+        appliance_profile=ApplianceProfile.MINI_SPLIT,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        weather_context_by_circuit={
+            "mini_split": {
+                "temperature_f": 88.0,
+                "mode": "cooling",
+            }
+        }
+    )
+    store_data = FeatureStoreData(
+        maintenance_by_circuit={
+            "mini_split": {
+                "active": False,
+                "started_at": (now - timedelta(hours=2)).isoformat(),
+                "ended_at": (now - timedelta(hours=1)).isoformat(),
+            }
+        }
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("mini_split", now),
+        state=state,
+        store_data=store_data,
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict()["season"] == "summer"
+    assert context.as_dict()["weather_mode"] == "cooling"
+    assert context.as_dict()["maintenance_state"] == "excluded"
+    assert context_allows_baseline_learning(context) is False
+
+
 def test_build_context_for_sample_uses_sample_local_calendar() -> None:
     sample_time = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
     now = datetime(2026, 6, 2, 15, tzinfo=UTC)
@@ -660,6 +708,41 @@ def test_build_context_for_sample_carries_rain_context_issue() -> None:
         "rain_state": "ambiguous",
         "season": "summer",
     }
+
+
+def test_build_context_for_sump_pump_carries_outdoor_humidity() -> None:
+    now = datetime(2026, 7, 17, 15, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="sump",
+        name="Sump Pump",
+        appliance_profile=ApplianceProfile.SUMP_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    state = AnalyzerState(
+        rain_pump_context_by_circuit={
+            "sump": {
+                "rain_sensor_active": False,
+                "outdoor_temperature_f": 86.0,
+                "outdoor_humidity_percent": 84.0,
+            }
+        },
+        water_flow_context_by_circuit={
+            "sump": {"flow_sensor_active": True, "flow_active_minutes": 10.0}
+        },
+    )
+
+    context = build_context_for_sample(
+        circuit_config=config,
+        sample=_sample("sump", now),
+        state=state,
+        store_data=FeatureStoreData(),
+        now=now,
+        feature="daily_energy_kwh",
+    )
+
+    assert context.as_dict()["temperature_bin"] == "hot"
+    assert context.as_dict()["outdoor_humidity_bin"] == "very_humid"
+    assert "water_flow_state" not in context.as_dict()
 
 
 def test_build_context_preserves_raw_rain_conflict_when_unit_unknown() -> None:
@@ -780,6 +863,34 @@ def test_build_context_for_water_and_solar_state() -> None:
     assert water_context.as_dict()["time_of_day"] == "evening"
     assert solar_context.as_dict()["solar_flow_state"] == "high_surplus"
     assert solar_context.as_dict()["power_flow_mode"] == "mains_net"
+
+
+def test_washer_profiles_preserve_water_flow_context() -> None:
+    now = datetime(2026, 6, 17, 21, tzinfo=UTC)
+    for profile in (ApplianceProfile.WASHER, ApplianceProfile.DISHWASHER):
+        circuit_id = profile.value
+        context = build_context_for_sample(
+            circuit_config=CircuitConfig(
+                circuit_id=circuit_id,
+                name=profile.value.title(),
+                appliance_profile=profile,
+                mode=CircuitMode.SINGLE_PHASE,
+            ),
+            sample=_sample(circuit_id, now),
+            state=AnalyzerState(
+                water_flow_context_by_circuit={
+                    circuit_id: {
+                        "flow_sensor_active": True,
+                        "flow_active_minutes": 8.0,
+                    }
+                }
+            ),
+            store_data=FeatureStoreData(),
+            now=now,
+            feature="daily_energy_kwh",
+        )
+
+        assert context.as_dict()["water_flow_state"] == "active_flow"
 
 
 def test_load_context_uses_site_solar_flow_state() -> None:

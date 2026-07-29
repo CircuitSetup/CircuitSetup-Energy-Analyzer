@@ -8,6 +8,8 @@ from ..state import circuit_is_learning
 
 _DATA_QUALITY_REPAIR_PROBLEMS = frozenset(
     {
+        "invalid_source_sensor",
+        "invalid_source_timestamp",
         "missing_required_sensor",
         "stale_source_sensor",
         "unexpected_negative_real_power",
@@ -70,9 +72,11 @@ class SetupHealthAggregator:
             desired.add((circuit_id, sample_or_problem))
         elif sample_or_problem.quality_issues:
             issue = sample_or_problem.quality_issues[0]
-            problem = data_quality_problem(issue)
             coordinator.state.data_quality_by_circuit[circuit_id] = issue
-            desired.add((circuit_id, problem))
+            desired.update(
+                (circuit_id, data_quality_problem(current_issue))
+                for current_issue in sample_or_problem.quality_issues
+            )
         else:
             coordinator.state.data_quality_by_circuit.pop(circuit_id, None)
         stale_issue = (circuit_id, "stale_source_sensor")
@@ -104,7 +108,15 @@ class SetupHealthAggregator:
 
         issues_to_create = desired - self.active_repair_issues
         issues_to_create.update(
-            issue for issue in desired if issue[1] == "stale_source_sensor"
+            issue
+            for issue in desired
+            if issue[1]
+            in {
+                "invalid_source_sensor",
+                "invalid_source_timestamp",
+                "stale_source_sensor",
+                "unexpected_negative_real_power",
+            }
         )
         for issue in issues_to_create:
             source_entities = (
@@ -211,6 +223,13 @@ class SetupHealthAggregator:
             "missing_required_sensor": (
                 "A configured circuit is missing a required source sensor."
             ),
+            "invalid_source_sensor": (
+                "One or more selected source sensors are unavailable or invalid."
+            ),
+            "invalid_source_timestamp": (
+                "One or more selected source sensors report an invalid update "
+                "timestamp."
+            ),
             "missing_source_entities": (
                 "The integration has no configured source sensors."
             ),
@@ -226,6 +245,12 @@ class SetupHealthAggregator:
     def data_quality_repair_action(self, circuit_name: str, problem: str) -> str:
         actions = {
             "missing_required_sensor": f"Review source sensors for {circuit_name}",
+            "invalid_source_sensor": (
+                f"Fix unavailable or invalid source data for {circuit_name}"
+            ),
+            "invalid_source_timestamp": (
+                f"Fix source sensor timestamps for {circuit_name}"
+            ),
             "missing_source_entities": (
                 f"Add at least one source sensor for {circuit_name}"
             ),
@@ -245,15 +270,13 @@ class SetupHealthAggregator:
         problem: str,
     ) -> list[str]:
         source_entities = list(sample.source_entity_ids)
-        if problem != "stale_source_sensor":
-            return source_entities
-        stale_entities = {
+        matching_entities = {
             issue.split(" ", 1)[0]
             for issue in sample.quality_issues
             if data_quality_problem(issue) == problem
         }
         return [
-            entity_id for entity_id in source_entities if entity_id in stale_entities
+            entity_id for entity_id in source_entities if entity_id in matching_entities
         ] or source_entities
 
     def repair_data(self, circuit_id: str, problem: str) -> dict[str, Any]:
@@ -406,9 +429,15 @@ class SetupHealthAggregator:
 
 
 def data_quality_problem(issue: str) -> str:
-    issue_text = issue.lower()
-    if "negative_real_power_load" in issue_text:
-        return "unexpected_negative_real_power"
-    if "stale" in issue_text:
-        return "stale_source_sensor"
-    return "missing_required_sensor"
+    issue_parts = str(issue).strip().lower().rsplit(maxsplit=1)
+    issue_kind = issue_parts[-1] if issue_parts else ""
+    return {
+        "missing": "missing_required_sensor",
+        "unavailable": "invalid_source_sensor",
+        "non_numeric": "invalid_source_sensor",
+        "non_finite": "invalid_source_sensor",
+        "naive_timestamp": "invalid_source_timestamp",
+        "future_timestamp": "invalid_source_timestamp",
+        "stale": "stale_source_sensor",
+        "negative_real_power_load": "unexpected_negative_real_power",
+    }.get(issue_kind, "missing_required_sensor")

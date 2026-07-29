@@ -316,3 +316,6 @@ def test_strings_include_service_repair_problem_keys() -> None:
     assert "missing_rain_context_source" in strings["issues"]
     assert "missing_water_flow_source" in strings["issues"]
     assert "utility_comparison_source_mismatch" in strings["issues"]
+    missing_required = strings["issues"]["missing_required_sensor"]
+    assert "{circuit_name}" in missing_required["title"]
+    assert "{circuit_name}" in missing_required["description"]

@@ -109,6 +109,10 @@ class AnalyzerState:
     run_cycle_evidence_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    appliance_health_status_by_circuit: dict[str, str] = field(default_factory=dict)
+    appliance_health_evidence_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     billing_cycle_usage_kwh_by_circuit: dict[str, float] = field(default_factory=dict)
     billing_cycle_forecast_kwh_by_circuit: dict[str, float] = field(
         default_factory=dict
@@ -248,6 +252,8 @@ def process_events_into_state(
     state: AnalyzerState,
     events: Iterable[CircuitEvent],
     alerts: Iterable[AlertEvidence],
+    *,
+    evaluated_circuit_ids: Iterable[str] | None = None,
 ) -> AnalyzerState:
     """Fold newly detected events and alerts into analyzer runtime state."""
     for event in events:
@@ -259,10 +265,19 @@ def process_events_into_state(
     for alert in alerts:
         alerts_by_circuit[alert.circuit_id].append(alert)
 
-    state.active_alerts_by_circuit = dict(alerts_by_circuit)
+    if evaluated_circuit_ids is None:
+        state.active_alerts_by_circuit = dict(alerts_by_circuit)
+    else:
+        evaluated = set(evaluated_circuit_ids) | set(alerts_by_circuit)
+        state.active_alerts_by_circuit = {
+            circuit_id: circuit_alerts
+            for circuit_id, circuit_alerts in state.active_alerts_by_circuit.items()
+            if circuit_id not in evaluated
+        }
+        state.active_alerts_by_circuit.update(alerts_by_circuit)
     state.anomaly_score_by_circuit = {
         circuit_id: max(alert_anomaly_score(alert) for alert in circuit_alerts)
-        for circuit_id, circuit_alerts in alerts_by_circuit.items()
+        for circuit_id, circuit_alerts in state.active_alerts_by_circuit.items()
     }
 
     for circuit_id in state.last_event_by_circuit:

@@ -3,6 +3,9 @@ from types import MappingProxyType
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.appliance_notifications import (
+    preferences_from_dict,
+)
 from custom_components.circuitsetup_energy_analyzer.const import STORAGE_VERSION
 from custom_components.circuitsetup_energy_analyzer.models import (
     AlertEvidence,
@@ -1215,7 +1218,8 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
             "circuit:dryer": {
                 "finished_running": True,
                 "delivery_mode": "daily_summary",
-            }
+            },
+            "circuit:washer": {"other_issue": False},
         },
         notification_delivery_state={
             "cooldowns": {
@@ -1237,6 +1241,14 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
     assert restored.appliance_notification_preferences == (
         data.appliance_notification_preferences
     )
+    assert preferences_from_dict(
+        restored.appliance_notification_preferences["circuit:dryer"],
+        appliance_key="circuit:dryer",
+    ).other_issue is True
+    assert preferences_from_dict(
+        restored.appliance_notification_preferences["circuit:washer"],
+        appliance_key="circuit:washer",
+    ).other_issue is False
     assert restored.notification_delivery_state == data.notification_delivery_state
     assert restored.learning_started_at_by_circuit == (
         data.learning_started_at_by_circuit

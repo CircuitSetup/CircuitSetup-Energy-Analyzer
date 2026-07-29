@@ -17,7 +17,8 @@ from ..alerting import (
     Observation,
     alert_anomaly_score,
     alert_feedback_fingerprint,
-    alert_feedback_fingerprint_for_observation,
+    alert_feedback_fingerprint_candidates,
+    alert_feedback_fingerprint_candidates_for_observation,
 )
 from ..models import AlertEvidence
 
@@ -95,6 +96,13 @@ class EvidenceActionController:
         coordinator.store_data.maintenance_by_circuit[circuit_id] = payload
         coordinator.paused_circuits.add(circuit_id)
         coordinator.store_persistence.mark_dirty()
+        refresh_expiry = getattr(
+            coordinator,
+            "refresh_maintenance_expiry_listener",
+            None,
+        )
+        if refresh_expiry is not None:
+            refresh_expiry()
         coordinator.refresh_ux_state_for_circuit(circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
@@ -110,47 +118,90 @@ class EvidenceActionController:
         current = dict(
             coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
         )
-        should_relearn = bool(relearn or current.get("relearn_on_end"))
+        was_active = current.get("active") is True
+        should_relearn = bool(relearn or (was_active and current.get("relearn_on_end")))
         current.update({"active": False, "ended_at": now.isoformat()})
         coordinator.store_data.maintenance_by_circuit[circuit_id] = current
         coordinator.paused_circuits.discard(circuit_id)
         coordinator.store_persistence.mark_dirty()
+        if not should_relearn:
+            coordinator.refresh_ux_state_for_circuit(circuit_id, now)
+            coordinator.async_set_updated_data(coordinator.state)
+        await coordinator.store_persistence.async_save_if_dirty(now)
+        started_at = str(current.get("started_at") or now.isoformat())
+        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
+        display_name = str(
+            getattr(config, "name", "") or circuit_id.replace("_", " ").title()
+        )
+        learning_epoch = None
         if should_relearn:
             await coordinator.async_relearn_baseline(circuit_id)
-            return
-        coordinator.refresh_ux_state_for_circuit(circuit_id, now)
-        coordinator.async_set_updated_data(coordinator.state)
+            learning_epoch = coordinator.store_data.learning_started_at_by_circuit.get(
+                circuit_id,
+                now.isoformat(),
+            )
+        if was_active:
+            await coordinator.notification_controller.async_notify_lifecycle_update(
+                circuit_id,
+                feature="maintenance_completed",
+                message=f"{display_name} maintenance ended.",
+                episode_key=f"maintenance_completed:{started_at}",
+                now=now,
+            )
+        if learning_epoch is not None:
+            await coordinator.notification_controller.async_notify_lifecycle_update(
+                circuit_id,
+                feature="relearning_started",
+                message=f"{display_name} started relearning its normal behavior.",
+                episode_key=f"relearning_started:{learning_epoch}",
+                now=now,
+            )
         await coordinator.store_persistence.async_save_if_dirty(now)
 
     def alerts_paused(self, circuit_id: str, now: datetime | None = None) -> bool:
         """Return whether circuit alerts are currently paused."""
-        self.expire_maintenance_if_due(circuit_id, now)
+        del now
         return circuit_id in self._coordinator.paused_circuits
 
-    def expire_maintenance_if_due(
+    async def async_expire_maintenance_if_due(
         self,
-        circuit_id: str,
         now: datetime | None = None,
-    ) -> bool:
-        """Clear a timed maintenance pause once its expiry is reached."""
+    ) -> tuple[str, ...]:
+        """Complete every timed maintenance window whose expiry has passed."""
         coordinator = self._coordinator
-        maintenance = dict(
-            coordinator.store_data.maintenance_by_circuit.get(circuit_id, {}),
-        )
-        if maintenance.get("active") is not True:
-            return False
-        expires_at = mapping_datetime(maintenance.get("expires_at"))
-        if expires_at is None:
-            return False
         now = now or coordinator.current_time()
-        if expires_at > _datetime_for_comparison(now, expires_at):
-            return False
+        expired: list[str] = []
+        for circuit_id, raw in tuple(
+            coordinator.store_data.maintenance_by_circuit.items()
+        ):
+            maintenance = dict(raw)
+            expires_at = mapping_datetime(maintenance.get("expires_at"))
+            if (
+                maintenance.get("active") is True
+                and expires_at is not None
+                and expires_at <= _datetime_for_comparison(now, expires_at)
+            ):
+                await self.async_end_maintenance(circuit_id)
+                expired.append(circuit_id)
+        refresh_expiry = getattr(
+            coordinator,
+            "refresh_maintenance_expiry_listener",
+            None,
+        )
+        if refresh_expiry is not None:
+            refresh_expiry()
+        return tuple(expired)
 
-        maintenance.update({"active": False, "ended_at": now.isoformat()})
-        coordinator.store_data.maintenance_by_circuit[circuit_id] = maintenance
-        coordinator.paused_circuits.discard(circuit_id)
-        coordinator.store_persistence.mark_dirty()
-        return True
+    def next_maintenance_expiry(self) -> datetime | None:
+        """Return the earliest active timed-maintenance expiry."""
+        expiries = [
+            expires_at
+            for raw in self._coordinator.store_data.maintenance_by_circuit.values()
+            if isinstance(raw, Mapping)
+            and raw.get("active") is True
+            and (expires_at := mapping_datetime(raw.get("expires_at"))) is not None
+        ]
+        return min(expiries, default=None)
 
     async def async_mark_alert_expected(self, alert_id: str) -> bool:
         """Mark an alert pattern as expected for future notifications."""
@@ -182,7 +233,7 @@ class EvidenceActionController:
             alert,
             config=coordinator.circuit_registry.config_for_circuit(alert.circuit_id),
         )
-        existing = coordinator.store_data.alert_feedback.get(fingerprint, {})
+        matched_fingerprint, existing = self.alert_feedback_for(alert)
         evidence_count = (
             _positive_int_value(existing.get("evidence_count"), default=0) + 1
         )
@@ -204,6 +255,8 @@ class EvidenceActionController:
             "baseline_value": alert.baseline_value,
             "evidence_count": evidence_count,
         }
+        if matched_fingerprint is not None and matched_fingerprint != fingerprint:
+            coordinator.store_data.alert_feedback.pop(matched_fingerprint, None)
         coordinator.apply_nilm_alert_feedback(alert, action, now)
         await coordinator.notification_controller.async_dismiss_alert_notification(
             alert_id
@@ -231,14 +284,11 @@ class EvidenceActionController:
     ) -> tuple[str | None, Mapping[str, Any]]:
         """Return matching retained feedback for an observation."""
         coordinator = self._coordinator
-        candidates = (
-            alert_feedback_fingerprint_for_observation(
-                observation,
-                config=coordinator.circuit_registry.config_for_circuit(
-                    observation.circuit_id
-                ),
+        candidates = alert_feedback_fingerprint_candidates_for_observation(
+            observation,
+            config=coordinator.circuit_registry.config_for_circuit(
+                observation.circuit_id
             ),
-            alert_feedback_fingerprint_for_observation(observation),
         )
         return self._first_current_feedback(candidates)
 
@@ -253,14 +303,11 @@ class EvidenceActionController:
     ) -> tuple[str | None, Mapping[str, Any]]:
         """Return matching retained feedback for an alert."""
         coordinator = self._coordinator
-        candidates = (
-            _alert_feedback_key(
-                alert,
-                config=coordinator.circuit_registry.config_for_circuit(
-                    alert.circuit_id
-                ),
+        candidates = alert_feedback_fingerprint_candidates(
+            alert,
+            config=coordinator.circuit_registry.config_for_circuit(
+                alert.circuit_id
             ),
-            _alert_feedback_key(alert),
         )
         return self._first_current_feedback(candidates)
 
@@ -358,14 +405,6 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
-
-
-def _alert_feedback_key(
-    alert: AlertEvidence,
-    *,
-    config: Any = None,
-) -> str:
-    return alert_feedback_fingerprint(alert, config=config)
 
 
 def _alert_feedback_effect(status: str) -> str:

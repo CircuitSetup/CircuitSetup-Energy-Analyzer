@@ -11,8 +11,8 @@
           "demo_source_bundle_enabled": "Load Bundled Demo Sources",
           "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
-          "outdoor_temperature_entity": "Outdoor Temperature Entity",
-          "rain_sensor_entity": "Rain Sensor",
+          "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
+          "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
           "sensitivity": "Sensitivity",
@@ -24,12 +24,12 @@
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
           "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
-          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions. Leave blank to disable weather correlation.",
-          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity; leave blank to disable rain correlation.",
+          "outdoor_temperature_entity": "Optional outdoor temperature sensor or weather entity used for HVAC context. Its humidity attribute also helps explain air-conditioner condensate reaching a sump pump.",
+          "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
-          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "assign": {
@@ -49,7 +49,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "nilm": {
@@ -125,8 +125,8 @@
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-          "outdoor_temperature_entity": "Outdoor Temperature Entity",
-          "rain_sensor_entity": "Rain Sensor",
+          "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
+          "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
           "water_flow_sensor_entities": "Water Flow Sensors",
           "sensitivity": "Sensitivity",
@@ -136,12 +136,12 @@
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
-          "outdoor_temperature_entity": "Optional temperature sensor used to compare HVAC activity with outdoor conditions. Leave blank to disable weather correlation.",
-          "rain_sensor_entity": "Optional binary sensor that is on when it is raining. Used to explain expected sump, well pump, or water pump activity; leave blank to disable rain correlation.",
+          "outdoor_temperature_entity": "Optional outdoor temperature sensor or weather entity used for HVAC context. Its humidity attribute also helps explain air-conditioner condensate reaching a sump pump.",
+          "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
           "water_flow_sensor_entities": "Optional binary or numeric water-flow sensors. Binary sensors are active when on; numeric flow-rate sensors are active when greater than 0. Leave blank to disable water-flow correlation.",
           "sensitivity": "Controls how quickly possible issue alerts are raised. Quiet raises fewer alerts, Balanced is the default, and Sensitive is more responsive.",
-          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "retention_mode": "Controls retained diagnostic evidence and events. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "refresh_sources": {
@@ -499,7 +499,7 @@
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
           "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 14 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
+          "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
     },
@@ -699,8 +699,16 @@
       "description": "The integration has no configured source sensors. Add at least one CircuitSetup energy sensor before appliance analysis can start. Suggested fix: {fix}"
     },
     "missing_required_sensor": {
-      "title": "Energy Analyzer source sensor is missing",
-      "description": "A configured circuit is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
+      "title": "Energy Analyzer source sensor is missing for {circuit_name}",
+      "description": "{circuit_name} is missing a required source sensor. Reconfigure the circuit mapping before appliance analysis can continue. Suggested fix: {fix}"
+    },
+    "invalid_source_sensor": {
+      "title": "Energy Analyzer source sensor data is invalid",
+      "description": "{circuit_name} has an unavailable, non-numeric, or non-finite source sensor. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
+    },
+    "invalid_source_timestamp": {
+      "title": "Energy Analyzer source sensor timestamp is invalid",
+      "description": "{circuit_name} has a source sensor with a missing time zone or future update timestamp. Reason: {reason}. Next step: {recommended_action}. Suggested fix: {fix}"
     },
     "phase_mismatch": {
       "title": "Energy Analyzer phase pairing looks suspicious",
@@ -815,7 +823,10 @@
       "alert": {
         "title": "Energy Analyzer Alert",
         "open_evidence": "Open evidence",
+        "open_appliance_evidence": "Open appliance evidence",
         "observed_value": "Observed value",
+        "recent_value": "Recent value",
+        "reference_value": "Reference value",
         "repeated_observations": "Repeated observations",
         "safety_notice": "Safety notice",
         "nilm_estimated": "Estimated from mains power by NILM.",
@@ -824,6 +835,7 @@
         "comparison_value": "Comparison value",
         "baseline_value": "Baseline value",
         "power_quality_notice": "This is a repeated change from the learned electrical pattern, not an electrical safety diagnosis.",
+        "health_notice": "This is an inspection prompt, not a component diagnosis or safety control.",
         "confidence_line": "Confidence: {confidence}%.",
         "units": {
           "minutes": "min",
@@ -832,8 +844,11 @@
           "reactive_power": "VAR",
           "apparent_power": "VA",
           "energy": "kWh",
+          "energy_per_hour": "kWh/h",
+          "energy_per_cycle": "kWh/cycle",
           "current": "A",
           "starts": "starts",
+          "starts_per_hour": "starts/h",
           "seconds": "s"
         },
         "value_metrics": {
@@ -854,6 +869,11 @@
           "demand_limit": "Demand limit",
           "demand_monthly_peak": "Demand monthly peak",
           "dual_phase_leg_imbalance": "Dual phase leg imbalance",
+          "energy_per_runtime_hour": "Energy per runtime hour",
+          "energy_per_completed_cycle": "Energy per completed cycle",
+          "average_cycle_duration": "Average cycle duration",
+          "starts_per_runtime_hour": "Starts per runtime hour",
+          "session_duration_seconds": "Session duration",
           "nilm_appliance_unusual_energy": "NILM appliance unusual energy",
           "nilm_appliance_confidence": "NILM confidence",
           "nilm_appliance_unusual_runtime": "NILM appliance unusual runtime",
@@ -864,6 +884,12 @@
           "utility_energy_mismatch": "Utility energy mismatch",
           "water_flow_correlation": "Water flow correlation"
         }
+      },
+      "lifecycle": {
+        "learning_completed": "{appliance} finished learning its normal behavior.",
+        "maintenance_completed": "{appliance} maintenance ended.",
+        "relearning_started": "{appliance} started relearning its normal behavior.",
+        "alert_recovered": "{appliance} returned to its expected behavior."
       },
       "settings_recommendations": {
         "title": "CircuitSetup Energy Analyzer suggested settings",
@@ -878,11 +904,15 @@
         "no_changes": "- No meaningful changes from learned normal.",
         "top_energy_users": "Top energy users",
         "energy_item": "- {display_name}: {energy_kwh} kWh",
-        "no_energy_data": "- No retained appliance energy data."
+        "no_energy_data": "- No retained appliance energy data.",
+        "observed_alerts": "Observed alerts",
+        "unresolved_items": "Unresolved items",
+        "nilm_review": "NILM review",
+        "load_shift_opportunities": "Load-shifting opportunities"
       },
       "daily_summary": {
         "title": "Daily Appliance Summary",
-        "intro": "Appliance notifications queued for {summary_date}.",
+        "intro": "Alerts observed on {summary_date}.",
         "alert_item": "- {message}"
       }
     },
@@ -1457,6 +1487,27 @@
           "unexplained": "Not yet explained"
         },
         "behavior_expectations": "Behavior Expectations",
+        "predictive_health": "Predictive Health",
+        "predictive_health_finding": "Finding",
+        "predictive_health_change": "Change",
+        "predictive_health_reference": "Reference window",
+        "predictive_health_recent": "Recent window",
+        "predictive_health_latest": "Latest evidence",
+        "predictive_health_context": "Comparable context",
+        "predictive_health_status": {
+          "learning": "Learning",
+          "normal": "Normal",
+          "possible_degradation": "Possible degradation",
+          "not_applicable": "Not applicable"
+        },
+        "predictive_health_reason": {
+          "shared_learning_active": "The appliance is still in its normal learning period.",
+          "insufficient_history": "More completed appliance history is needed before health trends can be compared.",
+          "insufficient_comparable_context": "More history under comparable operating conditions is needed.",
+          "within_comparable_range": "Retained behavior remains within its comparable learned range.",
+          "sustained_change": "Sustained efficiency change detected across recent comparable evidence.",
+          "unsupported_circuit": "Predictive health does not apply to this circuit type."
+        },
         "what_to_check_first": "What To Check First",
         "alerts_and_evidence": "Alerts and Evidence",
         "learning_ranges": "Learning normal ranges for this appliance.",
@@ -1526,6 +1577,7 @@
         "no_report": "No weekly report has been generated yet.",
         "biggest_changes": "Largest changes from normal",
         "top_energy_users": "Top energy users",
+        "observed_alerts": "Alerts observed this week",
         "unresolved_items": "Recurring unresolved issues",
         "nilm_review_items": "NILM assignments needing validation",
         "load_shift_opportunities": "Load-shifting opportunities",

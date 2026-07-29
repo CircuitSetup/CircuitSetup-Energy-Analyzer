@@ -189,10 +189,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     readiness = readiness_value(state, circuit_id)
     electrical = electrical_health_attributes(state, circuit_id)
     data_quality_problem = data_quality_checklist_value(state, circuit_id) == "problem"
-    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
-    maintenance_active = (
-        isinstance(maintenance, Mapping) and maintenance.get("active") is True
-    )
+    maintenance_active = _maintenance_active(state, circuit_id)
     active_alert_count = _active_alert_count(state, circuit_id)
     progress = getattr(state, "learning_progress_by_circuit", {}).get(circuit_id, {})
     if isinstance(progress, Mapping):
@@ -204,6 +201,16 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
     else:
         learning_days_complete = learning_days_required = 0
     learning_days_complete = min(learning_days_complete, learning_days_required)
+    raw_appliance_health = getattr(
+        state,
+        "appliance_health_evidence_by_circuit",
+        {},
+    ).get(circuit_id, {})
+    appliance_health_evidence = (
+        dict(raw_appliance_health)
+        if isinstance(raw_appliance_health, Mapping)
+        else {}
+    )
     return {
         "raw_status": _health_summary_raw_status(summary, readiness),
         "status_label": summary,
@@ -218,6 +225,13 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "maintenance_active": maintenance_active,
         "active_alert_count": active_alert_count,
         "evidence_path": _circuit_evidence_path(circuit_id),
+        "appliance_health_status": str(
+            getattr(state, "appliance_health_status_by_circuit", {}).get(
+                circuit_id,
+                "learning",
+            )
+        ),
+        "appliance_health_evidence": appliance_health_evidence,
         "electrical_summary": electrical["summary"],
         "metric_consistency_status": electrical["metric_consistency_status"],
         "metric_consistency_score": electrical["metric_consistency_score"],
@@ -868,6 +882,7 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         ),
         "alert_confirmed": _alert_confirmed(state, circuit_id),
         "learning": circuit_is_learning(state, circuit_id),
+        "maintenance_active": _maintenance_active(state, circuit_id),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
@@ -913,11 +928,17 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "cost_cycle_forecast": cost_cycle_forecast_value(state, circuit_id),
         "alert_confirmed": _alert_confirmed(state, circuit_id),
         "learning": circuit_is_learning(state, circuit_id),
+        "maintenance_active": _maintenance_active(state, circuit_id),
         "evidence_path": _circuit_evidence_path(circuit_id),
         "summary_explanation": explanation,
         "energy_usage_explanation": _status_explanation(energy_usage_status),
         "billing_cycle_explanation": _status_explanation(billing_status),
     }
+
+
+def _maintenance_active(state: Any, circuit_id: str) -> bool:
+    maintenance = getattr(state, "maintenance_by_circuit", {}).get(circuit_id, {})
+    return isinstance(maintenance, Mapping) and maintenance.get("active") is True
 
 
 def _health_summary_raw_status(summary: str, readiness: str) -> str:
@@ -2776,6 +2797,10 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             self.circuit_id,
         )
         status_attributes["alert_confirmed"] = _alert_confirmed(
+            self.coordinator_state,
+            self.circuit_id,
+        )
+        status_attributes["maintenance_active"] = _maintenance_active(
             self.coordinator_state,
             self.circuit_id,
         )

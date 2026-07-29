@@ -6,6 +6,7 @@ from datetime import date, datetime
 from math import isfinite
 from typing import Any
 
+from .alert_feedback import mapping_datetime
 from .baseline import build_baseline
 from .local_time import TimeZone, as_ha_local, local_date
 from .models import ApplianceProfile, CircuitConfig, PowerFlowMode
@@ -222,6 +223,19 @@ def weather_mode_for_temperature(temperature_f: float | None) -> str:
     if temperature >= 75.0:
         return "cooling"
     return "neutral"
+
+
+def humidity_bin(humidity_percent: float | None) -> str:
+    """Return a stable outdoor-relative-humidity context bucket."""
+    if humidity_percent is None:
+        return "unknown"
+    if humidity_percent < 40.0:
+        return "dry"
+    if humidity_percent < 60.0:
+        return "moderate"
+    if humidity_percent < 80.0:
+        return "humid"
+    return "very_humid"
 
 
 def normalize_rain_intensity_per_hour(
@@ -543,6 +557,12 @@ def build_context_for_sample(
     rain_active = _bool_or_none(rain.get("rain_sensor_active"))
     rain_intensity, rain_unit = _rain_intensity_for_context(rain)
     rain_issues = _rain_issues_for_context(rain)
+    outdoor_temperature = _float_or_none(rain.get("outdoor_temperature_f"))
+    if outdoor_temperature is not None:
+        values["temperature_bin"] = temperature_bin(outdoor_temperature)
+    humidity = _float_or_none(rain.get("outdoor_humidity_percent"))
+    if humidity is not None:
+        values["outdoor_humidity_bin"] = humidity_bin(humidity)
     if rain_active is not None or rain_intensity is not None or rain_issues:
         rain_info = rain_context(rain_active, rain_intensity, unit=rain_unit)
         issues = _unique_issue_tuple((*rain_issues, *rain_info.issues))
@@ -586,12 +606,14 @@ def build_context_for_sample(
     if solar_status is not None or solar_surplus is not None:
         values["solar_flow_state"] = solar_flow_state(solar_status, solar_surplus)
 
-    maintenance = _mapping_for(
-        getattr(store_data, "maintenance_by_circuit", {}),
-        circuit_id,
+    maintenance_state = maintenance_context_state(
+        store_data,
+        circuit_id=circuit_id,
+        timestamp=context_timestamp,
+        time_zone=time_zone,
     )
-    if maintenance.get("active") is True:
-        values["maintenance_state"] = "active"
+    if maintenance_state is not None:
+        values["maintenance_state"] = maintenance_state
 
     return ContextKey.from_mapping(_filter_context_for_profile(circuit_config, values))
 
@@ -688,6 +710,37 @@ def stored_contextual_samples(
     return samples
 
 
+def remove_contextual_samples_for_dates(
+    samples: list[dict[str, Any]],
+    *,
+    circuit_id: str,
+    dates: Iterable[date],
+    time_zone: TimeZone = None,
+    cache: ContextualSamplesCache | None = None,
+) -> bool:
+    """Remove learned samples whose local dates are no longer eligible."""
+    excluded_dates = set(dates)
+    if not excluded_dates:
+        return False
+    retained = [
+        raw
+        for raw in samples
+        if (
+            (sample := contextual_sample_from_dict(circuit_id, raw)) is None
+            or _sample_calendar_date(sample.timestamp, time_zone)
+            not in excluded_dates
+        )
+    ]
+    if len(retained) == len(samples):
+        return False
+    samples[:] = retained
+    if cache is not None:
+        for key in tuple(cache):
+            if key[0] == circuit_id:
+                cache.pop(key, None)
+    return True
+
+
 def upsert_contextual_sample(
     samples: list[dict[str, Any]],
     sample: ContextualBaselineSample,
@@ -748,7 +801,49 @@ def upsert_contextual_sample(
 
 
 def context_allows_baseline_learning(context: ContextKey) -> bool:
-    return context.as_dict().get("maintenance_state") != "active"
+    return "maintenance_state" not in context.as_dict()
+
+
+def maintenance_context_state(
+    store_data: Any,
+    *,
+    circuit_id: str,
+    timestamp: datetime,
+    time_zone: TimeZone = None,
+) -> str | None:
+    """Return maintenance exclusion state for one circuit date."""
+    maintenance = _mapping_for(
+        getattr(store_data, "maintenance_by_circuit", {}),
+        circuit_id,
+    )
+    if maintenance.get("active") is True:
+        return "active"
+
+    sample_date = local_date(timestamp, time_zone)
+    started_at = mapping_datetime(maintenance.get("started_at"))
+    ended_at = mapping_datetime(maintenance.get("ended_at"))
+    if (
+        started_at is not None
+        and ended_at is not None
+        and local_date(started_at, time_zone)
+        <= sample_date
+        <= local_date(ended_at, time_zone)
+    ):
+        return "excluded"
+
+    energy_history = _mapping_for(
+        getattr(store_data, "energy_usage_by_circuit", {}),
+        circuit_id,
+    )
+    days = energy_history.get("days")
+    if isinstance(days, list) and any(
+        isinstance(day, Mapping)
+        and day.get("date") == sample_date.isoformat()
+        and day.get("baseline_eligible") is False
+        for day in days
+    ):
+        return "excluded"
+    return None
 
 
 def _build_weighted_contextual_stats(
@@ -877,11 +972,17 @@ def _filter_context_for_profile(
         ApplianceProfile.ELECTRIC_HEAT,
     }:
         allowed.update({"temperature_bin", "time_of_day", "weather_mode"})
-    elif profile in {
-        ApplianceProfile.SUMP_PUMP,
-        ApplianceProfile.WATER_PUMP,
-        ApplianceProfile.WELL_PUMP,
-    }:
+    elif profile is ApplianceProfile.SUMP_PUMP:
+        allowed.update(
+            {
+                "outdoor_humidity_bin",
+                "rain_context_issue",
+                "rain_intensity_bin",
+                "rain_state",
+                "temperature_bin",
+            }
+        )
+    elif profile in {ApplianceProfile.WATER_PUMP, ApplianceProfile.WELL_PUMP}:
         allowed.update(
             {
                 "rain_context_issue",
@@ -892,6 +993,8 @@ def _filter_context_for_profile(
         )
     elif profile is ApplianceProfile.WATER_HEATER:
         allowed.update({"day_type", "time_of_day", "water_flow_state"})
+    elif profile in {ApplianceProfile.WASHER, ApplianceProfile.DISHWASHER}:
+        allowed.update({"time_of_day", "water_flow_state"})
     elif profile in {ApplianceProfile.EV_CHARGER, ApplianceProfile.POOL_PUMP}:
         allowed.update({"day_type", "solar_flow_state", "time_of_day"})
     elif profile in {ApplianceProfile.SOLAR_INVERTER, ApplianceProfile.MAINS_NILM}:

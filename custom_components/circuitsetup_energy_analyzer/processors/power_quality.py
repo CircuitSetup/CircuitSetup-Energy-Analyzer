@@ -76,8 +76,13 @@ class PowerQualityProcessor:
                 clear_power_quality_state=circuit_id,
             )
 
-        self._seed_demo_event_history(circuit_config, context.now)
-        self._seed_demo_power_quality_baselines(circuit_config, features)
+        maintenance = context.store_data.maintenance_by_circuit.get(circuit_id, {})
+        maintenance_active = (
+            isinstance(maintenance, Mapping) and maintenance.get("active") is True
+        )
+        if not maintenance_active:
+            self._seed_demo_event_history(circuit_config, context.now)
+            self._seed_demo_power_quality_baselines(circuit_config, features)
 
         baselines: dict[str, Any] = {}
         learning_new_features = False
@@ -86,6 +91,9 @@ class PowerQualityProcessor:
             key = _baseline_key(circuit_id, feature)
             baseline = context.store_data.baselines.get(key)
             if baseline is None:
+                if maintenance_active:
+                    learning_new_features = True
+                    continue
                 values = self._baseline_values[key]
                 values.append(value)
                 if len(values) >= 15:
@@ -113,7 +121,12 @@ class PowerQualityProcessor:
             ],
             store_dirty=store_dirty,
         )
-        if not mature or not has_confident_scores or evidence is None:
+        if (
+            maintenance_active
+            or not mature
+            or not has_confident_scores
+            or evidence is None
+        ):
             return feature_result
 
         alert = policy.observe(

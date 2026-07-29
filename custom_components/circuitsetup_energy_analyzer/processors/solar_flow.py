@@ -12,6 +12,7 @@ from ..contextual_baseline import (
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
+    maintenance_context_state,
     season_for_datetime,
     select_contextual_baseline,
     solar_flow_state,
@@ -298,9 +299,14 @@ def _solar_context_key(
         ),
         "time_of_day": time_of_day_bucket(context.now, time_zone=context.time_zone),
     }
-    maintenance = context.store_data.maintenance_by_circuit.get(config.circuit_id, {})
-    if isinstance(maintenance, Mapping) and maintenance.get("active") is True:
-        values["maintenance_state"] = "active"
+    maintenance_state = maintenance_context_state(
+        context.store_data,
+        circuit_id=config.circuit_id,
+        timestamp=context.now,
+        time_zone=context.time_zone,
+    )
+    if maintenance_state is not None:
+        values["maintenance_state"] = maintenance_state
     return ContextKey.from_mapping(values)
 
 

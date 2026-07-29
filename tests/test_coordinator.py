@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
@@ -56,6 +57,192 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+@pytest.mark.asyncio
+async def test_appliance_health_expected_feedback_suppresses_delivery() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        alert_feedback_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    previous = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue",
+        feature="efficiency_degradation",
+        value_metric="energy_per_runtime_hour",
+        observed_value=1.5,
+        baseline_value=1.0,
+        change_ratio=0.5,
+    )
+    repeated = AlertEvidence(
+        timestamp=now + timedelta(days=1),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Possible issue again",
+        feature="efficiency_degradation",
+        value_metric="energy_per_runtime_hour",
+        observed_value=1.52,
+        baseline_value=1.0,
+        change_ratio=0.52,
+    )
+    fingerprint = alert_feedback_fingerprint(previous)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "expected",
+                    "action": "expected",
+                    "created_at": now.isoformat(),
+                    "decided_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=90)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "efficiency_degradation",
+                }
+            }
+        ),
+        now_fn=lambda: now + timedelta(days=1),
+    )
+    coordinator.state.learning_by_circuit["fridge"] = False
+
+    _, active_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(alerts=[repeated], notifications=[repeated])
+    )
+
+    assert active_alerts == []
+    assert coordinator.store_data.alerts[0].feedback_status == "expected"
+
+
+def test_appliance_health_unhelpful_feedback_raises_repetition() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        Observation,
+        alert_feedback_fingerprint_for_observation,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    observation = Observation(
+        circuit_id="fridge",
+        feature="efficiency_degradation",
+        score=2.5,
+        baseline_confidence=1.0,
+        observed_at=now,
+        observed_value=1.5,
+        baseline_value=1.0,
+        value_metric="energy_per_runtime_hour",
+    )
+    fingerprint = alert_feedback_fingerprint_for_observation(observation)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alert_feedback={
+                fingerprint: {
+                    "fingerprint": fingerprint,
+                    "status": "unhelpful",
+                    "action": "unhelpful",
+                    "created_at": now.isoformat(),
+                    "decided_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=45)).isoformat(),
+                    "circuit_id": "fridge",
+                    "feature": "efficiency_degradation",
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    policy = coordinator.alert_policies.cycle_alert_policy_for_circuit("fridge")
+
+    for index in range(4):
+        assert (
+            policy.observe(
+                replace(
+                    observation,
+                    observed_at=now + timedelta(days=index),
+                    observation_key=f"efficiency_degradation:2026-07-{17 + index:02d}",
+                )
+            )
+            is None
+        )
+    alert = policy.observe(
+        replace(
+            observation,
+            observed_at=now + timedelta(days=4),
+            observation_key="efficiency_degradation:2026-07-21",
+        )
+    )
+
+    assert alert is not None
+    assert alert.adjusted_min_repeated == 5
+
+
+@pytest.mark.asyncio
+async def test_relearn_clears_appliance_health_state_and_policy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import Observation
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator.refresh_ux_state_for_circuit = lambda circuit_id, refreshed_at: None
+    coordinator.async_set_updated_data = lambda state: None
+    coordinator._async_save_store = AsyncMock()
+    coordinator.state.appliance_health_status_by_circuit["fridge"] = (
+        "possible_degradation"
+    )
+    coordinator.state.appliance_health_evidence_by_circuit["fridge"] = {
+        "feature": "efficiency_degradation"
+    }
+    old_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
+        "fridge"
+    )
+    old_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
+    old_policy.observe(
+        Observation(
+            circuit_id="fridge",
+            feature="efficiency_degradation",
+            score=2.5,
+            baseline_confidence=1.0,
+            observed_at=now,
+        )
+    )
+
+    await coordinator.async_relearn_baseline("fridge")
+
+    new_policy = coordinator.settings_controller.cycle_alert_policy_for_circuit(
+        "fridge"
+    )
+    new_short_cycle_policy = (
+        coordinator.settings_controller.appliance_health_short_cycle_alert_policy_for_circuit(
+            "fridge"
+        )
+    )
+    assert new_policy is not old_policy
+    assert new_short_cycle_policy is not old_short_cycle_policy
+    assert coordinator.state.appliance_health_status_by_circuit == {}
+    assert coordinator.state.appliance_health_evidence_by_circuit == {}
 
 
 def test_apply_state_update_rejects_unknown_root_path() -> None:
@@ -211,6 +398,49 @@ def _completed_energy_learning_history(
             ],
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_process_update_passes_prior_learning_state_to_lifecycle_controller() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({"sensor.fridge_power": 0}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.fridge_power",
+                            "role": "real_power",
+                        },
+                    ],
+                },
+            ],
+        },
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["fridge"] = True
+    coordinator.notification_controller.async_notify_learning_transitions = (
+        AsyncMock()
+    )
+
+    await coordinator.async_process_update()
+
+    coordinator.notification_controller.async_notify_learning_transitions.assert_awaited_once_with(
+        {"fridge": True},
+        now,
+    )
 
 
 @pytest.mark.asyncio
@@ -537,6 +767,83 @@ def test_coordinator_normalizes_rain_intensity_units_to_mm_per_hour() -> None:
     assert evidence["rain_intensity_bin"] == "heavy"
     assert evidence["baseline_context"] == "heavy_rain, heavy"
     assert evidence["rain_context_issues"] == []
+
+
+def test_coordinator_uses_weather_entity_and_outdoor_humidity_for_sump_context() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
+    weather_attributes = {
+        "temperature": 84,
+        "temperature_unit": "°F",
+        "humidity": 85,
+        "precipitation": 0.1,
+        "precipitation_unit": "in/h",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {"weather.home": ("rainy", 0, weather_attributes)},
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "sump_pump",
+                    "name": "Sump Pump",
+                    "appliance_profile": "sump_pump",
+                    "mode": "single_phase",
+                },
+                {
+                    "circuit_id": "hvac",
+                    "name": "Air Conditioner",
+                    "appliance_profile": "hvac_compressor",
+                    "mode": "single_phase",
+                },
+            ],
+            CONF_RAIN_SENSOR_ENTITY: "weather.home",
+            CONF_OUTDOOR_TEMPERATURE_ENTITY: "weather.home",
+            CONF_ADVANCED_SETTINGS: {
+                "sump_pump": {CONF_RAIN_PUMP_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "sump_pump": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "pump_runtime_minutes": 6.0,
+                        "rain_active": False,
+                        "compressor_runtime_minutes": 0.0,
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["sump_pump"] = 20 * 60
+    coordinator.state.run_cycle_runtime_seconds_by_circuit["hvac"] = 60 * 60
+    coordinator.state.run_cycle_duty_cycle_by_circuit["hvac"] = 50.0
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.rain_pump_context_by_circuit["sump_pump"]
+    assert evidence["rain_sensor_active"] is True
+    assert evidence["rain_intensity_per_hour"] == 0.1
+    assert evidence["rain_intensity_unit"] == "in/h"
+    assert evidence["outdoor_temperature_f"] == 84.0
+    assert evidence["temperature_bin"] == "hot"
+    assert evidence["outdoor_humidity_percent"] == 85.0
+    assert evidence["outdoor_humidity_bin"] == "very_humid"
+    assert "outdoor_temperature" in evidence["contributing_factors"]
+    assert "outdoor_humidity" in evidence["contributing_factors"]
 
 
 def test_coordinator_honors_rain_response_window_after_rain_stops() -> None:
@@ -2049,6 +2356,64 @@ async def test_schedule_timer_rechecks_source_freshness_before_recording_miss() 
 
 
 @pytest.mark.asyncio
+async def test_schedule_refresh_preserves_alert_until_context_clears(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    alert_ready = {"value": True}
+    alert = AlertEvidence(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="pool_pump",
+        severity=Severity.WARNING,
+        message="Pool pump missed its expected schedule.",
+        feature="expected_schedule_missed",
+        features={"appliance_key": "circuit:pool_pump"},
+    )
+
+    def refresh(coordinator, timestamp):
+        del timestamp
+        coordinator.state.expected_schedule_by_appliance = {
+            "circuit:pool_pump": {"alert_ready": alert_ready["value"]}
+        }
+        return []
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        refresh,
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={
+                "circuit:pool_pump": {"enabled": True}
+            },
+            alerts=[alert],
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.learning_by_circuit["pool_pump"] = False
+    coordinator.state.active_alerts_by_circuit = {"pool_pump": [alert]}
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator._async_save_store = AsyncMock()
+
+    await coordinator.async_refresh_expected_schedules(now)
+    assert coordinator.state.active_alerts_by_circuit == {
+        "pool_pump": [alert]
+    }
+
+    alert_ready["value"] = False
+    await coordinator.async_refresh_expected_schedules(now)
+    assert coordinator.state.active_alerts_by_circuit == {}
+
+
+@pytest.mark.asyncio
 async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -2507,6 +2872,17 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
     now_holder = {"value": datetime(2026, 6, 2, 12, 0, tzinfo=UTC)}
     coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
     calls = _record_source_scoped_update_work(coordinator)
+    untouched_alert = AlertEvidence(
+        timestamp=now_holder["value"],
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+        change_ratio=0.4,
+    )
+    coordinator.state.active_alerts_by_circuit = {"hvac": [untouched_alert]}
+    coordinator.state.anomaly_score_by_circuit = {"hvac": 0.4}
+    coordinator.store_data.alerts.append(untouched_alert)
 
     await coordinator.async_process_update(
         changed_entities=("sensor.fridge_power",),
@@ -2520,6 +2896,161 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
         "hvac": 1800.0,
         "well_pump": 700.0,
     }
+    assert coordinator.state.active_alerts_by_circuit == {
+        "hvac": [untouched_alert]
+    }
+    assert coordinator.state.anomaly_score_by_circuit["hvac"] == 0.4
+
+
+@pytest.mark.asyncio
+async def test_source_update_clears_overlapping_schedule_and_utility_alerts(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:hvac": {"enabled": True}
+    }
+    coordinator.store_data.utility_comparison_settings_by_circuit = {"hvac": {}}
+    schedule_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC ran outside its expected schedule.",
+        feature="running_outside_expected_schedule",
+    )
+    utility_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Utility comparison mismatch.",
+        feature="utility_energy_mismatch",
+    )
+    runtime_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    coordinator.state.active_alerts_by_circuit = {
+        "hvac": [schedule_alert, utility_alert, runtime_alert]
+    }
+    coordinator.store_data.alerts.extend(
+        (schedule_alert, utility_alert, runtime_alert)
+    )
+    sync_notifications = AsyncMock()
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        sync_notifications
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        lambda coordinator, now: [],
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["hvac"] == [runtime_alert]
+    sync_notifications.assert_awaited_once_with({"fridge", "hvac"})
+
+
+@pytest.mark.asyncio
+async def test_source_update_preserves_ongoing_schedule_alert(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.appliance_schedule_settings = {
+        "circuit:fridge": {"enabled": True}
+    }
+    alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Fridge missed its expected schedule.",
+        feature="expected_schedule_missed",
+        features={"appliance_key": "circuit:fridge"},
+    )
+    coordinator.state.learning_by_circuit["fridge"] = False
+    coordinator.state.active_alerts_by_circuit = {"fridge": [alert]}
+    coordinator.store_data.alerts.append(alert)
+
+    def refresh(current_coordinator, timestamp):
+        del timestamp
+        current_coordinator.state.expected_schedule_by_appliance = {
+            "circuit:fridge": {"alert_ready": True}
+        }
+        return []
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "refresh_expected_schedule_contexts",
+        refresh,
+    )
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        AsyncMock()
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["fridge"] == [alert]
+
+
+@pytest.mark.asyncio
+async def test_source_update_clears_utility_alerts_for_all_comparison_circuits(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now_holder = {"value": datetime(2026, 7, 13, 12, 0, tzinfo=UTC)}
+    coordinator = _source_scoped_coordinator(coordinator_module, now_holder)
+    _record_source_scoped_update_work(coordinator)
+    coordinator.store_data.utility_comparison_settings_by_circuit = {"hvac": {}}
+    utility_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="Utility comparison mismatch.",
+        feature="utility_energy_mismatch",
+    )
+    runtime_alert = AlertEvidence(
+        timestamp=now_holder["value"] - timedelta(minutes=5),
+        circuit_id="hvac",
+        severity=Severity.WARNING,
+        message="HVAC runtime changed.",
+        feature="run_cycle_duration_s",
+    )
+    coordinator.state.active_alerts_by_circuit = {
+        "hvac": [utility_alert, runtime_alert]
+    }
+    coordinator.store_data.alerts.extend((utility_alert, runtime_alert))
+    sync_notifications = AsyncMock()
+    coordinator.notification_controller.async_sync_alert_notifications = (
+        sync_notifications
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    assert coordinator.state.active_alerts_by_circuit["hvac"] == [runtime_alert]
+    sync_notifications.assert_awaited_once_with({"fridge", "hvac"})
 
 
 @pytest.mark.asyncio
@@ -4197,6 +4728,79 @@ def test_runtime_retention_prunes_contextual_baseline_samples() -> None:
     }
 
 
+def test_lightweight_retention_preserves_predictive_health_evidence_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    expired_at = now - timedelta(days=18, seconds=1)
+    oldest_complete_day_start = datetime(2026, 6, 1, tzinfo=UTC)
+    expired_event = CircuitEvent(
+        timestamp=expired_at,
+        circuit_id="fridge",
+        event_type=EventType.START,
+    )
+    boundary_event = CircuitEvent(
+        timestamp=oldest_complete_day_start,
+        circuit_id="fridge",
+        event_type=EventType.STOP,
+    )
+    boundary_context = {
+        "timestamp": oldest_complete_day_start.isoformat(),
+        "feature": "daily_energy_kwh",
+        "value": 1.0,
+        "context": {"season": "summer"},
+        "source": "test",
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "retention_mode": RetentionMode.LIGHTWEIGHT.value,
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=FeatureStoreData(
+            events=[expired_event, boundary_event],
+            energy_usage_by_circuit={
+                "fridge": {
+                    "days": [
+                        {"date": "2026-05-30", "usage_kwh": 1.0},
+                        {"date": "2026-06-01", "usage_kwh": 1.0},
+                    ]
+                }
+            },
+            contextual_baseline_samples_by_circuit={
+                "fridge": [
+                    {
+                        **boundary_context,
+                        "timestamp": expired_at.isoformat(),
+                    },
+                    boundary_context,
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator._apply_retention(now)
+
+    assert coordinator.store_data.events == [boundary_event]
+    assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
+        {"date": "2026-06-01", "usage_kwh": 1.0}
+    ]
+    assert coordinator.store_data.contextual_baseline_samples_by_circuit == {
+        "fridge": [boundary_context]
+    }
+
+
 def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4221,16 +4825,16 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
             energy_usage_by_circuit={
                 "fridge": {
                     "days": [
-                        {"date": "2026-05-30", "usage_kwh": 6.0},
-                        {"date": "2026-05-31", "usage_kwh": 7.0},
+                        {"date": "2026-05-26", "usage_kwh": 6.0},
+                        {"date": "2026-05-27", "usage_kwh": 7.0},
                     ],
                 }
             },
             demand_by_circuit={
                 "fridge": {
                     "daily_peaks": [
-                        {"date": "2026-05-30", "peak_demand_w": 1000.0},
-                        {"date": "2026-05-31", "peak_demand_w": 1200.0},
+                        {"date": "2026-05-26", "peak_demand_w": 1000.0},
+                        {"date": "2026-05-27", "peak_demand_w": 1200.0},
                     ],
                 }
             },
@@ -4241,10 +4845,10 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
     coordinator._apply_retention(now)
 
     assert coordinator.store_data.energy_usage_by_circuit["fridge"]["days"] == [
-        {"date": "2026-05-31", "usage_kwh": 7.0}
+        {"date": "2026-05-27", "usage_kwh": 7.0}
     ]
     assert coordinator.store_data.demand_by_circuit["fridge"]["daily_peaks"] == [
-        {"date": "2026-05-31", "peak_demand_w": 1200.0}
+        {"date": "2026-05-27", "peak_demand_w": 1200.0}
     ]
 
 
@@ -4255,7 +4859,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "standby_w": 8.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4277,7 +4881,7 @@ def test_runtime_retention_prunes_standby_samples_by_timestamp() -> None:
                 "fridge": {
                     "samples": [
                         {
-                            "timestamp": "2026-05-31T03:00:00+00:00",
+                            "timestamp": "2026-05-28T03:00:00+00:00",
                             "standby_w": 9.0,
                         },
                         retained_sample,
@@ -4302,11 +4906,11 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
 
     now = datetime(2026, 6, 15, 3, 30, tzinfo=UTC)
     retained_weather_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "outdoor_temperature_f": 78.0,
     }
     retained_water_sample = {
-        "timestamp": "2026-06-01T04:00:00+00:00",
+        "timestamp": "2026-05-28T04:00:00+00:00",
         "rain_intensity_mm_per_hour": 0.0,
     }
     coordinator = EnergyAnalyzerCoordinator(
@@ -4328,7 +4932,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.weather_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-28T03:00:00+00:00",
                 "outdoor_temperature_f": 72.0,
             },
             retained_weather_sample,
@@ -4337,7 +4941,7 @@ def test_runtime_retention_prunes_context_samples_by_timestamp() -> None:
     coordinator.store_data.water_context_history_by_circuit = {
         "hvac": [
             {
-                "timestamp": "2026-05-31T03:00:00+00:00",
+                "timestamp": "2026-05-28T03:00:00+00:00",
                 "rain_intensity_mm_per_hour": 1.0,
             },
             retained_water_sample,
@@ -8252,17 +8856,14 @@ async def test_runtime_negative_load_power_creates_orientation_issue(
         (
             "fridge",
             "unexpected_negative_real_power",
-            ("sensor.fridge_power", "sensor.fridge_current"),
+            ("sensor.fridge_power",),
             {
                 "circuit_name": "Fridge",
                 "reason": "A load circuit is reporting sustained negative real power.",
                 "recommended_action": (
                     "Check CT direction or power-flow mode for Fridge"
                 ),
-                "source_entities": [
-                    "sensor.fridge_power",
-                    "sensor.fridge_current",
-                ],
+                "source_entities": ["sensor.fridge_power"],
             },
         )
     ]
@@ -11401,7 +12002,9 @@ async def test_runtime_real_power_state_change_does_not_create_alert(
 
     assert notifications == []
     assert coordinator.state.active_alerts_by_circuit.get("fridge", []) == []
-    assert coordinator.store_data.alerts == []
+    assert [alert.feature for alert in coordinator.store_data.alerts] == [
+        "learning_completed"
+    ]
 
 
 @pytest.mark.asyncio
@@ -11657,6 +12260,186 @@ async def test_maintenance_mode_pauses_notifications_but_not_data_quality_repair
     assert "fridge" in coordinator.paused_circuits
     assert coordinator.state.maintenance_by_circuit["fridge"]["active"] is True
     assert issues == [("fridge", "missing_required_sensor")]
+
+
+@pytest.mark.asyncio
+async def test_maintenance_lifecycle_history_survives_relearn() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(get=lambda entity_id: None),
+            data={},
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                },
+            ],
+        },
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_start_maintenance(
+        "fridge",
+        relearn_on_end=True,
+    )
+    await coordinator.async_end_maintenance("fridge")
+
+    assert [alert.feature for alert in coordinator.store_data.alerts] == [
+        "maintenance_completed",
+        "relearning_started",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_timed_maintenance_expires_before_processing_context_is_built(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        lambda hass, callback, point_in_time: lambda: None,
+    )
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        now_fn=lambda: current_time[0],
+    )
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+    active_when_context_built: list[bool] = []
+    original_build = coordinator.context_builder.build
+
+    def build_context(now):
+        active_when_context_built.append(
+            coordinator.store_data.maintenance_by_circuit["fridge"]["active"]
+        )
+        return original_build(now)
+
+    coordinator.context_builder.build = build_context
+    current_time[0] = datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    await coordinator.async_process_update()
+
+    assert active_when_context_built
+    assert not any(active_when_context_built)
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("trigger", ["startup", "schedule_refresh"])
+async def test_timed_maintenance_expires_without_a_source_update(trigger: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+        store_data=FeatureStoreData(
+            maintenance_by_circuit={
+                "fridge": {
+                    "active": True,
+                    "started_at": (now - timedelta(hours=2)).isoformat(),
+                    "expires_at": (now - timedelta(minutes=30)).isoformat(),
+                }
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    if trigger == "startup":
+        await coordinator.async_start(())
+    else:
+        await coordinator.async_refresh_expected_schedules(now)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+
+
+@pytest.mark.asyncio
+async def test_timed_maintenance_schedules_its_own_expiry(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    tracked: list[tuple[datetime, Any]] = []
+    cancelled: list[bool] = []
+
+    def track_point(hass, callback, point_in_time):
+        del hass
+        tracked.append((point_in_time, callback))
+        return lambda: cancelled.append(True)
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_track_point_in_time",
+        track_point,
+        raising=False,
+    )
+    current_time = [datetime(2026, 7, 28, 12, 0, tzinfo=UTC)]
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        now_fn=lambda: current_time[0],
+    )
+    coordinator.async_relearn_baseline = AsyncMock()
+
+    await coordinator.async_start_maintenance(
+        "fridge",
+        duration="01:30:00",
+        relearn_on_end=True,
+    )
+
+    expires_at, callback = tracked[-1]
+    assert expires_at == datetime(2026, 7, 28, 13, 30, tzinfo=UTC)
+
+    current_time[0] = expires_at
+    await callback(expires_at)
+
+    assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
+    assert "fridge" not in coordinator.paused_circuits
+    coordinator.async_relearn_baseline.assert_awaited_once_with("fridge")
+    assert cancelled == []
 
 
 def test_per_circuit_sensitivity_override_controls_alert_policy() -> None:

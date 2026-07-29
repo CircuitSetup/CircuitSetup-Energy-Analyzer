@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import date, datetime, timedelta
 from typing import Any
 
+from ..alert_feedback import mapping_datetime
 from ..alerting import Observation
 from ..baseline import build_baseline
 from ..contextual_baseline import (
     DAILY_ENERGY_FEATURE,
+    ContextKey,
     ContextualBaselineSample,
     build_context_for_sample,
     context_allows_baseline_learning,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
+    remove_contextual_samples_for_dates,
     select_contextual_baseline,
     stored_contextual_samples,
     upsert_contextual_sample,
 )
-from ..local_time import as_ha_local, local_date
+from ..local_time import TimeZone, as_ha_local, local_date
 from ..models import CircuitConfig
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
@@ -67,7 +71,32 @@ class EnergyUsageProcessor:
         if self._seed_demo_history is not None:
             self._seed_demo_history(circuit_config, sample, context.now, settings)
 
+        context_key = build_context_for_sample(
+            circuit_config=circuit_config,
+            sample=sample,
+            state=context.state,
+            store_data=context.store_data,
+            now=context.now,
+            feature=DAILY_ENERGY_FEATURE,
+            time_zone=context.time_zone,
+            calendar_timestamp=context.now,
+        )
         history = context.store_data.energy_usage_by_circuit.setdefault(circuit_id, {})
+        retention_days = self._retention_days_for_circuit(circuit_id)
+        maintenance = context.store_data.maintenance_by_circuit.get(circuit_id, {})
+        maintenance_dates = _maintenance_ineligible_dates(
+            maintenance,
+            context.now,
+            time_zone=context.time_zone,
+            retention_days=retention_days,
+        )
+        baseline_eligible = context_allows_baseline_learning(
+            context_key
+        ) and _energy_interval_allows_baseline_learning(
+            history,
+            maintenance,
+            context.now,
+        )
         result = record_energy_usage(
             history,
             circuit_id=circuit_id,
@@ -77,18 +106,53 @@ class EnergyUsageProcessor:
                 window_days=settings.window_days,
                 daily_spike_ratio=settings.daily_spike_ratio,
             ),
-            retention_days=self._retention_days_for_circuit(circuit_id),
+            retention_days=retention_days,
             time_zone=context.time_zone,
+            baseline_eligible=baseline_eligible,
+            ineligible_dates=maintenance_dates,
         )
         if result is None:
             return FeatureResult()
 
+        ineligible_dates = _energy_ineligible_dates(history) | maintenance_dates
+        raw_contextual_samples = (
+            context.store_data.contextual_baseline_samples_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        if remove_contextual_samples_for_dates(
+            raw_contextual_samples,
+            circuit_id=circuit_id,
+            dates=ineligible_dates,
+            time_zone=context.time_zone,
+            cache=context.contextual_samples_cache,
+        ):
+            if not raw_contextual_samples:
+                context.store_data.contextual_baseline_samples_by_circuit.pop(
+                    circuit_id,
+                    None,
+                )
+            context.store_data.contextual_baselines_by_circuit.pop(circuit_id, None)
         contextual_comparison = _contextual_daily_energy_comparison(
             result,
-            circuit_config,
-            sample,
             context,
+            context_key,
+            baseline_eligible=(
+                baseline_eligible
+                and date.fromisoformat(result.date) not in ineligible_dates
+            ),
         )
+        for day in history.get("days", ()):
+            if isinstance(day, dict) and day.get("date") == result.date:
+                if (
+                    contextual_comparison.get("status_override")
+                    == "context_explained"
+                ):
+                    day["expected_context"] = True
+                else:
+                    day.pop("expected_context", None)
+                break
         energy_source = str(history.get("energy_source") or "")
         evidence = energy_usage_evidence_payload(
             result,
@@ -220,22 +284,13 @@ def energy_usage_evidence_payload(
 
 def _contextual_daily_energy_comparison(
     result: Any,
-    circuit_config: CircuitConfig,
-    sample: NormalizedCircuitSample,
     context: ProcessingContext,
+    context_key: ContextKey,
+    *,
+    baseline_eligible: bool,
 ) -> dict[str, Any]:
     """Record and compare daily energy against contextual history."""
-    circuit_id = circuit_config.circuit_id
-    context_key = build_context_for_sample(
-        circuit_config=circuit_config,
-        sample=sample,
-        state=context.state,
-        store_data=context.store_data,
-        now=context.now,
-        feature=DAILY_ENERGY_FEATURE,
-        time_zone=context.time_zone,
-        calendar_timestamp=context.now,
-    )
+    circuit_id = result.circuit_id
     raw_samples = context.store_data.contextual_baseline_samples_by_circuit.get(
         circuit_id,
         [],
@@ -257,9 +312,7 @@ def _contextual_daily_energy_comparison(
         fallback_contexts=daily_energy_fallback_contexts(context_key),
     )
 
-    if result.daily_usage_kwh > 0.0 and context_allows_baseline_learning(
-        context_key
-    ):
+    if result.daily_usage_kwh > 0.0 and baseline_eligible:
         samples = context.store_data.contextual_baseline_samples_by_circuit.setdefault(
             circuit_id,
             [],
@@ -322,6 +375,87 @@ def _contextual_daily_energy_comparison(
     return attrs
 
 
+def _energy_interval_allows_baseline_learning(
+    history: Mapping[str, Any],
+    maintenance: Any,
+    timestamp: datetime,
+) -> bool:
+    if not isinstance(maintenance, Mapping):
+        return True
+    if maintenance.get("active") is True:
+        return False
+
+    sample_start = mapping_datetime(history.get("last_sample_at"))
+    maintenance_start = mapping_datetime(maintenance.get("started_at"))
+    maintenance_end = mapping_datetime(maintenance.get("ended_at"))
+    if sample_start is None or maintenance_start is None or maintenance_end is None:
+        return True
+
+    sample_end = timestamp
+    if maintenance_start.tzinfo is None:
+        sample_start = sample_start.replace(tzinfo=None)
+        sample_end = sample_end.replace(tzinfo=None)
+        maintenance_end = maintenance_end.replace(tzinfo=None)
+    elif sample_start.tzinfo is None or sample_end.tzinfo is None:
+        sample_start = sample_start.replace(tzinfo=None)
+        sample_end = sample_end.replace(tzinfo=None)
+        maintenance_start = maintenance_start.replace(tzinfo=None)
+        maintenance_end = maintenance_end.replace(tzinfo=None)
+    return not (
+        sample_start < maintenance_end and sample_end > maintenance_start
+    )
+
+
+def _maintenance_ineligible_dates(
+    maintenance: Any,
+    timestamp: datetime,
+    *,
+    time_zone: TimeZone,
+    retention_days: int,
+) -> set[date]:
+    if not isinstance(maintenance, Mapping):
+        return set()
+    started_at = mapping_datetime(maintenance.get("started_at"))
+    ended_at = (
+        timestamp
+        if maintenance.get("active") is True
+        else mapping_datetime(maintenance.get("ended_at"))
+    )
+    if started_at is None or ended_at is None:
+        if maintenance.get("active"):
+            return {local_date(timestamp, time_zone)}
+        return set()
+
+    today = local_date(timestamp, time_zone)
+    first = max(
+        local_date(started_at, time_zone),
+        today - timedelta(days=max(int(retention_days), 1)),
+    )
+    last = min(local_date(ended_at, time_zone), today)
+    if last < first:
+        return set()
+    return {
+        first + timedelta(days=offset) for offset in range((last - first).days + 1)
+    }
+
+
+def _energy_ineligible_dates(
+    history: Mapping[str, Any],
+) -> set[date]:
+    days = history.get("days")
+    if not isinstance(days, list):
+        return set()
+    ineligible: set[date] = set()
+    for day in days:
+        if not isinstance(day, Mapping) or day.get("baseline_eligible") is not False:
+            continue
+        try:
+            ineligible.add(date.fromisoformat(str(day.get("date") or "")))
+        except ValueError:
+            continue
+    return ineligible
+
+
 def _daily_energy_projection(
     result: Any,
     selected: Any,
@@ -337,6 +471,7 @@ def _daily_energy_projection(
         if (
             not isinstance(item, dict)
             or item.get("complete") is not True
+            or item.get("baseline_eligible") is False
             or str(item.get("date")) >= today
         ):
             continue
