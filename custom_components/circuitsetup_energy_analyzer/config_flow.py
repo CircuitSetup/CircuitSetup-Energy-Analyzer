@@ -4327,9 +4327,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         config = _entry_config(self._config_entry)
         context = _advanced_circuit_context_from_config(config, circuit_id)
         if user_input is not None:
+            flattened_input = _flatten_advanced_settings_input(user_input)
+            reset_temperature_map = bool(
+                flattened_input.get(
+                    FIELD_RESET_ADVANCED_SETTINGS_TO_DEFAULTS,
+                    False,
+                )
+                or flattened_input.get(
+                    "reset_hvac_efficiency_settings_to_defaults",
+                    False,
+                )
+            )
             try:
                 settings = _advanced_settings_from_input(
-                    user_input,
+                    flattened_input,
                     context=context,
                 )
             except SetupValidationError as err:
@@ -4343,7 +4354,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
             )
             previous = current_settings.get(circuit_id, {})
             if (
-                CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP not in settings
+                not reset_temperature_map
+                and CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP not in settings
                 and isinstance(previous, Mapping)
                 and isinstance(
                     previous.get(CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP),

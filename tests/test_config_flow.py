@@ -5033,6 +5033,64 @@ async def test_advanced_settings_maps_each_linked_thermostat_temperature_sensor(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_input",
+    [
+        {
+            "hvac_efficiency_settings": {
+                "reset_hvac_efficiency_settings_to_defaults": True
+            }
+        },
+        {
+            "analysis_settings": {
+                "reset_advanced_settings_to_defaults": True
+            }
+        },
+    ],
+)
+async def test_advanced_settings_reset_removes_thermostat_temperature_map(
+    user_input: dict[str, object],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={
+            CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "heat_pump",
+                    "name": "Downstairs Heat Pump",
+                    "appliance_profile": "heat_pump",
+                    "mode": "dual_phase",
+                    "power_flow": "load",
+                    "sensors": [],
+                }
+            ],
+        },
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "heat_pump": {
+                    CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                        "climate.downstairs": "sensor.downstairs_temperature"
+                    },
+                }
+            }
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    flow._advanced_circuit_id = "heat_pump"
+
+    result = await flow.async_step_advanced_settings(user_input)
+
+    assert result["type"] == "create_entry"
+    saved = result["data"][CONF_ADVANCED_SETTINGS]["heat_pump"]
+    assert CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP not in saved
+
+
+@pytest.mark.asyncio
 async def test_advanced_settings_form_shows_learned_operating_detection_source() -> (
     None
 ):
