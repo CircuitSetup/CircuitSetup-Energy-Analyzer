@@ -50,6 +50,7 @@ class HvacResponseEpisode:
     complete: bool
     excluded_from_baseline: bool = False
     inactive_since: datetime | None = None
+    temperature_entity_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,7 @@ def advance_episode(
             participant_signature=_sorted_unique(participant_signature),
             supporting_blower_ids=_sorted_unique(supporting_blower_ids),
             complete=False,
+            temperature_entity_id=observation.temperature_entity_id,
         )
         return episode, None
 
@@ -132,6 +134,7 @@ def advance_episode(
         or target is None
         or mode is None
         or observation.thermostat_entity_id != current.thermostat_entity_id
+        or observation.temperature_entity_id != current.temperature_entity_id
         or circuit_id != current.circuit_id
         or mode != current.mode
         or not math.isclose(target, current.target_temperature_f, abs_tol=0.01)
@@ -313,6 +316,9 @@ def episode_from_dict(
                 raw.get("excluded_from_baseline", False)
             ),
             inactive_since=_optional_datetime(raw.get("inactive_since")),
+            temperature_entity_id=_optional_text(
+                raw.get("temperature_entity_id")
+            ),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -390,6 +396,7 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
     return (
         episode.circuit_id,
         episode.thermostat_entity_id,
+        episode.temperature_entity_id,
         episode.mode,
         episode.temperature_bin,
         episode.season,
@@ -473,6 +480,7 @@ def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
         "stream_id": episode.stream_id,
         "circuit_id": episode.circuit_id,
         "thermostat_entity_id": episode.thermostat_entity_id,
+        "temperature_entity_id": episode.temperature_entity_id,
         "mode": episode.mode,
         "temperature_bin": episode.temperature_bin,
         "season": episode.season,

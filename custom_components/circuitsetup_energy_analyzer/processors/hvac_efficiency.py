@@ -255,9 +255,6 @@ class HvacEfficiencyProcessor:
                         )
                     )
                     stored_episode = episode_to_dict(finalized)
-                    stored_episode["temperature_entity_id"] = (
-                        current_observation.temperature_entity_id
-                    )
                     stored_episode["baseline_era"] = (
                         context.store_data.hvac_baseline_era_by_stream.get(
                             stream_id,
@@ -813,19 +810,17 @@ def _circuit_efficiency_payload(
         "hvac_response_history_by_stream",
         {},
     )
-    mapped_thermostats = set(
-        thermostat_mappings_for_settings(
-            context.entry_data,
-            context.options,
-            settings,
-        )
+    thermostat_mappings = thermostat_mappings_for_settings(
+        context.entry_data,
+        context.options,
+        settings,
     )
     for stream_id, raw_history in history_by_stream.items():
         stream_parts = stream_id.split("|")
         if (
             len(stream_parts) != 3
             or stream_parts[0] != circuit_id
-            or stream_parts[1] not in mapped_thermostats
+            or stream_parts[1] not in thermostat_mappings
         ):
             continue
         mode = stream_parts[-1]
@@ -843,11 +838,13 @@ def _circuit_efficiency_payload(
             for raw in raw_history[-_HISTORY_LIMIT:]
             if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
             == baseline_era
+            if (str(raw.get("temperature_entity_id") or "").strip() or None)
+            == thermostat_mappings[stream_parts[1]]
             if (episode := episode_from_dict(raw)) is not None
         ]
         evaluations[stream_id] = {
             **_evaluation_to_dict(
-            evaluate_efficiency(episodes, threshold_pct=threshold)
+                evaluate_efficiency(episodes, threshold_pct=threshold)
             ),
             "baseline_era": baseline_era,
         }

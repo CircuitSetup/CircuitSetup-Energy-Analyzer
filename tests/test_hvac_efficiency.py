@@ -113,6 +113,7 @@ def test_episode_starts_only_with_capable_active_driver_and_one_degree_gap() -> 
     assert current.mode == "cooling"
     assert current.gap_bin == "6-8F"
     assert current.active_minutes == 1.0
+    assert current.temperature_entity_id == "sensor.downstairs_temperature"
     assert current.participant_signature == ("heat_pump",)
     assert current.supporting_blower_ids == ("blower",)
 
@@ -126,6 +127,25 @@ def test_episode_starts_only_with_capable_active_driver_and_one_degree_gap() -> 
         _observation(actual=78.0, target=72.0),
         driver_active=False,
     )[0] is None
+
+
+def test_temperature_source_change_excludes_the_active_episode() -> None:
+    current, _ = _advance(None, _observation(actual=78.0, target=72.0))
+    changed_source = replace(
+        _observation(actual=77.0, target=72.0),
+        temperature_entity_id="sensor.replacement_temperature",
+    )
+
+    active, excluded = _advance(
+        current,
+        changed_source,
+        now=START + timedelta(minutes=5),
+        active_minutes_delta=5.0,
+    )
+
+    assert active is None
+    assert excluded is not None
+    assert excluded.excluded_from_baseline is True
 
 
 @pytest.mark.parametrize(
