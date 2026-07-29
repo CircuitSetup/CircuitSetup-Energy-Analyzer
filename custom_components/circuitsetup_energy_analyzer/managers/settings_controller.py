@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
 from datetime import time as time_of_day
+from statistics import median
 from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings
@@ -31,6 +32,7 @@ from ..cycles import (
 )
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
+from ..hvac_efficiency import episode_from_dict
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from ..metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -262,6 +264,8 @@ class SettingsController:
             "apparent_power_samples_va": [],
             "negative_balance_w": [],
             "solar_export_w": [],
+            "hvac_correlation_calls": [],
+            "hvac_response_episodes": [],
         }
 
         usage_history = coordinator.store_data.energy_usage_by_circuit.get(
@@ -392,6 +396,12 @@ class SettingsController:
         feature_history["solar_export_w"] = _numeric_items(
             [solar_evidence],
             keys=("grid_export_w", "solar_grid_export_w"),
+        )
+        feature_history.update(
+            _hvac_advisor_history(
+                coordinator,
+                config,
+            )
         )
 
         return feature_history
@@ -2337,6 +2347,138 @@ def _replace_if_present_as(
     }
     if values:
         target[circuit_id] = values
+
+
+def _hvac_advisor_history(
+    coordinator: Any,
+    config: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    circuit_id = str(config.circuit_id)
+    histories = getattr(
+        coordinator.store_data,
+        "hvac_response_history_by_stream",
+        {},
+    )
+    eras = getattr(
+        coordinator.store_data,
+        "hvac_baseline_era_by_stream",
+        {},
+    )
+    raw_episodes = [
+        dict(raw)
+        for stream_id, history in histories.items()
+        if str(stream_id).startswith(f"{circuit_id}|")
+        for raw in history
+        if isinstance(raw, Mapping)
+        and str(raw.get("baseline_era", "initial"))
+        == str(eras.get(stream_id, "initial"))
+        and episode_from_dict(raw) is not None
+    ][-256:]
+    if not raw_episodes:
+        return {
+            "hvac_correlation_calls": [],
+            "hvac_response_episodes": [],
+        }
+
+    observations_for = getattr(
+        coordinator.context_builder,
+        "thermostat_observations",
+        None,
+    )
+    observations = observations_for() if callable(observations_for) else {}
+    alerted_episode_ids = {
+        str(episode_id)
+        for alert in getattr(coordinator.store_data, "alerts", ())
+        if alert.features.get("health_feature") == "hvac_thermostat_efficiency"
+        for episode_id in alert.features.get("recent_episode_ids", ())
+    }
+    profile = str(getattr(config.appliance_profile, "value", ""))
+    calls: list[dict[str, Any]] = []
+    episodes: list[dict[str, Any]] = []
+    for raw in raw_episodes:
+        episode = episode_from_dict(raw)
+        if episode is None:
+            continue
+        elapsed = float(episode.elapsed_minutes)
+        overlap_ratio = (
+            min(1.0, max(0.0, float(episode.active_minutes) / elapsed))
+            if elapsed > 0.0
+            else 0.0
+        )
+        base_observation = observations.get(episode.thermostat_entity_id)
+        capabilities = getattr(base_observation, "available_capabilities", ())
+        participants = list(episode.participant_signature)
+        temperature_id = str(raw.get("temperature_entity_id") or "") or None
+        calls.append(
+            {
+                "thermostat_entity_id": episode.thermostat_entity_id,
+                "thermostat_name": episode.thermostat_entity_id.replace(
+                    "climate.",
+                    "",
+                ).replace("_", " ").title(),
+                "temperature_entity_id": temperature_id,
+                "mode": episode.mode,
+                "driver_mode": episode.mode,
+                "overlap_ratio": overlap_ratio,
+                "candidate_moved_toward_target": bool(
+                    temperature_id and episode.complete
+                ),
+                "climate_has_current_temperature": (
+                    "current_temperature" in capabilities
+                ),
+                "electrical_driver_present": (
+                    profile != "hvac_blower"
+                    or any(item != circuit_id for item in participants)
+                ),
+                "weather_mode": episode.weather_mode,
+                "temperature_bin": episode.temperature_bin,
+            }
+        )
+        degrees_closed = abs(
+            episode.latest_temperature_f - episode.start_temperature_f
+        )
+        if degrees_closed <= 0.0:
+            continue
+        context_key = "|".join(
+            (
+                episode.mode,
+                str(episode.temperature_bin or ""),
+                str(episode.season or ""),
+                episode.gap_bin,
+                "+".join(participants),
+            )
+        )
+        episodes.append(
+            {
+                "episode_id": episode.started_at.isoformat(),
+                "complete": episode.complete,
+                "excluded_from_baseline": episode.excluded_from_baseline,
+                "alerted": episode.started_at.isoformat() in alerted_episode_ids,
+                "context_key": context_key,
+                "minutes_per_degree": elapsed / degrees_closed,
+            }
+        )
+
+    by_context: dict[str, list[dict[str, Any]]] = {}
+    for episode in episodes:
+        by_context.setdefault(str(episode["context_key"]), []).append(episode)
+    for comparable in by_context.values():
+        if len(comparable) < 9:
+            continue
+        baseline = median(
+            float(episode["minutes_per_degree"])
+            for episode in comparable[:9]
+        )
+        if baseline <= 0.0:
+            continue
+        for episode in comparable:
+            episode["absolute_deviation_percent"] = abs(
+                float(episode["minutes_per_degree"]) / baseline - 1.0
+            ) * 100.0
+    return {
+        "hvac_correlation_calls": calls[-256:],
+        "hvac_response_episodes": episodes[-256:],
+    }
 
 
 def _positive_int_value(value: Any, *, default: int) -> int:

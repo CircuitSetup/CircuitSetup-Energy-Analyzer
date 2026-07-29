@@ -26,6 +26,7 @@ DEGRADATION_CHANGE_RATIO = 0.25
 _WEATHER_AWARE_PROFILES = {
     ApplianceProfile.HVAC,
     ApplianceProfile.HVAC_COMPRESSOR,
+    ApplianceProfile.HEAT_PUMP,
     ApplianceProfile.HVAC_BLOWER,
     ApplianceProfile.MINI_SPLIT,
     ApplianceProfile.ELECTRIC_HEAT,
