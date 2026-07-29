@@ -350,6 +350,8 @@ def _response_mode(
     action = str(observation.action or "").lower()
     if action in {"heating", "cooling"}:
         return action
+    if action:
+        return None
     mode = str(observation.mode or "").lower()
     if mode in {"heat", "heating"}:
         return "heating"

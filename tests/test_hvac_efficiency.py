@@ -148,6 +148,16 @@ def test_temperature_source_change_excludes_the_active_episode() -> None:
     assert excluded.excluded_from_baseline is True
 
 
+def test_explicit_idle_action_does_not_start_an_episode() -> None:
+    active, completed = _advance(
+        None,
+        _observation(actual=78.0, target=72.0, action="idle"),
+    )
+
+    assert active is None
+    assert completed is None
+
+
 @pytest.mark.parametrize(
     ("action", "actual", "target", "expected_mode"),
     [

@@ -1158,6 +1158,7 @@ def _primary_appliance_expectations_for_circuit(
     if profile in {
         ApplianceProfile.HVAC,
         ApplianceProfile.HVAC_SYSTEM,
+        ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
     } and _is_higher(runtime):
         weather_status = _mapping_status(

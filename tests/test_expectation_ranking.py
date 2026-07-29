@@ -149,6 +149,12 @@ def test_nilm_validation_outranks_low_priority_energy_watch() -> None:
             "Runtime fits weather context",
         ),
         (
+            ApplianceProfile.HEAT_PUMP,
+            "weather_context_by_circuit",
+            "weather_correlated",
+            "Runtime fits weather context",
+        ),
+        (
             ApplianceProfile.SUMP_PUMP,
             "rain_pump_context_by_circuit",
             "rain_explained",
