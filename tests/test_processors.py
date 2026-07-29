@@ -19,8 +19,10 @@ from custom_components.circuitsetup_energy_analyzer.capacity import CapacitySett
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
     CONF_BLOWER_REPRESENTS_GAS_HEAT,
+    CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
     CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_THERMOSTAT_ENTITIES,
+    DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
     DOMAIN,
 )
 from custom_components.circuitsetup_energy_analyzer.cost import CostSettings
@@ -522,6 +524,47 @@ def test_hvac_efficiency_main_loop_uses_only_bounded_snapshots(
             )
             for stream_id, stream_history in histories.items()
         )
+    )
+
+
+def test_hvac_efficiency_defaults_a_malformed_persisted_threshold() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat_id = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat_id,
+            None,
+            78.0,
+            72.0,
+            "cool",
+            "cooling",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {
+                CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat_id],
+                CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT: "invalid",
+            }
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+    payload = _state_update_values(
+        result,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]
+
+    assert payload["threshold_pct"] == (
+        DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
     )
 
 

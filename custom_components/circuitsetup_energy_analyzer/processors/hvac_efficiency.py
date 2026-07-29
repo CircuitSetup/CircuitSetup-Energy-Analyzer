@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from statistics import median
@@ -469,12 +470,7 @@ def _circuit_efficiency_payload(
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
     circuit_id = config.circuit_id
-    threshold = float(
-        settings.get(
-            CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
-            DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
-        )
-    )
+    threshold = _response_change_threshold(settings)
     evaluations: dict[str, dict[str, Any]] = {}
     history_by_stream = getattr(
         context.store_data,
@@ -532,6 +528,23 @@ def _circuit_efficiency_payload(
         "current_streams": dict(current_streams),
         "streams": evaluations,
     }
+
+
+def _response_change_threshold(settings: Mapping[str, Any]) -> float:
+    try:
+        value = float(
+            settings.get(
+                CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+                DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+            )
+        )
+    except (TypeError, ValueError):
+        return DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
+    return (
+        value
+        if math.isfinite(value) and 5.0 <= value <= 100.0
+        else DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
+    )
 
 
 def _append_evaluation_alerts(
