@@ -241,6 +241,47 @@ def test_first_driver_off_interval_counts_toward_completed_episode() -> None:
     assert episode_to_dict(completed)["active_minutes"] == 20.0
 
 
+def test_actionless_range_thermostat_completes_at_active_boundary() -> None:
+    range_capabilities = (
+        "current_temperature",
+        "target_temp_high",
+        "target_temp_low",
+    )
+    current, _ = _advance(
+        None,
+        replace(
+            _observation(
+                actual=65.0,
+                target=68.0,
+                mode="heat_cool",
+                action=None,
+            ),
+            available_capabilities=range_capabilities,
+        ),
+    )
+
+    active, completed = _advance(
+        current,
+        replace(
+            _observation(
+                actual=68.2,
+                target=None,
+                mode="heat_cool",
+                action=None,
+            ),
+            available_capabilities=range_capabilities,
+        ),
+        now=START + timedelta(minutes=20),
+        driver_active=False,
+        active_minutes_delta=20.0,
+    )
+
+    assert active is None
+    assert completed is not None
+    assert completed.complete is True
+    assert completed.mode == "heating"
+
+
 def test_inactive_intervals_are_not_charged_when_driver_restarts() -> None:
     current, _ = _advance(None, _observation(actual=78.0, target=72.0))
     inactive, _ = _advance(

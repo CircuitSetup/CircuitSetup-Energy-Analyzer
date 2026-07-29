@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -494,9 +494,13 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
                 "temperature_entity_id": "sensor.downstairs_temperature",
                 "mode": "cooling",
                 "started_at": (
-                    datetime(2026, 1, 1, tzinfo=UTC).replace(day=1)
+                    datetime(2026, 1, 1, tzinfo=UTC)
+                    + timedelta(hours=index)
                 ).isoformat(),
-                "ended_at": datetime(2026, 1, 1, 1, tzinfo=UTC).isoformat(),
+                "ended_at": (
+                    datetime(2026, 1, 1, 1, tzinfo=UTC)
+                    + timedelta(hours=index)
+                ).isoformat(),
                 "start_temperature_f": 77.0,
                 "target_temperature_f": 72.0,
                 "latest_temperature_f": 72.0,
@@ -514,6 +518,28 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
                 "baseline_era": "era-2",
             }
             for index in range(300)
+        ]
+    }
+    duplicate_observed_at = (
+        datetime(2026, 1, 1, 1, tzinfo=UTC) + timedelta(hours=299)
+    ).isoformat()
+    coordinator.store_data.hvac_correlation_history_by_circuit = {
+        "heat_pump": [
+            {
+                "observed_at": duplicate_observed_at,
+                "appliance_profile": "heat_pump",
+                "thermostat_entity_id": "climate.downstairs",
+                "thermostat_name": "Downstairs",
+                "temperature_entity_id": "sensor.downstairs_temperature",
+                "mode": "cooling",
+                "driver_mode": "cooling",
+                "overlap_ratio": 0.9,
+                "candidate_moved_toward_target": True,
+                "climate_has_current_temperature": True,
+                "electrical_driver_present": True,
+                "weather_mode": "cooling",
+                "temperature_bin": "very_hot",
+            }
         ]
     }
     coordinator.store_data.alerts = []
@@ -534,6 +560,10 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
     ).advisor_feature_history_for_circuit(config, coordinator.now)
 
     assert len(history["hvac_correlation_calls"]) == 256
+    assert sum(
+        call.get("observed_at") == duplicate_observed_at
+        for call in history["hvac_correlation_calls"]
+    ) == 1
     assert len(history["hvac_response_episodes"]) == 256
     call = history["hvac_correlation_calls"][0]
     assert call["thermostat_entity_id"] == "climate.downstairs"
@@ -562,6 +592,7 @@ def test_settings_controller_uses_hvac_correlation_without_response_episodes() -
     config.appliance_profile = ApplianceProfile.HEAT_PUMP
     calls = [
         {
+            "appliance_profile": "heat_pump",
             "thermostat_entity_id": "climate.downstairs",
             "thermostat_name": "Downstairs",
             "temperature_entity_id": None,

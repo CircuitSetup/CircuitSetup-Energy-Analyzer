@@ -508,6 +508,7 @@ def _finalize_hvac_correlation(
     history.append(
         {
             "observed_at": context.now.isoformat(),
+            "appliance_profile": config.appliance_profile.value,
             "thermostat_entity_id": str(
                 current.get("thermostat_entity_id") or ""
             ),

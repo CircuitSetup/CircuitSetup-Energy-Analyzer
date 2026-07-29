@@ -2374,7 +2374,16 @@ def _hvac_advisor_history(
         dict(call)
         for call in stored_calls.get(circuit_id, ())[-256:]
         if isinstance(call, Mapping)
+        and str(call.get("appliance_profile") or "") == profile
     ]
+    call_identities = {
+        (
+            str(call.get("thermostat_entity_id") or ""),
+            str(call.get("mode") or ""),
+            str(call.get("observed_at") or ""),
+        )
+        for call in calls
+    }
     raw_episodes = [
         dict(raw)
         for stream_id, history in histories.items()
@@ -2414,31 +2423,43 @@ def _hvac_advisor_history(
         capabilities = getattr(base_observation, "available_capabilities", ())
         participants = list(episode.participant_signature)
         temperature_id = str(raw.get("temperature_entity_id") or "") or None
-        calls.append(
-            {
-                "thermostat_entity_id": episode.thermostat_entity_id,
-                "thermostat_name": episode.thermostat_entity_id.replace(
-                    "climate.",
-                    "",
-                ).replace("_", " ").title(),
-                "temperature_entity_id": temperature_id,
-                "mode": episode.mode,
-                "driver_mode": episode.mode,
-                "overlap_ratio": overlap_ratio,
-                "candidate_moved_toward_target": bool(
-                    temperature_id and episode.complete
-                ),
-                "climate_has_current_temperature": (
-                    "current_temperature" in capabilities
-                ),
-                "electrical_driver_present": (
-                    profile != "hvac_blower"
-                    or any(item != circuit_id for item in participants)
-                ),
-                "weather_mode": episode.weather_mode,
-                "temperature_bin": episode.temperature_bin,
-            }
+        observed_at = (
+            episode.ended_at.isoformat() if episode.ended_at is not None else ""
         )
+        call_identity = (
+            episode.thermostat_entity_id,
+            episode.mode,
+            observed_at,
+        )
+        if call_identity not in call_identities:
+            calls.append(
+                {
+                    "observed_at": observed_at,
+                    "appliance_profile": profile,
+                    "thermostat_entity_id": episode.thermostat_entity_id,
+                    "thermostat_name": episode.thermostat_entity_id.replace(
+                        "climate.",
+                        "",
+                    ).replace("_", " ").title(),
+                    "temperature_entity_id": temperature_id,
+                    "mode": episode.mode,
+                    "driver_mode": episode.mode,
+                    "overlap_ratio": overlap_ratio,
+                    "candidate_moved_toward_target": bool(
+                        temperature_id and episode.complete
+                    ),
+                    "climate_has_current_temperature": (
+                        "current_temperature" in capabilities
+                    ),
+                    "electrical_driver_present": (
+                        profile != "hvac_blower"
+                        or any(item != circuit_id for item in participants)
+                    ),
+                    "weather_mode": episode.weather_mode,
+                    "temperature_bin": episode.temperature_bin,
+                }
+            )
+            call_identities.add(call_identity)
         degrees_closed = abs(
             episode.latest_temperature_f - episode.start_temperature_f
         )
