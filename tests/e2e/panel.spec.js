@@ -4048,7 +4048,8 @@ test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page })
   await expect(efficiency).toContainText("Downstairs");
   await expect(efficiency).toContainText("10 min/°F");
   await expect(efficiency).toContainText("12.5 min/°F");
-  await expect(efficiency).toContainText("Outdoor: 95°F");
+  await expect(efficiency).toContainText("Outdoor temperature");
+  await expect(efficiency).toContainText("95°F");
   await expect(efficiency).toContainText("Gas-furnace blower proxy");
   await expect(efficiency).toContainText("Cooling blower supports air handling");
 });

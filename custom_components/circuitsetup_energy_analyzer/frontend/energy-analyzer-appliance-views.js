@@ -675,12 +675,11 @@ export function createApplianceViewMethods({
         <h3>${this._escape(this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`))}</h3>
         ${rows.map((row) => {
           const attribution = this._panelText(`appliance_detail.hvac_efficiency_attribution.${row.attribution || "direct"}`);
-          const context = [
-            finite(row.outdoor_temperature_f) ? `Outdoor: ${this._formatNumber(row.outdoor_temperature_f)}°F` : "",
-            row.season ? `season: ${row.season}` : "",
-            row.weather_mode ? `weather mode: ${row.weather_mode}` : "",
-          ].filter(Boolean);
           const facts = [
+            row.thermostat_name || row.thermostat_entity_id
+              ? this._metric("Thermostat", row.thermostat_name || row.thermostat_entity_id, "mdi:thermostat")
+              : "",
+            this._metric("Mode", this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`), "mdi:hvac"),
             finite(row.score)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(row.score)} / 100`, "mdi:gauge")
               : "",
@@ -690,12 +689,27 @@ export function createApplianceViewMethods({
             finite(row.recent_minutes_per_degree)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(row.recent_minutes_per_degree)} min/°F`, "mdi:history")
               : "",
+            finite(row.outdoor_temperature_f)
+              ? this._metric("Outdoor temperature", `${this._formatNumber(row.outdoor_temperature_f)}°F`, "mdi:weather-sunny")
+              : "",
+            row.season
+              ? this._metric("Season", row.season, "mdi:calendar-season")
+              : "",
+            row.weather_mode
+              ? this._metric("Weather context", row.weather_mode, "mdi:cloud-outline")
+              : "",
+            row.attribution
+              ? this._metric("Attribution", attribution, "mdi:account-check-outline")
+              : "",
+            finite(row.reference_count)
+              ? this._metric("Reference episodes", row.reference_count, "mdi:counter")
+              : "",
+            finite(row.recent_count)
+              ? this._metric("Recent episodes", row.recent_count, "mdi:counter")
+              : "",
           ].filter(Boolean);
           return `<article class="hvac-efficiency-row">
-            <h4>${this._escape(row.thermostat_name || row.thermostat_entity_id || this._panelText("common.unknown"))}</h4>
-            <p class="muted">${this._escape(attribution)}</p>
             ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-            ${context.length ? `<p class="muted">${this._escape(context.join(" · "))}</p>` : ""}
             ${Array.isArray(row.supporting_blower_ids) && row.supporting_blower_ids.length
               ? `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_supporting_blower"))}</p>`
               : ""}

@@ -2190,10 +2190,20 @@ for (const expected of [
   "12.5 min/°F",
   "9 of 9 reference episodes",
   "3 of 3 recent episodes",
-  "Outdoor: 95°F",
-  "season: summer",
+  "Outdoor temperature",
+  "95°F",
+  "Season",
+  "summer",
+  "Weather context",
+  "cooling",
   "Gas-furnace blower proxy",
   "Cooling blower supports air handling",
+  'icon="mdi:thermostat"',
+  'icon="mdi:weather-sunny"',
+  'icon="mdi:calendar-season"',
+  'icon="mdi:cloud-outline"',
+  'icon="mdi:account-check-outline"',
+  'icon="mdi:counter"',
 ]) {
   assert.ok(ready.includes(expected), `missing ${expected}: ${ready}`);
 }
