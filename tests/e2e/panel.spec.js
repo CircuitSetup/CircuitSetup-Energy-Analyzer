@@ -668,7 +668,7 @@ test("HVAC associations label ready modes without a trend as stable", async ({ p
   await expect(card.locator('[data-mode="heating"] .trend')).toHaveText("Stable");
 });
 
-test("Home summary omits power flow and separates contribution", async ({ page }) => {
+test("Home summary omits power flow and separates contribution", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
@@ -788,6 +788,14 @@ test("Home summary omits power flow and separates contribution", async ({ page }
   await expect(card).not.toContainText("Active now");
   await expect(card.locator("[data-appliance-id]")).toHaveCount(0);
   await expect(card.locator(".contribution")).toHaveCSS("margin-top", "12px");
+  const summaryKpis = card.locator(".kpis:has(.metric)");
+  await expect.poll(() => summaryKpis.evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns.split(" ").length
+  ))).toBe(isMobile ? 2 : 5);
+  await expect(summaryKpis.locator(".metric").first()).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
   await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
@@ -4148,7 +4156,7 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
   await expect(efficiency).not.toContainText("0 / 100");
   await expect(efficiency).not.toContainText("0 min/°F");
   await expect(efficiency).not.toContainText("Outdoor: 0°F");
-  await expect(efficiency.locator(".hvac-efficiency-gauge")).toHaveCount(0);
+  await expect(efficiency.locator('.hvac-efficiency-gauge[data-hvac-learning="true"]')).toHaveCount(1);
 });
 
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
@@ -4395,9 +4403,9 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
     return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
   })).toBe(168);
 
-  const period = panel.locator("[data-appliance-history-period]");
-  await period.selectOption("24");
-  await expect(period).toHaveValue("24");
+  const period = panel.locator('[data-appliance-history-period="24"]');
+  await period.click();
+  await expect(period).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {

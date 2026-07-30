@@ -338,7 +338,14 @@ def build_recommended_dashboard(
             )
         )
         for card in cards:
-            card["grid_options"]["columns"] = card_columns
+            if view["path"] == "overview":
+                card["grid_options"]["columns"] = (
+                    "full"
+                    if card.get("type") in {HOUSE_FLOW_CARD, APPLIANCE_GRID_CARD}
+                    else 24
+                )
+            else:
+                card["grid_options"]["columns"] = card_columns
     return {
         "title": DASHBOARD_TITLE,
         "views": views,

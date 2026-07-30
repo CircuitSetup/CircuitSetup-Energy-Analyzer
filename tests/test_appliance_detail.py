@@ -796,6 +796,34 @@ def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
     assert "sensor.fridge_reactive_power" not in payload["history"]["entities"]
 
 
+def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef("sensor.fridge_watts", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_va", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_var", SensorRole.REAL_POWER),
+            ),
+        ),
+    )
+
+    history = appliance_detail_payload(
+        [coordinator],
+        circuit_id="fridge",
+    )["history"]
+
+    assert history["entities"] == ["sensor.fridge_watts"]
+
+
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

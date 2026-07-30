@@ -1874,12 +1874,42 @@ for (const expected of [
   "1.9 kWh",
   "Projected range 1.7 kWh - 2.1 kWh",
   "Completed-day normal range 1.4 kWh - 1.8 kWh",
-  "Projected status Higher",
-  "58%",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
+}
+assert.equal((html.match(/>Projected</g) || []).length, 1);
+assert.ok(!html.includes("Projection confidence"));
+assert.ok(!html.includes("Projected status"));
+"""
+    )
+
+
+def test_appliance_detail_comparison_formats_runtime_as_duration() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "runtime_today_seconds",
+  label: "Runtime so far",
+  unit: "s",
+  current_value: 10349.897,
+  normal_low: 2610.09,
+  normal_high: 12518.361,
+  status: "normal",
+  projection_value: 17801.167,
+  projection_low: 9164.483,
+  projection_high: 22217.996,
+  full_period_normal_low: 8530.127,
+  full_period_normal_high: 20680.089,
+}]);
+for (const expected of ["2h 52m 30s", "43m 30s - 3h 28m 38s", "4h 56m 41s"]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
+}
+assert.ok(html.includes('icon="mdi:timer-outline"'));
+for (const raw of ["10349.897 s", "2610.09 s", "12518.361 s", "17801.167 s"]) {
+  assert.ok(!html.includes(raw), `raw seconds remain: ${html}`);
 }
 """
     )
@@ -2231,7 +2261,10 @@ const learning = panel._renderHvacEfficiency({
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("waiting for completed thermostat episodes"));
 assert.ok(!learning.toLowerCase().includes("fault"));
-assert.ok(!learning.includes("hvac-efficiency-gauge"));
+assert.ok(learning.includes("hvac-efficiency-layout"));
+assert.ok(learning.includes('data-hvac-learning="true"'));
+assert.ok(learning.includes('icon="mdi:database-clock-outline"'));
+assert.ok(learning.includes('icon="mdi:history"'));
 """
     )
 
@@ -2364,6 +2397,8 @@ panel._applianceDetail = {
     ],
     entity_series: [
       { entity_id: "sensor.fridge_power", unit: "W" },
+      { entity_id: "sensor.fridge_va", unit: "VA" },
+      { entity_id: "sensor.fridge_var", unit: "VAR" },
       { entity_id: "sensor.fridge_power_factor", unit: "PF" },
       { entity_id: "sensor.fridge_current", unit: "A" },
       { entity_id: "sensor.fridge_energy", unit: "kWh" },
@@ -2395,6 +2430,12 @@ panel._applianceDetailHistorySeries = [[
   { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
 ], [
+  { entity_id: "sensor.fridge_va", state: "132", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_va", state: "90", last_changed: "2026-07-10T13:00:00Z" },
+], [
+  { entity_id: "sensor.fridge_var", state: "14", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_var", state: "11", last_changed: "2026-07-10T13:00:00Z" },
+], [
   { entity_id: "sensor.fridge_power_factor", state: "0.92", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power_factor", state: "0.88", last_changed: "2026-07-10T13:00:00Z" },
 ], [
@@ -2415,10 +2456,12 @@ if (graph < 0 || graph > summary) {
   throw new Error(`expected appliance history graph before summaries: ${html}`);
 }
 for (const expected of [
-  "Energy History",
+  ">Graphs<",
   'data-appliance-history-period',
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
+  ">Zoom In<",
+  ">Pan Earlier<",
   'data-chart-point="1"',
   'data-chart-tooltip',
 ]) {
@@ -2426,6 +2469,8 @@ for (const expected of [
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
+assert.ok(!html.includes(">VA<"));
+assert.ok(!html.includes(">VAR<"));
 if ((html.match(/class="chart"/g) || []).length !== 3) {
   throw new Error(`expected combined power and amps plus power factor and energy charts: ${html}`);
 }

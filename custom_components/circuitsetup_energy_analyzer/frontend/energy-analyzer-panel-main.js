@@ -951,6 +951,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (unit === "%") {
       return `${this._formatNumber(value)}%`;
     }
+    if (unit === "s") {
+      return this._formatDuration(value);
+    }
     return `${this._formatNumber(value)}${unit ? ` ${unit}` : ""}`;
   }
 

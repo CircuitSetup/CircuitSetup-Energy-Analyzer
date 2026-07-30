@@ -50,7 +50,8 @@ class DashboardController:
                 coordinator,
                 "_mains_voltage_entity_ids",
                 (),
-            ),
+            )
+            or _configured_mains_voltage_entities(coordinator),
         )
         action, reason = await self.async_create_or_update_lovelace_dashboard(
             dashboard_payload,
@@ -254,6 +255,31 @@ class DashboardController:
         ):
             return "deleted", None
         return "missing", None
+
+
+def _configured_mains_voltage_entities(coordinator: Any) -> tuple[str, ...]:
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(states, "get", None)
+    if not callable(get_state):
+        return ()
+    entities = []
+    for circuit in getattr(coordinator, "circuit_configs", ()) or ():
+        mode = getattr(circuit, "mode", "")
+        profile = getattr(circuit, "appliance_profile", "")
+        if str(getattr(mode, "value", mode)) != "mains_nilm" and str(
+            getattr(profile, "value", profile)
+        ) != "mains_nilm":
+            continue
+        for sensor in getattr(circuit, "sensors", ()) or ():
+            entity_id = str(getattr(sensor, "entity_id", "") or "").strip()
+            state = get_state(entity_id)
+            attributes = getattr(state, "attributes", {}) or {}
+            if (
+                str(attributes.get("unit_of_measurement", "")).strip() == "V"
+                or str(attributes.get("device_class", "")).strip() == "voltage"
+            ):
+                entities.append(entity_id)
+    return tuple(dict.fromkeys(entities))
 
 
 def _lovelace_dashboard_matches(item: Any, payload: Mapping[str, Any]) -> bool:

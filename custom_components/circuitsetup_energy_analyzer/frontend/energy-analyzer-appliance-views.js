@@ -628,16 +628,23 @@ export function createApplianceViewMethods({
     ).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
     return `<section class="panel" data-appliance-behavior-health>
       <h2>${this._escape(this._panelText("appliance_detail.behavior_and_predictive_health"))}</h2>
-      <h3>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h3>
-      ${this._renderApplianceExpectations(expectations)}
-      ${hasHealth ? `<h3>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
-      <p><strong>${this._escape(statusLabel)}</strong></p>
-      ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
-      ${Number.isFinite(Number(health.confidence)) ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(health.confidence) }))}</p>` : ""}
-      ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : ""}
-      <h3>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h3>
-      ${this._renderApplianceTimeline(timeline)}
+      <div class="appliance-behavior-grid">
+        <div class="appliance-detail-block">
+          <h3><ha-icon icon="mdi:bullseye-arrow"></ha-icon>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h3>
+          ${this._renderApplianceExpectations(expectations)}
+        </div>
+        <div class="appliance-detail-block">
+          <h3><ha-icon icon="mdi:heart-pulse"></ha-icon>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
+          ${hasHealth ? `<p><strong>${this._escape(statusLabel)}</strong></p>
+          ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
+          ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+          ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : `<p class="muted">${this._escape(this._panelText("common.unknown"))}</p>`}
+        </div>
+        <div class="appliance-detail-block">
+          <h3><ha-icon icon="mdi:history"></ha-icon>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h3>
+          ${this._renderApplianceTimeline(timeline)}
+        </div>
+      </div>
     </section>`;
   }
 
@@ -671,14 +678,6 @@ export function createApplianceViewMethods({
       `${Number(learning.reference_count || 0)} of ${Number(learning.required_reference || 9)} reference episodes`,
       `${Number(learning.recent_count || 0)} of ${Number(learning.required_recent || 3)} recent episodes`,
     ].join(" · ");
-    const summary = [
-      finite(efficiency.summary_score)
-        ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(efficiency.summary_score)} / 100`, "mdi:gauge")
-        : "",
-      trendLabel
-        ? this._metric(this._panelText("appliance_detail.hvac_efficiency_trend_label"), trendLabel, "mdi:trending-up")
-        : "",
-    ].filter(Boolean);
     const renderMode = (mode) => {
       const rows = Array.isArray(efficiency[mode]) ? efficiency[mode] : [];
       if (!rows.length) return "";
@@ -713,10 +712,10 @@ export function createApplianceViewMethods({
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_attribution_label"), attribution, "mdi:account-check-outline")
               : "",
             finite(row.reference_count)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), row.reference_count, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${row.reference_count} of ${Number(learning.required_reference || 9)} reference episodes`, "mdi:counter")
               : "",
             finite(row.recent_count)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), row.recent_count, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${row.recent_count} of ${Number(learning.required_recent || 3)} recent episodes`, "mdi:counter")
               : "",
           ].filter(Boolean);
           return `<article class="hvac-efficiency-row">
@@ -732,14 +731,23 @@ export function createApplianceViewMethods({
     const score = finite(efficiency.summary_score) ? Number(efficiency.summary_score) : null;
     const gauge = score !== null
       ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(200, score)) / 2}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
-      : "";
+      : `<div class="hvac-efficiency-gauge learning" data-hvac-learning="true" role="status" aria-label="${this._escape(statusLabel)}"><strong>—</strong></div>`;
+    const learningProgress = `<div class="summary appliance-health-metrics hvac-learning-progress">
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${Number(learning.reference_count || 0)} / ${Number(learning.required_reference || 9)}`, "mdi:database-clock-outline")}
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${Number(learning.recent_count || 0)} / ${Number(learning.required_recent || 3)}`, "mdi:history")}
+    </div>`;
     return `<section class="panel" data-hvac-efficiency>
-      <h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2>
-      <div class="hvac-efficiency-heading">${gauge}<p><strong>${this._escape(statusLabel)}</strong>${trendLabel ? `<br><span class="muted">${this._escape(trendLabel)}</span>` : ""}</p></div>
-      ${summary.length ? `<div class="summary appliance-health-metrics">${summary.join("")}</div>` : ""}
-      ${finite(efficiency.summary_score) ? `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_score_note"))}</p>` : ""}
-      <p class="muted">${this._escape(learningText)}</p>
-      ${modes || `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
+      <div class="appliance-section-heading"><h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2><span class="status">${this._escape(trendLabel || statusLabel)}</span></div>
+      <div class="hvac-efficiency-layout">
+        <div class="hvac-efficiency-score">
+          ${gauge}
+          <strong>${this._escape(this._panelText("appliance_detail.hvac_efficiency_score"))}</strong>
+          <span class="muted">${this._escape(score !== null ? this._panelText("appliance_detail.hvac_efficiency_score_note") : learningText)}</span>
+        </div>
+        <div class="hvac-efficiency-thermostats">
+          ${modes || `${learningProgress}<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
+        </div>
+      </div>
       ${finite(efficiency.threshold_pct) ? `<p class="muted hvac-efficiency-threshold">${this._escape(this._panelTextFormat("appliance_detail.hvac_efficiency_threshold_note", { value: `${this._formatNumber(efficiency.threshold_pct)}%` }))}</p>` : ""}
     </section>`;
   }
@@ -826,22 +834,27 @@ export function createApplianceViewMethods({
           : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_history"))}</p>`;
     return `
       <section class="panel" data-appliance-detail-history>
-        <div class="actions">
-          <label>${this._escape(this._panelText("appliance_detail.time_period"))}
-            <select data-appliance-history-period>
-              ${periodHours.map((hours) => `<option value="${hours}" ${hours === this._applianceDetailHistoryHours ? "selected" : ""}>${this._escape(this._applianceHistoryPeriodLabel(hours))}</option>`).join("")}
-            </select>
-          </label>
+        <div class="appliance-graph-heading">
+          <h2>${this._escape(this._panelText("appliance_detail.graphs"))}</h2>
+          <div class="appliance-graph-toolbar">
+            <div class="appliance-period-controls" role="group" aria-label="${this._escape(this._panelText("appliance_detail.time_period"))}">
+              ${periodHours.map((hours) => `<button type="button" class="secondary appliance-period-button" data-appliance-history-period="${hours}" aria-pressed="${hours === this._applianceDetailHistoryHours}">${this._escape(this._applianceHistoryPeriodLabel(hours))}</button>`).join("")}
+            </div>
+            ${this._renderApplianceHistoryGraphControls(window)}
+          </div>
         </div>
-        ${this._renderApplianceHistoryGraphControls(window)}
-        <h2>${this._escape(this._panelText("appliance_detail.energy_history"))}</h2>
         ${graph}
       </section>
     `;
   }
 
   _applianceDetailHistoryChartGroups(series) {
-    const visible = series.filter((item) => !["VA", "var"].includes(String(item.unit)));
+    const visible = series.filter((item) => {
+      const unit = String(item.unit || "").toLowerCase();
+      const entityId = String(item.entity_id || "").toLowerCase();
+      return !["va", "var"].includes(unit)
+        && !/(?:^|_)(?:apparent_power|reactive_power|va|var)(?:_|$)/.test(entityId);
+    });
     const watts = visible.filter((item) => item.unit === "W");
     const amps = visible.filter((item) => item.unit === "A");
     const groups = [];
@@ -912,8 +925,12 @@ export function createApplianceViewMethods({
     }
     const asOf = items.find((item) => item.as_of)?.as_of;
     const icons = {
-      current_power_w: "mdi:flash-outline", energy_kwh: "mdi:chart-line",
-      runtime_seconds: "mdi:timer-outline", run_count: "mdi:counter", cost: "mdi:cash",
+      current_power_w: "mdi:flash-outline",
+      daily_energy_kwh: "mdi:chart-line",
+      runtime_today_seconds: "mdi:timer-outline",
+      run_count_today: "mdi:counter",
+      demand_peak_w: "mdi:flash-triangle-outline",
+      cost_today: "mdi:cash",
     };
     return `${asOf ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(asOf) }))}</p>` : ""}
       <table class="appliance-comparison-table" data-appliance-comparison-table>
@@ -923,11 +940,6 @@ export function createApplianceViewMethods({
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
         : this._panelText("common.learning");
       const hasProjection = item.projection_value !== null && item.projection_value !== undefined;
-      const projectedStatus = hasProjection && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined && item.projection_value > item.full_period_normal_high
-        ? "higher"
-        : hasProjection && item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.projection_value < item.full_period_normal_low
-          ? "lower"
-          : "normal";
       const fullPeriod = item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined
         ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.completed_day_normal_range", { low: this._formatComparisonValue(item, item.full_period_normal_low), high: this._formatComparisonValue(item, item.full_period_normal_high) }))}</p>`
         : "";
@@ -939,9 +951,7 @@ export function createApplianceViewMethods({
         : "";
       const projection = hasProjection
         ? `<strong>${this._escape(this._formatComparisonValue(item, item.projection_value))}</strong>
-          ${item.projection_low !== null && item.projection_low !== undefined && item.projection_high !== null && item.projection_high !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_range", { low: this._formatComparisonValue(item, item.projection_low), high: this._formatComparisonValue(item, item.projection_high) }))}</p>` : ""}
-          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_status", { status: this._friendlyFeature(projectedStatus) }))}</p>
-          ${item.projection_confidence !== null && item.projection_confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projection_confidence", { confidence: this._formatConfidence(item.projection_confidence) }))}</p>` : ""}`
+          ${item.projection_low !== null && item.projection_low !== undefined && item.projection_high !== null && item.projection_high !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_range", { low: this._formatComparisonValue(item, item.projection_low), high: this._formatComparisonValue(item, item.projection_high) }))}</p>` : ""}`
         : this._panelText("common.unknown");
       return `
         <tr>
@@ -1065,6 +1075,7 @@ export function createApplianceViewMethods({
       "data-appliance-history-graph",
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
       canLoadMore,
+      true,
     );
   }
 

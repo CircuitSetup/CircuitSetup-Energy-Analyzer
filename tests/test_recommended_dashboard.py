@@ -609,6 +609,14 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
     ]
+    assert [card["grid_options"]["columns"] for card in cards[:6]] == [
+        "full",
+        24,
+        24,
+        "full",
+        24,
+        24,
+    ]
 
 
 def test_home_voltage_card_uses_one_row_per_configured_entity() -> None:
@@ -1236,10 +1244,14 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
             if len(content_cards) == 1 and content_cards[0]["type"] == DATE_RANGE_CARD:
                 assert content_cards[0]["grid_options"]["columns"] == "full"
                 continue
+            if view["path"] == "overview":
+                assert {
+                    card["grid_options"]["columns"] for card in content_cards
+                } == {24, "full"}
+                continue
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
-                or (view["path"] == "overview" and len(content_cards) > 1)
                 else 48 // min(4, len(content_cards))
             )
             assert {

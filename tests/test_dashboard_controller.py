@@ -173,6 +173,44 @@ class _StorageDashboardCoordinator:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_controller_recovers_configured_misclassified_voltage() -> None:
+    coordinator = _StorageDashboardCoordinator()
+    coordinator._mains_voltage_entity_ids = frozenset()
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="mains",
+            name="Mains",
+            appliance_profile=ApplianceProfile.MAINS_NILM,
+            mode=CircuitMode.MAINS_NILM,
+            sensors=(
+                SensorRef("sensor.mains_watts", SensorRole.REAL_POWER),
+                SensorRef("sensor.mains_voltage", SensorRole.REAL_POWER),
+            ),
+        ),
+    )
+    states = {
+        "sensor.mains_watts": SimpleNamespace(
+            state="1200",
+            attributes={"unit_of_measurement": "W", "device_class": "power"},
+        ),
+        "sensor.mains_voltage": SimpleNamespace(
+            state="121.8",
+            attributes={"unit_of_measurement": "V", "device_class": "voltage"},
+        ),
+    }
+    coordinator.hass.states = SimpleNamespace(get=states.get)
+
+    await dashboard_controller.DashboardController(
+        coordinator,
+    ).async_create_dashboard()
+
+    saved = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]
+    cards = saved["views"][0]["sections"][0]["cards"]
+    voltage = next(card for card in cards if card.get("title") == "Line voltage")
+    assert voltage["entities"] == [{"entity": "sensor.mains_voltage"}]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_controller_refresh_does_not_create_resource() -> None:
     coordinator = _StorageDashboardCoordinator()
     resources = _FakeLovelaceResources([])

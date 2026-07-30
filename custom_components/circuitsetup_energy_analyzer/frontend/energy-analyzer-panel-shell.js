@@ -766,29 +766,134 @@ export class PanelShellMethods {
         }
         .appliance-comparison-table p { margin: 4px 0 0; }
         .appliance-comparison-table ha-icon { vertical-align: middle; }
-        .hvac-efficiency-heading {
+        .appliance-graph-heading,
+        .appliance-section-heading {
           align-items: center;
           display: flex;
+          gap: 12px;
+          justify-content: space-between;
+        }
+        .appliance-graph-toolbar,
+        .appliance-period-controls {
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .appliance-graph-toolbar [data-appliance-history-graph] {
+          display: grid;
+          gap: 4px;
+        }
+        .appliance-period-button,
+        .labeled-graph-controls .icon-button {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-color: transparent;
+          color: var(--primary-text-color, #1f2933);
+          min-height: 36px;
+          padding: 6px 9px;
+          width: auto;
+        }
+        .appliance-period-button[aria-pressed="true"] {
+          background: var(--primary-color, #0b6bcb);
+          color: var(--text-primary-color, #fff);
+        }
+        .appliance-behavior-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 12px;
+        }
+        .appliance-detail-block {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          min-width: 0;
+          padding: 14px;
+        }
+        .appliance-detail-block h3 {
+          align-items: center;
+          display: flex;
+          font-size: 15px;
+          gap: 8px;
+          margin: 0 0 10px;
+        }
+        .appliance-detail-block h3 ha-icon {
+          --mdc-icon-size: 20px;
+          color: var(--primary-color, #0b6bcb);
+        }
+        .appliance-detail-block .entity-list,
+        .appliance-detail-block .summary {
+          grid-template-columns: 1fr;
+        }
+        .appliance-detail-block .metric {
+          background: transparent;
+          border: 0;
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 0;
+          padding: 8px 0;
+        }
+        .hvac-efficiency-layout {
+          align-items: stretch;
+          display: grid;
           gap: 16px;
+          grid-template-columns: 210px minmax(0, 1fr);
+          margin-top: 12px;
+        }
+        .hvac-efficiency-score {
+          align-items: center;
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-height: 175px;
+          padding: 14px;
+          text-align: center;
         }
         .hvac-efficiency-gauge {
-          align-items: center;
-          background: conic-gradient(var(--primary-color, #0b6bcb) var(--hvac-score), var(--divider-color, #d8dde6) 0);
-          border-radius: 50%;
+          align-items: end;
+          background: conic-gradient(from 270deg, var(--primary-color, #0b6bcb) 0 var(--hvac-score), var(--divider-color, #d8dde6) var(--hvac-score) 50%, transparent 50%);
+          border-radius: 100% 100% 0 0;
           display: flex;
           height: 76px;
           justify-content: center;
+          margin-bottom: 8px;
+          overflow: hidden;
           position: relative;
-          width: 76px;
+          width: 150px;
         }
         .hvac-efficiency-gauge::before {
-          background: var(--card-background-color, #fff);
-          border-radius: 50%;
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 100% 100% 0 0;
+          bottom: 0;
           content: "";
-          inset: 8px;
+          height: 52px;
           position: absolute;
+          width: 106px;
         }
-        .hvac-efficiency-gauge strong { position: relative; }
+        .hvac-efficiency-gauge strong {
+          font-size: 28px;
+          line-height: 1;
+          position: relative;
+          z-index: 1;
+        }
+        .hvac-efficiency-gauge.learning {
+          --hvac-score: 0%;
+        }
+        .hvac-efficiency-thermostats,
+        .hvac-efficiency-mode {
+          display: grid;
+          gap: 10px;
+        }
+        .hvac-efficiency-row {
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          padding: 12px;
+        }
+        .hvac-efficiency-row .metric {
+          background: transparent;
+        }
         .appliance-timeline {
           list-style: none;
           margin: 0;
@@ -1121,6 +1226,9 @@ export class PanelShellMethods {
           padding: 0;
           width: 44px;
         }
+        .labeled-graph-controls .icon-button {
+          width: auto;
+        }
         .decision-tile,
         .nilm-lane,
         .nilm-review-card,
@@ -1155,6 +1263,8 @@ export class PanelShellMethods {
           }
           .evidence-investigation,
           .appliance-detail-overview,
+          .appliance-behavior-grid,
+          .hvac-efficiency-layout,
           .recommendation-layout,
           .nilm-review-layout {
             grid-template-columns: minmax(0, 1fr);
@@ -1281,10 +1391,10 @@ export class PanelShellMethods {
         this._loadedRouteKey || this._routeKey(),
       )
     ));
-    for (const select of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
-      select.addEventListener("change", () => {
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
+      button.addEventListener("click", () => {
         this._loadApplianceDetailHistory(
-          Number(select.value),
+          Number(button.dataset.applianceHistoryPeriod),
           this._evidenceRequestId,
           this._loadedRouteKey || this._routeKey(),
         );

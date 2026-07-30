@@ -265,11 +265,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .banner { align-items: center; border: 1px solid var(--warning-color, #b7791f); border-radius: 6px; display: flex; justify-content: space-between; padding: 10px; }
         .banner.ready { border-color: var(--success-color, #2e7d32); }
         .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
-        .appliance-list, .appliance-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
-        button.appliance-tile { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; color: var(--primary-text-color, #111827); cursor: pointer; min-height: 96px; padding: 12px; text-align: left; }
+        .appliance-list, .appliance-grid { display: grid; gap: 0; grid-template-columns: 1fr; }
+        button.appliance-tile { align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--divider-color, #d8dee6); border-radius: 0; color: var(--primary-text-color, #111827); cursor: pointer; display: grid; gap: 12px; grid-template-columns: minmax(150px, 1fr) minmax(180px, 2fr); min-height: 64px; padding: 10px 4px; text-align: left; }
         .appliance-heading ha-icon { --mdc-icon-size: 24px; }
         button.appliance-tile:focus-visible, button.control:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 2px; }
-        .appliance-meta { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 13px; gap: 3px; margin-top: 6px; }
+        .appliance-meta { color: var(--secondary-text-color, #5b6470); display: grid; font-size: 13px; gap: 3px; text-align: right; }
         .issue { color: var(--warning-color, #a15c00); font-weight: 600; }
         .contribution { display: grid; gap: 8px; margin-top: 12px; position: relative; }
         .controls { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -319,6 +319,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           .timeline-lane { grid-template-columns: 1fr; }
           .timeline-scale { grid-template-columns: 1fr; }
           .timeline-scale > span:first-child { display: none; }
+          button.appliance-tile { grid-template-columns: 1fr; }
+          .appliance-meta { text-align: left; }
         }
       `;
     }
@@ -1763,11 +1765,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ` : "";
       this.shadowRoot.innerHTML = `
         <ha-card>
-          <style>${this._styles()}</style>
-          <div class="dashboard-card">
+          <style>${this._styles()}
+            .home-summary .kpis { border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; gap: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; }
+            .home-summary .metric { background: transparent; border: 0; border-left: 1px solid var(--divider-color, #d8dee6); border-radius: 0; padding: 14px; }
+            .home-summary .metric:first-child { border-left: 0; }
+            @media (max-width: 700px) { .home-summary .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .home-summary .metric { border-bottom: 1px solid var(--divider-color, #d8dee6); } }
+          </style>
+          <div class="dashboard-card home-summary">
             <h2>${this._escape(config.title || "Energy")}</h2>
             ${setup}
-            ${config.mode === "mains" ? nilm : `<div class="kpis"></div>`}
+            ${config.mode === "mains" ? nilm : ""}
             ${homeContent}
           </div>
         </ha-card>

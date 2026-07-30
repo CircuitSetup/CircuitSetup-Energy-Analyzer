@@ -1544,6 +1544,7 @@
         "learning_readiness": "Learning",
         "energy_today": "Energy Today",
         "energy_history": "Energy History",
+        "graphs": "Graphs",
         "runtime_today": "Runtime Today",
         "runs_today": "Runs Today",
         "cost_today": "Cost Today",
@@ -1649,9 +1650,9 @@
         "repeated_count": "Repeated {count} times.",
         "no_history": "No recorded appliance energy data is available.",
         "time_period": "Time period",
-        "history_24_hours": "Past 24 hours",
-        "history_7_days": "Past 7 days",
-        "history_30_days": "Past 30 days",
+        "history_24_hours": "24 hours",
+        "history_7_days": "7 days",
+        "history_30_days": "30 days",
         "history_window": "Showing {start} to {end}."
       },
       "appliance_insights": {
