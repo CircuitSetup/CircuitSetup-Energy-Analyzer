@@ -508,6 +508,20 @@ def test_efficiency_returns_bounded_score_and_learning_status() -> None:
     assert ready.score == 200.0
 
 
+def test_learning_efficiency_exposes_observed_minutes_per_degree() -> None:
+    episodes = [
+        _completed_episode(0, minutes_per_degree=10.0),
+        _completed_episode(1, minutes_per_degree=12.0),
+    ]
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "learning"
+    assert evaluation.score is None
+    assert evaluation.baseline_minutes_per_degree is None
+    assert evaluation.recent_minutes_per_degree == 11.0
+
+
 def test_persistent_response_change_does_not_age_into_reference_baseline() -> None:
     evaluation = evaluate_efficiency(
         [
