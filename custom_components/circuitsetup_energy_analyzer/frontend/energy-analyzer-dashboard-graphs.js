@@ -2110,7 +2110,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const body = loading
         ? `<p class="muted" data-hvac-associations-loading>${this._escape(this._label("loading", "Loading…"))}</p>`
         : this._associationError
-          ? `<div class="load-error"><p>${this._escape(this._label("load_error", "HVAC association data is temporarily unavailable."))}</p><button type="button" data-retry-hvac-associations>${this._escape(this._label("retry", "Retry"))}</button></div>`
+          ? `<div class="load-error"><p>${this._escape(this._label("load_error", "HVAC association data is temporarily unavailable."))}</p><button type="button" data-retry-hvac-associations>${this._escape(this._label("retry"))}</button></div>`
           : `<div class="association-grid">${(payload.items || []).filter((item) => !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id).map((item) => this._associationTile(item)).join("")}</div>`;
       this.shadowRoot.innerHTML = `<ha-card><style>${this._styles()}
         .association-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
