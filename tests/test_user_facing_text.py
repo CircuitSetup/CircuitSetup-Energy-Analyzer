@@ -1505,7 +1505,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "detail.recent_timeline",
         "_renderApplianceTimeline",
         '_panelText("appliance_detail.behavior_expectations")',
-        '_panelText("common.confidence")',
+        "data-appliance-behavior-health",
         "NILM_WORKSPACE_CALL_API_PATH",
         "nilm_workspace",
         "NILM_WORKSPACE_QUERY_PARAM",
