@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -230,7 +231,7 @@ def build_recommended_dashboard(
         home_view["sections"][0]["cards"].extend(
             _build_appliances_view(context)["sections"][0]["cards"]
         )
-    if voltage_card := _line_voltage_card(context):
+    if voltage_card := _line_voltage_card(context, hass=hass):
         home_view["sections"][0]["cards"].append(voltage_card)
     if context.appliances or context.primary_mains is not None:
         home_view["sections"][0]["cards"].append(
@@ -620,12 +621,49 @@ def _mains_power_current_rows(
     ]
 
 
-def _line_voltage_card(context: DashboardContext) -> dict[str, Any] | None:
+def _line_voltage_card(
+    context: DashboardContext,
+    *,
+    hass: Any | None,
+) -> dict[str, Any] | None:
     if not context.mains_voltage_entities:
         return None
-    return _entities_card(
-        _dashboard_text("cards", "line_voltage"),
-        ({"entity": entity_id} for entity_id in context.mains_voltage_entities),
+    gauges = []
+    for entity_id in context.mains_voltage_entities:
+        minimum, maximum = _voltage_gauge_bounds(hass, entity_id)
+        gauges.append(
+            {
+                "type": "gauge",
+                "entity": entity_id,
+                "needle": True,
+                "min": minimum,
+                "max": maximum,
+            }
+        )
+    return {
+        "type": "grid",
+        "title": _dashboard_text("cards", "line_voltage"),
+        "columns": min(2, len(gauges)),
+        "square": False,
+        "cards": gauges,
+        "grid_options": {"columns": 12},
+    }
+
+
+def _voltage_gauge_bounds(hass: Any | None, entity_id: str) -> tuple[int, int]:
+    states = getattr(hass, "states", None)
+    get_state = getattr(states, "get", None)
+    state = get_state(entity_id) if callable(get_state) else None
+    try:
+        value = float(getattr(state, "state", None))
+    except (TypeError, ValueError):
+        return 0, 300
+    if not math.isfinite(value) or value <= 0:
+        return 0, 300
+    margin = max(10.0, value * 0.2)
+    return (
+        max(0, math.floor((value - margin) / 5) * 5),
+        math.ceil((value + margin) / 5) * 5,
     )
 
 

@@ -558,10 +558,10 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "Energy and costs",
     ]
     voltage = _card_with_title(home, "Line voltage")
-    assert voltage["type"] == "entities"
-    assert voltage["entities"] == [
-        {"entity": "sensor.mains_l1_voltage"},
-        {"entity": "sensor.mains_l2_voltage"},
+    assert voltage["type"] == "grid"
+    assert [gauge["entity"] for gauge in voltage["cards"]] == [
+        "sensor.mains_l1_voltage",
+        "sensor.mains_l2_voltage",
     ]
     graph = cards[0]
     assert graph["entities"] == [
@@ -619,18 +619,43 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
     ]
 
 
-def test_home_voltage_card_uses_one_row_per_configured_entity() -> None:
+def test_home_voltage_card_uses_native_gauges_with_adaptive_ranges() -> None:
+    states = {
+        "sensor.mains_l1_voltage": SimpleNamespace(state="118"),
+        "sensor.mains_l2_voltage": SimpleNamespace(state="230"),
+    }
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
-        mains_voltage_entities=("sensor.mains_l1_voltage",),
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l1_voltage",
+            "sensor.mains_l2_voltage",
+        ),
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
 
-    assert _card_with_title(home, "Line voltage")["entities"] == [
-        {"entity": "sensor.mains_l1_voltage"}
+    card = _card_with_title(home, "Line voltage")
+    assert card["type"] == "grid"
+    assert card["columns"] == 2
+    assert card["square"] is False
+    assert card["cards"] == [
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l1_voltage",
+            "needle": True,
+            "min": 90,
+            "max": 145,
+        },
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l2_voltage",
+            "needle": True,
+            "min": 180,
+            "max": 280,
+        },
     ]
 
 

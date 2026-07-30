@@ -207,7 +207,15 @@ async def test_dashboard_controller_recovers_configured_misclassified_voltage() 
     saved = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]
     cards = saved["views"][0]["sections"][0]["cards"]
     voltage = next(card for card in cards if card.get("title") == "Line voltage")
-    assert voltage["entities"] == [{"entity": "sensor.mains_voltage"}]
+    assert voltage["cards"] == [
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_voltage",
+            "needle": True,
+            "min": 95,
+            "max": 150,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -246,11 +254,10 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
     cards = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]["views"][0][
         "sections"
     ][0]["cards"]
-    assert next(card for card in cards if card.get("title") == "Line voltage")[
-        "entities"
-    ] == [
-        {"entity": "sensor.mains_l1_voltage"},
-        {"entity": "sensor.mains_l2_voltage"},
+    voltage = next(card for card in cards if card.get("title") == "Line voltage")
+    assert [gauge["entity"] for gauge in voltage["cards"]] == [
+        "sensor.mains_l1_voltage",
+        "sensor.mains_l2_voltage",
     ]
 
 
