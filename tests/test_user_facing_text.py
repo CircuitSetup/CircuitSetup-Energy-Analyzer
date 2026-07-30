@@ -7158,7 +7158,7 @@ def test_readme_describes_native_dashboard_and_detail_ui() -> None:
 
     for text in (
         "Home Assistant's stock header and icon tabs",
-        "graphs appear above Top appliances",
+        "Home energy summary on the left and Appliances on the right",
         "Line voltage",
         "floating date",
         "VA and VAR are omitted from Appliance Detail graphs",

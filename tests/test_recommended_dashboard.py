@@ -443,12 +443,12 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
     assert [card["type"] for card in home["sections"][0]["cards"][:4]] == [
-        "custom:circuitsetup-energy-analyzer-house-flow",
         CONTEXT_GRAPH_CARD,
+        "custom:circuitsetup-energy-analyzer-house-flow",
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
     ]
-    assert home["sections"][0]["cards"][1]["title"] == "All appliance power"
+    assert home["sections"][0]["cards"][0]["title"] == "All appliance power"
 
 
 def test_dashboard_keeps_date_control_on_older_home_assistant(
@@ -550,9 +550,9 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
     cards = home["sections"][0]["cards"]
 
     assert [card.get("title") for card in cards[:6]] == [
-        "Home energy summary",
         "Mains total power and amps",
         "All appliance power",
+        "Home energy summary",
         "Appliances",
         "Line voltage",
         "Energy and costs",
@@ -563,7 +563,7 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         {"entity": "sensor.mains_l1_voltage"},
         {"entity": "sensor.mains_l2_voltage"},
     ]
-    graph = cards[1]
+    graph = cards[0]
     assert graph["entities"] == [
         {
             "entity": "sensor.mains_watts",
@@ -596,7 +596,7 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
             "axis": "right",
         },
     ]
-    summary = cards[0]
+    summary = cards[2]
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_watts",
         "sensor.mains_active_power",
@@ -610,10 +610,10 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_l2_current",
     ]
     assert [card["grid_options"]["columns"] for card in cards[:6]] == [
-        "full",
         24,
         24,
-        "full",
+        24,
+        24,
         24,
         24,
     ]
@@ -732,7 +732,7 @@ def test_home_mains_graph_uses_amps_axis_when_power_is_unavailable() -> None:
         sensors=(SensorRef("sensor.mains_current", SensorRole.CURRENT),),
     )
     dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)
-    graph = _dashboard_views(dashboard)[0]["sections"][0]["cards"][1]
+    graph = _dashboard_views(dashboard)[0]["sections"][0]["cards"][0]
 
     assert graph["title"] == "Mains total power and amps"
     assert graph["y_axis_label"] == "A"
@@ -1247,7 +1247,7 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
             if view["path"] == "overview":
                 assert {
                     card["grid_options"]["columns"] for card in content_cards
-                } == {24, "full"}
+                } == {24}
                 continue
             expected_columns = (
                 24

@@ -339,11 +339,7 @@ def build_recommended_dashboard(
         )
         for card in cards:
             if view["path"] == "overview":
-                card["grid_options"]["columns"] = (
-                    "full"
-                    if card.get("type") in {HOUSE_FLOW_CARD, APPLIANCE_GRID_CARD}
-                    else 24
-                )
+                card["grid_options"]["columns"] = 24
             else:
                 card["grid_options"]["columns"] = card_columns
     return {
@@ -562,7 +558,7 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
         ],
         "labels": dict(translation_section("dashboard", "live_cards")),
     }
-    cards = [summary]
+    cards = []
     mains_rows = _mains_power_current_rows(context.primary_mains)
     if mains_rows:
         cards.append(
@@ -587,6 +583,7 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }
         )
+    cards.append(summary)
     return _dashboard_view(
         title=_dashboard_text("views", "home"),
         path="overview",
