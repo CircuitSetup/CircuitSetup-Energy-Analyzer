@@ -104,7 +104,8 @@ def _completed_episode(
     )
 
 
-def test_episode_starts_only_with_capable_active_driver_and_one_degree_gap() -> None:
+def test_setpoint_episode_starts_with_capable_active_driver_and_one_degree_gap(
+) -> None:
     current, completed = _advance(
         None,
         _observation(actual=78.0, target=72.0),
@@ -122,7 +123,7 @@ def test_episode_starts_only_with_capable_active_driver_and_one_degree_gap() -> 
 
     for observation in (
         _observation(actual=None, target=72.0),
-        _observation(actual=72.8, target=72.0),
+        _observation(actual=72.8, target=72.0, action=None),
     ):
         assert _advance(None, observation)[0] is None
     assert _advance(
@@ -130,6 +131,104 @@ def test_episode_starts_only_with_capable_active_driver_and_one_degree_gap() -> 
         _observation(actual=78.0, target=72.0),
         driver_active=False,
     )[0] is None
+
+
+def test_subdegree_thermostat_call_completes_when_action_ends() -> None:
+    current, completed = _advance(
+        None,
+        _observation(actual=75.8, target=75.2),
+        active_minutes_delta=1.0,
+    )
+
+    assert completed is None
+    assert current is not None
+    assert current.episode_kind == "thermostat_call"
+
+    current, completed = _advance(
+        current,
+        _observation(actual=75.6, target=75.2),
+        now=START + timedelta(minutes=10),
+        active_minutes_delta=9.0,
+    )
+
+    assert current is not None
+    assert completed is None
+
+    current, completed = _advance(
+        current,
+        _observation(actual=75.3, target=75.2, action="idle"),
+        now=START + timedelta(minutes=20),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+
+    assert current is None
+    assert completed is not None
+    assert completed.complete is True
+    assert completed.active_minutes == 20.0
+    assert completed.latest_temperature_f == 75.3
+    assert episode_from_dict(episode_to_dict(completed)) == completed
+
+
+def test_exact_tenth_degree_thermostat_call_starts() -> None:
+    current, completed = _advance(
+        None,
+        _observation(actual=75.3, target=75.2),
+    )
+
+    assert current is not None
+    assert current.episode_kind == "thermostat_call"
+    assert completed is None
+
+
+def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
+    current, completed = _advance(
+        None,
+        _observation(actual=64.1, target=63.1),
+    )
+
+    assert current is not None
+    assert current.episode_kind == "setpoint_response"
+    assert completed is None
+
+
+def test_subdegree_thermostat_call_without_progress_is_excluded() -> None:
+    current, _ = _advance(
+        None,
+        _observation(actual=75.8, target=75.2),
+    )
+
+    active, completed = _advance(
+        current,
+        _observation(actual=75.8, target=75.2, action="idle"),
+        now=START + timedelta(minutes=10),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+
+    assert active is None
+    assert completed is not None
+    assert completed.complete is False
+    assert completed.excluded_from_baseline is True
+
+
+def test_subdegree_call_completes_when_action_disappears_and_driver_stops() -> None:
+    current, _ = _advance(
+        None,
+        _observation(actual=75.8, target=75.2),
+    )
+
+    active, completed = _advance(
+        current,
+        _observation(actual=75.3, target=75.2, action=None),
+        now=START + timedelta(minutes=10),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+
+    assert active is None
+    assert completed is not None
+    assert completed.complete is True
 
 
 def test_temperature_source_change_excludes_the_active_episode() -> None:
@@ -357,9 +456,12 @@ def test_target_change_inactivity_and_timeout_exclude_episode() -> None:
 def test_episode_serialization_round_trip_rejects_invalid_records() -> None:
     episode = _completed_episode(0, minutes_per_degree=10.0)
     excluded = replace(episode, excluded_from_baseline=True)
+    legacy_payload = episode_to_dict(episode)
+    legacy_payload.pop("episode_kind")
 
     assert episode_from_dict(episode_to_dict(episode)) == episode
     assert episode_from_dict(episode_to_dict(excluded)) == excluded
+    assert episode_from_dict(legacy_payload) == episode
     assert episode_from_dict({**episode_to_dict(episode), "complete": False}) is None
     assert (
         episode_from_dict(

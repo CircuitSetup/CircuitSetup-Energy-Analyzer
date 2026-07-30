@@ -665,14 +665,16 @@ such as Ecobee and Nest can expose different capability sets without
 brand-specific handling. A configured indoor temperature mapping overrides the
 climate entity's current-temperature attribute for that zone.
 
-An eligible response episode starts at least 1°F from the setpoint and completes
-within 0.5°F. Evaluation requires nine older and three recent complete episodes
-with the same thermostat, mode, season, weather mode, outdoor-temperature bin,
-two-degree starting-gap bin, and participating equipment. The default
-weather-adjusted response-change threshold is `25%` and can be set from `5%` to
-`100%`. A sustained slower result creates warning evidence and a Repair prompt;
-a faster result is informational and creates no Repair. Missing or incomparable
-data remains **Learning**.
+An eligible response episode either starts at least 1°F from the setpoint and
+completes within 0.5°F, or tracks a normal sub-1°F thermostat call until its
+heating/cooling action ends after at least 0.1°F of movement toward the target.
+Evaluation requires nine older and three recent complete episodes with the same
+episode type, thermostat, mode, season, weather mode, outdoor-temperature bin,
+starting-gap bin, and participating equipment. The default weather-adjusted
+response-change threshold is `25%` and can be set from `5%` to `100%`. A
+sustained slower result creates warning evidence and a Repair prompt; a faster
+result is informational and creates no Repair. Missing or incomparable data
+remains **Learning**.
 
 Observed response can appear while the feature is **Learning**, but its
 efficiency percentage waits for a mature weather-adjusted baseline. Appliance
