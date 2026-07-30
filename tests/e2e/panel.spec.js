@@ -403,7 +403,7 @@ test("HVAC associations ignore an old in-flight API key", async ({ page }) => {
   await expect(card).not.toContainText("First Heat Pump");
 });
 
-test("HVAC associations refresh once for referenced state revisions only", async ({ page }) => {
+test("HVAC associations refresh only for revisions and setup changes", async ({ page }) => {
   let requests = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/hvac_associations")) return false;
@@ -477,12 +477,26 @@ test("HVAC associations refresh once for referenced state revisions only", async
     last_updated: "2026-07-29T12:02:00.000Z",
     attributes: { temperature_unit: "°F", temperature: 73 },
   }));
-  await expect(card.locator('[data-mode="heating"]')).toContainText("123%");
-  expect(requests).toBe(3);
+  await expect.poll(() => requests).toBe(2);
 
   await page.evaluate(() => window.__setDashboardState("sensor.downstairs_temperature", {
     state: "73",
     last_updated: "2026-07-29T12:03:00.000Z",
+    attributes: { unit_of_measurement: "°F" },
+  }));
+  await expect.poll(() => requests).toBe(2);
+
+  await page.evaluate(() => window.__setDashboardState("climate.downstairs", {
+    state: "unavailable",
+    last_updated: "2026-07-29T12:04:00.000Z",
+    attributes: { temperature_unit: "°F", temperature: 73 },
+  }));
+  await expect(card.locator('[data-mode="heating"]')).toContainText("123%");
+  expect(requests).toBe(3);
+
+  await page.evaluate(() => window.__setDashboardState("sensor.downstairs_temperature", {
+    state: "unavailable",
+    last_updated: "2026-07-29T12:05:00.000Z",
     attributes: { unit_of_measurement: "°F" },
   }));
   await expect(card.locator("[data-hvac-associations-empty]")).toBeVisible();
@@ -490,7 +504,7 @@ test("HVAC associations refresh once for referenced state revisions only", async
 
   await page.evaluate(() => window.__setDashboardState("climate.downstairs", {
     state: "off",
-    last_updated: "2026-07-29T12:04:00.000Z",
+    last_updated: "2026-07-29T12:06:00.000Z",
     attributes: { temperature_unit: "°F", temperature: 73 },
   }));
   await expect.poll(() => requests).toBe(4);
@@ -527,17 +541,25 @@ test("HVAC associations keep unrelated updates out of a pending refresh", async 
   const card = await openDashboardCard(
     page,
     "circuitsetup-energy-analyzer-hvac-associations",
-    { entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    {
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/hvac_associations",
+      revision_entities: ["sensor.heat_pump_health_summary"],
+    },
     {
       "climate.downstairs": { state: "cool", attributes: { temperature_unit: "°F", temperature: 72 } },
       "sensor.downstairs_temperature": { state: "72", attributes: { unit_of_measurement: "°F" } },
+      "sensor.heat_pump_health_summary": {
+        state: "Ready",
+        attributes: { hvac_association_revision: 1 },
+      },
     },
   );
   await expect(card.locator('[data-mode="heating"]')).toContainText("92%");
 
-  await page.evaluate(() => window.__setDashboardState("climate.downstairs", {
-    state: "cool",
-    attributes: { temperature_unit: "°F", temperature: 73 },
+  await page.evaluate(() => window.__setDashboardState("sensor.heat_pump_health_summary", {
+    state: "Ready",
+    attributes: { hvac_association_revision: 2 },
   }));
   await expect.poll(() => Boolean(releaseRefresh)).toBe(true);
 

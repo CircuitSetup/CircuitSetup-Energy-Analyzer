@@ -2003,11 +2003,28 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _referencedStateKey() {
+      const hasNumber = (value) => value !== null
+        && value !== undefined
+        && value !== ""
+        && Number.isFinite(Number(value));
       return this._associationEntityIds.map((entityId) => {
-        const state = this._state(entityId) || {};
+        const state = this._state(entityId);
+        const attributes = state?.attributes || {};
+        const rawState = String(state?.state || "").trim().toLowerCase();
         const value = this._associationRevisionEntityIds.includes(entityId)
-          ? state.attributes?.hvac_association_revision
-          : state;
+          ? attributes.hvac_association_revision
+          : {
+            available: Boolean(rawState) && !["unknown", "unavailable"].includes(rawState),
+            capabilities: [
+              "current_temperature",
+              "temperature",
+              "target_temp_low",
+              "target_temp_high",
+            ].filter((name) => hasNumber(attributes[name])),
+            state_number: hasNumber(state?.state),
+            hvac_action: String(attributes.hvac_action || "").trim().toLowerCase(),
+            temperature_unit: String(attributes.temperature_unit || ""),
+          };
         return `${entityId}:${JSON.stringify(value ?? null)}`;
       }).join("|");
     }
