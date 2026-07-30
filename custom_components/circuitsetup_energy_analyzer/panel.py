@@ -1483,6 +1483,8 @@ def _hvac_association_mode(
         raw.get("change_ratio"), (int, float)
     ):
         change_percent = raw["change_ratio"] * 100.0
+    context = raw.get("context")
+    context = context if isinstance(context, Mapping) else {}
     return {
         "applicable": True,
         "status": str(raw.get("status") or "learning"),
@@ -1493,6 +1495,13 @@ def _hvac_association_mode(
         "recent_minutes_per_degree_f": raw.get("recent_minutes_per_degree"),
         "reference_count": int(raw.get("reference_count") or 0),
         "recent_count": int(raw.get("recent_count") or 0),
+        "supporting_blower_ids": sorted(
+            {
+                str(item)
+                for item in context.get("supporting_blower_ids", ())
+                if str(item)
+            }
+        )[:8],
         "attribution": "gas_furnace_proxy"
         if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
         else "direct",

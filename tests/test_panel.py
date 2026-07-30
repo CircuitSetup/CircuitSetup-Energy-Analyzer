@@ -169,6 +169,29 @@ def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> Non
     assert payload["items"][1]["status"] == "learning"
 
 
+def test_hvac_associations_payload_exposes_bounded_supporting_blowers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "heat_pump", "Heat Pump", ApplianceProfile.HEAT_PUMP, CircuitMode.SINGLE_PHASE, ()
+    )
+    streams = {
+        "heat_pump|climate.downstairs|cooling": {
+            "status": "ready",
+            "context": {"supporting_blower_ids": ["blower", "", "air_handler", "blower"]},
+            "current_episode": {"unbounded": ["not", "for", "panel"]},
+        }
+    }
+
+    payload = hvac_associations_payload([_hvac_association_coordinator(config, streams=streams)])
+
+    mode = payload["items"][0]["modes"]["cooling"]
+    assert mode["supporting_blower_ids"] == ["air_handler", "blower"]
+    assert "current_episode" not in mode
+
+
 @pytest.mark.parametrize(
     ("profile", "settings", "modes"),
     [
