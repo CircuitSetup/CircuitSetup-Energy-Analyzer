@@ -103,13 +103,17 @@ def advance_episode(
     ):
         target = current.target_temperature_f
         preserved_target = True
-    mode = _response_mode(observation, actual=actual, target=target)
-    if (
+    call_ended = (
         current is not None
         and current.episode_kind == "thermostat_call"
-        and action
-        and not action_active
-    ):
+        and bool(action)
+        and action != current.mode
+    )
+    if call_ended:
+        target = current.target_temperature_f
+        preserved_target = True
+    mode = _response_mode(observation, actual=actual, target=target)
+    if call_ended:
         mode = current.mode
     if (
         current is not None
@@ -199,11 +203,7 @@ def advance_episode(
         ),
         inactive_since=inactive_since,
     )
-    if (
-        current.episode_kind == "thermostat_call"
-        and action
-        and not action_active
-    ):
+    if call_ended:
         complete = _has_minimum_progress(updated)
         return None, replace(
             updated,
