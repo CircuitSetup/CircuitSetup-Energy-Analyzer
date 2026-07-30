@@ -181,6 +181,17 @@ def test_exact_tenth_degree_thermostat_call_starts() -> None:
     assert completed is None
 
 
+def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
+    current, completed = _advance(
+        None,
+        _observation(actual=64.1, target=63.1),
+    )
+
+    assert current is not None
+    assert current.episode_kind == "setpoint_response"
+    assert completed is None
+
+
 def test_subdegree_thermostat_call_without_progress_is_excluded() -> None:
     current, _ = _advance(
         None,

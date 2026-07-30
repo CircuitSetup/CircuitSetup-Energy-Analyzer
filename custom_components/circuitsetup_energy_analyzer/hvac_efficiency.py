@@ -129,7 +129,7 @@ def advance_episode(
             return None, None
         gap = _directional_gap(mode, actual=actual, target=target)
         episode_kind = "setpoint_response"
-        if gap < _MINIMUM_START_GAP_F:
+        if not _meets_minimum(gap, _MINIMUM_START_GAP_F):
             if not action_active or not _meets_minimum(gap, _MINIMUM_CALL_GAP_F):
                 return None, None
             episode_kind = "thermostat_call"
@@ -553,8 +553,10 @@ def _degrees_closed(episode: HvacResponseEpisode) -> float:
 
 def _valid_start_gap(episode: HvacResponseEpisode, gap: float) -> bool:
     if episode.episode_kind == "thermostat_call":
-        return _meets_minimum(gap, _MINIMUM_CALL_GAP_F) and gap < _MINIMUM_START_GAP_F
-    return gap >= _MINIMUM_START_GAP_F
+        return _meets_minimum(gap, _MINIMUM_CALL_GAP_F) and not _meets_minimum(
+            gap, _MINIMUM_START_GAP_F
+        )
+    return _meets_minimum(gap, _MINIMUM_START_GAP_F)
 
 
 def _has_minimum_progress(episode: HvacResponseEpisode) -> bool:
