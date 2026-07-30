@@ -813,7 +813,7 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
             appliance_profile="refrigerator",
             circuit_mode="single_phase",
             power_flow="load",
-            advanced_settings={"standby_threshold_w": 8.0},
+            advanced_settings={"standby_threshold_w": 12.0},
         ),
         feature_history={
             "standby_samples_w": [3.8, 4.1, 4.0, 5.2, 4.8, 4.4, 5.0, 4.6],
@@ -830,6 +830,24 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
     assert recommendation.setting_label == "Standby Power Threshold"
     assert recommendation.group == "Standby"
     assert recommendation.evidence["p95_standby_w"] == 5.2
+
+
+def test_standby_recommendation_ignores_one_watt_change() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="pressure_pump",
+            circuit_name="Pressure Pump",
+            appliance_profile="pump",
+            circuit_mode="single_phase",
+            power_flow="load",
+            advanced_settings={"standby_threshold_w": 248.0},
+        ),
+        feature_history={"standby_samples_w": [190.0] * 7},
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
 
 
 def test_advisor_uses_compacted_sample_counts() -> None:
@@ -871,7 +889,7 @@ def test_standby_recommendation_uses_compacted_sample_counts() -> None:
             appliance_profile="refrigerator",
             circuit_mode="single_phase",
             power_flow="load",
-            advanced_settings={"standby_threshold_w": 8.0},
+            advanced_settings={"standby_threshold_w": 12.0},
         ),
         feature_history={
             "standby_samples_w": [4.0, 5.0],

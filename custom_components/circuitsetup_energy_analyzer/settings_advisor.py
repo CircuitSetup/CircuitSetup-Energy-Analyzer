@@ -38,6 +38,7 @@ OPERATING_THRESHOLD_MIN_IDLE_SAMPLES = 10
 OPERATING_THRESHOLD_MIN_START_SAMPLES = 5
 OPERATING_THRESHOLD_MIN_SEPARATION_W = 15.0
 OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
+STANDBY_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
 
 
 def _advisor_text(*keys: str, **values: Any) -> str:
@@ -480,7 +481,7 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
         "standby_threshold_w",
         DEFAULT_STANDBY_THRESHOLD_W,
     )
-    if math.isclose(suggested_value, current_value):
+    if abs(suggested_value - current_value) < STANDBY_THRESHOLD_SIGNIFICANT_DELTA_W:
         return []
 
     return [
