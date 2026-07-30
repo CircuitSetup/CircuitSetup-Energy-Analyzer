@@ -133,6 +133,7 @@ def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> Non
             "status": "ready",
             "score": 92.0,
             "finding": "slower",
+            "change_ratio": 0.087,
             "recent_minutes_per_degree": 10.87,
             "context": {
                 "mode": "heating",
@@ -163,6 +164,7 @@ def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> Non
         "climate.upstairs",
     ]
     assert payload["items"][0]["modes"]["heating"]["score"] == 92.0
+    assert payload["items"][0]["modes"]["heating"]["change_percent"] == 8.7
     assert payload["items"][0]["modes"]["cooling"]["score"] == 108.0
     assert payload["items"][1]["status"] == "learning"
 

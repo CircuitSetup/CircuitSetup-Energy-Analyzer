@@ -1478,12 +1478,17 @@ def _hvac_association_mode(
         else {}
     )
     raw = raw if isinstance(raw, Mapping) else {}
+    change_percent = raw.get("change_percent")
+    if "change_percent" not in raw and isinstance(
+        raw.get("change_ratio"), (int, float)
+    ):
+        change_percent = raw["change_ratio"] * 100.0
     return {
         "applicable": True,
         "status": str(raw.get("status") or "learning"),
         "score": raw.get("score"),
         "trend": str(raw.get("finding") or "") or None,
-        "change_percent": raw.get("change_percent", raw.get("change_ratio")),
+        "change_percent": change_percent,
         "baseline_minutes_per_degree_f": raw.get("baseline_minutes_per_degree"),
         "recent_minutes_per_degree_f": raw.get("recent_minutes_per_degree"),
         "reference_count": int(raw.get("reference_count") or 0),
