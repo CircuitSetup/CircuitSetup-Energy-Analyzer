@@ -1078,6 +1078,7 @@
       "cards": {
         "setup_health": "Setup Health",
         "home_summary": "Home energy summary",
+        "line_voltage": "Line voltage",
         "appliances": "Appliances",
         "mains_total_power_and_amps": "Mains total power and amps",
         "all_appliance_power": "All appliance power",

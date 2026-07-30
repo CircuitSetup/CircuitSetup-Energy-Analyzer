@@ -647,7 +647,7 @@ export function createEvidenceViewMethods({
     return `
       <div class="chart-frame" data-chart-frame>
         ${this._historyLink(historyEntities, new Date(minTime).toISOString(), new Date(maxTime).toISOString(), true)}
-        ${zoomWindow ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
+        ${zoomWindow && !this._hideChartResetControl ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
         <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
           <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
           <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>

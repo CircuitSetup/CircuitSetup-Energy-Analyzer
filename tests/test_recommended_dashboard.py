@@ -443,12 +443,12 @@ def test_dashboard_adds_shared_date_control_and_orders_home_cards(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
     assert [card["type"] for card in home["sections"][0]["cards"][:4]] == [
-        CONTEXT_GRAPH_CARD,
         "custom:circuitsetup-energy-analyzer-house-flow",
+        CONTEXT_GRAPH_CARD,
         "custom:circuitsetup-energy-analyzer-appliance-grid",
         "custom:circuitsetup-energy-analyzer-energy-cost",
     ]
-    assert home["sections"][0]["cards"][0]["title"] == "All appliance power"
+    assert home["sections"][0]["cards"][1]["title"] == "All appliance power"
 
 
 def test_dashboard_keeps_date_control_on_older_home_assistant(
@@ -506,7 +506,7 @@ def test_appliance_power_graph_groups_dual_phase_entities() -> None:
     assert {row["name"] for row in dryer_rows} == {"Dryer"}
 
 
-def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power(
+def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
 ) -> None:
     mains = CircuitConfig(
         circuit_id="mains",
@@ -538,20 +538,32 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
         (_circuits()[0], mains),
         DASHBOARD_LAYOUT_STANDARD,
         hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l2_voltage",
+            " sensor.mains_l1_voltage ",
+            "sensor.mains_l1_voltage",
+        ),
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
     )
     cards = home["sections"][0]["cards"]
 
-    assert [card.get("title") for card in cards[:5]] == [
+    assert [card.get("title") for card in cards[:6]] == [
+        "Home energy summary",
         "Mains total power and amps",
         "All appliance power",
-        "Home energy summary",
         "Appliances",
+        "Line voltage",
         "Energy and costs",
     ]
-    graph = cards[0]
+    voltage = _card_with_title(home, "Line voltage")
+    assert voltage["type"] == "entities"
+    assert voltage["entities"] == [
+        {"entity": "sensor.mains_l1_voltage"},
+        {"entity": "sensor.mains_l2_voltage"},
+    ]
+    graph = cards[1]
     assert graph["entities"] == [
         {
             "entity": "sensor.mains_watts",
@@ -584,7 +596,7 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
             "axis": "right",
         },
     ]
-    summary = cards[2]
+    summary = cards[0]
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_watts",
         "sensor.mains_active_power",
@@ -597,6 +609,32 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
     ]
+
+
+def test_home_voltage_card_uses_one_row_per_configured_entity() -> None:
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        mains_voltage_entities=("sensor.mains_l1_voltage",),
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    assert _card_with_title(home, "Line voltage")["entities"] == [
+        {"entity": "sensor.mains_l1_voltage"}
+    ]
+
+
+def test_home_omits_voltage_card_without_configured_voltage_entities() -> None:
+    dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    assert not any(
+        card.get("title") == "Line voltage" for card in home["sections"][0]["cards"]
+    )
 
 
 def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None:
@@ -686,7 +724,7 @@ def test_home_mains_graph_uses_amps_axis_when_power_is_unavailable() -> None:
         sensors=(SensorRef("sensor.mains_current", SensorRole.CURRENT),),
     )
     dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)
-    graph = _dashboard_views(dashboard)[0]["sections"][0]["cards"][0]
+    graph = _dashboard_views(dashboard)[0]["sections"][0]["cards"][1]
 
     assert graph["title"] == "Mains total power and amps"
     assert graph["y_axis_label"] == "A"

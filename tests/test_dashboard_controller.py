@@ -109,6 +109,9 @@ class _StorageDashboardCoordinator:
     def __init__(self) -> None:
         self.entry_id = "entry-1"
         self.dashboard_layout = DASHBOARD_LAYOUT_STANDARD
+        self._mains_voltage_entity_ids = frozenset(
+            {"sensor.mains_l1_voltage", "sensor.mains_l2_voltage"}
+        )
         self.entry_data = {
             CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
         }
@@ -202,6 +205,15 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
         payload,
     ) in coordinator.hass.bus.events
     assert coordinator.updated_data == [coordinator.state]
+    cards = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]["views"][0][
+        "sections"
+    ][0]["cards"]
+    assert next(card for card in cards if card.get("title") == "Line voltage")[
+        "entities"
+    ] == [
+        {"entity": "sensor.mains_l1_voltage"},
+        {"entity": "sensor.mains_l2_voltage"},
+    ]
 
 
 @pytest.mark.asyncio

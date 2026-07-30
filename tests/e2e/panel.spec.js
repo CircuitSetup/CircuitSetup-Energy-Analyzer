@@ -668,7 +668,7 @@ test("HVAC associations label ready modes without a trend as stable", async ({ p
   await expect(card.locator('[data-mode="heating"] .trend')).toHaveText("Stable");
 });
 
-test("House power flow omits Active now and separates contribution", async ({ page }) => {
+test("Home summary omits power flow and separates contribution", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
@@ -791,8 +791,8 @@ test("House power flow omits Active now and separates contribution", async ({ pa
   await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
-  await expect(card.locator(".flow")).toHaveCount(1);
-  await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
+  await expect(card.locator(".flow")).toHaveCount(0);
+  await expect(card).not.toContainText("House power:");
   const clearedTotals = await page.evaluate(() => {
     window.__apiCalls.length = 0;
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
@@ -3859,8 +3859,15 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
     return Number(new Date(url.searchParams.get("end_date")))
       - Number(new Date(url.searchParams.get("start_date")));
   })).toBeLessThan(fullSpan * 0.6);
-  await expect(card.locator("[data-chart-reset]")).toBeVisible();
-  await card.locator("[data-chart-reset]").click();
+  await expect(card.locator("[data-chart-reset]")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: window.__dashboardCard._rangeFromDateKeys(
+        window.__dashboardCard._chartDateKey(Date.now()),
+        window.__dashboardCard._chartDateKey(Date.now()),
+      ),
+    }));
+  });
   await expect.poll(() => chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
   ))).toBe(fullSpan);
@@ -3953,7 +3960,7 @@ test("historical dashboard keeps live summary and house status current", async (
   const summary = page.locator("circuitsetup-energy-analyzer-summary");
   const house = page.locator("circuitsetup-energy-analyzer-house-flow");
   await expect(summary).toContainText("$42.10");
-  await expect(house).toContainText("House power: 100 W");
+  await expect(house).not.toContainText("House power:");
   await expect(house).toContainText("Ready");
 
   await page.evaluate(() => {
@@ -3978,7 +3985,7 @@ test("historical dashboard keeps live summary and house status current", async (
   });
 
   await expect(summary).toContainText("$43.20");
-  await expect(house).toContainText("House power: 250 W");
+  await expect(house).not.toContainText("House power:");
   await expect(house).toContainText("Needs attention");
 });
 

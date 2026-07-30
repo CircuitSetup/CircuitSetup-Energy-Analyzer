@@ -59,6 +59,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     constructor() {
       super();
       this._dashboardConfig = {};
+      this._hideChartResetControl = true;
       this._hass = null;
       this._deferredHassRender = false;
       this._deferredRenderControl = null;
@@ -263,12 +264,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .metric small { display: block; margin-top: 4px; }
         .banner { align-items: center; border: 1px solid var(--warning-color, #b7791f); border-radius: 6px; display: flex; justify-content: space-between; padding: 10px; }
         .banner.ready { border-color: var(--success-color, #2e7d32); }
-        .flow { display: grid; gap: 8px; }
-        .flow-bar { background: var(--secondary-background-color, #e5e7eb); border-radius: 4px; display: flex; height: 18px; overflow: hidden; }
-        .flow-known { background: var(--primary-color, #0b6bcb); }
-        .flow-unassigned { background: var(--warning-color, #b7791f); }
-        .flow-labels { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
-        .flow-labels > span, .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
+        .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
         .flow-labels .swatch { flex: 0 0 auto; }
         .appliance-list, .appliance-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
         button.appliance-tile { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; color: var(--primary-text-color, #111827); cursor: pointer; min-height: 96px; padding: 12px; text-align: left; }
@@ -1701,11 +1697,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const mains = config.primary_mains || {};
       const appliances = (config.appliances || []).map((item) => this._applianceState(item));
       const contributionAppliances = this._contributionAppliances(appliances);
-      const knownPower = this._number(mains.monitored_power_entity)
-        ?? appliances.reduce((total, item) => total + (item.power || 0), 0);
-      const housePower = this._sum(mains.power_entities) ?? knownPower;
-      const unassignedPower = this._number(mains.balance_power_entity);
-      const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
       const issueCount = appliances.filter((item) => item.issue).length;
       const applianceLiveTotals = this._applianceLiveTotals(config.appliances);
@@ -1745,28 +1736,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <span>${this._escape(String(healthState.state))}</span>
         </button>
       ` : "";
-      const knownPercent = Number.isFinite(coverage)
-        ? Math.max(0, Math.min(100, coverage))
-        : housePower > 0 ? Math.max(0, Math.min(100, knownPower / housePower * 100)) : 0;
-      const housePowerLabel = config.primary_mains
-        ? this._label("house_power", "House power")
-        : this._label("known_monitored_load", "Known monitored load");
       const rangeLabel = this._rangeLabel();
-      const flow = days === 1 ? `
-        <section class="flow">
-          <h3>${this._escape(housePowerLabel)}: ${this._escape(this._formatValue(housePower, "W"))}</h3>
-          <div class="flow-bar" role="img" aria-label="${this._escape(this._label("known_load_coverage", "Known load coverage"))} ${knownPercent.toFixed(0)}%">
-            <span class="flow-known" style="width:${knownPercent}%"></span>
-            <span class="flow-unassigned" style="width:${100 - knownPercent}%"></span>
-          </div>
-          <div class="flow-labels">
-            <span><i class="swatch flow-known"></i>${this._escape(this._label("known_monitored_load", "Known monitored load"))}: ${this._escape(this._formatValue(knownPower, "W"))}</span>
-            <span><i class="swatch flow-unassigned"></i>${this._escape(this._label("unassigned_load", "Unassigned load"))}: ${this._escape(this._formatValue(unassignedPower, "W"))}</span>
-            <span><i class="swatch flow-known"></i>${this._escape(this._label("known_load_coverage", "Known load coverage"))}: ${this._escape(this._formatValue(coverage, "%"))}</span>
-            ${mains.solar_surplus_power_entity ? `<span>${this._escape(this._label("solar_surplus", "Solar surplus"))}: ${this._escape(this._formatEntity(mains.solar_surplus_power_entity, "W"))}</span>` : ""}
-          </div>
-        </section>
-      ` : "";
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
           ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
@@ -1799,7 +1769,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             <h2>${this._escape(config.title || "Energy")}</h2>
             ${setup}
             ${config.mode === "mains" ? nilm : `<div class="kpis"></div>`}
-            ${flow}
             ${homeContent}
           </div>
         </ha-card>
@@ -2839,9 +2808,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
 
   class CircuitSetupEnergyAnalyzerDashboardGraphs extends CircuitSetupEnergyAnalyzerPanel {
-  constructor() {
-    super();
-    this._dashboardConfig = {};
+   constructor() {
+     super();
+     this._dashboardConfig = {};
+     this._hideChartResetControl = true;
   }
 
   setConfig(config) {
