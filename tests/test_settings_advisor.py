@@ -813,7 +813,7 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
             appliance_profile="refrigerator",
             circuit_mode="single_phase",
             power_flow="load",
-            advanced_settings={"standby_threshold_w": 12.0},
+            advanced_settings={"standby_threshold_w": 8.0},
         ),
         feature_history={
             "standby_samples_w": [3.8, 4.1, 4.0, 5.2, 4.8, 4.4, 5.0, 4.6],
@@ -889,7 +889,7 @@ def test_standby_recommendation_uses_compacted_sample_counts() -> None:
             appliance_profile="refrigerator",
             circuit_mode="single_phase",
             power_flow="load",
-            advanced_settings={"standby_threshold_w": 12.0},
+            advanced_settings={"standby_threshold_w": 8.0},
         ),
         feature_history={
             "standby_samples_w": [4.0, 5.0],
