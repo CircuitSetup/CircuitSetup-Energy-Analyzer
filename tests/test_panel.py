@@ -14,6 +14,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_BLOWER_REPRESENTS_GAS_HEAT,
     CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     DATA_RELOAD_COUNT,
     DOMAIN,
 )
@@ -252,6 +253,52 @@ def test_hvac_associations_payload_marks_setup_issues_and_avoids_hass() -> None:
     payload = hvac_associations_payload([coordinator])
 
     assert payload["items"][0]["status"] == "needs_attention"
+
+
+def test_hvac_associations_payload_scopes_setup_issues_to_matching_mapping(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    coordinator = _hvac_association_coordinator(
+        config,
+        streams={
+            "hvac|climate.downstairs|heating": {
+                "status": "ready",
+                "context": {
+                    "mode": "heating",
+                    "thermostat_entity_id": "climate.downstairs",
+                },
+            }
+        },
+    )
+    coordinator.entry_data[CONF_THERMOSTAT_ENTITIES].append("climate.upstairs")
+    coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"][
+        CONF_LINKED_THERMOSTAT_ENTITIES
+    ].append("climate.upstairs")
+    coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"][
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP
+    ] = {"climate.upstairs": "sensor.upstairs_temperature"}
+
+    class ForbiddenHassAccess:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"unexpected hass access: {name}")
+
+    coordinator.hass = ForbiddenHassAccess()
+    coordinator.state.hvac_thermostat_setup_issues_by_circuit = {
+        "hvac": [{"source_entities": ["sensor.upstairs_temperature"]}]
+    }
+
+    payload = hvac_associations_payload([coordinator])
+
+    assert [item["status"] for item in payload["items"]] == [
+        "ready",
+        "needs_attention",
+    ]
 
 
 def test_hvac_associations_payload_filters_coordinators_by_entry_id() -> None:

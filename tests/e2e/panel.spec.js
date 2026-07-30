@@ -238,6 +238,28 @@ test("HVAC associations show learning, attribution, native detail links, and fit
   expect(axe.violations.filter((violation) => ["serious", "critical"].includes(violation.impact))).toEqual([]);
 });
 
+test("HVAC associations explain how to set up an empty filtered card on desktop and mobile", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/hvac_associations")) return false;
+    await route.fulfill({ json: { status: "ok", count: 0, items: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    { title: "HVAC & Thermostats", entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    {},
+  );
+
+  await expect(card.locator("[data-hvac-associations-empty]")).toContainText(
+    "Link a thermostat in the appliance Advanced Settings, then update the generated dashboard.",
+  );
+  await expect(card.locator(".association-grid")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(card.locator("[data-hvac-associations-empty]")).toBeVisible();
+  expect(await card.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("HVAC associations retry one failed request", async ({ page }) => {
   test.info().annotations.push(
     { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/hvac_associations?entry_id=entry-1" },

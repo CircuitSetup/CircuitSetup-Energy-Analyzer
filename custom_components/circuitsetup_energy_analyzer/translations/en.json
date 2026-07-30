@@ -1178,7 +1178,8 @@
         "not_available": "—",
         "retry": "Retry",
         "load_error": "HVAC association data is temporarily unavailable.",
-        "open_detail": "Open appliance detail"
+        "open_detail": "Open appliance detail",
+        "no_hvac_associations": "Link a thermostat in the appliance Advanced Settings, then update the generated dashboard."
       },
       "notes": {
         "household_overview_after_setup": "Household overview appears after setup.",

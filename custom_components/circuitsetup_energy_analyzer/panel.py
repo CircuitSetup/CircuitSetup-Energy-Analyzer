@@ -1401,7 +1401,11 @@ def hvac_associations_payload(
                 }
                 status = (
                     "needs_attention"
-                    if circuit_issues
+                    if _association_has_setup_issue(
+                        circuit_issues,
+                        thermostat_entity_id,
+                        temperature_entity_id,
+                    )
                     else (
                         "ready"
                         if any(mode["status"] == "ready" for mode in modes.values())
@@ -1435,6 +1439,21 @@ def hvac_associations_payload(
         )
     )
     return {"status": "ok", "count": len(items), "items": items}
+
+
+def _association_has_setup_issue(
+    issues: Any,
+    thermostat_entity_id: str,
+    temperature_entity_id: str | None,
+) -> bool:
+    association_sources = {thermostat_entity_id, temperature_entity_id} - {None}
+    for issue in issues:
+        source_entities = (
+            issue.get("source_entities") if isinstance(issue, Mapping) else None
+        )
+        if not source_entities or association_sources.intersection(source_entities):
+            return True
+    return False
 
 
 _HVAC_ASSOCIATION_PROFILES = frozenset(

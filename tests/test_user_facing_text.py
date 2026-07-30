@@ -197,6 +197,7 @@ def test_hvac_associations_card_text_has_required_labels_and_placeholders() -> N
         "retry",
         "load_error",
         "open_detail",
+        "no_hvac_associations",
     }
 
     assert expected <= live_cards.keys()
@@ -206,6 +207,7 @@ def test_hvac_associations_card_text_has_required_labels_and_placeholders() -> N
         "value",
         "unit",
     ]
+    assert re.findall(r"{(.*?)}", live_cards["no_hvac_associations"]) == []
 
 
 def _iter_translation_strings(value, path: tuple[str, ...] = ()):

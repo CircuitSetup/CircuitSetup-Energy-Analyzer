@@ -2124,7 +2124,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ? `<p class="muted" data-hvac-associations-loading>${this._escape(this._label("loading", "Loading…"))}</p>`
         : this._associationError
           ? `<div class="load-error"><p>${this._escape(this._label("load_error", "HVAC association data is temporarily unavailable."))}</p><button type="button" data-retry-hvac-associations>${this._escape(this._label("retry"))}</button></div>`
-          : `<div class="association-grid">${(payload.items || []).filter((item) => !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id).map((item) => this._associationTile(item)).join("")}</div>`;
+          : (() => {
+              const items = (payload.items || []).filter((item) => !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id);
+              return items.length
+                ? `<div class="association-grid">${items.map((item) => this._associationTile(item)).join("")}</div>`
+                : `<p class="muted" data-hvac-associations-empty>${this._escape(this._label("no_hvac_associations", "Link a thermostat in the appliance Advanced Settings, then update the generated dashboard."))}</p>`;
+            })();
       this.shadowRoot.innerHTML = `<ha-card><style>${this._styles()}
         .association-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
         .association { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; color: inherit; display: grid; gap: 10px; min-width: 0; padding: 14px; text-decoration: none; }
