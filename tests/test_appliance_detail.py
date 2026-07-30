@@ -341,6 +341,51 @@ def test_water_flow_context_detail_projects_retained_evidence() -> None:
     }
 
 
+def test_water_flow_context_detail_omits_missing_metrics_and_keeps_zero_values(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        _config(
+            "washer",
+            name="Laundry Washer",
+            profile=ApplianceProfile.WASHER,
+        ),
+    )
+    coordinator.state.water_flow_context_by_circuit["washer"] = {
+        "status": "learning",
+        "confidence": 0.0,
+        "flow_sensor_active": False,
+        "flow_active_minutes": 0.0,
+        "mapped_appliance_count": 0,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+    }
+
+    context = appliance_detail_payload(
+        [coordinator],
+        circuit_id="washer",
+    )["detail"]["water_flow_context"]
+
+    assert context == {
+        "status": "learning",
+        "confidence": 0.0,
+        "flow_sensor_active": False,
+        "flow_active_minutes": 0.0,
+        "mapped_appliance_count": 0,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+        "flow_sensors": [],
+        "learning": {
+            "comparable_window_count": 0,
+            "required_comparable_windows": 10,
+        },
+    }
+
+
 def test_hvac_appliance_detail_exposes_retained_thermostat_efficiency() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

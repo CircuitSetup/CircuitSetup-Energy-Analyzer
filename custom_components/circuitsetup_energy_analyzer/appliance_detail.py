@@ -1714,29 +1714,8 @@ def _water_flow_context_detail(
     sources = sorted(
         {str(entity_id) for entity_id in source_ids if str(entity_id)}
     )
-    return {
+    detail = {
         "status": str(retained.get("status") or "unconfigured"),
-        "friendly_summary": (
-            str(retained.get("friendly_summary") or "") or None
-        ),
-        "confidence": retained.get("confidence"),
-        "flow_sensor_active": retained.get("flow_sensor_active"),
-        "flow_active_minutes": retained.get("flow_active_minutes"),
-        "appliance_runtime_minutes": retained.get("appliance_runtime_minutes"),
-        "mapped_appliance_count": retained.get("mapped_appliance_count"),
-        "mapped_appliance_runtime_minutes": retained.get(
-            "mapped_appliance_runtime_minutes"
-        ),
-        "recent_related_runtime_minutes": retained.get(
-            "recent_related_runtime_minutes"
-        ),
-        "recent_flow_explains_activity": retained.get(
-            "recent_flow_explains_activity"
-        ),
-        "mismatch_minutes": retained.get("mismatch_minutes"),
-        "flow_mismatch_threshold_minutes": retained.get(
-            "flow_mismatch_threshold_minutes"
-        ),
         "flow_sensors": [
             {
                 "entity_id": entity_id,
@@ -1752,6 +1731,23 @@ def _water_flow_context_detail(
             "required_comparable_windows": MIN_COMPARABLE_WINDOWS,
         },
     }
+    for field in (
+        "confidence",
+        "flow_sensor_active",
+        "flow_active_minutes",
+        "appliance_runtime_minutes",
+        "mapped_appliance_count",
+        "mapped_appliance_runtime_minutes",
+        "recent_related_runtime_minutes",
+        "recent_flow_explains_activity",
+        "mismatch_minutes",
+        "flow_mismatch_threshold_minutes",
+    ):
+        if (value := retained.get(field)) is not None:
+            detail[field] = value
+    if summary := str(retained.get("friendly_summary") or ""):
+        detail["friendly_summary"] = summary
+    return detail
 
 
 _HVAC_EFFICIENCY_PROFILES = frozenset(
