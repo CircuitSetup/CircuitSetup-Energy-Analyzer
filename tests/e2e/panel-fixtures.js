@@ -462,11 +462,66 @@ export const nilmWorkspace = {
   lane_counts: { needs_review: 1, assigned: 1, published: 0, ignored_expected: 0 },
 };
 
+export const hvacAssociations = {
+  status: "ok",
+  count: 3,
+  items: [
+    {
+      entry_id: "entry-1",
+      circuit_id: "heat_pump",
+      appliance_name: "Heat Pump",
+      appliance_profile: "heat_pump",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=heat_pump",
+      thermostat_entity_id: "climate.downstairs",
+      thermostat_name: "Downstairs",
+      temperature_entity_id: "sensor.downstairs_temperature",
+      temperature_name: "Downstairs Temperature",
+      status: "ready",
+      modes: {
+        heating: { applicable: true, status: "ready", score: 92, trend: "slower", baseline_minutes_per_degree_f: 10, recent_minutes_per_degree_f: 11, attribution: "direct" },
+        cooling: { applicable: true, status: "ready", score: 108, trend: "faster", baseline_minutes_per_degree_f: 10, recent_minutes_per_degree_f: 9, attribution: "direct", supporting_blower_ids: ["blower"] },
+      },
+    },
+    {
+      entry_id: "entry-1",
+      circuit_id: "heat_pump",
+      appliance_name: "Heat Pump",
+      appliance_profile: "heat_pump",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=heat_pump",
+      thermostat_entity_id: "climate.upstairs",
+      thermostat_name: "Upstairs",
+      temperature_entity_id: "sensor.upstairs_temperature",
+      temperature_name: "Upstairs Temperature",
+      status: "learning",
+      modes: {
+        heating: { applicable: true, status: "learning", score: null, trend: null, baseline_minutes_per_degree_f: 6, recent_minutes_per_degree_f: 5, attribution: "direct" },
+        cooling: { applicable: true, status: "learning", score: null, trend: null, baseline_minutes_per_degree_f: null, recent_minutes_per_degree_f: null, attribution: "direct" },
+      },
+    },
+    {
+      entry_id: "entry-1",
+      circuit_id: "electric_heat",
+      appliance_name: "Electric Heat",
+      appliance_profile: "electric_heat",
+      detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=electric_heat",
+      thermostat_entity_id: "climate.bedroom",
+      thermostat_name: "Bedroom",
+      temperature_entity_id: null,
+      temperature_name: null,
+      status: "needs_attention",
+      modes: {
+        heating: { applicable: true, status: "ready", score: 76, trend: "slower", baseline_minutes_per_degree_f: 12, recent_minutes_per_degree_f: 15, attribution: "gas_furnace_proxy" },
+      },
+    },
+  ],
+};
+
 export function apiPayload(pathname) {
   if (pathname.endsWith("/alert_evidence")) return evidence;
   if (pathname.endsWith("/appliance_insights")) return applianceInsights;
   if (pathname.endsWith("/appliance_detail")) return applianceDetail;
   if (pathname.endsWith("/setup_health")) return setupHealth;
+  if (pathname.endsWith("/hvac_associations")) return hvacAssociations;
   if (pathname.endsWith("/nilm_workspace")) return nilmWorkspace;
   if (pathname.includes("/history/period")) return chartHistory;
   throw new Error(`Unmocked browser API request: ${pathname}`);

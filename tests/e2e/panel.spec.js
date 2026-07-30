@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { apiPayload, evidence } from "./panel-fixtures.js";
+import { apiPayload, evidence, hvacAssociations } from "./panel-fixtures.js";
 
 const HARNESS = "/tests/e2e/panel.html";
 const browserLogs = new WeakMap();
@@ -176,6 +176,91 @@ async function toHaveNoViolations(page) {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
+
+test("HVAC associations render ready and learning thermostat gauges", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    {
+      title: "HVAC & Thermostats",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/hvac_associations",
+    },
+    {
+      "climate.downstairs": { state: "cool", attributes: { temperature_unit: "°F" } },
+      "climate.upstairs": { state: "heat", attributes: { temperature_unit: "°C" } },
+      "climate.bedroom": { state: "heat", attributes: { temperature_unit: "°F" } },
+    },
+  );
+
+  await expect(card.locator("[data-hvac-association]")).toHaveCount(3);
+  await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"]')).toContainText("92%");
+  await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="cooling"]')).toContainText("108%");
+  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("9 min/°C");
+  await expect(card.locator('[data-thermostat="climate.bedroom"] [data-mode="cooling"]')).toHaveCount(0);
+  for (const mode of ["heating", "cooling"]) {
+    await expect(card.locator(`[data-thermostat="climate.downstairs"] [data-mode="${mode}"] svg`)).toHaveAttribute(
+      "aria-label",
+      new RegExp(`Heat Pump.*Downstairs.*${mode}.*(?:92|108)%.*(?:9|11) min/°F`, "i"),
+    );
+  }
+});
+
+test("HVAC associations show learning, attribution, native detail links, and fit narrow screens", async ({ page }) => {
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    { title: "HVAC & Thermostats", entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    {
+      "climate.downstairs": { state: "cool", attributes: { temperature_unit: "°F" } },
+      "climate.upstairs": { state: "heat", attributes: { temperature_unit: "°C" } },
+      "climate.bedroom": { state: "heat", attributes: { temperature_unit: "°F" } },
+    },
+  );
+  const upstairs = card.locator('[data-thermostat="climate.upstairs"]');
+  await expect(upstairs.locator('[data-mode="heating"]')).toContainText("Learning");
+  await expect(upstairs.locator('[data-mode="cooling"]')).toContainText("—");
+  await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Needs attention");
+  await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Gas heat: supporting blower attribution.");
+  await expect(card.locator('[data-thermostat="climate.downstairs"]')).toContainText("Cooling blower supports air handling");
+  await expect(card.locator('[data-thermostat="climate.downstairs"]')).toHaveAttribute(
+    "href",
+    hvacAssociations.items[0].detail_path,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await card.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const axe = await new AxeBuilder({ page }).analyze();
+  expect(axe.violations.filter((violation) => ["serious", "critical"].includes(violation.impact))).toEqual([]);
+});
+
+test("HVAC associations retry one failed request", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/hvac_associations?entry_id=entry-1" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "hvac_associations?entry_id=entry-1: net::ERR_ABORTED" },
+  );
+  let attempts = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/hvac_associations")) return false;
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({ status: 503, body: "" });
+      return true;
+    }
+    return false;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    { entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    { "climate.downstairs": { state: "cool", attributes: { temperature_unit: "°F" } } },
+  );
+  await card.locator("[data-retry-hvac-associations]").click();
+  await expect(card.locator("[data-hvac-association]")).toHaveCount(3);
+  expect(attempts).toBe(2);
+});
 
 test("House power flow omits Active now and separates contribution", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });

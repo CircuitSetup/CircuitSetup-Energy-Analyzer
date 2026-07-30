@@ -1971,6 +1971,152 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
   }
 
+  class CircuitSetupEnergyAnalyzerHvacAssociations extends DashboardCardBase {
+    constructor() {
+      super();
+      this._associationPayload = null;
+      this._associationLoadKey = "";
+      this._associationRequest = null;
+      this._associationError = false;
+      this._associationStateKey = "";
+    }
+
+    _apiPathWithEntryId() {
+      const path = String(this._dashboardConfig.api_path || "");
+      const entryId = String(this._dashboardConfig.entry_id || "");
+      return entryId ? `${path}${path.includes("?") ? "&" : "?"}entry_id=${encodeURIComponent(entryId)}` : path;
+    }
+
+    _referencedStateKey() {
+      return (this._associationPayload?.items || []).map((item) => {
+        const state = this._state(item.thermostat_entity_id) || {};
+        return `${item.thermostat_entity_id}:${state.state || ""}:${state.attributes?.temperature_unit || ""}`;
+      }).join("|");
+    }
+
+    _shouldRenderForHassUpdate() {
+      const key = this._referencedStateKey();
+      const changed = key !== this._associationStateKey;
+      this._associationStateKey = key;
+      return changed;
+    }
+
+    _temperatureUnit(thermostatEntityId) {
+      const stateUnit = String(
+        (this._state(thermostatEntityId) || {}).attributes?.temperature_unit || "",
+      ).trim();
+      if (stateUnit === "°C" || stateUnit.toUpperCase() === "C") return "°C";
+      if (stateUnit === "°F" || stateUnit.toUpperCase() === "F") return "°F";
+      const systemUnit = String(
+        this._hass?.config?.unit_system?.temperature || "",
+      ).trim();
+      return systemUnit === "°C" ? "°C" : "°F";
+    }
+
+    _displayResponse(value, unit) {
+      if (value === null || value === undefined || value === "") return null;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return null;
+      return unit === "°C" ? parsed * 1.8 : parsed;
+    }
+
+    async _loadAssociations() {
+      const apiPathWithEntryId = this._apiPathWithEntryId();
+      if (!apiPathWithEntryId || this._associationRequest || this._associationLoadKey === apiPathWithEntryId) return;
+      this._associationLoadKey = apiPathWithEntryId;
+      const request = this._hass.callApi("GET", apiPathWithEntryId);
+      this._associationRequest = request;
+      try {
+        const payload = await request;
+        if (this._associationRequest !== request) return;
+        this._associationPayload = payload && Array.isArray(payload.items) ? payload : { items: [] };
+        this._associationError = false;
+        this._associationStateKey = this._referencedStateKey();
+      } catch (_error) {
+        if (this._associationRequest !== request) return;
+        this._associationError = true;
+      } finally {
+        if (this._associationRequest === request) this._associationRequest = null;
+      }
+      this._render();
+    }
+
+    _responseText(value, unit) {
+      const displayed = this._displayResponse(value, unit);
+      if (displayed === null) return this._label("not_available", "—");
+      return this._labelFormat("minutes_per_degree", "{value} min/{unit}", {
+        value: new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(displayed),
+        unit,
+      });
+    }
+
+    _modeTile(item, modeName, mode) {
+      const unit = this._temperatureUnit(item.thermostat_entity_id);
+      const score = Number(mode.score);
+      const ready = mode.status === "ready" && Number.isFinite(score);
+      const clampedScore = Math.max(0, Math.min(200, score));
+      const scoreText = ready ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(score)}%` : this._label("learning", "Learning");
+      const recent = this._responseText(mode.recent_minutes_per_degree_f, unit);
+      const baseline = this._responseText(mode.baseline_minutes_per_degree_f, unit);
+      const modeLabel = this._label(modeName, modeName[0].toUpperCase() + modeName.slice(1));
+      const ariaLabel = `${item.appliance_name}, ${item.thermostat_name || item.thermostat_entity_id}, ${modeLabel}, ${scoreText}, ${recent}`;
+      const attribution = mode.attribution === "gas_furnace_proxy"
+        ? "Gas heat: supporting blower attribution."
+        : mode.supporting_blower_ids?.length || item.appliance_profile === "hvac_blower" && modeName === "cooling"
+          ? this._label("supporting_blower", "Cooling blower supports air handling; the compressor drives temperature change.")
+          : "";
+      return `<section class="mode-card ${ready ? "ready" : "learning"}" data-mode="${this._escape(modeName)}">
+        <h3>${this._escape(modeLabel)}</h3>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 120 70" role="img" aria-label="${this._escape(ariaLabel)}">
+            <path class="gauge-track" pathLength="100" d="M10 60 A50 50 0 0 1 110 60"></path>
+            <path class="gauge-value ${this._escape(modeName)}" pathLength="100" stroke-dasharray="${ready ? clampedScore / 2 : 0} 100" d="M10 60 A50 50 0 0 1 110 60"></path>
+            <path class="gauge-baseline" d="M60 8 L60 16"></path>
+          </svg>
+          <strong>${this._escape(scoreText)}</strong>
+        </div>
+        <dl><div><dt>${this._escape(this._label("recent_response", "Recent response"))}</dt><dd>${this._escape(recent)}</dd></div><div><dt>${this._escape(this._label("learned_baseline", "Learned baseline"))}</dt><dd>${this._escape(baseline)}</dd></div></dl>
+        <p class="trend">${this._escape(mode.trend || this._label("learning", "Learning"))}</p>
+        ${attribution ? `<p class="attribution">${this._escape(attribution)}</p>` : ""}
+      </section>`;
+    }
+
+    _associationTile(item) {
+      const thermostat = item.thermostat_name || item.thermostat_entity_id;
+      const modes = Object.entries(item.modes || {}).filter(([, mode]) => mode?.applicable !== false);
+      return `<a class="association" data-hvac-association data-thermostat="${this._escape(item.thermostat_entity_id)}" href="${this._escape(item.detail_path || "#")}">
+        <header><span><ha-icon icon="mdi:hvac"></ha-icon>${this._escape(item.appliance_name)}</span><span class="association-arrow" aria-hidden="true">→</span><span><ha-icon icon="mdi:thermostat"></ha-icon>${this._escape(thermostat)}</span></header>
+        ${item.temperature_name ? `<p class="sensor">${this._escape(this._labelFormat("mapped_temperature", "Indoor temperature: {name}", { name: item.temperature_name }))}</p>` : ""}
+        <p class="status ${this._escape(item.status || "learning")}">${this._escape(item.status === "needs_attention" ? this._label("needs_attention", "Needs attention") : item.status === "ready" ? this._label("ready", "Ready") : this._label("learning", "Learning"))}</p>
+        <div class="mode-grid">${modes.map(([name, mode]) => this._modeTile(item, name, mode)).join("")}</div>
+      </a>`;
+    }
+
+    _render() {
+      if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
+      const payload = this._associationPayload;
+      const loading = !payload && !this._associationError;
+      const body = loading
+        ? `<p class="muted" data-hvac-associations-loading>${this._escape(this._label("loading", "Loading…"))}</p>`
+        : this._associationError
+          ? `<div class="load-error"><p>${this._escape(this._label("load_error", "HVAC association data is temporarily unavailable."))}</p><button type="button" data-retry-hvac-associations>${this._escape(this._label("retry", "Retry"))}</button></div>`
+          : `<div class="association-grid">${(payload.items || []).filter((item) => !this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id).map((item) => this._associationTile(item)).join("")}</div>`;
+      this.shadowRoot.innerHTML = `<ha-card><style>${this._styles()}
+        .association-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+        .association { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; color: inherit; display: grid; gap: 10px; min-width: 0; padding: 14px; text-decoration: none; }
+        .association:hover { border-color: var(--primary-color, #0b6bcb); } .association:focus-visible, button:focus-visible { outline: 2px solid var(--primary-color, #0b6bcb); outline-offset: 3px; }
+        .association header { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; font-weight: 600; overflow-wrap: anywhere; } .association header span { align-items: center; display: inline-flex; gap: 4px; } .association-arrow { color: var(--secondary-text-color, #5b6470); }
+        .sensor, .status, .trend, .attribution { margin: 0; overflow-wrap: anywhere; } .sensor, .trend, .attribution { color: var(--secondary-text-color, #5b6470); font-size: 13px; } .status { font-weight: 600; } .status.needs_attention { color: var(--warning-color, #a15c00); }
+        .mode-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); } .mode-card { background: var(--secondary-background-color, #f4f6f8); border-radius: 6px; min-width: 0; padding: 10px; } .mode-card h3 { font-size: 14px; line-height: 20px; }
+        .gauge-wrap { position: relative; } .gauge-wrap svg { display: block; margin: 4px auto -19px; max-width: 100%; } .gauge-track, .gauge-value { fill: none; stroke-width: 9; stroke-linecap: round; } .gauge-track { stroke: var(--divider-color, #d8dee6); } .gauge-value.heating { stroke: var(--warning-color, #b7791f); } .gauge-value.cooling { stroke: var(--primary-color, #0b6bcb); } .gauge-baseline { stroke: var(--secondary-text-color, #5b6470); stroke-width: 2; } .gauge-wrap strong { display: block; text-align: center; }
+        dl { display: grid; gap: 4px; margin: 10px 0 0; } dl div { display: grid; gap: 1px; } dt { color: var(--secondary-text-color, #5b6470); font-size: 12px; } dd { margin: 0; overflow-wrap: anywhere; } .load-error { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; } .load-error p { margin: 0; } .load-error button { background: var(--primary-color, #0b6bcb); border: 0; border-radius: 4px; color: var(--text-primary-color, #fff); cursor: pointer; font: inherit; padding: 8px 12px; }
+      </style><div class="dashboard-card"><h2>${this._escape(this._dashboardConfig.title || this._label("hvac_associations_title", "HVAC & Thermostats"))}</h2>${body}</div></ha-card>`;
+      const retry = this.shadowRoot.querySelector("[data-retry-hvac-associations]");
+      if (retry) retry.addEventListener("click", () => { this._associationLoadKey = ""; this._associationError = false; this._loadAssociations(); this._render(); });
+      if (loading) queueMicrotask(() => this._loadAssociations());
+    }
+  }
+
   class CircuitSetupEnergyAnalyzerApplianceGrid extends DashboardCardBase {
     constructor() {
       super();
@@ -2962,6 +3108,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   }
   if (!customElements.get("circuitsetup-energy-analyzer-summary")) {
     customElements.define("circuitsetup-energy-analyzer-summary", CircuitSetupEnergyAnalyzerSummary);
+  }
+  if (!customElements.get("circuitsetup-energy-analyzer-hvac-associations")) {
+    customElements.define("circuitsetup-energy-analyzer-hvac-associations", CircuitSetupEnergyAnalyzerHvacAssociations);
   }
   return CircuitSetupEnergyAnalyzerDashboardGraphs;
 }
