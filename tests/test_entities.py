@@ -1810,6 +1810,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
 
     state = AnalyzerState(
         health_summary_by_circuit={"washer": "Possible issue"},
+        hvac_association_revision_by_circuit={"washer": 7},
         readiness_by_circuit={"washer": {"health_status": "possible_issue"}},
         run_cycle_status_by_circuit={"washer": "running"},
         run_cycle_count_by_circuit={"washer": 2},
@@ -1841,6 +1842,7 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
     assert health_summary_value(state, "washer") == "Possible issue"
     health_attrs = health_summary_attributes(state, "washer")
     assert health_attrs["raw_status"] == "possible_issue"
+    assert health_attrs["hvac_association_revision"] == 7
     assert health_attrs["status_label"] == "Possible issue"
     assert health_attrs["active_alert_count"] == 2
     assert health_attrs["alert_confirmed"] is True

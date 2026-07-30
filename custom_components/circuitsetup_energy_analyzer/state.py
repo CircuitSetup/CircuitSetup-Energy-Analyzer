@@ -96,6 +96,9 @@ class AnalyzerState:
     hvac_efficiency_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    hvac_association_revision_by_circuit: dict[str, int] = field(
+        default_factory=dict
+    )
     hvac_thermostat_setup_issues_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )

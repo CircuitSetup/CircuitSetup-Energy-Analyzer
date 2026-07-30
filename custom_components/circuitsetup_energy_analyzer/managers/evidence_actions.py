@@ -21,6 +21,7 @@ from ..alerting import (
     alert_feedback_fingerprint_candidates_for_observation,
 )
 from ..models import AlertEvidence
+from .state_reducer import clear_hvac_efficiency
 
 ALERT_EXPECTED_FEEDBACK_TTL = timedelta(days=90)
 ALERT_UNHELPFUL_FEEDBACK_TTL = timedelta(days=45)
@@ -292,10 +293,7 @@ class EvidenceActionController:
                 stream_id,
                 None,
             )
-            getattr(state, "hvac_efficiency_by_circuit", {}).pop(
-                alert.circuit_id,
-                None,
-            )
+            clear_hvac_efficiency(state, alert.circuit_id)
             return
         if action != "confirmed":
             return

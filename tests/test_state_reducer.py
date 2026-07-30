@@ -65,6 +65,24 @@ def test_state_reducer_applies_state_update_batches() -> None:
     assert state.health_summary_by_circuit == {"fridge": "Running"}
 
 
+def test_state_reducer_revises_hvac_association_on_processor_update() -> None:
+    state = AnalyzerState()
+    reducer = StateReducer()
+
+    reducer.apply_update(
+        state,
+        ("hvac_efficiency_by_circuit", "heat_pump"),
+        {"status": "ready"},
+    )
+    reducer.apply_update(
+        state,
+        ("hvac_efficiency_by_circuit", "heat_pump"),
+        {"status": "ready"},
+    )
+
+    assert state.hvac_association_revision_by_circuit == {"heat_pump": 1}
+
+
 def test_state_reducer_applies_feature_result_payload() -> None:
     now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
     state = AnalyzerState()
@@ -349,6 +367,7 @@ def test_state_reducer_resets_learning_state_for_relearn() -> None:
         "washer|climate.laundry|cooling": {"complete": False}
     }
     assert state.hvac_efficiency_by_circuit == {}
+    assert state.hvac_association_revision_by_circuit == {"fridge": 1}
     assert state.hvac_thermostat_setup_issues_by_circuit == {}
 
 

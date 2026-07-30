@@ -661,6 +661,11 @@ def _build_energy_costs_view(
                 "title": _dashboard_text("cards", "hvac_associations"),
                 "entry_id": context.entry_id,
                 "api_path": f"{DOMAIN}/hvac_associations",
+                "revision_entities": [
+                    circuit.entities["health_summary"]
+                    for circuit in context.hvac
+                    if circuit.entities.get("health_summary")
+                ],
                 "labels": dict(translation_section("dashboard", "live_cards")),
             }
         )

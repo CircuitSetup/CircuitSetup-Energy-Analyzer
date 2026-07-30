@@ -34,6 +34,19 @@ class AppliedFeatureResult:
     store_dirty: bool
 
 
+def _bump_hvac_association_revision(state: Any, circuit_id: str) -> None:
+    revisions = state.hvac_association_revision_by_circuit
+    revisions[circuit_id] = revisions.get(circuit_id, 0) + 1
+
+
+def clear_hvac_efficiency(state: Any, circuit_id: str) -> None:
+    """Clear retained HVAC efficiency and notify existing entity consumers."""
+    if circuit_id not in state.hvac_efficiency_by_circuit:
+        return
+    state.hvac_efficiency_by_circuit.pop(circuit_id)
+    _bump_hvac_association_revision(state, circuit_id)
+
+
 def apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
     """Apply a processor-requested update to AnalyzerState."""
     if not path:
@@ -68,7 +81,13 @@ def apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
         msg = f"State update target is not a mapping at: {target_segment}"
         raise TypeError(msg)
     final_segment = path[-1]
+    changed_hvac_association = (
+        root == "hvac_efficiency_by_circuit"
+        and target.get(final_segment) != value
+    )
     target[final_segment] = value
+    if changed_hvac_association:
+        _bump_hvac_association_revision(state, final_segment)
 
 
 class StateReducer:
@@ -196,7 +215,7 @@ class StateReducer:
             for key, value in state.hvac_correlation_active_by_pair.items()
             if not key.startswith(hvac_prefix)
         }
-        state.hvac_efficiency_by_circuit.pop(circuit_id, None)
+        clear_hvac_efficiency(state, circuit_id)
         state.hvac_thermostat_setup_issues_by_circuit.pop(circuit_id, None)
 
     def refresh_alert_evidence_state(

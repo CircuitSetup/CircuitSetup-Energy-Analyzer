@@ -826,6 +826,35 @@ def test_hvac_associations_card_is_omitted_without_hvac() -> None:
     }
 
 
+def test_hvac_associations_card_uses_resolved_health_sensors_for_revisions() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.renamed_hvac_health": _registry_entry(
+                        "sensor.renamed_hvac_health",
+                        "entry-1_hvac_health_summary",
+                    )
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+
+    card = _card_of_type(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "energy-costs"
+        ),
+        HVAC_ASSOCIATIONS_CARD,
+    )
+
+    assert card["revision_entities"] == ["sensor.renamed_hvac_health"]
+
+
 def test_heat_pump_dashboard_keeps_hvac_cards_and_weather_graphs() -> None:
     heat_pump = CircuitConfig(
         circuit_id="heat_pump",

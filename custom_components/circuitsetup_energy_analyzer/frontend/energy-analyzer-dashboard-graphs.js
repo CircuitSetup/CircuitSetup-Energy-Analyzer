@@ -1980,6 +1980,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationError = false;
       this._associationStateKey = "";
       this._associationEntityIds = [];
+      this._associationRevisionEntityIds = [];
     }
 
     _associationKey(config = this._dashboardConfig) {
@@ -1994,14 +1995,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationRequest = null;
       this._associationError = false;
       this._associationStateKey = "";
-      this._associationEntityIds = [];
+      this._associationRevisionEntityIds = Array.isArray(config.revision_entities)
+        ? config.revision_entities.filter(Boolean)
+        : [];
+      this._associationEntityIds = [...this._associationRevisionEntityIds];
       super.setConfig(config);
     }
 
     _referencedStateKey() {
-      return this._associationEntityIds.map((entityId) => (
-        `${entityId}:${JSON.stringify(this._state(entityId) || {})}`
-      )).join("|");
+      return this._associationEntityIds.map((entityId) => {
+        const state = this._state(entityId) || {};
+        const value = this._associationRevisionEntityIds.includes(entityId)
+          ? state.attributes?.hvac_association_revision
+          : state;
+        return `${entityId}:${JSON.stringify(value ?? null)}`;
+      }).join("|");
     }
 
     _shouldRenderForHassUpdate() {
@@ -2046,10 +2054,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const payload = await request;
         if (this._associationRequest !== request) return;
         this._associationPayload = payload && Array.isArray(payload.items) ? payload : { items: [] };
-        this._associationEntityIds = [...new Set(this._associationPayload.items.flatMap((item) => [
-          item.thermostat_entity_id,
-          item.temperature_entity_id,
-        ]).filter(Boolean))];
+        this._associationEntityIds = [...new Set([
+          ...this._associationRevisionEntityIds,
+          ...this._associationPayload.items.flatMap((item) => [
+            item.thermostat_entity_id,
+            item.temperature_entity_id,
+          ]),
+        ].filter(Boolean))];
         this._associationError = false;
         this._associationStateKey = this._referencedStateKey();
       } catch (_error) {
