@@ -4157,7 +4157,9 @@ test("Appliance Detail shows water flow context", async ({ page }) => {
   const context = panel.locator("[data-water-flow-context]");
 
   await expect(context).toBeVisible();
-  await expect(context).toContainText("Possible Flow Without Load");
+  await expect(
+    context.locator(".appliance-section-heading .status"),
+  ).toHaveText("Possible Flow Without Load");
   await expect(context).toContainText(
     "Water flow has no mapped running appliance.",
   );

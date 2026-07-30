@@ -749,8 +749,7 @@ export function createApplianceViewMethods({
     const friendlySummary = String(context.friendly_summary || "");
 
     return `<section class="panel" data-water-flow-context>
-      <h2>${this._escape(this._panelText("appliance_detail.water_flow_context"))}</h2>
-      <p><strong>${this._escape(statusLabel)}</strong></p>
+      <div class="appliance-section-heading"><h2>${this._escape(this._panelText("appliance_detail.water_flow_context"))}</h2><span class="status">${this._escape(statusLabel)}</span></div>
       ${friendlySummary ? `<p class="muted">${this._escape(friendlySummary)}</p>` : ""}
       ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
       <p class="muted">${this._escape(`${this._formatNumber(observed)} of ${this._formatNumber(required)} ${this._panelText("appliance_detail.water_flow_comparable_windows")}`)}</p>
