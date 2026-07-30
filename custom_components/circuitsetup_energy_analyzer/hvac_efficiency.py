@@ -106,8 +106,10 @@ def advance_episode(
     call_ended = (
         current is not None
         and current.episode_kind == "thermostat_call"
-        and bool(action)
-        and action != current.mode
+        and (
+            (bool(action) and action != current.mode)
+            or (not action and not driver_active)
+        )
     )
     if call_ended:
         target = current.target_temperature_f

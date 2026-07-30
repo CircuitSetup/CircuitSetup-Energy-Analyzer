@@ -212,6 +212,25 @@ def test_subdegree_thermostat_call_without_progress_is_excluded() -> None:
     assert completed.excluded_from_baseline is True
 
 
+def test_subdegree_call_completes_when_action_disappears_and_driver_stops() -> None:
+    current, _ = _advance(
+        None,
+        _observation(actual=75.8, target=75.2),
+    )
+
+    active, completed = _advance(
+        current,
+        _observation(actual=75.3, target=75.2, action=None),
+        now=START + timedelta(minutes=10),
+        driver_active=False,
+        active_minutes_delta=10.0,
+    )
+
+    assert active is None
+    assert completed is not None
+    assert completed.complete is True
+
+
 def test_temperature_source_change_excludes_the_active_episode() -> None:
     current, _ = _advance(None, _observation(actual=78.0, target=72.0))
     changed_source = replace(
