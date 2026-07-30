@@ -239,11 +239,15 @@ def evaluate_efficiency(
     comparable.sort(key=lambda item: _episode_sort_time(item[0]))
     context = _evaluation_context(comparable[-1][0])
     if len(comparable) < required_count:
+        observed = median(
+            metric for _episode, metric in comparable[-_RECENT_EPISODE_COUNT:]
+        )
         return _empty_evaluation(
             "learning",
             context=context,
             reference_count=max(0, len(comparable) - _RECENT_EPISODE_COUNT),
             recent_count=min(len(comparable), _RECENT_EPISODE_COUNT),
+            recent_minutes_per_degree=observed,
         )
 
     reference = comparable[:_REFERENCE_EPISODE_COUNT]
@@ -532,13 +536,14 @@ def _empty_evaluation(
     context: Mapping[str, Any] | None = None,
     reference_count: int = 0,
     recent_count: int = 0,
+    recent_minutes_per_degree: float | None = None,
 ) -> HvacEfficiencyEvaluation:
     return HvacEfficiencyEvaluation(
         status=status,
         score=None,
         change_ratio=None,
         baseline_minutes_per_degree=None,
-        recent_minutes_per_degree=None,
+        recent_minutes_per_degree=recent_minutes_per_degree,
         reference_count=reference_count,
         recent_count=recent_count,
         finding=None,
