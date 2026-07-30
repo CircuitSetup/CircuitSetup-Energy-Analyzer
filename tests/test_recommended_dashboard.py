@@ -556,6 +556,7 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "Appliances",
         "Energy and costs",
     ]
+    assert cards[3]["columns"] == 2
     summary_stack = cards[2]
     assert summary_stack["type"] == "grid"
     assert summary_stack["columns"] == 1

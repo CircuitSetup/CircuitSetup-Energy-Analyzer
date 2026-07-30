@@ -1174,6 +1174,12 @@ def test_alert_evidence_payload_selects_requested_recommendation_preview() -> No
     selected = payload["selected_recommendation"]
     assert selected["recommendation_id"] == recommendation_id
     assert selected["display_label"] == "EV Charger Capacity Warning Ratio"
+    assert selected["graph_entities"] == [
+        "sensor.ev_charger_l1_watts",
+        "sensor.ev_charger_l2_watts",
+        "sensor.ev_charger_l1_current",
+        "sensor.ev_charger_l2_current",
+    ]
     assert selected["evidence_preview"] == (
         "Observed Samples: 8; P95 Current Amps: 36.4"
     )

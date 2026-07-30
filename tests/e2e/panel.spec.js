@@ -1382,6 +1382,7 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     "circuitsetup-energy-analyzer-appliance-grid",
     {
       title: "Appliances",
+      columns: 2,
       appliances: ["fridge", "oven"].map((id) => ({
         circuit_id: id,
         name: id[0].toUpperCase() + id.slice(1),
@@ -1398,6 +1399,11 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     },
     states,
   );
+
+  const applianceTiles = await card.locator("[data-appliance-id]").evaluateAll((tiles) => (
+    tiles.map((tile) => tile.getBoundingClientRect().toJSON())
+  ));
+  expect(applianceTiles[1].top).toBe(applianceTiles[0].top);
 
   const search = card.locator("[data-appliance-search]");
   await search.focus();
@@ -4176,11 +4182,12 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
   const efficiency = panel.locator("[data-hvac-efficiency]");
 
   await expect(efficiency).toContainText("Upstairs");
-  await expect(efficiency).toContainText("2 of 9 reference episodes");
+  await expect(efficiency).not.toContainText("2 of 9 reference episodes · 0 of 3 recent episodes");
   await expect(efficiency).not.toContainText("0 / 100");
   await expect(efficiency).not.toContainText("0 min/°F");
   await expect(efficiency).not.toContainText("Outdoor: 0°F");
   await expect(efficiency.locator('.hvac-efficiency-gauge[data-hvac-learning="true"]')).toHaveCount(1);
+  await expect(efficiency.locator(".hvac-efficiency-score .muted")).toHaveCount(0);
 });
 
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
@@ -4379,18 +4386,34 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
 
-  await expect(panel.locator(".appliance-detail-facts")).toHaveCount(1);
-  await expect(panel.locator(".appliance-detail-facts .metric-heading")).toHaveText([
+  await expect(panel.locator(".appliance-detail-facts")).toHaveCount(0);
+  const behavior = panel.locator("[data-appliance-behavior-health]");
+  await expect(behavior.locator("[data-appliance-now] .metric-heading")).toHaveText([
     "Activity",
     "Power",
     "Health",
     "Energy",
-    "Runtime Today",
-    "Runs Today",
   ]);
+  await expect(behavior.locator("[data-behavior-expectations]")).toContainText("Predictive Health");
+  await expect(behavior.getByRole("heading", { name: "Now" })).toBeVisible();
+  const expectationFont = await behavior.locator(".appliance-expectation-title").evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  const expectationHeaderFont = await behavior.getByRole("heading", { name: "Behavior Expectations" }).evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  expect(expectationFont).toBeLessThan(expectationHeaderFont);
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
   await expect(panel.locator("[data-appliance-comparison-table]")).toBeVisible();
   await expect(panel.getByRole("columnheader", { name: "Projected" })).toBeVisible();
+  await expect(panel.locator("[data-appliance-comparison-table]")).toContainText("Cost so far");
+  const asOfFont = await panel.locator(".appliance-comparison-as-of").evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  const comparisonHeaderFont = await panel.getByRole("heading", { name: "Today vs Normal" }).evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  expect(asOfFont).toBeLessThan(comparisonHeaderFont);
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
   await expect(dailyCost).toBeVisible();
   await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
@@ -4460,6 +4483,7 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
     }
     const selected = {
       ...evidence.setting_recommendations[0],
+      graph_entities: evidence.alert.graph_entities,
       evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
       actions: {
         ...evidence.setting_recommendations[0].actions,
@@ -4470,7 +4494,7 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
         },
       },
     };
-    await route.fulfill({ json: { ...evidence, selected_recommendation: selected } });
+    await route.fulfill({ json: { ...evidence, alert: null, selected_recommendation: selected } });
     return true;
   });
   const panel = await openPanel(page, "?circuit_id=kitchen&recommendation_id=energy-threshold");
@@ -4493,13 +4517,17 @@ test("Suggested Settings uses a compact support column", async ({ page, isMobile
   test.skip(isMobile, "The desktop layout is covered here; mobile already stacks the card.");
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/alert_evidence")) return false;
+    const recommendation = {
+      ...evidence.setting_recommendations[0],
+      evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
+    };
     await route.fulfill({
       json: {
         ...evidence,
-        setting_recommendations: evidence.setting_recommendations.map((recommendation) => ({
-          ...recommendation,
-          evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
-        })),
+        setting_recommendations: [recommendation],
+        ...(url.searchParams.has("recommendation_id")
+          ? { selected_recommendation: recommendation }
+          : {}),
       },
     });
     return true;
@@ -4508,42 +4536,57 @@ test("Suggested Settings uses a compact support column", async ({ page, isMobile
   for (const query of [
     "?review_suggested_settings=1&circuit_id=kitchen",
     "?appliance_detail=1&circuit_id=kitchen",
+    "?circuit_id=kitchen&recommendation_id=energy-threshold",
   ]) {
     const panel = await openPanel(page, query);
     const layout = panel.locator(".recommendation-layout").first();
     await expect(layout.locator(".recommendation-evidence")).toContainText("Observed Days: 12");
+    for (const support of ["expected-effect", "evidence", "historical-impact", "limitations"]) {
+      await expect(layout.locator(`[data-recommendation-support="${support}"]`)).toHaveCount(1);
+    }
     const card = await layout.evaluate((element) => {
       const heading = element.querySelector(".recommendation-heading");
       const summary = element.querySelector(".recommendation-summary");
       const support = element.querySelector(".recommendation-support");
-      const expectedEffect = support.querySelector("p > strong");
-      const evidence = support.querySelector(".recommendation-evidence > strong");
-      const historicalImpact = support.querySelector(".setting-impact-preview > strong");
-      const limitations = support.querySelector(".setting-impact-preview .muted > strong");
+      const expectedEffect = support.querySelector('[data-recommendation-support="expected-effect"]');
+      const evidence = support.querySelector('[data-recommendation-support="evidence"]');
+      const historicalImpact = support.querySelector('[data-recommendation-support="historical-impact"]');
+      const limitations = support.querySelector('[data-recommendation-support="limitations"]');
+      const evidenceCopy = evidence.querySelector(".recommendation-support-copy");
+      const style = (node) => ({
+        color: getComputedStyle(node).color,
+        fontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+      });
       return {
         headingPresent: Boolean(heading),
         headingBottom: heading?.getBoundingClientRect().bottom || 0,
-        headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+        headingFontSize: heading ? Number.parseFloat(getComputedStyle(heading).fontSize) : null,
         summaryTop: summary.getBoundingClientRect().top,
         summaryLeft: summary.getBoundingClientRect().left,
         supportTop: support.getBoundingClientRect().top,
         supportLeft: support.getBoundingClientRect().left,
         supportAlignContent: getComputedStyle(support).alignContent,
-        expectedEffectFontSize: Number.parseFloat(getComputedStyle(expectedEffect).fontSize),
-        evidenceFontSize: Number.parseFloat(getComputedStyle(evidence).fontSize),
-        historicalImpactFontSize: Number.parseFloat(getComputedStyle(historicalImpact).fontSize),
-        limitationsFontSize: Number.parseFloat(getComputedStyle(limitations).fontSize),
+        expectedEffect: style(expectedEffect),
+        evidence: style(evidenceCopy),
+        historicalImpact: style(historicalImpact),
+        limitations: style(limitations),
+        twoColumnRows: Array.from(support.querySelectorAll(".recommendation-support-row")).every((row) => (
+          getComputedStyle(row).gridTemplateColumns.split(" ").length === 2
+        )),
       };
     });
-    expect(card.headingPresent).toBe(true);
+    expect(card.headingPresent).toBe(!query.includes("recommendation_id"));
     expect(card.summaryTop).toBeGreaterThan(card.headingBottom);
     expect(card.supportTop).toBeGreaterThan(card.headingBottom);
     expect(card.supportLeft).toBeGreaterThan(card.summaryLeft);
     expect(card.supportAlignContent).toBe("start");
-    expect(card.expectedEffectFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.evidenceFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.historicalImpactFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.limitationsFontSize).toBeLessThan(card.headingFontSize);
+    expect(card.expectedEffect).toEqual(card.evidence);
+    expect(card.historicalImpact).toEqual(card.evidence);
+    expect(card.limitations).toEqual(card.evidence);
+    if (card.headingFontSize !== null) {
+      expect(card.evidence.fontSize).toBeLessThan(card.headingFontSize);
+    }
+    expect(card.twoColumnRows).toBe(true);
   }
 });
 

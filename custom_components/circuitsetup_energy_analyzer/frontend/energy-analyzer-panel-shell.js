@@ -610,8 +610,8 @@ export class PanelShellMethods {
         }
         .recommendation-summary,
         .recommendation-support,
-        .recommendation-evidence,
-        .setting-impact-preview {
+        .setting-impact-preview,
+        .recommendation-support-copy {
           display: grid;
           gap: 8px;
           min-width: 0;
@@ -635,19 +635,34 @@ export class PanelShellMethods {
         .recommendation-evidence-line {
           display: block;
         }
+        .recommendation-support-row {
+          align-items: start;
+          color: var(--secondary-text-color, #5f6b7a);
+          display: grid;
+          font-size: 14px;
+          gap: 12px;
+          grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+          min-width: 0;
+        }
+        .recommendation-support-copy {
+          gap: 4px;
+        }
+        .recommendation-support-row .recommendation-support-copy,
+        .recommendation-support-row .recommendation-evidence-line {
+          color: inherit;
+          font-size: inherit;
+          margin: 0;
+        }
+        .recommendation-support-row > strong,
+        .recommendation-support-row p,
+        .recommendation-support-row .muted {
+          color: inherit;
+          font-size: inherit;
+          margin: 0;
+        }
         .recommendation-summary,
         .recommendation-support {
           align-content: start;
-        }
-        .recommendation-support > p,
-        .recommendation-evidence,
-        .setting-impact-preview {
-          font-size: 14px;
-        }
-        .recommendation-support > p > strong,
-        .recommendation-evidence > strong,
-        .setting-impact-preview strong {
-          font-size: 14px;
         }
         .recommendation-evidence-actions {
           margin-top: 16px;
@@ -663,6 +678,11 @@ export class PanelShellMethods {
         .selected-recommendation-evidence p,
         .selected-recommendation-evidence .muted {
           color: var(--primary-text-color, #1f2933);
+        }
+        .selected-recommendation-evidence .recommendation-support-row,
+        .selected-recommendation-evidence .recommendation-support-row strong,
+        .selected-recommendation-evidence .recommendation-support-row p {
+          color: var(--secondary-text-color, #5f6b7a);
         }
         .recommendation-evidence-graph {
           display: grid;
@@ -766,6 +786,9 @@ export class PanelShellMethods {
         }
         .appliance-comparison-table p { margin: 4px 0 0; }
         .appliance-comparison-table ha-icon { vertical-align: middle; }
+        .appliance-comparison-as-of {
+          font-size: var(--ha-font-size-s, 12px);
+        }
         .appliance-graph-heading,
         .appliance-section-heading {
           align-items: center;
@@ -831,6 +854,17 @@ export class PanelShellMethods {
           border-bottom: 1px solid var(--divider-color, #d8dde6);
           border-radius: 0;
           padding: 8px 0;
+        }
+        .appliance-detail-block .metric:last-child {
+          border-bottom: 0;
+        }
+        .metric .appliance-expectation-title {
+          font-size: var(--ha-font-size-s, 13px);
+        }
+        .appliance-predictive-health {
+          border-top: 1px solid var(--divider-color, #d8dde6);
+          margin-top: 12px;
+          padding-top: 12px;
         }
         .hvac-efficiency-layout {
           align-items: stretch;

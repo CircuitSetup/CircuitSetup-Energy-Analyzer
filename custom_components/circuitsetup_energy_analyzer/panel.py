@@ -1625,10 +1625,15 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
     circuit_id = str(payload.get("circuit_id") or "").strip()
+    config = _config_for_circuit(coordinator, circuit_id) if circuit_id else None
     if circuit_id and not str(payload.get("circuit_name") or "").strip():
-        config = _config_for_circuit(coordinator, circuit_id)
         if config is not None:
             payload["circuit_name"] = config.name
+    graph_entities = [
+        item["entity_id"] for item in _source_history_series(config)
+    ]
+    if graph_entities:
+        payload.setdefault("graph_entities", graph_entities)
     payload["display_label"] = _recommendation_display_label(payload)
     _add_setting_impact_preview(payload, coordinator)
     _add_recommendation_guidance(payload)

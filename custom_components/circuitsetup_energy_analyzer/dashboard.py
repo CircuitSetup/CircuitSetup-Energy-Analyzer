@@ -713,6 +713,7 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
                 "title": _dashboard_text("cards", "appliances"),
                 "entry_id": context.entry_id,
                 "api_path": f"{DOMAIN}/appliance_insights",
+                "columns": 2,
                 "appliances": [
                     _appliance_card_payload(circuit, live_context=context)
                     for circuit in context.appliances

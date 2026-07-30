@@ -1795,7 +1795,8 @@ if (html.includes("$")) {
 }
 assert.equal((html.match(/>Cost Today</g) || []).length, 1);
 assert.equal((html.match(/class="chart"/g) || []).length, 1);
-assert.equal((html.match(/class="panel summary appliance-detail-facts"/g) || []).length, 1);
+assert.equal((html.match(/class="panel summary appliance-detail-facts"/g) || []).length, 0);
+assert.ok(html.includes("data-appliance-now"));
 const dailyMetricOrder = [
   ">kWh Today<",
   ">Average kWh per Day<",
@@ -2092,9 +2093,8 @@ for (const expected of [
   'icon="mdi:flash-outline"',
   'icon="mdi:heart-pulse"',
   'icon="mdi:chart-line"',
+  'icon="mdi:clock-outline"',
   'icon="mdi:calendar-today"',
-  'icon="mdi:timer-outline"',
-  'icon="mdi:counter"',
   'icon="mdi:cash"',
   'class="appliance-timeline"',
   'data-appliance-comparison-table',
@@ -2125,32 +2125,43 @@ def test_appliance_detail_renders_predictive_health_evidence() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
-const learning = panel._renderApplianceBehaviorHealth([], {
-  status: "learning",
-  reason: "insufficient_history",
-  confidence: 0,
+const learning = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: {
+    status: "learning",
+    reason: "insufficient_history",
+    confidence: 0,
+  },
 });
 assert.ok(learning.includes('data-appliance-behavior-health'));
 assert.ok(learning.includes("Predictive Health"));
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("More completed appliance history is needed"));
 
-const withoutHealth = panel._renderApplianceBehaviorHealth([], null, { items: [] });
-assert.ok(!withoutHealth.includes("<h3>Predictive Health</h3>"));
+const withoutHealth = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: null,
+  recent_timeline: { items: [] },
+});
+assert.ok(withoutHealth.includes("Predictive Health"));
 assert.ok(!withoutHealth.includes("<strong>Learning</strong>"));
 
-const possibleIssue = panel._renderApplianceBehaviorHealth([], {
-  status: "possible_degradation",
-  reason: "sustained_change",
-  confidence: 0.91,
-  feature: "efficiency_degradation",
-  metric: "energy_per_runtime_hour",
-  change_percent: 30,
-  reference_count: 14,
-  recent_count: 3,
-  context: { season: "summer", weather_mode: "cooling" },
-  last_eligible_date_or_session: "2026-07-27",
-}, { items: [] });
+const possibleIssue = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: {
+    status: "possible_degradation",
+    reason: "sustained_change",
+    confidence: 0.91,
+    feature: "efficiency_degradation",
+    metric: "energy_per_runtime_hour",
+    change_percent: 30,
+    reference_count: 14,
+    recent_count: 3,
+    context: { season: "summer", weather_mode: "cooling" },
+    last_eligible_date_or_session: "2026-07-27",
+  },
+  recent_timeline: { items: [] },
+});
 for (const expected of [
   "Possible degradation",
   "Sustained efficiency change",
@@ -2306,7 +2317,7 @@ panel._applianceDetail = {
   },
 };
 const html = panel._renderApplianceDetailBody();
-assert.ok(html.includes('class="panel summary appliance-detail-facts"'));
+assert.ok(html.includes("data-appliance-now"));
 assert.ok(html.includes("Appliance Activity History"));
 assert.ok(!html.includes("Why Energy Changed"));
 assert.ok(!html.includes("What To Check First"));
@@ -2458,7 +2469,7 @@ panel._applianceDetailHistoryBounds = {
 };
 const html = panel._renderApplianceDetailBody();
 const graph = html.indexOf('class="chart"');
-const summary = html.indexOf('class="panel summary appliance-detail-facts"');
+const summary = html.indexOf("data-appliance-behavior-health");
 if (graph < 0 || graph > summary) {
   throw new Error(`expected appliance history graph before summaries: ${html}`);
 }

@@ -339,7 +339,7 @@ export function createEvidenceViewMethods({
                   ${this._recommendationValueRows(recommendation)}
                 </div>
                 <div class="recommendation-support">
-                  ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+                  ${recommendation.expected_effect ? `<div class="recommendation-support-row" data-recommendation-support="expected-effect"><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong><span class="recommendation-support-copy">${this._escape(recommendation.expected_effect)}</span></div>` : ""}
                   ${this._renderRecommendationEvidence(recommendation.evidence_preview)}
                   ${this._renderSettingImpactPreview(recommendation)}
                 </div>
@@ -376,10 +376,15 @@ export function createEvidenceViewMethods({
       : "";
     const originalIndex = this._selectedRecommendationIndex(recommendation);
     const alert = this._payload && this._payload.alert;
-    const graph = alert && Array.isArray(alert.graph_entities) && alert.graph_entities.length
+    const graphSource = alert && Array.isArray(alert.graph_entities) && alert.graph_entities.length
+      ? alert
+      : Array.isArray(recommendation.graph_entities) && recommendation.graph_entities.length
+        ? recommendation
+        : null;
+    const graph = graphSource
       ? `<div class="recommendation-evidence-graph" data-recommendation-evidence-graph>
           <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
-          ${this._renderChart(alert)}
+          ${this._renderChart(graphSource)}
         </div>`
       : "";
     return `
@@ -390,7 +395,7 @@ export function createEvidenceViewMethods({
             ${this._recommendationValueRows(recommendation)}
           </div>
           <div class="recommendation-support">
-            ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+            ${recommendation.expected_effect ? `<div class="recommendation-support-row" data-recommendation-support="expected-effect"><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong><span class="recommendation-support-copy">${this._escape(recommendation.expected_effect)}</span></div>` : ""}
             ${evidenceSummary}
             ${countSummary}
             ${this._renderSettingImpactPreview(recommendation)}
@@ -424,9 +429,9 @@ export function createEvidenceViewMethods({
     if (!lines.length) {
       return "";
     }
-    return `<div class="recommendation-evidence">
+    return `<div class="recommendation-evidence recommendation-support-row" data-recommendation-support="evidence">
       <strong>${this._escape(this._panelText("recommendations.evidence_label"))}:</strong>
-      ${lines.map((line) => `<span class="recommendation-evidence-line">${this._escape(line)}</span>`).join("")}
+      <span class="recommendation-support-copy">${lines.map((line) => `<span class="recommendation-evidence-line">${this._escape(line)}</span>`).join("")}</span>
     </div>`;
   }
 

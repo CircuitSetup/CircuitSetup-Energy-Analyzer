@@ -266,6 +266,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .banner.ready { border-color: var(--success-color, #2e7d32); }
         .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
         .appliance-list, .appliance-grid { display: grid; gap: 0; grid-template-columns: 1fr; }
+        .appliance-grid[data-columns="2"] { column-gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .appliance-grid[data-columns="2"] button.appliance-tile { align-items: start; grid-template-columns: 1fr; }
+        .appliance-grid[data-columns="2"] .appliance-meta { text-align: left; }
         button.appliance-tile { align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--divider-color, #d8dee6); border-radius: 0; color: var(--primary-text-color, #111827); cursor: pointer; display: grid; gap: 12px; grid-template-columns: minmax(150px, 1fr) minmax(180px, 2fr); min-height: 64px; padding: 10px 4px; text-align: left; }
         button.appliance-tile[hidden] { display: none; }
         .appliance-heading ha-icon { --mdc-icon-size: 24px; }
@@ -320,6 +323,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           .timeline-lane { grid-template-columns: 1fr; }
           .timeline-scale { grid-template-columns: 1fr; }
           .timeline-scale > span:first-child { display: none; }
+          .appliance-grid[data-columns="2"] { grid-template-columns: 1fr; }
           button.appliance-tile { grid-template-columns: 1fr; }
           .appliance-meta { text-align: left; }
         }
@@ -2309,7 +2313,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               ${filters.map(([key, label]) => `<button type="button" class="control" role="tab" data-filter="${key}" aria-selected="${key === this._filter}">${this._escape(label)}</button>`).join("")}
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
-            <div class="appliance-grid">
+            <div class="appliance-grid" data-columns="${Number(this._dashboardConfig.columns) === 2 ? 2 : 1}">
               ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical, singleDay)).join("")}
             </div>
             <section class="timeline">

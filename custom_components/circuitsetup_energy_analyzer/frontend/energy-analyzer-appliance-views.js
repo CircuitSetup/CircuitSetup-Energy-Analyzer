@@ -577,24 +577,19 @@ export function createApplianceViewMethods({
       </section>` : ""}
       ${this._renderApplianceDetailHistory(payload.history)}
       ${this._renderApplianceDailyCost(payload, detail)}
-      <section class="panel summary appliance-detail-facts">
-        ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
-        ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
-        ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
-        ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
-        ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
-        ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-      </section>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
         ${this._renderApplianceComparisons(detail.today_vs_normal, detail.learning_readiness)}
       </section>
-      ${this._renderApplianceBehaviorHealth(detail.expectations, detail.appliance_health, detail.recent_timeline)}
+      ${this._renderApplianceBehaviorHealth(detail)}
       ${this._renderHvacEfficiency(detail.hvac_efficiency)}
     `;
   }
 
-  _renderApplianceBehaviorHealth(expectations, health, timeline) {
+  _renderApplianceBehaviorHealth(detail) {
+    const expectations = detail.expectations;
+    const timeline = detail.recent_timeline;
+    let health = detail.appliance_health;
     const humanize = (value) => String(value || "")
       .replaceAll("_", " ")
       .replace(/^\w/, (letter) => letter.toUpperCase());
@@ -629,16 +624,25 @@ export function createApplianceViewMethods({
     return `<section class="panel" data-appliance-behavior-health>
       <h2>${this._escape(this._panelText("appliance_detail.behavior_and_predictive_health"))}</h2>
       <div class="appliance-behavior-grid">
-        <div class="appliance-detail-block">
+        <div class="appliance-detail-block" data-behavior-expectations>
           <h3><ha-icon icon="mdi:bullseye-arrow"></ha-icon>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h3>
           ${this._renderApplianceExpectations(expectations)}
+          <div class="appliance-predictive-health">
+            <h3><ha-icon icon="mdi:heart-pulse"></ha-icon>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
+            ${hasHealth ? `<p><strong>${this._escape(statusLabel)}</strong></p>
+            ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
+            ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+            ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : `<p class="muted">${this._escape(this._panelText("common.unknown"))}</p>`}
+          </div>
         </div>
-        <div class="appliance-detail-block">
-          <h3><ha-icon icon="mdi:heart-pulse"></ha-icon>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
-          ${hasHealth ? `<p><strong>${this._escape(statusLabel)}</strong></p>
-          ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
-          ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-          ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : `<p class="muted">${this._escape(this._panelText("common.unknown"))}</p>`}
+        <div class="appliance-detail-block" data-appliance-now>
+          <h3><ha-icon icon="mdi:clock-outline"></ha-icon>${this._escape(this._panelText("appliance_insights.columns.now"))}</h3>
+          <div class="summary">
+            ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+            ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+            ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+            ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+          </div>
         </div>
         <div class="appliance-detail-block">
           <h3><ha-icon icon="mdi:history"></ha-icon>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h3>
@@ -674,10 +678,6 @@ export function createApplianceViewMethods({
     const learning = efficiency.learning && typeof efficiency.learning === "object"
       ? efficiency.learning
       : {};
-    const learningText = [
-      `${Number(learning.reference_count || 0)} of ${Number(learning.required_reference || 9)} reference episodes`,
-      `${Number(learning.recent_count || 0)} of ${Number(learning.required_recent || 3)} recent episodes`,
-    ].join(" · ");
     const renderMode = (mode) => {
       const rows = Array.isArray(efficiency[mode]) ? efficiency[mode] : [];
       if (!rows.length) return "";
@@ -742,7 +742,7 @@ export function createApplianceViewMethods({
         <div class="hvac-efficiency-score">
           ${gauge}
           <strong>${this._escape(this._panelText("appliance_detail.hvac_efficiency_score"))}</strong>
-          <span class="muted">${this._escape(score !== null ? this._panelText("appliance_detail.hvac_efficiency_score_note") : learningText)}</span>
+          ${score !== null ? `<span class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_score_note"))}</span>` : ""}
         </div>
         <div class="hvac-efficiency-thermostats">
           ${modes || `${learningProgress}<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
@@ -911,7 +911,8 @@ export function createApplianceViewMethods({
     const items = (Array.isArray(comparisons) ? comparisons : []).filter((item) => (
       item.current_value !== null
       && item.current_value !== undefined
-      && ((item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined)
+      && (item.metric_id === "cost_today"
+        || (item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined)
         || (item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined)
         || (item.configured_warning_value !== null && item.configured_warning_value !== undefined)
         || (item.configured_limit_value !== null && item.configured_limit_value !== undefined))
@@ -933,7 +934,7 @@ export function createApplianceViewMethods({
       demand_peak_w: "mdi:flash-triangle-outline",
       cost_today: "mdi:cash",
     };
-    return `${asOf ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(asOf) }))}</p>` : ""}
+    return `${asOf ? `<p class="muted appliance-comparison-as-of">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(asOf) }))}</p>` : ""}
       <table class="appliance-comparison-table" data-appliance-comparison-table>
         <thead><tr><th>Metric</th><th>Today</th><th>Normal</th><th>Projected</th></tr></thead>
         <tbody>${items.map((item) => {
@@ -972,7 +973,7 @@ export function createApplianceViewMethods({
     return `<div class="entity-list">${items.map((item) => `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.status))}</span>
-        <strong>${this._escape(item.title || this._panelText("appliance_detail.expectation_title"))}</strong>
+        <strong class="appliance-expectation-title">${this._escape(item.title || this._panelText("appliance_detail.expectation_title"))}</strong>
         <p>${this._escape(item.observed || this._panelText("appliance_detail.observed_learning"))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.expected_prefix", { expected: item.expected || this._panelText("appliance_detail.expected_learning") }))}</p>
         <p class="muted">${this._escape(item.why_it_matters || "")}</p>

@@ -352,8 +352,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         await this._loadSetupHealth(requestId, routeKey);
       }
       const alert = this._payload && this._payload.alert;
-      if (alert && alert.graph_entities && alert.graph_entities.length) {
-        await this._loadHistory(alert, requestId, routeKey);
+      const recommendation = this._payload && this._payload.selected_recommendation;
+      const historySource = alert && alert.graph_entities && alert.graph_entities.length
+        ? alert
+        : recommendation && recommendation.graph_entities && recommendation.graph_entities.length
+          ? recommendation
+          : null;
+      if (historySource) {
+        await this._loadHistory(historySource, requestId, routeKey);
       }
       if (this._routeRequestsNilmWorkspace(routeKey)) {
         await this._loadNilmWorkspace(requestId, routeKey);
@@ -730,7 +736,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._panelText("recommendations.preview_state_changes")
       : this._panelText("recommendations.preview_alerts");
     const window = Number(preview.observations_evaluated || 0) > 0
-      ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_window", {
+      ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_window", {
         count: preview.observations_evaluated,
         start: this._formatDateTime(new Date(preview.history_start)),
         end: this._formatDateTime(new Date(preview.history_end)),
@@ -738,21 +744,28 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : "";
     const examples = [
       preview.examples_removed && preview.examples_removed.length
-        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_removed", { examples: preview.examples_removed.join(", ") }))}</p>`
+        ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_removed", { examples: preview.examples_removed.join(", ") }))}</p>`
         : "",
       preview.examples_added && preview.examples_added.length
-        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_added", { examples: preview.examples_added.join(", ") }))}</p>`
+        ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_added", { examples: preview.examples_added.join(", ") }))}</p>`
         : "",
     ].join("");
     const limitations = Array.isArray(preview.limitations) && preview.limitations.length
-      ? `<p class="muted"><strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong> ${this._escape(preview.limitations.join(" "))}</p>`
+      ? `<div class="recommendation-support-row" data-recommendation-support="limitations">
+          <strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong>
+          <span class="recommendation-support-copy">${this._escape(preview.limitations.join(" "))}</span>
+        </div>`
       : "";
     return `<div class="setting-impact-preview">
-        <strong>${this._escape(this._panelText("recommendations.preview_history"))}</strong>
-        ${window}
-        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
-        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
-        ${examples}
+        <div class="recommendation-support-row" data-recommendation-support="historical-impact">
+          <strong>${this._escape(this._panelText("recommendations.preview_history"))}</strong>
+          <div class="recommendation-support-copy">
+            ${window}
+            <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
+            <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
+            ${examples}
+          </div>
+        </div>
         ${limitations}
     </div>`;
   }
