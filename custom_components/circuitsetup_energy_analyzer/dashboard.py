@@ -191,6 +191,7 @@ WATER_FLOW_PROFILES = {
 HVAC_WEATHER_PROFILES = {
     "hvac",
     "hvac_compressor",
+    "heat_pump",
     "mini_split",
     "hvac_blower",
     "electric_heat",

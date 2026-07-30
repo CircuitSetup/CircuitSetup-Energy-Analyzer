@@ -1979,6 +1979,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationRequest = null;
       this._associationError = false;
       this._associationStateKey = "";
+      this._associationEntityIds = [];
     }
 
     _associationKey(config = this._dashboardConfig) {
@@ -1994,21 +1995,27 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._associationRequest = null;
         this._associationError = false;
         this._associationStateKey = "";
+        this._associationEntityIds = [];
       }
       super.setConfig(config);
     }
 
     _referencedStateKey() {
-      return (this._associationPayload?.items || []).map((item) => {
-        const state = this._state(item.thermostat_entity_id) || {};
-        return `${item.thermostat_entity_id}:${state.state || ""}:${state.attributes?.temperature_unit || ""}`;
-      }).join("|");
+      return this._associationEntityIds.map((entityId) => (
+        `${entityId}:${JSON.stringify(this._state(entityId) || {})}`
+      )).join("|");
     }
 
     _shouldRenderForHassUpdate() {
       const key = this._referencedStateKey();
       const changed = key !== this._associationStateKey;
       this._associationStateKey = key;
+      if (changed) {
+        this._associationPayload = null;
+        this._associationLoadKey = "";
+        this._associationRequest = null;
+        this._associationError = false;
+      }
       return changed;
     }
 
@@ -2041,6 +2048,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const payload = await request;
         if (this._associationRequest !== request) return;
         this._associationPayload = payload && Array.isArray(payload.items) ? payload : { items: [] };
+        this._associationEntityIds = [...new Set(this._associationPayload.items.flatMap((item) => [
+          item.thermostat_entity_id,
+          item.temperature_entity_id,
+        ]).filter(Boolean))];
         this._associationError = false;
         this._associationStateKey = this._referencedStateKey();
       } catch (_error) {
@@ -2072,7 +2083,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const modeLabel = this._label(modeName, modeName[0].toUpperCase() + modeName.slice(1));
       const ariaLabel = `${item.appliance_name}, ${item.thermostat_name || item.thermostat_entity_id}, ${modeLabel}, ${scoreText}, ${recent}`;
       const trend = String(mode.trend || "");
-      const trendText = trend ? this._label(trend, trend) : this._label("learning", "Learning");
+      const trendText = trend ? this._label(trend, trend) : this._label(ready ? "stable" : "learning", ready ? "Stable" : "Learning");
       const attribution = mode.attribution === "gas_furnace_proxy"
         ? "Gas heat: supporting blower attribution."
         : mode.supporting_blower_ids?.length || item.appliance_profile === "hvac_blower" && modeName === "cooling"

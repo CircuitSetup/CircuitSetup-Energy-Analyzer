@@ -826,6 +826,33 @@ def test_hvac_associations_card_is_omitted_without_hvac() -> None:
     }
 
 
+def test_heat_pump_dashboard_keeps_hvac_cards_and_weather_graphs() -> None:
+    heat_pump = CircuitConfig(
+        circuit_id="heat_pump",
+        name="Heat Pump",
+        appliance_profile=ApplianceProfile.HEAT_PUMP,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(SensorRef("sensor.heat_pump_power", SensorRole.REAL_POWER),),
+    )
+    dashboard = build_recommended_dashboard(
+        (heat_pump,),
+        DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert "energy-costs" in cards_by_view
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert CONTEXT_GRAPH_CARD in cards_by_view["energy-costs"]
+
+
 def test_hvac_associations_card_is_shown_in_simple_layout() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(), DASHBOARD_LAYOUT_SIMPLE
