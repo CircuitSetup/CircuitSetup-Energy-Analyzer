@@ -556,7 +556,7 @@ class EnvironmentalContextManager:
             )
             if isinstance(sample, Mapping)
             and isinstance(sample.get("flow_status"), str)
-            and sample["flow_status"] != "unconfigured"
+            and sample["flow_status"] not in {"sensor_unavailable", "unconfigured"}
         )
         evidence = evaluate_flow_correlation(
             FlowCorrelationInput(
@@ -588,7 +588,11 @@ class EnvironmentalContextManager:
             else None
         )
         evidence["flow_sensor_active"] = flow_sensor_active
-        if flow_entities and flow_sensor_active is None:
+        if (
+            flow_entities
+            and flow_sensor_active is None
+            and evidence["status"] != "unconfigured"
+        ):
             evidence["status"] = "sensor_unavailable"
             evidence["friendly_summary"] = (
                 "Configured water-flow sensors are currently unavailable."
