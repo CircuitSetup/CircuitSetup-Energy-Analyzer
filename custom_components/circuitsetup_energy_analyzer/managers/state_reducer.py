@@ -81,9 +81,13 @@ def apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
         msg = f"State update target is not a mapping at: {target_segment}"
         raise TypeError(msg)
     final_segment = path[-1]
+    previous = target.get(final_segment)
     changed_hvac_association = (
         root == "hvac_efficiency_by_circuit"
-        and target.get(final_segment) != value
+        and (
+            previous.get("streams", {}) if isinstance(previous, Mapping) else {}
+        )
+        != (value.get("streams", {}) if isinstance(value, Mapping) else {})
     )
     target[final_segment] = value
     if changed_hvac_association:

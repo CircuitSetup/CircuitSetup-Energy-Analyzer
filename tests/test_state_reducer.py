@@ -68,19 +68,34 @@ def test_state_reducer_applies_state_update_batches() -> None:
 def test_state_reducer_revises_hvac_association_on_processor_update() -> None:
     state = AnalyzerState()
     reducer = StateReducer()
+    streams = {"heat_pump|climate.home|heating": {"status": "learning"}}
 
     reducer.apply_update(
         state,
         ("hvac_efficiency_by_circuit", "heat_pump"),
-        {"status": "ready"},
+        {"status": "tracking", "current_streams": {"episode": 1}, "streams": streams},
     )
     reducer.apply_update(
         state,
         ("hvac_efficiency_by_circuit", "heat_pump"),
-        {"status": "ready"},
+        {"status": "tracking", "current_streams": {"episode": 2}, "streams": streams},
     )
 
     assert state.hvac_association_revision_by_circuit == {"heat_pump": 1}
+
+    reducer.apply_update(
+        state,
+        ("hvac_efficiency_by_circuit", "heat_pump"),
+        {
+            "status": "ready",
+            "current_streams": {},
+            "streams": {
+                "heat_pump|climate.home|heating": {"status": "ready"}
+            },
+        },
+    )
+
+    assert state.hvac_association_revision_by_circuit == {"heat_pump": 2}
 
 
 def test_state_reducer_applies_feature_result_payload() -> None:
