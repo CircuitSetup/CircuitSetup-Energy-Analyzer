@@ -266,6 +266,31 @@ def test_hvac_associations_payload_filters_coordinators_by_entry_id() -> None:
     assert payload["items"][0]["entry_id"] == "entry-2"
 
 
+def test_hvac_associations_payload_detail_links_keep_entry_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    payload = hvac_associations_payload(
+        [
+            _hvac_association_coordinator(config, entry_id="entry one"),
+            _hvac_association_coordinator(config, entry_id="entry/two"),
+        ]
+    )
+
+    assert [
+        parse_qs(urlparse(item["detail_path"]).query)["entry_id"]
+        for item in payload["items"]
+    ] == [["entry one"], ["entry/two"]]
+    for item in payload["items"]:
+        query = parse_qs(urlparse(item["detail_path"]).query)
+        assert query["circuit_id"] == ["hvac"]
+        assert query["appliance_detail"] == ["1"]
+
+
 def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

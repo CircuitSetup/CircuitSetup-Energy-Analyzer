@@ -1338,10 +1338,15 @@ def _advanced_circuit_settings_action(
     return action
 
 
-def _circuit_appliance_detail_panel_path(circuit_id: str) -> str:
+def _circuit_appliance_detail_panel_path(
+    circuit_id: str, *, entry_id: str | None = None
+) -> str:
+    query = {ATTR_CIRCUIT_ID: circuit_id, "appliance_detail": "1"}
+    if entry_id:
+        query["entry_id"] = entry_id
     return (
         f"/{PANEL_URL_PATH}?"
-        f"{urlencode({ATTR_CIRCUIT_ID: circuit_id, 'appliance_detail': '1'})}"
+        f"{urlencode(query)}"
     )
 
 
@@ -1410,7 +1415,7 @@ def hvac_associations_payload(
                         "appliance_name": config.name,
                         "appliance_profile": config.appliance_profile.value,
                         "detail_path": _circuit_appliance_detail_panel_path(
-                            config.circuit_id
+                            config.circuit_id, entry_id=coordinator_entry_id
                         ),
                         "thermostat_entity_id": thermostat_entity_id,
                         "thermostat_name": _entity_id_name(thermostat_entity_id),
