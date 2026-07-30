@@ -351,9 +351,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (this._routeRequestsSetupHealth(routeKey)) {
         await this._loadSetupHealth(requestId, routeKey);
       }
-      const alert = this._payload && this._payload.alert;
-      if (alert && alert.graph_entities && alert.graph_entities.length) {
-        await this._loadHistory(alert, requestId, routeKey);
+      const historySource = this._evidenceHistorySource();
+      if (historySource) {
+        await this._loadHistory(historySource, requestId, routeKey);
       }
       if (this._routeRequestsNilmWorkspace(routeKey)) {
         await this._loadNilmWorkspace(requestId, routeKey);
@@ -730,7 +730,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       ? this._panelText("recommendations.preview_state_changes")
       : this._panelText("recommendations.preview_alerts");
     const window = Number(preview.observations_evaluated || 0) > 0
-      ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_window", {
+      ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_window", {
         count: preview.observations_evaluated,
         start: this._formatDateTime(new Date(preview.history_start)),
         end: this._formatDateTime(new Date(preview.history_end)),
@@ -738,21 +738,28 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       : "";
     const examples = [
       preview.examples_removed && preview.examples_removed.length
-        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_removed", { examples: preview.examples_removed.join(", ") }))}</p>`
+        ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_removed", { examples: preview.examples_removed.join(", ") }))}</p>`
         : "",
       preview.examples_added && preview.examples_added.length
-        ? `<p class="muted">${this._escape(this._panelTextFormat("recommendations.preview_added", { examples: preview.examples_added.join(", ") }))}</p>`
+        ? `<p>${this._escape(this._panelTextFormat("recommendations.preview_added", { examples: preview.examples_added.join(", ") }))}</p>`
         : "",
     ].join("");
     const limitations = Array.isArray(preview.limitations) && preview.limitations.length
-      ? `<p class="muted"><strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong> ${this._escape(preview.limitations.join(" "))}</p>`
+      ? `<div class="recommendation-support-row" data-recommendation-support="limitations">
+          <strong>${this._escape(this._panelText("recommendations.preview_limitations"))}:</strong>
+          <span class="recommendation-support-copy">${this._escape(preview.limitations.join(" "))}</span>
+        </div>`
       : "";
     return `<div class="setting-impact-preview">
-        <strong>${this._escape(this._panelText("recommendations.preview_history"))}</strong>
-        ${window}
-        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
-        <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
-        ${examples}
+        <div class="recommendation-support-row" data-recommendation-support="historical-impact">
+          <strong>${this._escape(this._panelText("recommendations.preview_history"))}</strong>
+          <div class="recommendation-support-copy">
+            ${window}
+            <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.current"), count: currentCount, metric: countLabel }))}</p>
+            <p>${this._escape(this._panelTextFormat("recommendations.preview_count", { label: this._panelText("common.suggested"), count: candidateCount, metric: countLabel }))}</p>
+            ${examples}
+          </div>
+        </div>
         ${limitations}
     </div>`;
   }
@@ -911,15 +918,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!Number.isFinite(seconds)) {
       return this._panelText("common.unknown");
     }
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.round((seconds % 3600) / 60);
-    if (hours && minutes) {
-      return `${hours}h ${minutes}m`;
-    }
-    if (hours) {
-      return `${hours}h`;
-    }
-    return `${minutes}m`;
+    const wholeSeconds = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const remainingSeconds = wholeSeconds % 60;
+    return [
+      hours ? `${hours}h` : "",
+      minutes ? `${minutes}m` : "",
+      remainingSeconds || (!hours && !minutes) ? `${remainingSeconds}s` : "",
+    ].filter(Boolean).join(" ");
   }
 
   _formatConfidence(value) {
@@ -950,6 +957,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     if (unit === "%") {
       return `${this._formatNumber(value)}%`;
+    }
+    if (unit === "s") {
+      return this._formatDuration(value);
     }
     return `${this._formatNumber(value)}${unit ? ` ${unit}` : ""}`;
   }

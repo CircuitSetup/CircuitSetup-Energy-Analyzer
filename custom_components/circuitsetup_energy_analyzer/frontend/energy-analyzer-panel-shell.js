@@ -63,13 +63,13 @@ export class PanelShellMethods {
     this.shadowRoot.innerHTML = `
       <style>
         :host {
+          background: var(--primary-background-color);
+          color: var(--primary-text-color);
           display: block;
+          font-family: inherit;
           min-height: 100vh;
           box-sizing: border-box;
           padding: 24px;
-          color: var(--primary-text-color, #1f2933);
-          background: var(--primary-background-color, #f7f8fa);
-          font-family: var(--paper-font-body1_-_font-family, system-ui, sans-serif);
         }
         .shell {
           max-width: 1120px;
@@ -87,12 +87,16 @@ export class PanelShellMethods {
         h2 {
           font-size: 18px;
         }
+        .panel,
+        .section-surface {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid
+            var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
+          box-shadow: var(--ha-card-box-shadow);
+        }
         .panel {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 8px;
           padding: 18px;
-          box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(15, 23, 42, 0.12));
         }
         .page-header {
           display: grid;
@@ -128,9 +132,6 @@ export class PanelShellMethods {
           gap: 6px;
         }
         .section-surface {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 8px;
           padding: 16px;
         }
         .legend {
@@ -387,7 +388,7 @@ export class PanelShellMethods {
           margin-top: 8px;
         }
         .chart-frame {
-          font-family: Roboto, Noto, sans-serif;
+          font-family: inherit;
           overflow: visible;
           position: relative;
         }
@@ -609,8 +610,8 @@ export class PanelShellMethods {
         }
         .recommendation-summary,
         .recommendation-support,
-        .recommendation-evidence,
-        .setting-impact-preview {
+        .setting-impact-preview,
+        .recommendation-support-copy {
           display: grid;
           gap: 8px;
           min-width: 0;
@@ -634,19 +635,34 @@ export class PanelShellMethods {
         .recommendation-evidence-line {
           display: block;
         }
+        .recommendation-support-row {
+          align-items: start;
+          color: var(--secondary-text-color, #5f6b7a);
+          display: grid;
+          font-size: 14px;
+          gap: 12px;
+          grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+          min-width: 0;
+        }
+        .recommendation-support-copy {
+          gap: 4px;
+        }
+        .recommendation-support-row .recommendation-support-copy,
+        .recommendation-support-row .recommendation-evidence-line {
+          color: inherit;
+          font-size: inherit;
+          margin: 0;
+        }
+        .recommendation-support-row > strong,
+        .recommendation-support-row p,
+        .recommendation-support-row .muted {
+          color: inherit;
+          font-size: inherit;
+          margin: 0;
+        }
         .recommendation-summary,
         .recommendation-support {
           align-content: start;
-        }
-        .recommendation-support > p,
-        .recommendation-evidence,
-        .setting-impact-preview {
-          font-size: 14px;
-        }
-        .recommendation-support > p > strong,
-        .recommendation-evidence > strong,
-        .setting-impact-preview strong {
-          font-size: 14px;
         }
         .recommendation-evidence-actions {
           margin-top: 16px;
@@ -662,6 +678,11 @@ export class PanelShellMethods {
         .selected-recommendation-evidence p,
         .selected-recommendation-evidence .muted {
           color: var(--primary-text-color, #1f2933);
+        }
+        .selected-recommendation-evidence .recommendation-support-row,
+        .selected-recommendation-evidence .recommendation-support-row strong,
+        .selected-recommendation-evidence .recommendation-support-row p {
+          color: var(--secondary-text-color, #5f6b7a);
         }
         .recommendation-evidence-graph {
           display: grid;
@@ -747,56 +768,165 @@ export class PanelShellMethods {
           margin: 12px 0 0;
           padding-left: 20px;
         }
-        .appliance-comparison-grid {
-          display: grid;
-          gap: 12px;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        .appliance-comparison-table {
+          border-collapse: collapse;
+          width: 100%;
         }
-        .appliance-detail-overview {
-          align-items: start;
-          display: grid;
-          gap: 16px;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        .appliance-comparison-table th,
+        .appliance-comparison-table td {
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          padding: 10px;
+          text-align: left;
+          vertical-align: top;
         }
-        .appliance-detail-timeline {
-          align-self: start;
-        }
-        .appliance-comparison {
-          background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 6px;
-          display: grid;
-          gap: 6px;
-          min-width: 0;
-          padding: 12px;
-        }
-        .appliance-comparison .comparison-label {
+        .appliance-comparison-table th,
+        .appliance-comparison-table p {
           color: var(--secondary-text-color, #5f6b7a);
           font-size: 12px;
         }
-        .appliance-comparison strong {
-          font-size: 20px;
+        .appliance-comparison-table p { margin: 4px 0 0; }
+        .appliance-comparison-table ha-icon { vertical-align: middle; }
+        .appliance-comparison-as-of {
+          font-size: var(--ha-font-size-s, 12px);
         }
-        .appliance-comparison-columns {
-          display: grid;
+        .appliance-graph-heading,
+        .appliance-section-heading {
+          align-items: center;
+          display: flex;
           gap: 12px;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          justify-content: space-between;
         }
-        .appliance-comparison-columns > div {
+        .appliance-graph-toolbar,
+        .appliance-period-controls {
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .appliance-graph-toolbar [data-appliance-history-graph] {
           display: grid;
           gap: 4px;
+        }
+        .appliance-period-button,
+        .labeled-graph-controls .icon-button {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-color: transparent;
+          color: var(--primary-text-color, #1f2933);
+          min-height: 36px;
+          padding: 6px 9px;
+          width: auto;
+        }
+        .appliance-period-button[aria-pressed="true"] {
+          background: var(--primary-color, #0b6bcb);
+          color: var(--text-primary-color, #fff);
+        }
+        .appliance-behavior-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          margin-top: 12px;
+        }
+        .appliance-detail-block {
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
           min-width: 0;
+          padding: 14px;
         }
-        .appliance-comparison-columns span {
-          color: var(--secondary-text-color, #5f6b7a);
-          font-size: 12px;
+        .appliance-detail-block h3 {
+          align-items: center;
+          display: flex;
+          font-size: 15px;
+          gap: 8px;
+          margin: 0 0 10px;
         }
-        .appliance-comparison .comparison-summary {
-          color: var(--secondary-text-color, #5f6b7a);
-          margin: 0;
+        .appliance-detail-block h3 ha-icon {
+          --mdc-icon-size: 20px;
+          color: var(--primary-color, #0b6bcb);
         }
-        .appliance-comparison p {
-          margin: 0;
+        .appliance-detail-block .entity-list,
+        .appliance-detail-block .summary {
+          grid-template-columns: 1fr;
+        }
+        .appliance-detail-block .metric {
+          background: transparent;
+          border: 0;
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 0;
+          padding: 8px 0;
+        }
+        .appliance-detail-block .metric:last-child {
+          border-bottom: 0;
+        }
+        .metric .appliance-expectation-title {
+          font-size: var(--ha-font-size-s, 13px);
+        }
+        .appliance-predictive-health {
+          border-top: 1px solid var(--divider-color, #d8dde6);
+          margin-top: 12px;
+          padding-top: 12px;
+        }
+        .hvac-efficiency-layout {
+          align-items: stretch;
+          display: grid;
+          gap: 16px;
+          grid-template-columns: 210px minmax(0, 1fr);
+          margin-top: 12px;
+        }
+        .hvac-efficiency-score {
+          align-items: center;
+          background: var(--secondary-background-color, #f4f6f8);
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          min-height: 175px;
+          padding: 14px;
+          text-align: center;
+        }
+        .hvac-efficiency-gauge {
+          align-items: end;
+          background: conic-gradient(from 270deg, var(--primary-color, #0b6bcb) 0 var(--hvac-score), var(--divider-color, #d8dde6) var(--hvac-score) 50%, transparent 50%);
+          border-radius: 100% 100% 0 0;
+          display: flex;
+          height: 76px;
+          justify-content: center;
+          margin-bottom: 8px;
+          overflow: hidden;
+          position: relative;
+          width: 150px;
+        }
+        .hvac-efficiency-gauge::before {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 100% 100% 0 0;
+          bottom: 0;
+          content: "";
+          height: 52px;
+          position: absolute;
+          width: 106px;
+        }
+        .hvac-efficiency-gauge strong {
+          font-size: 28px;
+          line-height: 1;
+          position: relative;
+          z-index: 1;
+        }
+        .hvac-efficiency-gauge.learning {
+          --hvac-score: 0%;
+        }
+        .hvac-efficiency-thermostats,
+        .hvac-efficiency-mode {
+          display: grid;
+          gap: 10px;
+        }
+        .hvac-efficiency-row {
+          border: 1px solid var(--divider-color, #d8dde6);
+          border-radius: 8px;
+          padding: 12px;
+        }
+        .hvac-efficiency-row .metric {
+          background: transparent;
         }
         .appliance-timeline {
           list-style: none;
@@ -854,17 +984,17 @@ export class PanelShellMethods {
           margin-top: 10px;
         }
         .nilm-label-field input {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           padding: 8px 10px;
         }
         .nilm-label-field select {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           min-width: 0;
@@ -876,8 +1006,8 @@ export class PanelShellMethods {
         }
         .nilm-decision-option {
           align-items: center;
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           cursor: pointer;
           display: grid;
           gap: 8px;
@@ -885,7 +1015,8 @@ export class PanelShellMethods {
           padding: 10px;
         }
         .nilm-decision-option:has(input:checked) {
-          border-color: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .nilm-decision-option input {
           margin: 0;
@@ -902,9 +1033,9 @@ export class PanelShellMethods {
         }
         .nilm-interval-form input,
         .nilm-interval-form select {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           padding: 8px 10px;
@@ -918,19 +1049,22 @@ export class PanelShellMethods {
         }
         .merge-target-chip {
           background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           cursor: pointer;
           font: inherit;
           padding: 7px 11px;
         }
         .merge-target-chip[aria-pressed="true"] {
-          background: var(--primary-color, #03a9f4);
-          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #0b6bcb);
+          border-color: var(--primary-color, #0b6bcb);
           color: var(--text-primary-color, #fff);
         }
         .workspace-section {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 12px;
           min-width: 0;
@@ -941,15 +1075,15 @@ export class PanelShellMethods {
           margin: 12px 0;
         }
         .nilm-interval-row {
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 8px;
           padding: 10px;
         }
         .nilm-interval-row[data-nilm-active="true"] {
-          border-color: var(--primary-color, #03a9f4);
-          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .nilm-interval-row-heading {
           align-items: center;
@@ -958,7 +1092,7 @@ export class PanelShellMethods {
           grid-template-columns: auto minmax(0, 1fr) auto;
         }
         .nilm-interval-row-heading span {
-          color: var(--primary-color, #03a9f4);
+          color: var(--primary-color, #0b6bcb);
           font-size: 12px;
         }
         .nilm-workspace {
@@ -994,7 +1128,7 @@ export class PanelShellMethods {
           grid-column: 1 / -1;
         }
         .workspace-progress progress {
-          accent-color: var(--primary-color, #03a9f4);
+          accent-color: var(--primary-color, #0b6bcb);
           align-self: center;
           height: 8px;
           width: 100%;
@@ -1010,8 +1144,9 @@ export class PanelShellMethods {
           padding-bottom: 4px;
         }
         .nilm-lane {
-          background: transparent;
-          border-color: transparent;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           flex: 0 0 auto;
           gap: 8px;
@@ -1020,7 +1155,8 @@ export class PanelShellMethods {
           white-space: nowrap;
         }
         .nilm-lane[aria-selected="true"] {
-          border-color: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 -2px 0 var(--primary-color, #0b6bcb);
           color: var(--primary-text-color, #111827);
         }
         .nilm-lane strong {
@@ -1046,8 +1182,9 @@ export class PanelShellMethods {
           min-width: 0;
         }
         .nilm-review-card {
-          background: var(--card-background-color, #fff);
-          border-color: var(--divider-color, #d8dee6);
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           display: grid;
           gap: 10px;
@@ -1057,8 +1194,8 @@ export class PanelShellMethods {
           width: 100%;
         }
         .nilm-review-card[aria-pressed="true"] {
-          border-color: var(--primary-color, #03a9f4);
-          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .review-card-heading,
         .review-card-facts {
@@ -1084,7 +1221,7 @@ export class PanelShellMethods {
           overflow-wrap: anywhere;
         }
         .power-meter {
-          background: var(--divider-color, #d8dee6);
+          background: var(--divider-color, #d8dde6);
           border-radius: 3px;
           display: block;
           height: 6px;
@@ -1092,17 +1229,20 @@ export class PanelShellMethods {
           width: 100%;
         }
         .power-meter > span {
-          background: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #0b6bcb);
           display: block;
           height: 100%;
           width: var(--power-percent, 0%);
         }
         .nilm-review-card progress {
-          accent-color: var(--primary-color, #03a9f4);
+          accent-color: var(--primary-color, #0b6bcb);
           height: 8px;
           width: 100%;
         }
         .nilm-review-inspector {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 10px;
           min-width: 0;
@@ -1119,6 +1259,9 @@ export class PanelShellMethods {
           height: 44px;
           padding: 0;
           width: 44px;
+        }
+        .labeled-graph-controls .icon-button {
+          width: auto;
         }
         .decision-tile,
         .nilm-lane,
@@ -1154,6 +1297,8 @@ export class PanelShellMethods {
           }
           .evidence-investigation,
           .appliance-detail-overview,
+          .appliance-behavior-grid,
+          .hvac-efficiency-layout,
           .recommendation-layout,
           .nilm-review-layout {
             grid-template-columns: minmax(0, 1fr);
@@ -1209,6 +1354,39 @@ export class PanelShellMethods {
             font-size: 12px;
             font-weight: 700;
           }
+          .appliance-comparison-table,
+          .appliance-comparison-table tbody,
+          .appliance-comparison-table tr,
+          .appliance-comparison-table td {
+            display: block;
+            width: 100%;
+          }
+          .appliance-comparison-table thead {
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            height: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: nowrap;
+            width: 1px;
+          }
+          .appliance-comparison-table tr {
+            border-bottom: 1px solid var(--divider-color, #d8dde6);
+            padding: 8px 0;
+          }
+          .appliance-comparison-table td {
+            border: 0;
+            box-sizing: border-box;
+            display: grid;
+            gap: 8px;
+            grid-template-columns: minmax(88px, 0.55fr) minmax(0, 1fr);
+            padding: 5px 0;
+          }
+          .appliance-comparison-table td::before {
+            color: var(--secondary-text-color, #5f6b7a);
+            content: attr(data-label);
+            font-size: 12px;
+          }
         }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after {
@@ -1218,12 +1396,12 @@ export class PanelShellMethods {
         }
       </style>
       <main class="shell">
-        <section class="panel page-header">
+        <header class="page-header">
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
           ${!setupHealthRoute && !suggestedSettingsRoute && !applianceInsightsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
-        </section>
+        </header>
       ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
@@ -1235,9 +1413,9 @@ export class PanelShellMethods {
     this._attachChartInspectors();
     this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
     this._listen("[data-retry-alert-history]", () => {
-      const alert = this._payload && this._payload.alert;
-      return alert
-        ? this._loadHistory(alert, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+      const historySource = this._evidenceHistorySource();
+      return historySource
+        ? this._loadHistory(historySource, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
         : undefined;
     });
     this._listen("[data-retry-appliance-history]", () => (
@@ -1247,10 +1425,10 @@ export class PanelShellMethods {
         this._loadedRouteKey || this._routeKey(),
       )
     ));
-    for (const select of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
-      select.addEventListener("change", () => {
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
+      button.addEventListener("click", () => {
         this._loadApplianceDetailHistory(
-          Number(select.value),
+          Number(button.dataset.applianceHistoryPeriod),
           this._evidenceRequestId,
           this._loadedRouteKey || this._routeKey(),
         );

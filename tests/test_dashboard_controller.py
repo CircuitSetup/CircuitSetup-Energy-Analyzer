@@ -109,6 +109,9 @@ class _StorageDashboardCoordinator:
     def __init__(self) -> None:
         self.entry_id = "entry-1"
         self.dashboard_layout = DASHBOARD_LAYOUT_STANDARD
+        self._mains_voltage_entity_ids = frozenset(
+            {"sensor.mains_l1_voltage", "sensor.mains_l2_voltage"}
+        )
         self.entry_data = {
             CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.outdoor_temperature",
         }
@@ -170,6 +173,64 @@ class _StorageDashboardCoordinator:
 
 
 @pytest.mark.asyncio
+async def test_dashboard_controller_merges_detected_and_misclassified_voltage() -> None:
+    coordinator = _StorageDashboardCoordinator()
+    coordinator._mains_voltage_entity_ids = frozenset({"sensor.mains_l1_voltage"})
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="mains",
+            name="Mains",
+            appliance_profile=ApplianceProfile.MAINS_NILM,
+            mode=CircuitMode.MAINS_NILM,
+            sensors=(
+                SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE),
+                SensorRef("sensor.mains_l2_voltage", SensorRole.REAL_POWER),
+            ),
+        ),
+    )
+    states = {
+        "sensor.mains_l1_voltage": SimpleNamespace(
+            state="118",
+            attributes={"unit_of_measurement": "V", "device_class": "voltage"},
+        ),
+        "sensor.mains_l2_voltage": SimpleNamespace(
+            state="119",
+            attributes={"unit_of_measurement": "V", "device_class": "voltage"},
+        ),
+    }
+    coordinator.hass.states = SimpleNamespace(get=states.get)
+
+    await dashboard_controller.DashboardController(
+        coordinator,
+    ).async_create_dashboard()
+
+    saved = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]
+    cards = saved["views"][0]["sections"][0]["cards"]
+    voltage = next(
+        child
+        for card in cards
+        for child in card.get("cards", [])
+        if child.get("title") == "Line voltage"
+    )
+    assert voltage["cards"] == [
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l1_voltage",
+            "needle": True,
+            "min": 90,
+            "max": 145,
+        },
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l2_voltage",
+            "needle": True,
+            "min": 95,
+            "max": 145,
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_controller_refresh_does_not_create_resource() -> None:
     coordinator = _StorageDashboardCoordinator()
     resources = _FakeLovelaceResources([])
@@ -202,6 +263,19 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
         payload,
     ) in coordinator.hass.bus.events
     assert coordinator.updated_data == [coordinator.state]
+    cards = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]["views"][0][
+        "sections"
+    ][0]["cards"]
+    voltage = next(
+        child
+        for card in cards
+        for child in card.get("cards", [])
+        if child.get("title") == "Line voltage"
+    )
+    assert [gauge["entity"] for gauge in voltage["cards"]] == [
+        "sensor.mains_l1_voltage",
+        "sensor.mains_l2_voltage",
+    ]
 
 
 @pytest.mark.asyncio

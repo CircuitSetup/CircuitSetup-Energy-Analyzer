@@ -260,6 +260,19 @@ export const applianceDetail = {
         source: "same_time_of_day",
         as_of: "2026-07-13T19:30:00Z",
       },
+      {
+        metric_id: "cost_today",
+        label: "Cost so far",
+        unit: "currency",
+        current_value: 0.42,
+        normal_low: null,
+        normal_high: null,
+        projection_value: 0.48,
+        projection_low: 0.44,
+        projection_high: 0.52,
+        status: "higher",
+        as_of: "2026-07-13T19:30:00Z",
+      },
     ],
     energy_change_explanation: {
       total_change_percent: 18,
@@ -270,7 +283,14 @@ export const applianceDetail = {
       confidence: 0.86,
       explanation: "Mostly explained by longer runtime.",
     },
-    expectations: [],
+    expectations: [{
+      status: "ok",
+      title: "Behavior looks normal",
+      observed: "No appliance behavior issue is currently visible.",
+      expected: "Usage and activity should stay within learned ranges.",
+      why_it_matters: "This is the baseline appliance check.",
+      what_to_check_first: [],
+    }],
     what_to_check_first: ["Confirm today included the expected cooking load."],
     active_alerts: [
       {

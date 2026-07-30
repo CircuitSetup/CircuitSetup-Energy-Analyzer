@@ -620,6 +620,16 @@ def test_profile_specific_expectations_cover_remaining_named_appliances() -> Non
         assert expectation["title"] != "Behavior looks normal"
 
 
+def test_normal_fallback_expectation_does_not_repeat_no_action_needed() -> None:
+    expectation = _detail(
+        _config("motor", ApplianceProfile.MOTOR_LOAD),
+        AnalyzerState(),
+    )["expectations"][0]
+
+    assert expectation["title"] == "Behavior looks normal"
+    assert expectation["what_to_check_first"] == []
+
+
 def test_mini_split_expectation_explains_inverter_and_defrost_behavior() -> None:
     expectation = _detail(
         _config("mini_split", ApplianceProfile.MINI_SPLIT),

@@ -1225,7 +1225,7 @@ def _primary_appliance_expectations_for_circuit(
                     observed="Recent rain explains the pump runtime.",
                     expected=_normal_range_text(runtime),
                     why_it_matters="Pump activity often follows rain or water use.",
-                    what_to_check_first=("No action needed right now.",),
+                    what_to_check_first=(),
                     evidence_path=evidence_path,
                 ),
             )
@@ -1296,7 +1296,7 @@ def _primary_appliance_expectations_for_circuit(
             observed="No appliance behavior issue is currently visible.",
             expected="Usage and activity should stay within learned ranges.",
             why_it_matters="This is the baseline appliance check.",
-            what_to_check_first=("No action needed right now.",),
+            what_to_check_first=(),
             evidence_path=evidence_path,
         ),
     )

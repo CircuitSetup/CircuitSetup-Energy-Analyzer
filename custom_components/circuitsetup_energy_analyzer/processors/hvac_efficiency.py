@@ -120,13 +120,11 @@ class HvacEfficiencyProcessor:
             )
             if observation is None:
                 continue
-            mode = observation_response_mode(observation)
-            if mode is None:
-                mode = _current_response_mode(
-                    context,
-                    linked_configs,
-                    thermostat_id,
-                )
+            mode = _current_response_mode(
+                context,
+                linked_configs,
+                thermostat_id,
+            ) or observation_response_mode(observation)
             active_ids = {
                 config.circuit_id
                 for config in linked_configs
@@ -263,7 +261,16 @@ class HvacEfficiencyProcessor:
                         )
                     )
                     history.append(stored_episode)
-                    del history[:-_HISTORY_LIMIT]
+                    matching_indexes = [
+                        index
+                        for index, raw in enumerate(history)
+                        if str(
+                            raw.get("episode_kind", "setpoint_response")
+                        )
+                        == finalized.episode_kind
+                    ]
+                    if len(matching_indexes) > _HISTORY_LIMIT:
+                        del history[matching_indexes[0]]
                     result.store_dirty = True
 
         for stream_id, raw in getattr(
@@ -844,7 +851,7 @@ def _circuit_efficiency_payload(
         )
         episodes = [
             episode
-            for raw in raw_history[-_HISTORY_LIMIT:]
+            for raw in raw_history
             if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
             == baseline_era
             if str(raw.get("appliance_profile") or "")
