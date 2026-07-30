@@ -853,7 +853,7 @@ export function createApplianceViewMethods({
       const unit = String(item.unit || "").toLowerCase();
       const entityId = String(item.entity_id || "").toLowerCase();
       return !["va", "var"].includes(unit)
-        && !/(?:^|_)(?:apparent_power|reactive_power|va|var)(?:_|$)/.test(entityId);
+        && !/(?:^|_)(?:apparent_power|reactive_power)(?:_|$)|(?:^|_)(?:va|var)$/.test(entityId);
     });
     const watts = visible.filter((item) => item.unit === "W");
     const amps = visible.filter((item) => item.unit === "A");

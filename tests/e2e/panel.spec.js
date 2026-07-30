@@ -790,7 +790,10 @@ test("Home summary omits power flow and separates contribution", async ({ page, 
   await expect(card.locator(".contribution")).toHaveCSS("margin-top", "12px");
   const summaryKpis = card.locator(".kpis:has(.metric)");
   await expect.poll(() => summaryKpis.evaluate((element) => (
-    getComputedStyle(element).gridTemplateColumns.split(" ").length
+    getComputedStyle(element).gridTemplateColumns
+      .split(" ")
+      .filter((track) => Number.parseFloat(track) > 0)
+      .length
   ))).toBe(isMobile ? 2 : 5);
   await expect(summaryKpis.locator(".metric").first()).toHaveCSS(
     "background-color",
@@ -4064,6 +4067,20 @@ test("shared Home Assistant surface preserves non-NILM panel routes", async ({ p
       expect(documentOverflow).toBe(false);
     }
   }
+});
+
+test("Appliance Detail keeps real power with an interior var name token", async ({ page }) => {
+  await mockPanelApi(page);
+  await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+
+  const entities = await page.evaluate(() => (
+    window.__panel._applianceDetailHistoryChartGroups([
+      { entity_id: "sensor.pump_var_speed_power", unit: "W", points: [] },
+      { entity_id: "sensor.pump_var", unit: "W", points: [] },
+    ]).flatMap((group) => group.series.map((item) => item.entity_id))
+  ));
+
+  expect(entities).toEqual(["sensor.pump_var_speed_power"]);
 });
 
 test("Appliance Detail omits session timeline and page-level controls", async ({ page }) => {
