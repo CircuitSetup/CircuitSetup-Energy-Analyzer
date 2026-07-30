@@ -149,7 +149,10 @@ questions instead of raw diagnostic entity lists:
   appliance or circuit. The compact activity facts share one summary panel
   beside the recent timeline, and the history graph moves between 24 hours,
   7 days, and 30 days with point inspection in a Home Assistant-style hover
-  tooltip.
+  tooltip. Eligible direct-circuit pages also show **Water Flow Context** when
+  retained water-flow correlation evidence exists, including flow state,
+  appliance and mapped-appliance runtime, mismatch duration, confidence,
+  learning progress, and configured flow sources.
 - **Appliance Status** keeps activity, health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
