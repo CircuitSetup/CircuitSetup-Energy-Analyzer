@@ -1767,7 +1767,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this.shadowRoot.innerHTML = `
         <ha-card>
           <style>${this._styles()}
-            .home-summary .kpis { border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; gap: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; }
+            .home-summary .kpis { border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; gap: 0; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); overflow: hidden; }
             .home-summary .metric { background: transparent; border: 0; border-left: 1px solid var(--divider-color, #d8dee6); border-radius: 0; padding: 14px; }
             .home-summary .metric:first-child { border-left: 0; }
             @media (max-width: 700px) { .home-summary .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .home-summary .metric { border-bottom: 1px solid var(--divider-color, #d8dee6); } }

@@ -55,6 +55,13 @@ def test_frontend_inherits_home_assistant_typography() -> None:
     assert "font-family: inherit;" in dashboard
 
 
+def test_home_summary_metrics_fit_the_number_rendered() -> None:
+    dashboard = DASHBOARD_GRAPHS_ASSET.read_text(encoding="utf-8")
+
+    assert "grid-template-columns: repeat(auto-fit, minmax(128px, 1fr))" in dashboard
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr))" not in dashboard
+
+
 def test_panel_uses_content_header_and_home_assistant_card_tokens() -> None:
     asset = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
 

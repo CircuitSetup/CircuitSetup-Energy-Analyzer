@@ -6,7 +6,7 @@ PANEL_URL_PATH = "circuitsetup-energy-analyzer-evidence"
 PANEL_ELEMENT_NAME = "circuitsetup-energy-analyzer-panel"
 STATIC_URL_PATH = "/circuitsetup_energy_analyzer_static"
 PANEL_MODULE_NAME = "energy-analyzer-panel.js"
-PANEL_MODULE_VERSION = "20260730-4"
+PANEL_MODULE_VERSION = "20260730-5"
 
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
 HVAC_ASSOCIATIONS_API_PATH = f"/api/{DOMAIN}/hvac_associations"

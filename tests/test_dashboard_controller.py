@@ -173,9 +173,9 @@ class _StorageDashboardCoordinator:
 
 
 @pytest.mark.asyncio
-async def test_dashboard_controller_recovers_configured_misclassified_voltage() -> None:
+async def test_dashboard_controller_merges_detected_and_misclassified_voltage() -> None:
     coordinator = _StorageDashboardCoordinator()
-    coordinator._mains_voltage_entity_ids = frozenset()
+    coordinator._mains_voltage_entity_ids = frozenset({"sensor.mains_l1_voltage"})
     coordinator.circuit_configs = (
         CircuitConfig(
             circuit_id="mains",
@@ -183,18 +183,18 @@ async def test_dashboard_controller_recovers_configured_misclassified_voltage() 
             appliance_profile=ApplianceProfile.MAINS_NILM,
             mode=CircuitMode.MAINS_NILM,
             sensors=(
-                SensorRef("sensor.mains_watts", SensorRole.REAL_POWER),
-                SensorRef("sensor.mains_voltage", SensorRole.REAL_POWER),
+                SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE),
+                SensorRef("sensor.mains_l2_voltage", SensorRole.REAL_POWER),
             ),
         ),
     )
     states = {
-        "sensor.mains_watts": SimpleNamespace(
-            state="1200",
-            attributes={"unit_of_measurement": "W", "device_class": "power"},
+        "sensor.mains_l1_voltage": SimpleNamespace(
+            state="118",
+            attributes={"unit_of_measurement": "V", "device_class": "voltage"},
         ),
-        "sensor.mains_voltage": SimpleNamespace(
-            state="121.8",
+        "sensor.mains_l2_voltage": SimpleNamespace(
+            state="119",
             attributes={"unit_of_measurement": "V", "device_class": "voltage"},
         ),
     }
@@ -210,11 +210,18 @@ async def test_dashboard_controller_recovers_configured_misclassified_voltage() 
     assert voltage["cards"] == [
         {
             "type": "gauge",
-            "entity": "sensor.mains_voltage",
+            "entity": "sensor.mains_l1_voltage",
+            "needle": True,
+            "min": 90,
+            "max": 145,
+        },
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l2_voltage",
             "needle": True,
             "min": 95,
-            "max": 150,
-        }
+            "max": 145,
+        },
     ]
 
 

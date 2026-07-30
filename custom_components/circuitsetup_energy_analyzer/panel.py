@@ -1051,7 +1051,8 @@ def _source_history_series(config: Any) -> list[dict[str, str]]:
             SensorRole.APPARENT_POWER,
             SensorRole.REACTIVE_POWER,
         } or re.search(
-            r"(?:^|_)(?:apparent_power|reactive_power|va|var)(?:_|$)",
+            r"(?:^|_)(?:apparent_power|reactive_power)(?:_|$)"
+            r"|(?:^|_)(?:va|var)$",
             entity_id.split(".", 1)[-1].lower(),
         ):
             continue

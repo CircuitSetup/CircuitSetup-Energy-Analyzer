@@ -46,12 +46,14 @@ class DashboardController:
                 coordinator.options,
                 CONF_OUTDOOR_TEMPERATURE_ENTITY,
             ),
-            mains_voltage_entities=getattr(
-                coordinator,
-                "_mains_voltage_entity_ids",
-                (),
-            )
-            or _configured_mains_voltage_entities(coordinator),
+            mains_voltage_entities=tuple(
+                dict.fromkeys(
+                    (
+                        *getattr(coordinator, "_mains_voltage_entity_ids", ()),
+                        *_configured_mains_voltage_entities(coordinator),
+                    )
+                )
+            ),
         )
         action, reason = await self.async_create_or_update_lovelace_dashboard(
             dashboard_payload,

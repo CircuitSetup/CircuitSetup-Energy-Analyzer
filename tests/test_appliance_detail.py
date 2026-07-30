@@ -810,6 +810,7 @@ def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> 
             mode=CircuitMode.SINGLE_PHASE,
             sensors=(
                 SensorRef("sensor.fridge_watts", SensorRole.REAL_POWER),
+                SensorRef("sensor.var_speed_pump_power", SensorRole.REAL_POWER),
                 SensorRef("sensor.fridge_va", SensorRole.REAL_POWER),
                 SensorRef("sensor.fridge_var", SensorRole.REAL_POWER),
             ),
@@ -821,7 +822,10 @@ def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> 
         circuit_id="fridge",
     )["history"]
 
-    assert history["entities"] == ["sensor.fridge_watts"]
+    assert history["entities"] == [
+        "sensor.fridge_watts",
+        "sensor.var_speed_pump_power",
+    ]
 
 
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:
