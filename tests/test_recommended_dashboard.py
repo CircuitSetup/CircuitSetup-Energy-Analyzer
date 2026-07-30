@@ -506,7 +506,7 @@ def test_appliance_power_graph_groups_dual_phase_entities() -> None:
     assert {row["name"] for row in dryer_rows} == {"Dryer"}
 
 
-def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power(
+def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
 ) -> None:
     mains = CircuitConfig(
         circuit_id="mains",
@@ -538,6 +538,11 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
         (_circuits()[0], mains),
         DASHBOARD_LAYOUT_STANDARD,
         hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l2_voltage",
+            " sensor.mains_l1_voltage ",
+            "sensor.mains_l1_voltage",
+        ),
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
@@ -547,9 +552,24 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
     assert [card.get("title") for card in cards[:5]] == [
         "Mains total power and amps",
         "All appliance power",
-        "Home energy summary",
+        None,
         "Appliances",
         "Energy and costs",
+    ]
+    assert cards[3]["columns"] == 2
+    summary_stack = cards[2]
+    assert summary_stack["type"] == "grid"
+    assert summary_stack["columns"] == 1
+    assert summary_stack["square"] is False
+    assert [card.get("title") for card in summary_stack["cards"]] == [
+        "Home energy summary",
+        "Line voltage",
+    ]
+    voltage = _card_with_title(home, "Line voltage")
+    assert voltage["type"] == "grid"
+    assert [gauge["entity"] for gauge in voltage["cards"]] == [
+        "sensor.mains_l1_voltage",
+        "sensor.mains_l2_voltage",
     ]
     graph = cards[0]
     assert graph["entities"] == [
@@ -584,7 +604,7 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
             "axis": "right",
         },
     ]
-    summary = cards[2]
+    summary = _card_with_title(home, "Home energy summary")
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_watts",
         "sensor.mains_active_power",
@@ -597,6 +617,58 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
     ]
+    assert [card["grid_options"]["columns"] for card in cards[:5]] == [24] * 5
+
+
+def test_home_voltage_card_uses_native_gauges_with_adaptive_ranges() -> None:
+    states = {
+        "sensor.mains_l1_voltage": SimpleNamespace(state="118"),
+        "sensor.mains_l2_voltage": SimpleNamespace(state="230"),
+    }
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l1_voltage",
+            "sensor.mains_l2_voltage",
+        ),
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    card = _card_with_title(home, "Line voltage")
+    assert card["type"] == "grid"
+    assert card["columns"] == 2
+    assert card["square"] is False
+    assert card["cards"] == [
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l1_voltage",
+            "needle": True,
+            "min": 90,
+            "max": 145,
+        },
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l2_voltage",
+            "needle": True,
+            "min": 180,
+            "max": 280,
+        },
+    ]
+
+
+def test_home_omits_voltage_card_without_configured_voltage_entities() -> None:
+    dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    assert not any(
+        card.get("title") == "Line voltage" for card in home["sections"][0]["cards"]
+    )
 
 
 def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None:
@@ -1198,10 +1270,14 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
             if len(content_cards) == 1 and content_cards[0]["type"] == DATE_RANGE_CARD:
                 assert content_cards[0]["grid_options"]["columns"] == "full"
                 continue
+            if view["path"] == "overview":
+                assert {
+                    card["grid_options"]["columns"] for card in content_cards
+                } == {24}
+                continue
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
-                or (view["path"] == "overview" and len(content_cards) > 1)
                 else 48 // min(4, len(content_cards))
             )
             assert {

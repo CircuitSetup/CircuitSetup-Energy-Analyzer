@@ -27,7 +27,11 @@
       const serviceCalls = [];
       const useFixtureApi = new URLSearchParams(window.location.search).get("mock_api") === "1";
       const hass = {
-        config: { currency: "USD", time_zone: "UTC" },
+        config: {
+          currency: "USD",
+          time_zone: "UTC",
+          unit_system: { temperature: "°F" },
+        },
         states: {},
         async callApi(method, apiPath, data) {
           const request = { method, apiPath, data };
