@@ -170,6 +170,17 @@ def test_subdegree_thermostat_call_completes_when_action_ends() -> None:
     assert episode_from_dict(episode_to_dict(completed)) == completed
 
 
+def test_exact_tenth_degree_thermostat_call_starts() -> None:
+    current, completed = _advance(
+        None,
+        _observation(actual=75.3, target=75.2),
+    )
+
+    assert current is not None
+    assert current.episode_kind == "thermostat_call"
+    assert completed is None
+
+
 def test_subdegree_thermostat_call_without_progress_is_excluded() -> None:
     current, _ = _advance(
         None,

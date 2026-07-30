@@ -126,7 +126,7 @@ def advance_episode(
         gap = _directional_gap(mode, actual=actual, target=target)
         episode_kind = "setpoint_response"
         if gap < _MINIMUM_START_GAP_F:
-            if not action_active or gap < _MINIMUM_CALL_GAP_F:
+            if not action_active or not _meets_minimum(gap, _MINIMUM_CALL_GAP_F):
                 return None, None
             episode_kind = "thermostat_call"
         episode = HvacResponseEpisode(
@@ -553,17 +553,16 @@ def _degrees_closed(episode: HvacResponseEpisode) -> float:
 
 def _valid_start_gap(episode: HvacResponseEpisode, gap: float) -> bool:
     if episode.episode_kind == "thermostat_call":
-        return _MINIMUM_CALL_GAP_F <= gap < _MINIMUM_START_GAP_F
+        return _meets_minimum(gap, _MINIMUM_CALL_GAP_F) and gap < _MINIMUM_START_GAP_F
     return gap >= _MINIMUM_START_GAP_F
 
 
 def _has_minimum_progress(episode: HvacResponseEpisode) -> bool:
-    progress = _degrees_closed(episode)
-    return progress >= _MINIMUM_CALL_PROGRESS_F or math.isclose(
-        progress,
-        _MINIMUM_CALL_PROGRESS_F,
-        abs_tol=1e-6,
-    )
+    return _meets_minimum(_degrees_closed(episode), _MINIMUM_CALL_PROGRESS_F)
+
+
+def _meets_minimum(value: float, minimum: float) -> bool:
+    return value >= minimum or math.isclose(value, minimum, abs_tol=1e-6)
 
 
 def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
