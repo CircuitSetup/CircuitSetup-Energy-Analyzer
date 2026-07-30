@@ -7,6 +7,16 @@ export function createEvidenceViewMethods({
     || `hsl(${(210 + index * 137.508) % 360} ${62 + index % 3 * 8}% ${42 + Math.floor(index / 3) % 3 * 8}%)`;
 
   return class EvidenceViewMethods {
+  _evidenceHistorySource() {
+    const alert = this._payload && this._payload.alert;
+    const recommendation = this._payload && this._payload.selected_recommendation;
+    return alert && alert.graph_entities && alert.graph_entities.length
+      ? alert
+      : recommendation && recommendation.graph_entities && recommendation.graph_entities.length
+        ? recommendation
+        : null;
+  }
+
   async _loadHistory(alert, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     this._historyLoading = true;
     this._historyError = "";
@@ -475,11 +485,17 @@ export function createEvidenceViewMethods({
     if (this._historyError) {
       return `<div data-alert-history-error><p class="muted">${this._escape(this._historyError)}</p><button type="button" class="secondary" data-retry-alert-history>${this._escape(this._panelText("common.retry"))}</button></div>`;
     }
-    const series = this._chartSeries();
-    if (!series.length) {
+    const groups = this._applianceDetailHistoryChartGroups(
+      this._chartSeries(this._historySeries, alert.graph_entity_series),
+    );
+    if (!groups.length) {
       return `<p class="muted">${this._escape(this._panelText("chart.no_history"))}</p>`;
     }
-    return this._chartSvg(series, alert);
+    return groups.map((group) => this._chartSvg(group.series, {
+      ...alert,
+      y_axis_label: group.unit || alert.y_axis_label || "",
+      right_y_axis_label: group.rightUnit || "",
+    })).join("");
   }
 
   _chartSvg(series, alert) {

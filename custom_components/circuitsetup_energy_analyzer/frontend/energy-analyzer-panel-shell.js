@@ -1413,9 +1413,9 @@ export class PanelShellMethods {
     this._attachChartInspectors();
     this._listen("#retry", () => this._loadEvidence({ routeKey: this._routeKey() }));
     this._listen("[data-retry-alert-history]", () => {
-      const alert = this._payload && this._payload.alert;
-      return alert
-        ? this._loadHistory(alert, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
+      const historySource = this._evidenceHistorySource();
+      return historySource
+        ? this._loadHistory(historySource, this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
         : undefined;
     });
     this._listen("[data-retry-appliance-history]", () => (

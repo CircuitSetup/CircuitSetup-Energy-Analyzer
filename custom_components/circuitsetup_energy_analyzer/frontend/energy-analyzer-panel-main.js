@@ -351,13 +351,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       if (this._routeRequestsSetupHealth(routeKey)) {
         await this._loadSetupHealth(requestId, routeKey);
       }
-      const alert = this._payload && this._payload.alert;
-      const recommendation = this._payload && this._payload.selected_recommendation;
-      const historySource = alert && alert.graph_entities && alert.graph_entities.length
-        ? alert
-        : recommendation && recommendation.graph_entities && recommendation.graph_entities.length
-          ? recommendation
-          : null;
+      const historySource = this._evidenceHistorySource();
       if (historySource) {
         await this._loadHistory(historySource, requestId, routeKey);
       }

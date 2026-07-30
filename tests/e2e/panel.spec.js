@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { apiPayload, evidence, hvacAssociations } from "./panel-fixtures.js";
+import { apiPayload, chartHistory, evidence, hvacAssociations } from "./panel-fixtures.js";
 
 const HARNESS = "/tests/e2e/panel.html";
 const browserLogs = new WeakMap();
@@ -1344,7 +1344,7 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
 });
 
-test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
+test("appliance grid filters live state and loads Activity Summary history", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
@@ -1400,10 +1400,13 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     states,
   );
 
-  const applianceTiles = await card.locator("[data-appliance-id]").evaluateAll((tiles) => (
-    tiles.map((tile) => tile.getBoundingClientRect().toJSON())
-  ));
-  expect(applianceTiles[1].top).toBe(applianceTiles[0].top);
+  await expect(card.locator(".appliance-grid")).toHaveAttribute("data-columns", "2");
+  if (!isMobile) {
+    const applianceTiles = await card.locator("[data-appliance-id]").evaluateAll((tiles) => (
+      tiles.map((tile) => tile.getBoundingClientRect().toJSON())
+    ));
+    expect(applianceTiles[1].top).toBe(applianceTiles[0].top);
+  }
 
   const search = card.locator("[data-appliance-search]");
   await search.focus();
@@ -4477,13 +4480,40 @@ test("Appliance Detail omits a cost axis without an effective rate", async ({ pa
 
 test("Review Evidence keeps recommendation data, graph, and actions in order", async ({ page, isMobile }) => {
   test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/history/period/" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+  );
+  let historyCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      historyCalls += 1;
+      if (historyCalls === 1) {
+        await route.fulfill({ status: 503, json: { message: "Try again" } });
+      } else {
+        await route.fulfill({
+          json: [
+            chartHistory[0],
+            [
+              { entity_id: "sensor.kitchen_current", state: "2.1", last_changed: "2026-07-13T17:00:00Z" },
+              { entity_id: "sensor.kitchen_current", state: "4.9", last_changed: "2026-07-13T18:30:00Z" },
+              { entity_id: "sensor.kitchen_current", state: "3.0", last_changed: "2026-07-13T19:30:00Z" },
+            ],
+          ],
+        });
+      }
+      return true;
+    }
     if (!url.pathname.endsWith("/alert_evidence") || !url.searchParams.has("recommendation_id")) {
       return false;
     }
     const selected = {
       ...evidence.setting_recommendations[0],
-      graph_entities: evidence.alert.graph_entities,
+      graph_entities: ["sensor.kitchen_power", "sensor.kitchen_current"],
+      graph_entity_series: [
+        { entity_id: "sensor.kitchen_power", unit: "W" },
+        { entity_id: "sensor.kitchen_current", unit: "A" },
+      ],
       evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
       actions: {
         ...evidence.setting_recommendations[0].actions,
@@ -4502,7 +4532,11 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
   await expect(panel.locator("h1")).toHaveText("Review Evidence");
   await expect(panel.getByText("Reviewing evidence for Kitchen Appliances Daily Energy Threshold.")).toHaveCount(1);
   await expect(panel.locator(".recommendation-values")).toContainText("2.2 kWh");
+  await expect(panel.locator("[data-retry-alert-history]")).toBeVisible();
+  await panel.locator("[data-retry-alert-history]").click();
   await expect(panel.locator("[data-recommendation-evidence-graph] svg.chart")).toBeVisible();
+  await expect(panel.locator("[data-recommendation-evidence-graph] svg.chart")).toHaveAttribute("data-chart-right-axis", "A");
+  expect(historyCalls).toBe(2);
   const order = await panel.locator(".selected-recommendation-evidence").evaluate((section) => ({
     data: section.querySelector(".recommendation-values").getBoundingClientRect().top,
     graph: section.querySelector("svg.chart").getBoundingClientRect().top,

@@ -1180,6 +1180,12 @@ def test_alert_evidence_payload_selects_requested_recommendation_preview() -> No
         "sensor.ev_charger_l1_current",
         "sensor.ev_charger_l2_current",
     ]
+    assert selected["graph_entity_series"] == [
+        {"entity_id": "sensor.ev_charger_l1_watts", "unit": "W"},
+        {"entity_id": "sensor.ev_charger_l2_watts", "unit": "W"},
+        {"entity_id": "sensor.ev_charger_l1_current", "unit": "A"},
+        {"entity_id": "sensor.ev_charger_l2_current", "unit": "A"},
+    ]
     assert selected["evidence_preview"] == (
         "Observed Samples: 8; P95 Current Amps: 36.4"
     )
