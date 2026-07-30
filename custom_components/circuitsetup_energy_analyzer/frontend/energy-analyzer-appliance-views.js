@@ -647,6 +647,16 @@ export function createApplianceViewMethods({
       && value !== undefined
       && value !== ""
       && Number.isFinite(Number(value));
+    const temperatureUnit = String(
+      this._hass?.config?.unit_system?.temperature || "",
+    ).trim();
+    const celsius = temperatureUnit === "°C";
+    const temperatureValue = (value) => celsius
+      ? (Number(value) - 32) / 1.8
+      : Number(value);
+    const responseValue = (value) => celsius
+      ? Number(value) * 1.8
+      : Number(value);
     const status = String(efficiency.status || "learning");
     const statusLabel = this._panelText(`appliance_detail.hvac_efficiency_status.${status}`)
       || this._panelText("appliance_detail.hvac_efficiency_status.learning");
@@ -685,13 +695,13 @@ export function createApplianceViewMethods({
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(row.score)} / 100`, "mdi:gauge")
               : "",
             finite(row.baseline_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(row.baseline_minutes_per_degree)} min/°F`, "mdi:database-clock-outline")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(responseValue(row.baseline_minutes_per_degree))} min/${temperatureUnit}`, "mdi:database-clock-outline")
               : "",
             finite(row.recent_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(row.recent_minutes_per_degree)} min/°F`, "mdi:history")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(responseValue(row.recent_minutes_per_degree))} min/${temperatureUnit}`, "mdi:history")
               : "",
             finite(row.outdoor_temperature_f)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_outdoor_temperature"), `${this._formatNumber(row.outdoor_temperature_f)}°F`, "mdi:weather-sunny")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_outdoor_temperature"), `${this._formatNumber(temperatureValue(row.outdoor_temperature_f))}${temperatureUnit}`, "mdi:weather-sunny")
               : "",
             row.season
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_season"), row.season, "mdi:calendar-season")

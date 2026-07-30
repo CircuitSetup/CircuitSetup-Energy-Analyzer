@@ -4094,6 +4094,21 @@ test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page })
   await expect(efficiency).toContainText("Cooling blower supports air handling");
 });
 
+test("Appliance Detail uses Home Assistant temperature units for HVAC efficiency", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  await page.evaluate(() => {
+    window.__panel._hass.config.unit_system = { temperature: "°C" };
+    window.__panel._render();
+  });
+  const efficiency = panel.locator("[data-hvac-efficiency]");
+
+  await expect(efficiency).toContainText("18 min/°C");
+  await expect(efficiency).toContainText("22.5 min/°C");
+  await expect(efficiency).toContainText("35°C");
+  await expect(efficiency).not.toContainText("°F");
+});
+
 test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_detail")) return false;

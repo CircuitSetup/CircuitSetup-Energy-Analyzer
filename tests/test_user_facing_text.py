@@ -2134,6 +2134,7 @@ def test_appliance_detail_renders_hvac_thermostat_efficiency() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
+panel._hass = { config: { unit_system: { temperature: "°F" } } };
 const ready = panel._renderHvacEfficiency({
   status: "ready",
   summary_score: 80,
