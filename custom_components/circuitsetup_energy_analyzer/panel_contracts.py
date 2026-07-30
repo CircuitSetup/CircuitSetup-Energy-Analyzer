@@ -9,6 +9,7 @@ PANEL_MODULE_NAME = "energy-analyzer-panel.js"
 PANEL_MODULE_VERSION = "20260729-3"
 
 EVIDENCE_API_PATH = f"/api/{DOMAIN}/alert_evidence"
+HVAC_ASSOCIATIONS_API_PATH = f"/api/{DOMAIN}/hvac_associations"
 APPLIANCE_DETAIL_API_PATH = f"/api/{DOMAIN}/appliance_detail"
 APPLIANCE_INSIGHTS_API_PATH = f"/api/{DOMAIN}/appliance_insights"
 SETUP_HEALTH_API_PATH = f"/api/{DOMAIN}/setup_health"

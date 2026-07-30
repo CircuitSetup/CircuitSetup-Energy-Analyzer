@@ -10,6 +10,7 @@ from .panel_contracts import (
     APPLIANCE_DETAIL_API_PATH,
     APPLIANCE_INSIGHTS_API_PATH,
     EVIDENCE_API_PATH,
+    HVAC_ASSOCIATIONS_API_PATH,
     NILM_WORKSPACE_API_PATH,
     NILM_WORKSPACE_HISTORY_API_PATH,
     SETUP_HEALTH_API_PATH,
@@ -54,6 +55,25 @@ class AlertEvidenceView(HomeAssistantView):
             ),
         )
         return panel.web.json_response(payload)
+
+
+class HvacAssociationsView(HomeAssistantView):
+    """Authenticated bounded HVAC thermostat association endpoint."""
+
+    url = HVAC_ASSOCIATIONS_API_PATH
+    name = f"api:{DOMAIN}:hvac_associations"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        from . import panel
+
+        hass = request.app[panel.KEY_HASS]
+        return panel.web.json_response(
+            panel.hvac_associations_payload(
+                panel._loaded_coordinators(hass),
+                entry_id=request.query.get(panel.ATTR_ENTRY_ID),
+            )
+        )
 
 
 class ApplianceDetailView(HomeAssistantView):
