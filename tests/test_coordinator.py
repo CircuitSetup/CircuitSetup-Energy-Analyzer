@@ -1406,6 +1406,17 @@ def test_coordinator_preserves_unavailable_flow_sensor_state() -> None:
                 }
             },
         },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "flow_status": "normal",
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
         now_fn=lambda: now,
     )
 
@@ -1416,6 +1427,13 @@ def test_coordinator_preserves_unavailable_flow_sensor_state() -> None:
 
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["flow_sensor_active"] is None
+    assert (
+        evidence["status"],
+        evidence["friendly_summary"],
+    ) == (
+        "sensor_unavailable",
+        "Configured water-flow sensors are currently unavailable.",
+    )
 
 
 def test_coordinator_uses_active_cycle_not_daily_runtime_for_water_flow() -> None:
