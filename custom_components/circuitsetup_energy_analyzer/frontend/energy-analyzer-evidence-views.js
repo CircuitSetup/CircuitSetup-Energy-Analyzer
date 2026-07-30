@@ -485,9 +485,16 @@ export function createEvidenceViewMethods({
     if (this._historyError) {
       return `<div data-alert-history-error><p class="muted">${this._escape(this._historyError)}</p><button type="button" class="secondary" data-retry-alert-history>${this._escape(this._panelText("common.retry"))}</button></div>`;
     }
-    const groups = this._applianceDetailHistoryChartGroups(
-      this._chartSeries(this._historySeries, alert.graph_entity_series),
-    );
+    const series = this._chartSeries(this._historySeries, alert.graph_entity_series);
+    const groups = Array.isArray(alert.graph_entity_series)
+      ? this._applianceDetailHistoryChartGroups(series)
+      : series.length
+        ? [{
+            unit: alert.y_axis_label || "",
+            rightUnit: alert.right_y_axis_label || "",
+            series,
+          }]
+        : [];
     if (!groups.length) {
       return `<p class="muted">${this._escape(this._panelText("chart.no_history"))}</p>`;
     }

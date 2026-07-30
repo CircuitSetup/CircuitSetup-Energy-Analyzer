@@ -4306,6 +4306,38 @@ test("chart mouseover shows a clamped Home Assistant-style tooltip", async ({ pa
   await expect(chart.locator('[data-chart-point][data-selected="true"]')).toHaveCount(0);
 });
 
+test("reactive-power alert evidence keeps its VAR graph", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.kitchen_var", state: "120", last_changed: "2026-07-13T17:00:00Z" },
+          { entity_id: "sensor.kitchen_var", state: "180", last_changed: "2026-07-13T19:30:00Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/alert_evidence")) return false;
+    await route.fulfill({
+      json: {
+        ...evidence,
+        alert: {
+          ...evidence.alert,
+          feature: "reactive_power",
+          feature_name: "Reactive Power",
+          graph_entities: ["sensor.kitchen_var"],
+          y_axis_label: "var",
+        },
+      },
+    });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?alert_id=alert-kitchen-energy");
+  await expect(panel.locator("svg.chart")).toBeVisible();
+  await expect(panel.locator(".axis-label")).toContainText("var");
+});
+
 test("matched low-side alert keeps comparison markers apart", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/alert_evidence")) return false;
