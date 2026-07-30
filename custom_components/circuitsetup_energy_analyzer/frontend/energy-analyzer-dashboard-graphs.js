@@ -1989,14 +1989,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     setConfig(config) {
-      if (this._associationKey(config || {}) !== this._associationKey()) {
-        this._associationPayload = null;
-        this._associationLoadKey = "";
-        this._associationRequest = null;
-        this._associationError = false;
-        this._associationStateKey = "";
-        this._associationEntityIds = [];
-      }
+      this._associationPayload = null;
+      this._associationLoadKey = "";
+      this._associationRequest = null;
+      this._associationError = false;
+      this._associationStateKey = "";
+      this._associationEntityIds = [];
       super.setConfig(config);
     }
 

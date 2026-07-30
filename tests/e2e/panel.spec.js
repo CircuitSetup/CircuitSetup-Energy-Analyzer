@@ -329,6 +329,40 @@ test("HVAC associations reload a reused card for a new API key", async ({ page }
   ]);
 });
 
+test("HVAC associations reload a reused card for the same API key after an empty response", async ({ page }) => {
+  let requests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/hvac_associations")) return false;
+    requests += 1;
+    await route.fulfill({
+      json: requests === 1 ? { status: "ok", items: [] } : {
+        status: "ok",
+        items: [{
+          ...hvacAssociations.items[0],
+          entry_id: "entry-1",
+          appliance_name: "Updated Heat Pump",
+          thermostat_entity_id: "climate.updated",
+          thermostat_name: "Updated",
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    { entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    { "climate.updated": { state: "cool", attributes: { temperature_unit: "°F" } } },
+  );
+  await expect(card.locator("[data-hvac-associations-empty]")).toBeVisible();
+  await page.evaluate(() => window.__dashboardCard.setConfig({
+    entry_id: "entry-1",
+    api_path: "circuitsetup_energy_analyzer/hvac_associations",
+  }));
+  await expect(card).toContainText("Updated Heat Pump");
+  expect(requests).toBe(2);
+});
+
 test("HVAC associations ignore an old in-flight API key", async ({ page }) => {
   let releaseFirst;
   await mockPanelApi(page, async ({ route, url }) => {
