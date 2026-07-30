@@ -45,6 +45,7 @@ from .session_timeline import (
     direct_appliance_timeline,
     nilm_appliance_timeline,
 )
+from .water_correlations import MIN_COMPARABLE_WINDOWS
 
 ComparisonBaseline = tuple[float | None, float | None, float | None, float | None, str]
 ProfileExpectationRecipe = tuple[str, str, str, tuple[str, ...]]
@@ -233,6 +234,7 @@ def appliance_detail_for_circuit(
         evidence_path=_evidence_path(circuit_id=config.circuit_id),
         appliance_health=health_attrs["appliance_health_evidence"] or None,
         hvac_efficiency=_hvac_efficiency_detail(state, config),
+        water_flow_context=_water_flow_context_detail(state, config),
         source_quality=_direct_source_quality(config, state),
         learning_readiness=_learning_readiness(state, config.circuit_id, config),
         assignment_id=(
@@ -1692,6 +1694,64 @@ def _mapping_for_circuit(state: Any, field: str, circuit_id: str) -> dict[str, A
         return {}
     value = values.get(circuit_id)
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _water_flow_context_detail(
+    state: Any,
+    config: CircuitConfig,
+) -> dict[str, Any] | None:
+    retained = _mapping_for_circuit(
+        state,
+        "water_flow_context_by_circuit",
+        config.circuit_id,
+    )
+    if not retained:
+        return None
+
+    source_ids = retained.get("flow_sensor_entities", [])
+    if not isinstance(source_ids, list):
+        source_ids = []
+    sources = sorted(
+        {str(entity_id) for entity_id in source_ids if str(entity_id)}
+    )
+    return {
+        "status": str(retained.get("status") or "unconfigured"),
+        "friendly_summary": (
+            str(retained.get("friendly_summary") or "") or None
+        ),
+        "confidence": retained.get("confidence"),
+        "flow_sensor_active": retained.get("flow_sensor_active"),
+        "flow_active_minutes": retained.get("flow_active_minutes"),
+        "appliance_runtime_minutes": retained.get("appliance_runtime_minutes"),
+        "mapped_appliance_count": retained.get("mapped_appliance_count"),
+        "mapped_appliance_runtime_minutes": retained.get(
+            "mapped_appliance_runtime_minutes"
+        ),
+        "recent_related_runtime_minutes": retained.get(
+            "recent_related_runtime_minutes"
+        ),
+        "recent_flow_explains_activity": retained.get(
+            "recent_flow_explains_activity"
+        ),
+        "mismatch_minutes": retained.get("mismatch_minutes"),
+        "flow_mismatch_threshold_minutes": retained.get(
+            "flow_mismatch_threshold_minutes"
+        ),
+        "flow_sensors": [
+            {
+                "entity_id": entity_id,
+                "name": _entity_display_name(entity_id),
+            }
+            for entity_id in sources
+        ],
+        "learning": {
+            "comparable_window_count": max(
+                int(retained.get("comparable_window_count") or 0),
+                0,
+            ),
+            "required_comparable_windows": MIN_COMPARABLE_WINDOWS,
+        },
+    }
 
 
 _HVAC_EFFICIENCY_PROFILES = frozenset(
