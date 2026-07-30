@@ -7101,6 +7101,22 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
         assert phrase in readme_text
 
 
+def test_readme_describes_native_dashboard_and_detail_ui() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for text in (
+        "Home Assistant's stock header and icon tabs",
+        "graphs appear above Top appliances",
+        "Line voltage",
+        "floating date",
+        "VA and VAR are omitted from Appliance Detail graphs",
+    ):
+        assert text in readme_text
+
+    assert "House power flow is shown" not in readme_text
+    assert "a restore icon resets an individual graph" not in readme_text
+
+
 def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
     translations = _translations()
     issues = translations["issues"]
@@ -7289,7 +7305,7 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "previous, next, now, compare, and CSV download actions" in readme_text
     assert "without repeating a separate Active Now list" in readme_text
     assert "segmented Running intervals against the selected range" in readme_text
-    assert "restore icon resets an individual graph" in readme_text
+    assert "no visible chart-level zoom, pan, or reset controls" in readme_text
     assert "Detail links open appliance detail pages directly" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text
