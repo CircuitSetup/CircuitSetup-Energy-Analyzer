@@ -576,9 +576,16 @@ class EnvironmentalContextManager:
             )
         )
         evidence["flow_sensor_entities"] = list(flow_entities)
-        evidence["flow_sensor_active"] = any(
-            coordinator.context_builder.flow_entity_active(entity_id) is True
+        flow_states = tuple(
+            coordinator.context_builder.flow_entity_active(entity_id)
             for entity_id in flow_entities
+        )
+        evidence["flow_sensor_active"] = (
+            True
+            if True in flow_states
+            else False
+            if flow_states and None not in flow_states
+            else None
         )
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
         return evidence
