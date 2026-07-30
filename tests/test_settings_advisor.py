@@ -832,6 +832,24 @@ def test_standby_recommendation_uses_low_power_distribution() -> None:
     assert recommendation.evidence["p95_standby_w"] == 5.2
 
 
+def test_standby_recommendation_ignores_one_watt_change() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="pressure_pump",
+            circuit_name="Pressure Pump",
+            appliance_profile="pump",
+            circuit_mode="single_phase",
+            power_flow="load",
+            advanced_settings={"standby_threshold_w": 248.0},
+        ),
+        feature_history={"standby_samples_w": [190.0] * 7},
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
+
+
 def test_advisor_uses_compacted_sample_counts() -> None:
     advisor = _advisor()
     inputs = advisor.AdvisorInputs(
