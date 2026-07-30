@@ -6415,6 +6415,20 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
         assert declaration in summary_style
 
 
+def test_non_nilm_panel_routes_use_the_shared_surface_contract() -> None:
+    asset = _frontend_source()
+
+    for hook in (
+        "data-evidence-comparison",
+        "recommendation-layout",
+        "appliance-insights-table",
+        "setup-health-status",
+    ):
+        assert hook in asset
+    assert "font-family:" not in EVIDENCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    assert "font-family:" not in APPLIANCE_VIEWS_ASSET.read_text(encoding="utf-8")
+
+
 def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:
     asset = _frontend_source()
     surface_rule = re.search(

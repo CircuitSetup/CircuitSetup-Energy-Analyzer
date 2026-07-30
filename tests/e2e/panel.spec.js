@@ -4025,6 +4025,26 @@ for (const route of [
   });
 }
 
+test("shared Home Assistant surface preserves non-NILM panel routes", async ({ page }) => {
+  await mockPanelApi(page);
+  for (const route of [
+    { query: "?alert_id=alert-kitchen-energy", action: "button:not([disabled])" },
+    { query: "?review_suggested_settings=1", action: '[data-recommendation-action="apply"]' },
+    { query: "?circuit_id=kitchen&recommendation_id=energy-threshold", action: '[data-recommendation-action="apply"]' },
+    { query: "?appliance_insights=1", action: ".appliance-insights-table a" },
+    { query: "?setup_health=1", action: "[data-save-weekly-digest]" },
+  ]) {
+    const panel = await openPanel(page, route.query);
+    await expect(panel.locator(".page-header")).toHaveCount(1);
+    await expect(panel.locator(".panel.page-header")).toHaveCount(0);
+    await expect(panel.locator("main .panel, main .section-surface").first()).toBeVisible();
+    await expect(panel.locator(route.action).first()).toBeEnabled();
+    expect(await panel.locator(route.action).first().evaluate((action) => action.tabIndex)).toBeGreaterThanOrEqual(0);
+    const overflow = await panel.locator("main").evaluate((main) => main.scrollWidth > main.clientWidth);
+    expect(overflow).toBe(false);
+  }
+});
+
 test("Appliance Detail omits session timeline and page-level controls", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
