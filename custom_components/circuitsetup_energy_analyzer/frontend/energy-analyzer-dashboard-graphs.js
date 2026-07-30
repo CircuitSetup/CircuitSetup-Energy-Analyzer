@@ -1,6 +1,7 @@
 export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
   const RANGE_EVENT = "circuitsetup-dashboard-range-changed";
   const DATA_EVENT = "circuitsetup-dashboard-data-changed";
+  const HVAC_ASSOCIATION_EVENT = "circuitsetup_energy_analyzer_hvac_association_updated";
   const RANGE_KEY = "circuitsetup-energy-analyzer-dashboard-range";
   const RANGE_PRESET_KEY = "circuitsetup-energy-analyzer-dashboard-range-preset";
   const STOCK_RANGE_KEYS = [
@@ -1981,6 +1982,60 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationStateKey = "";
       this._associationEntityIds = [];
       this._associationRevisionEntityIds = [];
+      this._associationEventUnsubscribe = null;
+      this._handleAssociationEvent = (event) => {
+        if (!this.isConnected) return;
+        const entryId = String(this._dashboardConfig.entry_id || "");
+        if (entryId && String(event.data?.entry_id || "") !== entryId) return;
+        this._associationPayload = null;
+        this._associationLoadKey = "";
+        this._associationRequest = null;
+        this._associationError = false;
+        this._render();
+      };
+    }
+
+    connectedCallback() {
+      super.connectedCallback();
+      this._subscribeAssociationUpdates();
+    }
+
+    disconnectedCallback() {
+      this._unsubscribeAssociationUpdates();
+      super.disconnectedCallback();
+    }
+
+    _unsubscribeAssociationUpdates() {
+      const subscription = this._associationEventUnsubscribe;
+      this._associationEventUnsubscribe = null;
+      if (subscription) {
+        Promise.resolve(subscription)
+          .then((unsubscribe) => unsubscribe())
+          .catch(() => {});
+      }
+    }
+
+    set hass(value) {
+      super.hass = value;
+      this._subscribeAssociationUpdates();
+    }
+
+    get hass() {
+      return super.hass;
+    }
+
+    _subscribeAssociationUpdates() {
+      const connection = this._hass?.connection;
+      if (
+        this._associationRevisionEntityIds.length
+        || this._associationEventUnsubscribe
+        || !this.isConnected
+        || typeof connection?.subscribeEvents !== "function"
+      ) return;
+      this._associationEventUnsubscribe = connection.subscribeEvents(
+        this._handleAssociationEvent,
+        HVAC_ASSOCIATION_EVENT,
+      );
     }
 
     _associationKey(config = this._dashboardConfig) {
@@ -1998,8 +2053,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationRevisionEntityIds = Array.isArray(config.revision_entities)
         ? config.revision_entities.filter(Boolean)
         : [];
+      if (this._associationRevisionEntityIds.length) {
+        this._unsubscribeAssociationUpdates();
+      }
       this._associationEntityIds = [...this._associationRevisionEntityIds];
       super.setConfig(config);
+      this._subscribeAssociationUpdates();
     }
 
     _referencedStateKey() {

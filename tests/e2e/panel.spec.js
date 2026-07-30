@@ -510,6 +510,70 @@ test("HVAC associations refresh only for revisions and setup changes", async ({ 
   await expect.poll(() => requests).toBe(4);
 });
 
+test("HVAC associations use the revision event without a health entity", async ({ page }) => {
+  let requests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/hvac_associations")) return false;
+    requests += 1;
+    await route.fulfill({
+      json: {
+        ...hvacAssociations,
+        items: [{
+          ...hvacAssociations.items[0],
+          modes: {
+            ...hvacAssociations.items[0].modes,
+            heating: {
+              ...hvacAssociations.items[0].modes.heating,
+              score: requests === 1 ? 92 : 107,
+            },
+          },
+        }],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-hvac-associations",
+    { entry_id: "entry-1", api_path: "circuitsetup_energy_analyzer/hvac_associations" },
+    {
+      "climate.downstairs": {
+        state: "cool",
+        attributes: { temperature_unit: "°F", temperature: 72 },
+      },
+    },
+  );
+  await expect(card.locator('[data-mode="heating"]')).toContainText("92%");
+
+  await page.evaluate(() => {
+    window.__dashboardHass.connection = {
+      subscribeEvents: async (handler, eventType) => {
+        window.__associationEventHandler = handler;
+        window.__associationEventType = eventType;
+        return () => { window.__associationUnsubscribed = true; };
+      },
+    };
+    window.__dashboardCard.hass = window.__dashboardHass;
+  });
+  await expect.poll(() => page.evaluate(() => window.__associationEventType))
+    .toBe("circuitsetup_energy_analyzer_hvac_association_updated");
+
+  await page.evaluate(() => window.__associationEventHandler({
+    data: { entry_id: "other-entry" },
+  }));
+  await expect.poll(() => requests).toBe(1);
+
+  await page.evaluate(() => window.__associationEventHandler({
+    data: { entry_id: "entry-1" },
+  }));
+  await expect(card.locator('[data-mode="heating"]')).toContainText("107%");
+  expect(requests).toBe(2);
+
+  await page.evaluate(() => window.__dashboardCard.remove());
+  await expect.poll(() => page.evaluate(() => window.__associationUnsubscribed))
+    .toBe(true);
+});
+
 test("HVAC associations keep unrelated updates out of a pending refresh", async ({ page }) => {
   let requests = 0;
   let releaseRefresh;

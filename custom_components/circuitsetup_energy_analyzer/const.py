@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 DOMAIN = "circuitsetup_energy_analyzer"
 DATA_RELOAD_COUNT = "_reload_count"
+EVENT_HVAC_ASSOCIATION_UPDATED = f"{DOMAIN}_hvac_association_updated"
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
