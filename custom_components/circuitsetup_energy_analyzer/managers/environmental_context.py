@@ -588,7 +588,7 @@ class EnvironmentalContextManager:
             else None
         )
         evidence["flow_sensor_active"] = flow_sensor_active
-        if flow_sensor_active is None:
+        if flow_entities and flow_sensor_active is None:
             evidence["status"] = "sensor_unavailable"
             evidence["friendly_summary"] = (
                 "Configured water-flow sensors are currently unavailable."

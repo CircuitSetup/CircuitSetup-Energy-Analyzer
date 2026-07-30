@@ -1378,6 +1378,40 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
     assert evidence["status"] == "normal"
 
 
+def test_coordinator_keeps_water_flow_unconfigured_without_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True}
+            },
+        },
+        now_fn=lambda: now,
+    )
+
+    evidence = coordinator.environment_context.water_flow_context_evidence(
+        coordinator.circuit_configs[0],
+        {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+        now,
+    )
+
+    assert evidence["status"] == "unconfigured"
+    assert evidence["flow_sensor_active"] is None
+
+
 def test_coordinator_preserves_unavailable_flow_sensor_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
