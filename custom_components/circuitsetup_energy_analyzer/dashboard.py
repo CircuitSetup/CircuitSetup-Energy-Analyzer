@@ -227,14 +227,24 @@ def build_recommended_dashboard(
         mains_voltage_entities=mains_voltage_entities,
     )
     home_view = _build_home_view(context)
+    home_cards = home_view["sections"][0]["cards"]
+    if voltage_card := _line_voltage_card(context, hass=hass):
+        summary_card = home_cards.pop()
+        home_cards.append(
+            {
+                "type": "grid",
+                "columns": 1,
+                "square": False,
+                "cards": [summary_card, voltage_card],
+                "grid_options": {"columns": 12},
+            }
+        )
     if context.appliances:
-        home_view["sections"][0]["cards"].extend(
+        home_cards.extend(
             _build_appliances_view(context)["sections"][0]["cards"]
         )
-    if voltage_card := _line_voltage_card(context, hass=hass):
-        home_view["sections"][0]["cards"].append(voltage_card)
     if context.appliances or context.primary_mains is not None:
-        home_view["sections"][0]["cards"].append(
+        home_cards.append(
             {
                 "type": ENERGY_COST_CARD,
                 "title": _dashboard_text("cards", "energy_and_costs"),

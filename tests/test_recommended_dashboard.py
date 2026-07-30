@@ -549,13 +549,20 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
     )
     cards = home["sections"][0]["cards"]
 
-    assert [card.get("title") for card in cards[:6]] == [
+    assert [card.get("title") for card in cards[:5]] == [
         "Mains total power and amps",
         "All appliance power",
-        "Home energy summary",
+        None,
         "Appliances",
-        "Line voltage",
         "Energy and costs",
+    ]
+    summary_stack = cards[2]
+    assert summary_stack["type"] == "grid"
+    assert summary_stack["columns"] == 1
+    assert summary_stack["square"] is False
+    assert [card.get("title") for card in summary_stack["cards"]] == [
+        "Home energy summary",
+        "Line voltage",
     ]
     voltage = _card_with_title(home, "Line voltage")
     assert voltage["type"] == "grid"
@@ -596,7 +603,7 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
             "axis": "right",
         },
     ]
-    summary = cards[2]
+    summary = _card_with_title(home, "Home energy summary")
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_watts",
         "sensor.mains_active_power",
@@ -609,14 +616,7 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
     ]
-    assert [card["grid_options"]["columns"] for card in cards[:6]] == [
-        24,
-        24,
-        24,
-        24,
-        24,
-        24,
-    ]
+    assert [card["grid_options"]["columns"] for card in cards[:5]] == [24] * 5
 
 
 def test_home_voltage_card_uses_native_gauges_with_adaptive_ranges() -> None:

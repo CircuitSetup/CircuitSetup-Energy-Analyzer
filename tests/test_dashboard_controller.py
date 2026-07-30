@@ -206,7 +206,12 @@ async def test_dashboard_controller_merges_detected_and_misclassified_voltage() 
 
     saved = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]
     cards = saved["views"][0]["sections"][0]["cards"]
-    voltage = next(card for card in cards if card.get("title") == "Line voltage")
+    voltage = next(
+        child
+        for card in cards
+        for child in card.get("cards", [])
+        if child.get("title") == "Line voltage"
+    )
     assert voltage["cards"] == [
         {
             "type": "gauge",
@@ -261,7 +266,12 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
     cards = coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[-1]["views"][0][
         "sections"
     ][0]["cards"]
-    voltage = next(card for card in cards if card.get("title") == "Line voltage")
+    voltage = next(
+        child
+        for card in cards
+        for child in card.get("cards", [])
+        if child.get("title") == "Line voltage"
+    )
     assert [gauge["entity"] for gauge in voltage["cards"]] == [
         "sensor.mains_l1_voltage",
         "sensor.mains_l2_voltage",
