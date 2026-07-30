@@ -845,17 +845,17 @@ export class PanelShellMethods {
           margin-top: 10px;
         }
         .nilm-label-field input {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           padding: 8px 10px;
         }
         .nilm-label-field select {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           min-width: 0;
@@ -867,8 +867,8 @@ export class PanelShellMethods {
         }
         .nilm-decision-option {
           align-items: center;
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           cursor: pointer;
           display: grid;
           gap: 8px;
@@ -876,7 +876,8 @@ export class PanelShellMethods {
           padding: 10px;
         }
         .nilm-decision-option:has(input:checked) {
-          border-color: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .nilm-decision-option input {
           margin: 0;
@@ -893,9 +894,9 @@ export class PanelShellMethods {
         }
         .nilm-interval-form input,
         .nilm-interval-form select {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           font: inherit;
           padding: 8px 10px;
@@ -909,19 +910,22 @@ export class PanelShellMethods {
         }
         .merge-target-chip {
           background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 8px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           cursor: pointer;
           font: inherit;
           padding: 7px 11px;
         }
         .merge-target-chip[aria-pressed="true"] {
-          background: var(--primary-color, #03a9f4);
-          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #0b6bcb);
+          border-color: var(--primary-color, #0b6bcb);
           color: var(--text-primary-color, #fff);
         }
         .workspace-section {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 12px;
           min-width: 0;
@@ -932,15 +936,15 @@ export class PanelShellMethods {
           margin: 12px 0;
         }
         .nilm-interval-row {
-          border: 1px solid var(--divider-color, #d8dee6);
-          border-radius: 6px;
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 8px;
           padding: 10px;
         }
         .nilm-interval-row[data-nilm-active="true"] {
-          border-color: var(--primary-color, #03a9f4);
-          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .nilm-interval-row-heading {
           align-items: center;
@@ -949,7 +953,7 @@ export class PanelShellMethods {
           grid-template-columns: auto minmax(0, 1fr) auto;
         }
         .nilm-interval-row-heading span {
-          color: var(--primary-color, #03a9f4);
+          color: var(--primary-color, #0b6bcb);
           font-size: 12px;
         }
         .nilm-workspace {
@@ -985,7 +989,7 @@ export class PanelShellMethods {
           grid-column: 1 / -1;
         }
         .workspace-progress progress {
-          accent-color: var(--primary-color, #03a9f4);
+          accent-color: var(--primary-color, #0b6bcb);
           align-self: center;
           height: 8px;
           width: 100%;
@@ -1001,8 +1005,9 @@ export class PanelShellMethods {
           padding-bottom: 4px;
         }
         .nilm-lane {
-          background: transparent;
-          border-color: transparent;
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           flex: 0 0 auto;
           gap: 8px;
@@ -1011,7 +1016,8 @@ export class PanelShellMethods {
           white-space: nowrap;
         }
         .nilm-lane[aria-selected="true"] {
-          border-color: var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 -2px 0 var(--primary-color, #0b6bcb);
           color: var(--primary-text-color, #111827);
         }
         .nilm-lane strong {
@@ -1037,8 +1043,9 @@ export class PanelShellMethods {
           min-width: 0;
         }
         .nilm-review-card {
-          background: var(--card-background-color, #fff);
-          border-color: var(--divider-color, #d8dee6);
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           color: var(--primary-text-color, #111827);
           display: grid;
           gap: 10px;
@@ -1048,8 +1055,8 @@ export class PanelShellMethods {
           width: 100%;
         }
         .nilm-review-card[aria-pressed="true"] {
-          border-color: var(--primary-color, #03a9f4);
-          box-shadow: inset 0 0 0 1px var(--primary-color, #03a9f4);
+          border-color: var(--primary-color, #0b6bcb);
+          box-shadow: inset 0 0 0 1px var(--primary-color, #0b6bcb);
         }
         .review-card-heading,
         .review-card-facts {
@@ -1075,7 +1082,7 @@ export class PanelShellMethods {
           overflow-wrap: anywhere;
         }
         .power-meter {
-          background: var(--divider-color, #d8dee6);
+          background: var(--divider-color, #d8dde6);
           border-radius: 3px;
           display: block;
           height: 6px;
@@ -1083,17 +1090,20 @@ export class PanelShellMethods {
           width: 100%;
         }
         .power-meter > span {
-          background: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #0b6bcb);
           display: block;
           height: 100%;
           width: var(--power-percent, 0%);
         }
         .nilm-review-card progress {
-          accent-color: var(--primary-color, #03a9f4);
+          accent-color: var(--primary-color, #0b6bcb);
           height: 8px;
           width: 100%;
         }
         .nilm-review-inspector {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
           display: grid;
           gap: 10px;
           min-width: 0;

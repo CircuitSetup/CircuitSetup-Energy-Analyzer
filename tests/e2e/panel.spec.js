@@ -4146,6 +4146,26 @@ test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   await expect(assigned).toHaveAttribute("aria-selected", "true");
 });
 
+test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--ha-card-background", "#ffffff");
+    root.setProperty("--divider-color", "#d8dde6");
+    root.setProperty("--primary-color", "#0b6bcb");
+    root.setProperty("--ha-card-border-radius", "12px");
+  });
+
+  await expect(panel.locator(".workspace-section").first()).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await expect(panel.locator('[data-nilm-lane][aria-selected="true"]')).toBeVisible();
+  await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
+  await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
+});
+
 test("major panel routes pass automated accessibility checks", async ({ page }) => {
   await mockPanelApi(page);
   for (const query of [
