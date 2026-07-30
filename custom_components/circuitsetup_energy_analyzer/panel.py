@@ -1047,16 +1047,16 @@ def _source_history_series(config: Any) -> list[dict[str, str]]:
             role = role if isinstance(role, SensorRole) else SensorRole(role)
         except (TypeError, ValueError):
             role = None
+        unit = str(getattr(sensor, "unit", "") or _HISTORY_UNIT_BY_ROLE.get(role, ""))
         if role in {
             SensorRole.APPARENT_POWER,
             SensorRole.REACTIVE_POWER,
-        } or re.search(
+        } or unit.lower().endswith(("va", "var")) or re.search(
             r"(?:^|_)(?:apparent_power|reactive_power)(?:_|$)"
-            r"|(?:^|_)(?:va|var)$",
+            r"|(?:^|_)(?:[km]?va|[km]?var)$",
             entity_id.split(".", 1)[-1].lower(),
         ):
             continue
-        unit = str(getattr(sensor, "unit", "") or _HISTORY_UNIT_BY_ROLE.get(role, ""))
         series.append({"entity_id": entity_id, "unit": unit})
     return series
 

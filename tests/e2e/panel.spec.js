@@ -4076,11 +4076,18 @@ test("Appliance Detail keeps real power with an interior var name token", async 
   const entities = await page.evaluate(() => (
     window.__panel._applianceDetailHistoryChartGroups([
       { entity_id: "sensor.pump_var_speed_power", unit: "W", points: [] },
+      { entity_id: "sensor.pump_kva_speed_power", unit: "W", points: [] },
       { entity_id: "sensor.pump_var", unit: "W", points: [] },
+      { entity_id: "sensor.pump_kva", unit: "W", points: [] },
+      { entity_id: "sensor.legacy_apparent_meter", unit: "MVA", points: [] },
+      { entity_id: "sensor.legacy_reactive_meter", unit: "kvar", points: [] },
     ]).flatMap((group) => group.series.map((item) => item.entity_id))
   ));
 
-  expect(entities).toEqual(["sensor.pump_var_speed_power"]);
+  expect(entities).toEqual([
+    "sensor.pump_var_speed_power",
+    "sensor.pump_kva_speed_power",
+  ]);
 });
 
 test("Appliance Detail omits session timeline and page-level controls", async ({ page }) => {

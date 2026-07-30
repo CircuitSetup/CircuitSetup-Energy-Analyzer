@@ -811,8 +811,18 @@ def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> 
             sensors=(
                 SensorRef("sensor.fridge_watts", SensorRole.REAL_POWER),
                 SensorRef("sensor.var_speed_pump_power", SensorRole.REAL_POWER),
+                SensorRef("sensor.kva_speed_pump_power", SensorRole.REAL_POWER),
                 SensorRef("sensor.fridge_va", SensorRole.REAL_POWER),
                 SensorRef("sensor.fridge_var", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_kva", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_mva", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_kvar", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_mvar", SensorRole.REAL_POWER),
+                SensorRef(
+                    "sensor.legacy_apparent_meter",
+                    SensorRole.REAL_POWER,
+                    unit="kVA",
+                ),
             ),
         ),
     )
@@ -825,6 +835,7 @@ def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> 
     assert history["entities"] == [
         "sensor.fridge_watts",
         "sensor.var_speed_pump_power",
+        "sensor.kva_speed_pump_power",
     ]
 
 
