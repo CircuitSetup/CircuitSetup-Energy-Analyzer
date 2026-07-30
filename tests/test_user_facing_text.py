@@ -2098,6 +2098,10 @@ assert.ok(learning.includes("Predictive Health"));
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("More completed appliance history is needed"));
 
+const withoutHealth = panel._renderApplianceBehaviorHealth([], null, { items: [] });
+assert.ok(!withoutHealth.includes("<h3>Predictive Health</h3>"));
+assert.ok(!withoutHealth.includes("<strong>Learning</strong>"));
+
 const possibleIssue = panel._renderApplianceBehaviorHealth([], {
   status: "possible_degradation",
   reason: "sustained_change",
@@ -2181,7 +2185,7 @@ for (const expected of [
   "HVAC Thermostat Efficiency",
   "80 / 100",
   "100 is the learned baseline",
-  "25% response-change threshold",
+  "Alert threshold: 25% response change",
   "Heating",
   "Cooling",
   "Upstairs",
@@ -2225,6 +2229,7 @@ const learning = panel._renderHvacEfficiency({
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("waiting for completed thermostat episodes"));
 assert.ok(!learning.toLowerCase().includes("fault"));
+assert.ok(!learning.includes("hvac-efficiency-gauge"));
 """
     )
 

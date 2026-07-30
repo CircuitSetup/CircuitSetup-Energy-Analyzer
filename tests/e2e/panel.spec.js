@@ -4133,6 +4133,7 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
   await expect(efficiency).not.toContainText("0 / 100");
   await expect(efficiency).not.toContainText("0 min/°F");
   await expect(efficiency).not.toContainText("Outdoor: 0°F");
+  await expect(efficiency.locator(".hvac-efficiency-gauge")).toHaveCount(0);
 });
 
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {

@@ -598,7 +598,8 @@ export function createApplianceViewMethods({
     const humanize = (value) => String(value || "")
       .replaceAll("_", " ")
       .replace(/^\w/, (letter) => letter.toUpperCase());
-    health = health && typeof health === "object" ? health : {};
+    const hasHealth = health && typeof health === "object" && !Array.isArray(health);
+    health = hasHealth ? health : {};
     const status = String(health.status || "learning");
     const reason = String(health.reason || "");
     const statusLabel = this._panelText(`appliance_detail.predictive_health_status.${status}`) || humanize(status);
@@ -629,12 +630,12 @@ export function createApplianceViewMethods({
       <h2>${this._escape(this._panelText("appliance_detail.behavior_and_predictive_health"))}</h2>
       <h3>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h3>
       ${this._renderApplianceExpectations(expectations)}
-      <h3>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
+      ${hasHealth ? `<h3>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
       <p><strong>${this._escape(statusLabel)}</strong></p>
       ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
       ${Number.isFinite(Number(health.confidence)) ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(health.confidence) }))}</p>` : ""}
       ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}
+      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : ""}
       <h3>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h3>
       ${this._renderApplianceTimeline(timeline)}
     </section>`;
@@ -677,9 +678,9 @@ export function createApplianceViewMethods({
           const attribution = this._panelText(`appliance_detail.hvac_efficiency_attribution.${row.attribution || "direct"}`);
           const facts = [
             row.thermostat_name || row.thermostat_entity_id
-              ? this._metric("Thermostat", row.thermostat_name || row.thermostat_entity_id, "mdi:thermostat")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_thermostat"), row.thermostat_name || row.thermostat_entity_id, "mdi:thermostat")
               : "",
-            this._metric("Mode", this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`), "mdi:hvac"),
+            this._metric(this._panelText("appliance_detail.hvac_efficiency_mode_label"), this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`), "mdi:hvac"),
             finite(row.score)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(row.score)} / 100`, "mdi:gauge")
               : "",
@@ -690,22 +691,22 @@ export function createApplianceViewMethods({
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(row.recent_minutes_per_degree)} min/°F`, "mdi:history")
               : "",
             finite(row.outdoor_temperature_f)
-              ? this._metric("Outdoor temperature", `${this._formatNumber(row.outdoor_temperature_f)}°F`, "mdi:weather-sunny")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_outdoor_temperature"), `${this._formatNumber(row.outdoor_temperature_f)}°F`, "mdi:weather-sunny")
               : "",
             row.season
-              ? this._metric("Season", row.season, "mdi:calendar-season")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_season"), row.season, "mdi:calendar-season")
               : "",
             row.weather_mode
-              ? this._metric("Weather context", row.weather_mode, "mdi:cloud-outline")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_weather_context"), row.weather_mode, "mdi:cloud-outline")
               : "",
             row.attribution
-              ? this._metric("Attribution", attribution, "mdi:account-check-outline")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_attribution_label"), attribution, "mdi:account-check-outline")
               : "",
             finite(row.reference_count)
-              ? this._metric("Reference episodes", row.reference_count, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), row.reference_count, "mdi:counter")
               : "",
             finite(row.recent_count)
-              ? this._metric("Recent episodes", row.recent_count, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), row.recent_count, "mdi:counter")
               : "",
           ].filter(Boolean);
           return `<article class="hvac-efficiency-row">
@@ -718,8 +719,8 @@ export function createApplianceViewMethods({
       </div>`;
     };
     const modes = `${renderMode("heating")}${renderMode("cooling")}`;
-    const score = Number(efficiency.summary_score);
-    const gauge = Number.isFinite(score)
+    const score = finite(efficiency.summary_score) ? Number(efficiency.summary_score) : null;
+    const gauge = score !== null
       ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(100, score))}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
       : "";
     return `<section class="panel" data-hvac-efficiency>
@@ -729,7 +730,7 @@ export function createApplianceViewMethods({
       ${finite(efficiency.summary_score) ? `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_score_note"))}</p>` : ""}
       <p class="muted">${this._escape(learningText)}</p>
       ${modes || `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
-      ${finite(efficiency.threshold_pct) ? `<p class="muted hvac-efficiency-threshold">${this._escape(this._panelTextFormat("appliance_detail.hvac_efficiency_threshold", { value: `${this._formatNumber(efficiency.threshold_pct)}%` }))}: ${this._formatNumber(efficiency.threshold_pct)}% response-change threshold</p>` : ""}
+      ${finite(efficiency.threshold_pct) ? `<p class="muted hvac-efficiency-threshold">${this._escape(this._panelTextFormat("appliance_detail.hvac_efficiency_threshold_note", { value: `${this._formatNumber(efficiency.threshold_pct)}%` }))}</p>` : ""}
     </section>`;
   }
 

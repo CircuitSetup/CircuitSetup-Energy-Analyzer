@@ -265,7 +265,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .banner { align-items: center; border: 1px solid var(--warning-color, #b7791f); border-radius: 6px; display: flex; justify-content: space-between; padding: 10px; }
         .banner.ready { border-color: var(--success-color, #2e7d32); }
         .appliance-heading { align-items: center; display: inline-flex; gap: 6px; }
-        .flow-labels .swatch { flex: 0 0 auto; }
         .appliance-list, .appliance-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
         button.appliance-tile { background: var(--card-background-color, #fff); border: 1px solid var(--divider-color, #d8dee6); border-radius: 6px; color: var(--primary-text-color, #111827); cursor: pointer; min-height: 96px; padding: 12px; text-align: left; }
         .appliance-heading ha-icon { --mdc-icon-size: 24px; }
