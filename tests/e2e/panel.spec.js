@@ -186,6 +186,7 @@ test("HVAC associations render ready and learning thermostat gauges", async ({ p
       title: "HVAC & Thermostats",
       entry_id: "entry-1",
       api_path: "circuitsetup_energy_analyzer/hvac_associations",
+      labels: { slower: "Slower", faster: "Faster", stable: "Stable" },
     },
     {
       "climate.downstairs": { state: "cool", attributes: { temperature_unit: "°F" } },
@@ -198,6 +199,8 @@ test("HVAC associations render ready and learning thermostat gauges", async ({ p
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"]')).toContainText("92%");
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="cooling"]')).toContainText("108%");
   await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("9 min/°C");
+  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"] .gauge-value')).toHaveCount(0);
+  await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"] .trend')).toHaveText("Slower");
   await expect(card.locator('[data-thermostat="climate.bedroom"] [data-mode="cooling"]')).toHaveCount(0);
   for (const mode of ["heating", "cooling"]) {
     await expect(card.locator(`[data-thermostat="climate.downstairs"] [data-mode="${mode}"] svg`)).toHaveAttribute(

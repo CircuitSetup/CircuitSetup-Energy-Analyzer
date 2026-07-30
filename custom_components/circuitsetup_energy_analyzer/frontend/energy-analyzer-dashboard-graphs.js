@@ -2071,6 +2071,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const baseline = this._responseText(mode.baseline_minutes_per_degree_f, unit);
       const modeLabel = this._label(modeName, modeName[0].toUpperCase() + modeName.slice(1));
       const ariaLabel = `${item.appliance_name}, ${item.thermostat_name || item.thermostat_entity_id}, ${modeLabel}, ${scoreText}, ${recent}`;
+      const trend = String(mode.trend || "");
+      const trendText = trend ? this._label(trend, trend) : this._label("learning", "Learning");
       const attribution = mode.attribution === "gas_furnace_proxy"
         ? "Gas heat: supporting blower attribution."
         : mode.supporting_blower_ids?.length || item.appliance_profile === "hvac_blower" && modeName === "cooling"
@@ -2081,13 +2083,13 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <div class="gauge-wrap">
           <svg viewBox="0 0 120 70" role="img" aria-label="${this._escape(ariaLabel)}">
             <path class="gauge-track" pathLength="100" d="M10 60 A50 50 0 0 1 110 60"></path>
-            <path class="gauge-value ${this._escape(modeName)}" pathLength="100" stroke-dasharray="${ready ? clampedScore / 2 : 0} 100" d="M10 60 A50 50 0 0 1 110 60"></path>
+            ${ready ? `<path class="gauge-value ${this._escape(modeName)}" pathLength="100" stroke-dasharray="${clampedScore / 2} 100" d="M10 60 A50 50 0 0 1 110 60"></path>` : ""}
             <path class="gauge-baseline" d="M60 8 L60 16"></path>
           </svg>
           <strong>${this._escape(scoreText)}</strong>
         </div>
         <dl><div><dt>${this._escape(this._label("recent_response", "Recent response"))}</dt><dd>${this._escape(recent)}</dd></div><div><dt>${this._escape(this._label("learned_baseline", "Learned baseline"))}</dt><dd>${this._escape(baseline)}</dd></div></dl>
-        <p class="trend">${this._escape(mode.trend || this._label("learning", "Learning"))}</p>
+        <p class="trend">${this._escape(trendText)}</p>
         ${attribution ? `<p class="attribution">${this._escape(attribution)}</p>` : ""}
       </section>`;
     }
