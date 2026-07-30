@@ -431,6 +431,71 @@ def test_hvac_efficiency_caps_completed_history() -> None:
     )
 
 
+def test_hvac_efficiency_stores_completed_subdegree_thermostat_call() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.upstairs"
+    compressor = _hvac_config("ac2", ApplianceProfile.HVAC_COMPRESSOR)
+    linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+    calling = ThermostatObservation(
+        thermostat,
+        "sensor.upstairs_temperature",
+        75.8,
+        75.2,
+        "cool",
+        "cooling",
+        (
+            "current_temperature",
+            "temperature",
+            "temperature_override",
+            "hvac_action",
+        ),
+    )
+    context = _hvac_context(
+        configs=(compressor,),
+        observation=calling,
+        advanced_settings={"ac2": linked},
+        running_circuit_ids={"ac2"},
+    )
+    processor = HvacEfficiencyProcessor()
+
+    started = processor.process([(compressor, SimpleNamespace())], context)
+    stream_id = f"ac2|{thermostat}|cooling"
+    current_episode = _state_update_values(
+        started,
+        "hvac_current_episode_by_stream",
+    )[stream_id]
+    assert current_episode["episode_kind"] == "thermostat_call"
+    context.state.hvac_current_episode_by_stream[stream_id] = current_episode
+
+    context = replace(
+        context,
+        now=context.now + timedelta(minutes=20),
+        thermostat_observations=MappingProxyType(
+            {
+                f"ac2|{thermostat}": replace(
+                    calling,
+                    actual_temperature_f=75.3,
+                    action="idle",
+                )
+            }
+        ),
+    )
+    context.state.operating_state_snapshot_by_circuit["ac2"] = {
+        "state": "off",
+        "stable_state": "off",
+    }
+
+    result = processor.process([(compressor, SimpleNamespace())], context)
+    stored = context.store_data.hvac_response_history_by_stream[stream_id]
+
+    assert result.store_dirty is True
+    assert stored[-1]["complete"] is True
+    assert stored[-1]["episode_kind"] == "thermostat_call"
+
+
 @pytest.mark.parametrize(
     "profile",
     [ApplianceProfile.HEAT_PUMP, ApplianceProfile.HVAC_BLOWER],

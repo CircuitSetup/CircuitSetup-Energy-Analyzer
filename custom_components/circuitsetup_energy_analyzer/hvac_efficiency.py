@@ -10,6 +10,8 @@ from typing import Any
 
 _COMPLETION_TOLERANCE_F = 0.5
 _MINIMUM_START_GAP_F = 1.0
+_MINIMUM_CALL_GAP_F = 0.1
+_MINIMUM_CALL_PROGRESS_F = 0.1
 _INACTIVE_TIMEOUT_MINUTES = 30.0
 _EPISODE_TIMEOUT_MINUTES = 8.0 * 60.0
 _RECENT_EPISODE_COUNT = 3
@@ -52,6 +54,7 @@ class HvacResponseEpisode:
     inactive_since: datetime | None = None
     temperature_entity_id: str | None = None
     appliance_profile: str | None = None
+    episode_kind: str = "setpoint_response"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,7 @@ def advance_episode(
     actual = _finite_float(observation.actual_temperature_f)
     target = _finite_float(observation.target_temperature_f)
     action = str(observation.action or "").lower()
+    action_active = action in {"heating", "cooling"}
     range_capabilities = set(observation.available_capabilities)
     preserved_target = False
     if (
@@ -102,6 +106,13 @@ def advance_episode(
     mode = _response_mode(observation, actual=actual, target=target)
     if (
         current is not None
+        and current.episode_kind == "thermostat_call"
+        and action
+        and not action_active
+    ):
+        mode = current.mode
+    if (
+        current is not None
         and actual is not None
         and target is not None
         and (mode is None or preserved_target)
@@ -113,8 +124,11 @@ def advance_episode(
         if not driver_active or actual is None or target is None or mode is None:
             return None, None
         gap = _directional_gap(mode, actual=actual, target=target)
+        episode_kind = "setpoint_response"
         if gap < _MINIMUM_START_GAP_F:
-            return None, None
+            if not action_active or gap < _MINIMUM_CALL_GAP_F:
+                return None, None
+            episode_kind = "thermostat_call"
         episode = HvacResponseEpisode(
             stream_id=(
                 f"{circuit_id}|{observation.thermostat_entity_id}|{mode}"
@@ -139,12 +153,13 @@ def advance_episode(
             temperature_bin=_optional_text(
                 environmental_context.get("temperature_bin")
             ),
-            gap_bin=_gap_bin(gap),
+            gap_bin="0-1F" if episode_kind == "thermostat_call" else _gap_bin(gap),
             participant_signature=_sorted_unique(participant_signature),
             supporting_blower_ids=_sorted_unique(supporting_blower_ids),
             complete=False,
             temperature_entity_id=observation.temperature_entity_id,
             appliance_profile=_optional_text(appliance_profile),
+            episode_kind=episode_kind,
         )
         return episode, None
 
@@ -184,7 +199,23 @@ def advance_episode(
         ),
         inactive_since=inactive_since,
     )
-    if _target_reached(mode, actual=actual, target=target):
+    if (
+        current.episode_kind == "thermostat_call"
+        and action
+        and not action_active
+    ):
+        complete = _has_minimum_progress(updated)
+        return None, replace(
+            updated,
+            ended_at=now,
+            complete=complete,
+            excluded_from_baseline=not complete,
+            inactive_since=None,
+        )
+    if (
+        current.episode_kind == "setpoint_response"
+        and _target_reached(mode, actual=actual, target=target)
+    ):
         return None, replace(
             updated,
             ended_at=now,
@@ -345,6 +376,7 @@ def episode_from_dict(
                 raw.get("temperature_entity_id")
             ),
             appliance_profile=_optional_text(raw.get("appliance_profile")),
+            episode_kind=str(raw.get("episode_kind", "setpoint_response")),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -427,6 +459,7 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
         episode.thermostat_entity_id,
         episode.temperature_entity_id,
         episode.mode,
+        episode.episode_kind,
         episode.temperature_bin,
         episode.season,
         episode.weather_mode,
@@ -462,7 +495,14 @@ def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
         target=episode.target_temperature_f,
     )
     degrees_closed = _degrees_closed(episode)
-    return target_gap >= _MINIMUM_START_GAP_F and degrees_closed > 0.0
+    return (
+        _valid_start_gap(episode, target_gap)
+        and (
+            _has_minimum_progress(episode)
+            if episode.episode_kind == "thermostat_call"
+            else degrees_closed > 0.0
+        )
+    )
 
 
 def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
@@ -471,6 +511,7 @@ def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
         or not episode.circuit_id
         or not episode.thermostat_entity_id
         or episode.mode not in {"heating", "cooling"}
+        or episode.episode_kind not in {"setpoint_response", "thermostat_call"}
         or not episode.participant_signature
     ):
         return False
@@ -485,12 +526,14 @@ def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
         all(math.isfinite(value) for value in numeric_values)
         and episode.elapsed_minutes >= 0.0
         and episode.active_minutes >= 0.0
-        and _directional_gap(
-            episode.mode,
-            actual=episode.start_temperature_f,
-            target=episode.target_temperature_f,
+        and _valid_start_gap(
+            episode,
+            _directional_gap(
+                episode.mode,
+                actual=episode.start_temperature_f,
+                target=episode.target_temperature_f,
+            ),
         )
-        >= _MINIMUM_START_GAP_F
     )
 
 
@@ -508,6 +551,21 @@ def _degrees_closed(episode: HvacResponseEpisode) -> float:
     return min(target_gap, closed)
 
 
+def _valid_start_gap(episode: HvacResponseEpisode, gap: float) -> bool:
+    if episode.episode_kind == "thermostat_call":
+        return _MINIMUM_CALL_GAP_F <= gap < _MINIMUM_START_GAP_F
+    return gap >= _MINIMUM_START_GAP_F
+
+
+def _has_minimum_progress(episode: HvacResponseEpisode) -> bool:
+    progress = _degrees_closed(episode)
+    return progress >= _MINIMUM_CALL_PROGRESS_F or math.isclose(
+        progress,
+        _MINIMUM_CALL_PROGRESS_F,
+        abs_tol=1e-6,
+    )
+
+
 def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
     return {
         "stream_id": episode.stream_id,
@@ -516,6 +574,7 @@ def _evaluation_context(episode: HvacResponseEpisode) -> dict[str, Any]:
         "thermostat_entity_id": episode.thermostat_entity_id,
         "temperature_entity_id": episode.temperature_entity_id,
         "mode": episode.mode,
+        "episode_kind": episode.episode_kind,
         "temperature_bin": episode.temperature_bin,
         "season": episode.season,
         "weather_mode": episode.weather_mode,

@@ -2482,6 +2482,7 @@ def _hvac_advisor_history(
                 episode.thermostat_entity_id,
                 str(episode.temperature_entity_id or ""),
                 episode.mode,
+                episode.episode_kind,
                 str(episode.temperature_bin or ""),
                 str(episode.season or ""),
                 str(episode.weather_mode or ""),
