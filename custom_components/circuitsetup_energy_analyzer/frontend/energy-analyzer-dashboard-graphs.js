@@ -1981,10 +1981,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._associationStateKey = "";
     }
 
-    _apiPathWithEntryId() {
-      const path = String(this._dashboardConfig.api_path || "");
-      const entryId = String(this._dashboardConfig.entry_id || "");
+    _associationKey(config = this._dashboardConfig) {
+      const path = String(config.api_path || "");
+      const entryId = String(config.entry_id || "");
       return entryId ? `${path}${path.includes("?") ? "&" : "?"}entry_id=${encodeURIComponent(entryId)}` : path;
+    }
+
+    setConfig(config) {
+      if (this._associationKey(config || {}) !== this._associationKey()) {
+        this._associationPayload = null;
+        this._associationLoadKey = "";
+        this._associationRequest = null;
+        this._associationError = false;
+        this._associationStateKey = "";
+      }
+      super.setConfig(config);
     }
 
     _referencedStateKey() {
@@ -2021,7 +2032,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     async _loadAssociations() {
-      const apiPathWithEntryId = this._apiPathWithEntryId();
+      const apiPathWithEntryId = this._associationKey();
       if (!apiPathWithEntryId || this._associationRequest || this._associationLoadKey === apiPathWithEntryId) return;
       this._associationLoadKey = apiPathWithEntryId;
       const request = this._hass.callApi("GET", apiPathWithEntryId);
