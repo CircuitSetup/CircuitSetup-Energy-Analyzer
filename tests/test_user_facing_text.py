@@ -6416,17 +6416,18 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
 
 
 def test_non_nilm_panel_routes_use_the_shared_surface_contract() -> None:
-    asset = _frontend_source()
+    evidence_views = EVIDENCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    appliance_views = APPLIANCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    panel_shell = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
 
-    for hook in (
-        "data-evidence-comparison",
-        "recommendation-layout",
-        "appliance-insights-table",
-        "setup-health-status",
-    ):
-        assert hook in asset
-    assert "font-family:" not in EVIDENCE_VIEWS_ASSET.read_text(encoding="utf-8")
-    assert "font-family:" not in APPLIANCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    assert "data-evidence-comparison" in evidence_views
+    assert "recommendation-layout" in evidence_views
+    assert "appliance-insights-table" in appliance_views
+    assert "setup-health-status" in appliance_views
+    assert '<header class="page-header">' in panel_shell
+    assert 'class="panel page-header"' not in panel_shell
+    assert "font-family:" not in evidence_views
+    assert "font-family:" not in appliance_views
 
 
 def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:

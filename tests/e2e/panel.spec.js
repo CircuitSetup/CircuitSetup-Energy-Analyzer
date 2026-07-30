@@ -4025,10 +4025,14 @@ for (const route of [
   });
 }
 
-test("shared Home Assistant surface preserves non-NILM panel routes", async ({ page }) => {
+test("shared Home Assistant surface preserves non-NILM panel routes", async ({ page, isMobile }) => {
   await mockPanelApi(page);
   for (const route of [
-    { query: "?alert_id=alert-kitchen-energy", action: "button:not([disabled])" },
+    {
+      query: "?alert_id=alert-kitchen-energy",
+      action: "#apply_alert_decision",
+      decision: '[data-alert-decision][value="mark_expected"]',
+    },
     { query: "?review_suggested_settings=1", action: '[data-recommendation-action="apply"]' },
     { query: "?circuit_id=kitchen&recommendation_id=energy-threshold", action: '[data-recommendation-action="apply"]' },
     { query: "?appliance_insights=1", action: ".appliance-insights-table a" },
@@ -4038,10 +4042,19 @@ test("shared Home Assistant surface preserves non-NILM panel routes", async ({ p
     await expect(panel.locator(".page-header")).toHaveCount(1);
     await expect(panel.locator(".panel.page-header")).toHaveCount(0);
     await expect(panel.locator("main .panel, main .section-surface").first()).toBeVisible();
+    if (route.decision) {
+      await panel.locator(route.decision).check();
+    }
     await expect(panel.locator(route.action).first()).toBeEnabled();
     expect(await panel.locator(route.action).first().evaluate((action) => action.tabIndex)).toBeGreaterThanOrEqual(0);
-    const overflow = await panel.locator("main").evaluate((main) => main.scrollWidth > main.clientWidth);
-    expect(overflow).toBe(false);
+    const hostOverflow = await panel.evaluate((host) => host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth);
+    expect(hostOverflow).toBe(false);
+    if (isMobile) {
+      const documentOverflow = await page.evaluate(() => (
+        document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+      ));
+      expect(documentOverflow).toBe(false);
+    }
   }
 });
 
