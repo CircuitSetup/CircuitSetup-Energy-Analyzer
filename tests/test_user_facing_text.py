@@ -2215,7 +2215,7 @@ for (const expected of [
   'data-hvac-efficiency',
   "HVAC Thermostat Efficiency",
   "110 / 100",
-  'style="--hvac-score:55%"',
+  'style="--hvac-score:27.5%"',
   "100 is the learned baseline",
   "Alert threshold: 25% response change",
   "Heating",
