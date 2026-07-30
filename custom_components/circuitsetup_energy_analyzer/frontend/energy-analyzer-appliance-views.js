@@ -569,47 +569,32 @@ export function createApplianceViewMethods({
         </section>
       `;
     }
+    const alerts = Array.isArray(detail.active_alerts) ? detail.active_alerts : [];
     return `
+      ${alerts.length ? `<section class="panel appliance-alert-banner">
+        <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
+        ${this._renderApplianceAlerts(alerts)}
+      </section>` : ""}
       ${this._renderApplianceDetailHistory(payload.history)}
       ${this._renderApplianceDailyCost(payload, detail)}
-      <div class="appliance-detail-overview">
-        <section class="panel summary appliance-detail-facts">
-          ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
-          ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
-          ${detail.confidence !== null && detail.confidence !== undefined ? this._metric(this._panelText("common.confidence"), this._formatConfidence(detail.confidence), "mdi:chart-bell-curve-cumulative") : ""}
-          ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
-          ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
-          ${this._metric(this._panelText("appliance_detail.runtime_today"), this._formatDuration(detail.runtime_today_seconds), "mdi:timer-outline")}
-          ${this._metric(this._panelText("appliance_detail.runs_today"), detail.run_count_today, "mdi:counter")}
-        </section>
-        <section class="panel appliance-detail-timeline">
-          <h2>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h2>
-          ${this._renderApplianceTimeline(detail.recent_timeline)}
-        </section>
-      </div>
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
         ${this._renderApplianceComparisons(detail.today_vs_normal, detail.learning_readiness)}
       </section>
-      ${this._renderWhyEnergyChanged(detail.energy_change_explanation)}
-      <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h2>
-        ${this._renderApplianceExpectations(detail.expectations)}
-      </section>
-      ${this._renderApplianceHealth(detail.appliance_health)}
+      ${this._renderApplianceBehaviorHealth(detail)}
       ${this._renderHvacEfficiency(detail.hvac_efficiency)}
-      <section class="panel">
-        <h2>${this._escape(this._panelText("appliance_detail.alerts_and_evidence"))}</h2>
-        ${this._renderApplianceAlerts(detail.active_alerts)}
-      </section>
     `;
   }
 
-  _renderApplianceHealth(health) {
-    if (!health || typeof health !== "object") return "";
+  _renderApplianceBehaviorHealth(detail) {
+    const expectations = detail.expectations;
+    const timeline = detail.recent_timeline;
+    let health = detail.appliance_health;
     const humanize = (value) => String(value || "")
       .replaceAll("_", " ")
       .replace(/^\w/, (letter) => letter.toUpperCase());
+    const hasHealth = health && typeof health === "object" && !Array.isArray(health);
+    health = hasHealth ? health : {};
     const status = String(health.status || "learning");
     const reason = String(health.reason || "");
     const statusLabel = this._panelText(`appliance_detail.predictive_health_status.${status}`) || humanize(status);
@@ -617,9 +602,6 @@ export function createApplianceViewMethods({
     const sessionEvidence = health.feature === "repeated_short_cycle";
     const scope = sessionEvidence ? "sessions" : "days";
     const facts = [
-      Number.isFinite(Number(health.confidence))
-        ? this._metric(this._panelText("common.confidence"), this._formatConfidence(health.confidence), "mdi:chart-bell-curve-cumulative")
-        : "",
       health.feature
         ? this._metric(this._panelText("appliance_detail.predictive_health_finding"), humanize(health.feature), "mdi:stethoscope")
         : "",
@@ -639,12 +621,34 @@ export function createApplianceViewMethods({
     const context = Object.entries(
       health.context && typeof health.context === "object" ? health.context : {},
     ).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`);
-    return `<section class="panel" data-appliance-health>
-      <h2>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h2>
-      <p><strong>${this._escape(statusLabel)}</strong></p>
-      ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
-      ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-      ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}
+    return `<section class="panel" data-appliance-behavior-health>
+      <h2>${this._escape(this._panelText("appliance_detail.behavior_and_predictive_health"))}</h2>
+      <div class="appliance-behavior-grid">
+        <div class="appliance-detail-block" data-behavior-expectations>
+          <h3><ha-icon icon="mdi:bullseye-arrow"></ha-icon>${this._escape(this._panelText("appliance_detail.behavior_expectations"))}</h3>
+          ${this._renderApplianceExpectations(expectations)}
+          <div class="appliance-predictive-health">
+            <h3><ha-icon icon="mdi:heart-pulse"></ha-icon>${this._escape(this._panelText("appliance_detail.predictive_health"))}</h3>
+            ${hasHealth ? `<p><strong>${this._escape(statusLabel)}</strong></p>
+            ${reasonLabel ? `<p class="muted">${this._escape(reasonLabel)}</p>` : ""}
+            ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+            ${context.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.predictive_health_context"))}: ${this._escape(context.join(" · "))}</p>` : ""}` : `<p class="muted">${this._escape(this._panelText("common.unknown"))}</p>`}
+          </div>
+        </div>
+        <div class="appliance-detail-block" data-appliance-now>
+          <h3><ha-icon icon="mdi:clock-outline"></ha-icon>${this._escape(this._panelText("appliance_insights.columns.now"))}</h3>
+          <div class="summary">
+            ${this._metric(this._panelText("appliance_detail.activity"), detail.activity_state, "mdi:play-circle-outline")}
+            ${this._metric(this._panelText("appliance_detail.power"), this._formatPower(detail.current_power_w), "mdi:flash-outline")}
+            ${this._metric(this._panelText("appliance_detail.health"), detail.health_state, "mdi:heart-pulse")}
+            ${this._metric(this._panelText("appliance_detail.energy"), detail.energy_state, "mdi:chart-line")}
+          </div>
+        </div>
+        <div class="appliance-detail-block">
+          <h3><ha-icon icon="mdi:history"></ha-icon>${this._escape(this._panelText("appliance_detail.recent_timeline"))}</h3>
+          ${this._renderApplianceTimeline(timeline)}
+        </div>
+      </div>
     </section>`;
   }
 
@@ -654,6 +658,16 @@ export function createApplianceViewMethods({
       && value !== undefined
       && value !== ""
       && Number.isFinite(Number(value));
+    const temperatureUnit = String(
+      this._hass?.config?.unit_system?.temperature || "",
+    ).trim();
+    const celsius = temperatureUnit === "°C";
+    const temperatureValue = (value) => celsius
+      ? (Number(value) - 32) / 1.8
+      : Number(value);
+    const responseValue = (value) => celsius
+      ? Number(value) * 1.8
+      : Number(value);
     const status = String(efficiency.status || "learning");
     const statusLabel = this._panelText(`appliance_detail.hvac_efficiency_status.${status}`)
       || this._panelText("appliance_detail.hvac_efficiency_status.learning");
@@ -664,21 +678,6 @@ export function createApplianceViewMethods({
     const learning = efficiency.learning && typeof efficiency.learning === "object"
       ? efficiency.learning
       : {};
-    const learningText = [
-      `${Number(learning.reference_count || 0)} of ${Number(learning.required_reference || 9)} reference episodes`,
-      `${Number(learning.recent_count || 0)} of ${Number(learning.required_recent || 3)} recent episodes`,
-    ].join(" · ");
-    const summary = [
-      finite(efficiency.summary_score)
-        ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(efficiency.summary_score)} / 100`, "mdi:gauge")
-        : "",
-      trendLabel
-        ? this._metric(this._panelText("appliance_detail.hvac_efficiency_trend_label"), trendLabel, "mdi:trending-up")
-        : "",
-      finite(efficiency.threshold_pct)
-        ? this._metric(this._panelText("appliance_detail.hvac_efficiency_threshold"), `${this._formatNumber(efficiency.threshold_pct)}% response-change threshold`, "mdi:percent")
-        : "",
-    ].filter(Boolean);
     const renderMode = (mode) => {
       const rows = Array.isArray(efficiency[mode]) ? efficiency[mode] : [];
       if (!rows.length) return "";
@@ -686,27 +685,41 @@ export function createApplianceViewMethods({
         <h3>${this._escape(this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`))}</h3>
         ${rows.map((row) => {
           const attribution = this._panelText(`appliance_detail.hvac_efficiency_attribution.${row.attribution || "direct"}`);
-          const context = [
-            finite(row.outdoor_temperature_f) ? `Outdoor: ${this._formatNumber(row.outdoor_temperature_f)}°F` : "",
-            row.season ? `season: ${row.season}` : "",
-            row.weather_mode ? `weather mode: ${row.weather_mode}` : "",
-          ].filter(Boolean);
           const facts = [
+            row.thermostat_name || row.thermostat_entity_id
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_thermostat"), row.thermostat_name || row.thermostat_entity_id, "mdi:thermostat")
+              : "",
+            this._metric(this._panelText("appliance_detail.hvac_efficiency_mode_label"), this._panelText(`appliance_detail.hvac_efficiency_mode.${mode}`), "mdi:hvac"),
             finite(row.score)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(row.score)} / 100`, "mdi:gauge")
               : "",
             finite(row.baseline_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(row.baseline_minutes_per_degree)} min/°F`, "mdi:database-clock-outline")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(responseValue(row.baseline_minutes_per_degree))} min/${temperatureUnit}`, "mdi:database-clock-outline")
               : "",
             finite(row.recent_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(row.recent_minutes_per_degree)} min/°F`, "mdi:history")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(responseValue(row.recent_minutes_per_degree))} min/${temperatureUnit}`, "mdi:history")
+              : "",
+            finite(row.outdoor_temperature_f)
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_outdoor_temperature"), `${this._formatNumber(temperatureValue(row.outdoor_temperature_f))}${temperatureUnit}`, "mdi:weather-sunny")
+              : "",
+            row.season
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_season"), row.season, "mdi:calendar-season")
+              : "",
+            row.weather_mode
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_weather_context"), row.weather_mode, "mdi:cloud-outline")
+              : "",
+            row.attribution
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_attribution_label"), attribution, "mdi:account-check-outline")
+              : "",
+            finite(row.reference_count)
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${row.reference_count} of ${Number(learning.required_reference || 9)} reference episodes`, "mdi:counter")
+              : "",
+            finite(row.recent_count)
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${row.recent_count} of ${Number(learning.required_recent || 3)} recent episodes`, "mdi:counter")
               : "",
           ].filter(Boolean);
           return `<article class="hvac-efficiency-row">
-            <h4>${this._escape(row.thermostat_name || row.thermostat_entity_id || this._panelText("common.unknown"))}</h4>
-            <p class="muted">${this._escape(attribution)}</p>
             ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
-            ${context.length ? `<p class="muted">${this._escape(context.join(" · "))}</p>` : ""}
             ${Array.isArray(row.supporting_blower_ids) && row.supporting_blower_ids.length
               ? `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_supporting_blower"))}</p>`
               : ""}
@@ -715,13 +728,27 @@ export function createApplianceViewMethods({
       </div>`;
     };
     const modes = `${renderMode("heating")}${renderMode("cooling")}`;
+    const score = finite(efficiency.summary_score) ? Number(efficiency.summary_score) : null;
+    const gauge = score !== null
+      ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(200, score)) / 4}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
+      : `<div class="hvac-efficiency-gauge learning" data-hvac-learning="true" role="status" aria-label="${this._escape(statusLabel)}"><strong>—</strong></div>`;
+    const learningProgress = `<div class="summary appliance-health-metrics hvac-learning-progress">
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${Number(learning.reference_count || 0)} / ${Number(learning.required_reference || 9)}`, "mdi:database-clock-outline")}
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${Number(learning.recent_count || 0)} / ${Number(learning.required_recent || 3)}`, "mdi:history")}
+    </div>`;
     return `<section class="panel" data-hvac-efficiency>
-      <h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2>
-      <p><strong>${this._escape(statusLabel)}</strong></p>
-      ${summary.length ? `<div class="summary appliance-health-metrics">${summary.join("")}</div>` : ""}
-      ${finite(efficiency.summary_score) ? `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_score_note"))}</p>` : ""}
-      <p class="muted">${this._escape(learningText)}</p>
-      ${modes || `<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
+      <div class="appliance-section-heading"><h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2><span class="status">${this._escape(trendLabel || statusLabel)}</span></div>
+      <div class="hvac-efficiency-layout">
+        <div class="hvac-efficiency-score">
+          ${gauge}
+          <strong>${this._escape(this._panelText("appliance_detail.hvac_efficiency_score"))}</strong>
+          ${score !== null ? `<span class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_score_note"))}</span>` : ""}
+        </div>
+        <div class="hvac-efficiency-thermostats">
+          ${modes || `${learningProgress}<p class="muted">${this._escape(this._panelText("appliance_detail.hvac_efficiency_waiting"))}</p>`}
+        </div>
+      </div>
+      ${finite(efficiency.threshold_pct) ? `<p class="muted hvac-efficiency-threshold">${this._escape(this._panelTextFormat("appliance_detail.hvac_efficiency_threshold_note", { value: `${this._formatNumber(efficiency.threshold_pct)}%` }))}</p>` : ""}
     </section>`;
   }
 
@@ -770,31 +797,6 @@ export function createApplianceViewMethods({
     </section>`;
   }
 
-  _renderWhyEnergyChanged(energy_change_explanation) {
-    const heading = this._panelText("appliance_detail.why_energy_changed");
-    if (!energy_change_explanation) {
-      return "";
-    }
-    const totalChange = Number(energy_change_explanation.total_change_percent);
-    if (Number.isFinite(totalChange) && Math.abs(totalChange) < 0.5) {
-      return "";
-    }
-    const contributions = [
-      ["runtime", energy_change_explanation.runtime_contribution_percent],
-      ["running_power", energy_change_explanation.running_power_contribution_percent],
-      ["cycle_count", energy_change_explanation.cycle_count_contribution_percent],
-      ["unexplained", energy_change_explanation.unexplained_percent],
-    ].filter(([, value]) => value !== null && value !== undefined && Math.abs(Number(value)) >= 0.05);
-    return `<section class="panel" data-energy-change-explanation>
-      <h2>${this._escape(heading)}</h2>
-      <p>${this._escape(energy_change_explanation.explanation || "")}</p>
-      ${contributions.length ? `<ul class="energy-change-list">${contributions.map(([key, value]) => `<li>${this._escape(this._panelTextFormat("appliance_detail.energy_change_contribution", {
-        factor: this._panelText(`appliance_detail.energy_change_factors.${key}`),
-        percent: this._formatChangePercent(value),
-      }))}</li>`).join("")}</ul>` : ""}
-    </section>`;
-  }
-
   _renderApplianceDetailHistory(history) {
     const entities = Array.isArray(history && history.entities) ? history.entities : [];
     if (!entities.length) {
@@ -806,7 +808,7 @@ export function createApplianceViewMethods({
       ? this._applianceDetailChartSeries
       : this._chartSeries(this._applianceDetailHistorySeries, history.entity_series);
     const series = window ? this._visibleParsedChartSeries(parsedSeries, window) : [];
-    const groupedSeries = this._chartSeriesByUnit(series);
+    const groupedSeries = this._applianceDetailHistoryChartGroups(series);
     const powerFactorIndex = groupedSeries.findIndex(({ unit }) => unit === "PF");
     const ampsIndex = groupedSeries.findIndex(({ unit }) => unit === "A");
     if (powerFactorIndex >= 0 && ampsIndex >= 0 && powerFactorIndex !== ampsIndex + 1) {
@@ -822,25 +824,52 @@ export function createApplianceViewMethods({
       : this._applianceDetailHistoryError
         ? `<div data-appliance-history-error><p class="muted">${this._escape(this._applianceDetailHistoryError)}</p><button type="button" class="secondary" data-retry-appliance-history>${this._escape(this._panelText("common.retry"))}</button></div>`
         : window && groupedSeries.length
-          ? groupedSeries.map(({ unit, series: unitSeries }) => this._chartSvg(
+          ? groupedSeries.map(({ unit, rightUnit, series: unitSeries }) => this._chartSvg(
             unitSeries,
-            Object.assign({}, chartOptions, { y_axis_label: unit }),
+            Object.assign({}, chartOptions, {
+              y_axis_label: unit,
+              ...(rightUnit ? { right_y_axis_label: rightUnit } : {}),
+            }),
           )).join("")
           : `<p class="muted">${this._escape(this._panelText("appliance_detail.no_history"))}</p>`;
     return `
       <section class="panel" data-appliance-detail-history>
-        <div class="actions">
-          <label>${this._escape(this._panelText("appliance_detail.time_period"))}
-            <select data-appliance-history-period>
-              ${periodHours.map((hours) => `<option value="${hours}" ${hours === this._applianceDetailHistoryHours ? "selected" : ""}>${this._escape(this._applianceHistoryPeriodLabel(hours))}</option>`).join("")}
-            </select>
-          </label>
+        <div class="appliance-graph-heading">
+          <h2>${this._escape(this._panelText("appliance_detail.graphs"))}</h2>
+          <div class="appliance-graph-toolbar">
+            <div class="appliance-period-controls" role="group" aria-label="${this._escape(this._panelText("appliance_detail.time_period"))}">
+              ${periodHours.map((hours) => `<button type="button" class="secondary appliance-period-button" data-appliance-history-period="${hours}" aria-pressed="${hours === this._applianceDetailHistoryHours}">${this._escape(this._applianceHistoryPeriodLabel(hours))}</button>`).join("")}
+            </div>
+            ${this._renderApplianceHistoryGraphControls(window)}
+          </div>
         </div>
-        ${this._renderApplianceHistoryGraphControls(window)}
-        <h2>${this._escape(this._panelText("appliance_detail.energy_history"))}</h2>
         ${graph}
       </section>
     `;
+  }
+
+  _applianceDetailHistoryChartGroups(series) {
+    const visible = series.filter((item) => {
+      const unit = String(item.unit || "").toLowerCase();
+      const entityId = String(item.entity_id || "").toLowerCase();
+      return !unit.endsWith("va")
+        && !unit.endsWith("var")
+        && !/(?:^|_)(?:apparent_power|reactive_power)(?:_|$)|(?:^|_)(?:[km]?va|[km]?var)$/.test(entityId);
+    });
+    const watts = visible.filter((item) => item.unit === "W");
+    const amps = visible.filter((item) => item.unit === "A");
+    const groups = [];
+    if (watts.length || amps.length) {
+      groups.push({
+        unit: watts.length ? "W" : "A",
+        rightUnit: watts.length && amps.length ? "A" : "",
+        series: [...watts, ...amps.map((item) => ({ ...item, axis: watts.length ? "right" : "left" }))],
+      });
+    }
+    groups.push(...this._chartSeriesByUnit(
+      visible.filter((item) => !["W", "A"].includes(String(item.unit))),
+    ).map((group) => ({ ...group, rightUnit: "" })));
+    return groups;
   }
 
   _applianceHistoryPeriodLabel(hours) {
@@ -882,7 +911,8 @@ export function createApplianceViewMethods({
     const items = (Array.isArray(comparisons) ? comparisons : []).filter((item) => (
       item.current_value !== null
       && item.current_value !== undefined
-      && ((item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined)
+      && (item.metric_id === "cost_today"
+        || (item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined)
         || (item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined)
         || (item.configured_warning_value !== null && item.configured_warning_value !== undefined)
         || (item.configured_limit_value !== null && item.configured_limit_value !== undefined))
@@ -895,16 +925,23 @@ export function createApplianceViewMethods({
       }
       return `<p class="muted">${this._escape(learningReadiness.label || this._panelText("appliance_detail.learning_ranges"))}</p>`;
     }
-    return `<div class="appliance-comparison-grid">${items.map((item) => {
+    const asOf = items.find((item) => item.as_of)?.as_of;
+    const icons = {
+      current_power_w: "mdi:flash-outline",
+      daily_energy_kwh: "mdi:chart-line",
+      runtime_today_seconds: "mdi:timer-outline",
+      run_count_today: "mdi:counter",
+      demand_peak_w: "mdi:flash-triangle-outline",
+      cost_today: "mdi:cash",
+    };
+    return `${asOf ? `<p class="muted appliance-comparison-as-of">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(asOf) }))}</p>` : ""}
+      <table class="appliance-comparison-table" data-appliance-comparison-table>
+        <thead><tr><th>Metric</th><th>Today</th><th>Normal</th><th>Projected</th></tr></thead>
+        <tbody>${items.map((item) => {
       const normal = item.normal_low !== null && item.normal_low !== undefined && item.normal_high !== null && item.normal_high !== undefined
         ? `${this._formatComparisonValue(item, item.normal_low)} - ${this._formatComparisonValue(item, item.normal_high)}`
         : this._panelText("common.learning");
       const hasProjection = item.projection_value !== null && item.projection_value !== undefined;
-      const projectedStatus = hasProjection && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined && item.projection_value > item.full_period_normal_high
-        ? "higher"
-        : hasProjection && item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.projection_value < item.full_period_normal_low
-          ? "lower"
-          : "normal";
       const fullPeriod = item.full_period_normal_low !== null && item.full_period_normal_low !== undefined && item.full_period_normal_high !== null && item.full_period_normal_high !== undefined
         ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.completed_day_normal_range", { low: this._formatComparisonValue(item, item.full_period_normal_low), high: this._formatComparisonValue(item, item.full_period_normal_high) }))}</p>`
         : "";
@@ -914,32 +951,18 @@ export function createApplianceViewMethods({
       const configuredLimit = item.configured_limit_value !== null && item.configured_limit_value !== undefined
         ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.configured_limit", { value: this._formatComparisonValue({ unit: item.limit_unit || item.unit }, item.configured_limit_value) }))}</p>`
         : "";
-      const asOf = item.as_of
-        ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.as_of", { timestamp: this._formatDateTime(item.as_of) }))}</p>`
-        : "";
       const projection = hasProjection
-        ? `<p><strong>${this._escape(this._panelText("appliance_detail.projected_end_of_day"))}</strong> ${this._escape(this._formatComparisonValue(item, item.projection_value))}</p>
-          ${item.projection_low !== null && item.projection_low !== undefined && item.projection_high !== null && item.projection_high !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_range", { low: this._formatComparisonValue(item, item.projection_low), high: this._formatComparisonValue(item, item.projection_high) }))}</p>` : ""}
-          <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_status", { status: this._friendlyFeature(projectedStatus) }))}</p>
-          ${item.projection_confidence !== null && item.projection_confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projection_confidence", { confidence: this._formatConfidence(item.projection_confidence) }))}</p>` : ""}`
-        : "";
+        ? `<strong>${this._escape(this._formatComparisonValue(item, item.projection_value))}</strong>
+          ${item.projection_low !== null && item.projection_low !== undefined && item.projection_high !== null && item.projection_high !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.projected_range", { low: this._formatComparisonValue(item, item.projection_low), high: this._formatComparisonValue(item, item.projection_high) }))}</p>` : ""}`
+        : this._panelText("common.unknown");
       return `
-        <div class="appliance-comparison">
-          <span class="comparison-label">${this._escape(item.label || this._friendlyFeature(item.metric_id))}</span>
-          <div class="appliance-comparison-columns">
-            <div><span>${this._escape(this._panelText("common.today"))}</span><strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong></div>
-            <div><span>${this._escape(this._panelText("common.normal"))}</span><strong>${this._escape(normal)}</strong></div>
-          </div>
-          <p class="comparison-summary">${this._escape(this._friendlyFeature(item.status))}</p>
-          ${fullPeriod}
-          ${configuredWarning}
-          ${configuredLimit}
-          ${asOf}
-          ${projection}
-          ${item.confidence !== null && item.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(item.confidence) }))}</p>` : ""}
-        </div>
-      `;
-    }).join("")}</div>`;
+        <tr>
+          <td data-label="Metric"><ha-icon icon="${icons[item.metric_id] || "mdi:chart-line"}"></ha-icon> ${this._escape(item.label || this._friendlyFeature(item.metric_id))}</td>
+          <td data-label="Today"><strong>${this._escape(this._formatComparisonValue(item, item.current_value))}</strong><p class="muted">${this._escape(this._friendlyFeature(item.status))}</p>${configuredWarning}${configuredLimit}</td>
+          <td data-label="Normal"><strong>${this._escape(normal)}</strong>${fullPeriod}</td>
+          <td data-label="Projected">${projection}</td>
+        </tr>`;
+    }).join("")}</tbody></table>`;
   }
 
   _renderApplianceExpectations(expectations) {
@@ -950,7 +973,7 @@ export function createApplianceViewMethods({
     return `<div class="entity-list">${items.map((item) => `
       <div class="metric">
         <span>${this._escape(this._friendlyFeature(item.status))}</span>
-        <strong>${this._escape(item.title || this._panelText("appliance_detail.expectation_title"))}</strong>
+        <strong class="appliance-expectation-title">${this._escape(item.title || this._panelText("appliance_detail.expectation_title"))}</strong>
         <p>${this._escape(item.observed || this._panelText("appliance_detail.observed_learning"))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.expected_prefix", { expected: item.expected || this._panelText("appliance_detail.expected_learning") }))}</p>
         <p class="muted">${this._escape(item.why_it_matters || "")}</p>
@@ -1054,6 +1077,7 @@ export function createApplianceViewMethods({
       "data-appliance-history-graph",
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
       canLoadMore,
+      true,
     );
   }
 

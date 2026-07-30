@@ -1513,8 +1513,8 @@ export function createNilmWorkspaceMethods({
         <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
-        <section class="workspace-section">${this._renderNilmReviewLayout(workspace)}</section>
-        <section class="workspace-section">${this._renderNilmSecondaryCollections(workspace)}</section>
+        <section class="workspace-section section-surface">${this._renderNilmReviewLayout(workspace)}</section>
+        <section class="workspace-section section-surface">${this._renderNilmSecondaryCollections(workspace)}</section>
       </div>
     `;
   }

@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { apiPayload, evidence, hvacAssociations } from "./panel-fixtures.js";
+import { apiPayload, chartHistory, evidence, hvacAssociations } from "./panel-fixtures.js";
 
 const HARNESS = "/tests/e2e/panel.html";
 const browserLogs = new WeakMap();
@@ -668,7 +668,7 @@ test("HVAC associations label ready modes without a trend as stable", async ({ p
   await expect(card.locator('[data-mode="heating"] .trend')).toHaveText("Stable");
 });
 
-test("House power flow omits Active now and separates contribution", async ({ page }) => {
+test("Home summary omits power flow and separates contribution", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
@@ -788,11 +788,22 @@ test("House power flow omits Active now and separates contribution", async ({ pa
   await expect(card).not.toContainText("Active now");
   await expect(card.locator("[data-appliance-id]")).toHaveCount(0);
   await expect(card.locator(".contribution")).toHaveCSS("margin-top", "12px");
+  const summaryKpis = card.locator(".kpis:has(.metric)");
+  await expect.poll(() => summaryKpis.evaluate((element) => (
+    getComputedStyle(element).gridTemplateColumns
+      .split(" ")
+      .filter((track) => Number.parseFloat(track) > 0)
+      .length
+  ))).toBe(isMobile ? 2 : 5);
+  await expect(summaryKpis.locator(".metric").first()).toHaveCSS(
+    "background-color",
+    "rgba(0, 0, 0, 0)",
+  );
   await expect(card.locator(".contribution h3")).toHaveText("Appliance Energy/Cost");
   await expect(card.locator(".contribution h3 + .controls")).toBeVisible();
   await expect(card.locator("[data-contribution-window]")).toHaveCount(0);
-  await expect(card.locator(".flow")).toHaveCount(1);
-  await expect(card.locator(".flow-labels .swatch")).toHaveCount(3);
+  await expect(card.locator(".flow")).toHaveCount(0);
+  await expect(card).not.toContainText("House power:");
   const clearedTotals = await page.evaluate(() => {
     window.__apiCalls.length = 0;
     window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
@@ -1333,7 +1344,7 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
 });
 
-test("appliance grid filters live state and loads Activity Summary history", async ({ page }) => {
+test("appliance grid filters live state and loads Activity Summary history", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.includes("/history/period")) return false;
@@ -1371,6 +1382,7 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     "circuitsetup-energy-analyzer-appliance-grid",
     {
       title: "Appliances",
+      columns: 2,
       appliances: ["fridge", "oven"].map((id) => ({
         circuit_id: id,
         name: id[0].toUpperCase() + id.slice(1),
@@ -1387,6 +1399,14 @@ test("appliance grid filters live state and loads Activity Summary history", asy
     },
     states,
   );
+
+  await expect(card.locator(".appliance-grid")).toHaveAttribute("data-columns", "2");
+  if (!isMobile) {
+    const applianceTiles = await card.locator("[data-appliance-id]").evaluateAll((tiles) => (
+      tiles.map((tile) => tile.getBoundingClientRect().toJSON())
+    ));
+    expect(applianceTiles[1].top).toBe(applianceTiles[0].top);
+  }
 
   const search = card.locator("[data-appliance-search]");
   await search.focus();
@@ -3859,8 +3879,15 @@ test("HVAC context graph overlays outdoor temperature on a selectable right axis
     return Number(new Date(url.searchParams.get("end_date")))
       - Number(new Date(url.searchParams.get("start_date")));
   })).toBeLessThan(fullSpan * 0.6);
-  await expect(card.locator("[data-chart-reset]")).toBeVisible();
-  await card.locator("[data-chart-reset]").click();
+  await expect(card.locator("[data-chart-reset]")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: window.__dashboardCard._rangeFromDateKeys(
+        window.__dashboardCard._chartDateKey(Date.now()),
+        window.__dashboardCard._chartDateKey(Date.now()),
+      ),
+    }));
+  });
   await expect.poll(() => chart.evaluate((element) => (
     Number(element.dataset.chartEnd) - Number(element.dataset.chartStart)
   ))).toBe(fullSpan);
@@ -3953,7 +3980,7 @@ test("historical dashboard keeps live summary and house status current", async (
   const summary = page.locator("circuitsetup-energy-analyzer-summary");
   const house = page.locator("circuitsetup-energy-analyzer-house-flow");
   await expect(summary).toContainText("$42.10");
-  await expect(house).toContainText("House power: 100 W");
+  await expect(house).not.toContainText("House power:");
   await expect(house).toContainText("Ready");
 
   await page.evaluate(() => {
@@ -3978,7 +4005,7 @@ test("historical dashboard keeps live summary and house status current", async (
   });
 
   await expect(summary).toContainText("$43.20");
-  await expect(house).toContainText("House power: 250 W");
+  await expect(house).not.toContainText("House power:");
   await expect(house).toContainText("Needs attention");
 });
 
@@ -4018,11 +4045,65 @@ for (const route of [
   });
 }
 
+test("shared Home Assistant surface preserves non-NILM panel routes", async ({ page, isMobile }) => {
+  await mockPanelApi(page);
+  for (const route of [
+    {
+      query: "?alert_id=alert-kitchen-energy",
+      action: "#apply_alert_decision",
+      decision: '[data-alert-decision][value="mark_expected"]',
+    },
+    { query: "?review_suggested_settings=1", action: '[data-recommendation-action="apply"]' },
+    { query: "?circuit_id=kitchen&recommendation_id=energy-threshold", action: '[data-recommendation-action="apply"]' },
+    { query: "?appliance_insights=1", action: ".appliance-insights-table a" },
+    { query: "?setup_health=1", action: "[data-save-weekly-digest]" },
+  ]) {
+    const panel = await openPanel(page, route.query);
+    await expect(panel.locator(".page-header")).toHaveCount(1);
+    await expect(panel.locator(".panel.page-header")).toHaveCount(0);
+    await expect(panel.locator("main .panel, main .section-surface").first()).toBeVisible();
+    if (route.decision) {
+      await panel.locator(route.decision).check();
+    }
+    await expect(panel.locator(route.action).first()).toBeEnabled();
+    expect(await panel.locator(route.action).first().evaluate((action) => action.tabIndex)).toBeGreaterThanOrEqual(0);
+    const hostOverflow = await panel.evaluate((host) => host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth);
+    expect(hostOverflow).toBe(false);
+    if (isMobile) {
+      const documentOverflow = await page.evaluate(() => (
+        document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+      ));
+      expect(documentOverflow).toBe(false);
+    }
+  }
+});
+
+test("Appliance Detail keeps real power with an interior var name token", async ({ page }) => {
+  await mockPanelApi(page);
+  await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+
+  const entities = await page.evaluate(() => (
+    window.__panel._applianceDetailHistoryChartGroups([
+      { entity_id: "sensor.pump_var_speed_power", unit: "W", points: [] },
+      { entity_id: "sensor.pump_kva_speed_power", unit: "W", points: [] },
+      { entity_id: "sensor.pump_var", unit: "W", points: [] },
+      { entity_id: "sensor.pump_kva", unit: "W", points: [] },
+      { entity_id: "sensor.legacy_apparent_meter", unit: "MVA", points: [] },
+      { entity_id: "sensor.legacy_reactive_meter", unit: "kvar", points: [] },
+    ]).flatMap((group) => group.series.map((item) => item.entity_id))
+  ));
+
+  expect(entities).toEqual([
+    "sensor.pump_var_speed_power",
+    "sensor.pump_kva_speed_power",
+  ]);
+});
+
 test("Appliance Detail omits session timeline and page-level controls", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
-  const predictiveHealth = panel.locator("[data-appliance-health]");
+  const predictiveHealth = panel.locator("[data-appliance-behavior-health]");
   await expect(predictiveHealth).toBeVisible();
   await expect(predictiveHealth).toContainText("Possible degradation");
   await expect(predictiveHealth).toContainText("30%");
@@ -4048,9 +4129,25 @@ test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page })
   await expect(efficiency).toContainText("Downstairs");
   await expect(efficiency).toContainText("10 min/°F");
   await expect(efficiency).toContainText("12.5 min/°F");
-  await expect(efficiency).toContainText("Outdoor: 95°F");
+  await expect(efficiency).toContainText("Outdoor temperature");
+  await expect(efficiency).toContainText("95°F");
   await expect(efficiency).toContainText("Gas-furnace blower proxy");
   await expect(efficiency).toContainText("Cooling blower supports air handling");
+});
+
+test("Appliance Detail uses Home Assistant temperature units for HVAC efficiency", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  await page.evaluate(() => {
+    window.__panel._hass.config.unit_system = { temperature: "°C" };
+    window.__panel._render();
+  });
+  const efficiency = panel.locator("[data-hvac-efficiency]");
+
+  await expect(efficiency).toContainText("18 min/°C");
+  await expect(efficiency).toContainText("22.5 min/°C");
+  await expect(efficiency).toContainText("35°C");
+  await expect(efficiency).not.toContainText("°F");
 });
 
 test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page }) => {
@@ -4088,10 +4185,12 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
   const efficiency = panel.locator("[data-hvac-efficiency]");
 
   await expect(efficiency).toContainText("Upstairs");
-  await expect(efficiency).toContainText("2 of 9 reference episodes");
+  await expect(efficiency).not.toContainText("2 of 9 reference episodes · 0 of 3 recent episodes");
   await expect(efficiency).not.toContainText("0 / 100");
   await expect(efficiency).not.toContainText("0 min/°F");
   await expect(efficiency).not.toContainText("Outdoor: 0°F");
+  await expect(efficiency.locator('.hvac-efficiency-gauge[data-hvac-learning="true"]')).toHaveCount(1);
+  await expect(efficiency.locator(".hvac-efficiency-score .muted")).toHaveCount(0);
 });
 
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
@@ -4103,6 +4202,34 @@ test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   const assigned = panel.locator('[data-nilm-lane="assigned"]');
   await expect(assigned).toBeFocused();
   await expect(assigned).toHaveAttribute("aria-selected", "true");
+});
+
+test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--ha-card-background", "#e5e7eb");
+    root.setProperty("--divider-color", "#d8dde6");
+    root.setProperty("--primary-color", "#0b6bcb");
+    root.setProperty("--ha-card-border-radius", "12px");
+  });
+
+  await expect(panel.locator(".nilm-lane").first()).toHaveCSS(
+    "background-color",
+    "rgb(229, 231, 235)",
+  );
+  await expect(panel.locator(".nilm-review-card").first()).toHaveCSS(
+    "background-color",
+    "rgb(229, 231, 235)",
+  );
+  await expect(panel.locator(".nilm-review-card").first()).toHaveCSS(
+    "border-radius",
+    "12px",
+  );
+  await expect(panel.locator('[data-nilm-lane][aria-selected="true"]')).toBeVisible();
+  await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
+  await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
 });
 
 test("major panel routes pass automated accessibility checks", async ({ page }) => {
@@ -4177,6 +4304,38 @@ test("chart mouseover shows a clamped Home Assistant-style tooltip", async ({ pa
   await page.mouse.move(0, 0);
   await expect(tooltip).toBeHidden();
   await expect(chart.locator('[data-chart-point][data-selected="true"]')).toHaveCount(0);
+});
+
+test("reactive-power alert evidence keeps its VAR graph", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.kitchen_var", state: "120", last_changed: "2026-07-13T17:00:00Z" },
+          { entity_id: "sensor.kitchen_var", state: "180", last_changed: "2026-07-13T19:30:00Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/alert_evidence")) return false;
+    await route.fulfill({
+      json: {
+        ...evidence,
+        alert: {
+          ...evidence.alert,
+          feature: "reactive_power",
+          feature_name: "Reactive Power",
+          graph_entities: ["sensor.kitchen_var"],
+          y_axis_label: "var",
+        },
+      },
+    });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?alert_id=alert-kitchen-energy");
+  await expect(panel.locator("svg.chart")).toBeVisible();
+  await expect(panel.locator(".axis-label")).toContainText("var");
 });
 
 test("matched low-side alert keeps comparison markers apart", async ({ page }) => {
@@ -4262,18 +4421,34 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
 
-  await expect(panel.locator(".appliance-detail-facts")).toHaveCount(1);
-  await expect(panel.locator(".appliance-detail-facts .metric-heading")).toHaveText([
+  await expect(panel.locator(".appliance-detail-facts")).toHaveCount(0);
+  const behavior = panel.locator("[data-appliance-behavior-health]");
+  await expect(behavior.locator("[data-appliance-now] .metric-heading")).toHaveText([
     "Activity",
     "Power",
-    "Confidence",
     "Health",
     "Energy",
-    "Runtime Today",
-    "Runs Today",
   ]);
+  await expect(behavior.locator("[data-behavior-expectations]")).toContainText("Predictive Health");
+  await expect(behavior.getByRole("heading", { name: "Now" })).toBeVisible();
+  const expectationFont = await behavior.locator(".appliance-expectation-title").evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  const expectationHeaderFont = await behavior.getByRole("heading", { name: "Behavior Expectations" }).evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  expect(expectationFont).toBeLessThan(expectationHeaderFont);
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
-  await expect(panel.getByText("Projected end of day")).toBeVisible();
+  await expect(panel.locator("[data-appliance-comparison-table]")).toBeVisible();
+  await expect(panel.getByRole("columnheader", { name: "Projected" })).toBeVisible();
+  await expect(panel.locator("[data-appliance-comparison-table]")).toContainText("Cost so far");
+  const asOfFont = await panel.locator(".appliance-comparison-as-of").evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  const comparisonHeaderFont = await panel.getByRole("heading", { name: "Today vs Normal" }).evaluate(
+    (node) => Number.parseFloat(getComputedStyle(node).fontSize),
+  );
+  expect(asOfFont).toBeLessThan(comparisonHeaderFont);
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
   await expect(dailyCost).toBeVisible();
   await expect(dailyCost.locator("svg.chart")).toHaveCount(1);
@@ -4310,9 +4485,9 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
     return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
   })).toBe(168);
 
-  const period = panel.locator("[data-appliance-history-period]");
-  await period.selectOption("24");
-  await expect(period).toHaveValue("24");
+  const period = panel.locator('[data-appliance-history-period="24"]');
+  await period.click();
+  await expect(period).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {
@@ -4337,12 +4512,40 @@ test("Appliance Detail omits a cost axis without an effective rate", async ({ pa
 
 test("Review Evidence keeps recommendation data, graph, and actions in order", async ({ page, isMobile }) => {
   test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/history/period/" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+  );
+  let historyCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      historyCalls += 1;
+      if (historyCalls === 1) {
+        await route.fulfill({ status: 503, json: { message: "Try again" } });
+      } else {
+        await route.fulfill({
+          json: [
+            chartHistory[0],
+            [
+              { entity_id: "sensor.kitchen_current", state: "2.1", last_changed: "2026-07-13T17:00:00Z" },
+              { entity_id: "sensor.kitchen_current", state: "4.9", last_changed: "2026-07-13T18:30:00Z" },
+              { entity_id: "sensor.kitchen_current", state: "3.0", last_changed: "2026-07-13T19:30:00Z" },
+            ],
+          ],
+        });
+      }
+      return true;
+    }
     if (!url.pathname.endsWith("/alert_evidence") || !url.searchParams.has("recommendation_id")) {
       return false;
     }
     const selected = {
       ...evidence.setting_recommendations[0],
+      graph_entities: ["sensor.kitchen_power", "sensor.kitchen_current"],
+      graph_entity_series: [
+        { entity_id: "sensor.kitchen_power", unit: "W" },
+        { entity_id: "sensor.kitchen_current", unit: "A" },
+      ],
       evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
       actions: {
         ...evidence.setting_recommendations[0].actions,
@@ -4353,7 +4556,7 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
         },
       },
     };
-    await route.fulfill({ json: { ...evidence, selected_recommendation: selected } });
+    await route.fulfill({ json: { ...evidence, alert: null, selected_recommendation: selected } });
     return true;
   });
   const panel = await openPanel(page, "?circuit_id=kitchen&recommendation_id=energy-threshold");
@@ -4361,7 +4564,11 @@ test("Review Evidence keeps recommendation data, graph, and actions in order", a
   await expect(panel.locator("h1")).toHaveText("Review Evidence");
   await expect(panel.getByText("Reviewing evidence for Kitchen Appliances Daily Energy Threshold.")).toHaveCount(1);
   await expect(panel.locator(".recommendation-values")).toContainText("2.2 kWh");
+  await expect(panel.locator("[data-retry-alert-history]")).toBeVisible();
+  await panel.locator("[data-retry-alert-history]").click();
   await expect(panel.locator("[data-recommendation-evidence-graph] svg.chart")).toBeVisible();
+  await expect(panel.locator("[data-recommendation-evidence-graph] svg.chart")).toHaveAttribute("data-chart-right-axis", "A");
+  expect(historyCalls).toBe(2);
   const order = await panel.locator(".selected-recommendation-evidence").evaluate((section) => ({
     data: section.querySelector(".recommendation-values").getBoundingClientRect().top,
     graph: section.querySelector("svg.chart").getBoundingClientRect().top,
@@ -4376,13 +4583,17 @@ test("Suggested Settings uses a compact support column", async ({ page, isMobile
   test.skip(isMobile, "The desktop layout is covered here; mobile already stacks the card.");
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/alert_evidence")) return false;
+    const recommendation = {
+      ...evidence.setting_recommendations[0],
+      evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
+    };
     await route.fulfill({
       json: {
         ...evidence,
-        setting_recommendations: evidence.setting_recommendations.map((recommendation) => ({
-          ...recommendation,
-          evidence_preview: "Observed Days: 12; Daily P95: 2.5 kWh",
-        })),
+        setting_recommendations: [recommendation],
+        ...(url.searchParams.has("recommendation_id")
+          ? { selected_recommendation: recommendation }
+          : {}),
       },
     });
     return true;
@@ -4391,42 +4602,57 @@ test("Suggested Settings uses a compact support column", async ({ page, isMobile
   for (const query of [
     "?review_suggested_settings=1&circuit_id=kitchen",
     "?appliance_detail=1&circuit_id=kitchen",
+    "?circuit_id=kitchen&recommendation_id=energy-threshold",
   ]) {
     const panel = await openPanel(page, query);
     const layout = panel.locator(".recommendation-layout").first();
     await expect(layout.locator(".recommendation-evidence")).toContainText("Observed Days: 12");
+    for (const support of ["expected-effect", "evidence", "historical-impact", "limitations"]) {
+      await expect(layout.locator(`[data-recommendation-support="${support}"]`)).toHaveCount(1);
+    }
     const card = await layout.evaluate((element) => {
       const heading = element.querySelector(".recommendation-heading");
       const summary = element.querySelector(".recommendation-summary");
       const support = element.querySelector(".recommendation-support");
-      const expectedEffect = support.querySelector("p > strong");
-      const evidence = support.querySelector(".recommendation-evidence > strong");
-      const historicalImpact = support.querySelector(".setting-impact-preview > strong");
-      const limitations = support.querySelector(".setting-impact-preview .muted > strong");
+      const expectedEffect = support.querySelector('[data-recommendation-support="expected-effect"]');
+      const evidence = support.querySelector('[data-recommendation-support="evidence"]');
+      const historicalImpact = support.querySelector('[data-recommendation-support="historical-impact"]');
+      const limitations = support.querySelector('[data-recommendation-support="limitations"]');
+      const evidenceCopy = evidence.querySelector(".recommendation-support-copy");
+      const style = (node) => ({
+        color: getComputedStyle(node).color,
+        fontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+      });
       return {
         headingPresent: Boolean(heading),
         headingBottom: heading?.getBoundingClientRect().bottom || 0,
-        headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+        headingFontSize: heading ? Number.parseFloat(getComputedStyle(heading).fontSize) : null,
         summaryTop: summary.getBoundingClientRect().top,
         summaryLeft: summary.getBoundingClientRect().left,
         supportTop: support.getBoundingClientRect().top,
         supportLeft: support.getBoundingClientRect().left,
         supportAlignContent: getComputedStyle(support).alignContent,
-        expectedEffectFontSize: Number.parseFloat(getComputedStyle(expectedEffect).fontSize),
-        evidenceFontSize: Number.parseFloat(getComputedStyle(evidence).fontSize),
-        historicalImpactFontSize: Number.parseFloat(getComputedStyle(historicalImpact).fontSize),
-        limitationsFontSize: Number.parseFloat(getComputedStyle(limitations).fontSize),
+        expectedEffect: style(expectedEffect),
+        evidence: style(evidenceCopy),
+        historicalImpact: style(historicalImpact),
+        limitations: style(limitations),
+        twoColumnRows: Array.from(support.querySelectorAll(".recommendation-support-row")).every((row) => (
+          getComputedStyle(row).gridTemplateColumns.split(" ").length === 2
+        )),
       };
     });
-    expect(card.headingPresent).toBe(true);
+    expect(card.headingPresent).toBe(!query.includes("recommendation_id"));
     expect(card.summaryTop).toBeGreaterThan(card.headingBottom);
     expect(card.supportTop).toBeGreaterThan(card.headingBottom);
     expect(card.supportLeft).toBeGreaterThan(card.summaryLeft);
     expect(card.supportAlignContent).toBe("start");
-    expect(card.expectedEffectFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.evidenceFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.historicalImpactFontSize).toBeLessThan(card.headingFontSize);
-    expect(card.limitationsFontSize).toBeLessThan(card.headingFontSize);
+    expect(card.expectedEffect).toEqual(card.evidence);
+    expect(card.historicalImpact).toEqual(card.evidence);
+    expect(card.limitations).toEqual(card.evidence);
+    if (card.headingFontSize !== null) {
+      expect(card.evidence.fontSize).toBeLessThan(card.headingFontSize);
+    }
+    expect(card.twoColumnRows).toBe(true);
   }
 });
 
@@ -4512,4 +4738,15 @@ test("failed NILM request can be retried", async ({ page }) => {
   await expect(panel.locator("[data-retry-nilm-workspace]")).toHaveCount(0);
   await expect(panel.locator('[data-nilm-lane="needs_review"]')).toBeVisible();
   expect(attempts).toBe(2);
+});
+
+test("integration surfaces inherit the Home Assistant font", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?setup_health=1");
+  await page.evaluate(() => {
+    document.body.style.fontFamily = '"Courier New", monospace';
+  });
+  await expect.poll(() => panel.locator("h1").evaluate(
+    (heading) => getComputedStyle(heading).fontFamily,
+  )).toContain("Courier New");
 });
