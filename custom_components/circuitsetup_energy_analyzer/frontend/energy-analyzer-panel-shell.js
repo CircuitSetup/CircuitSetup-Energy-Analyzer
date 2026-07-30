@@ -748,57 +748,47 @@ export class PanelShellMethods {
           margin: 12px 0 0;
           padding-left: 20px;
         }
-        .appliance-comparison-grid {
-          display: grid;
-          gap: 12px;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        .appliance-comparison-table {
+          border-collapse: collapse;
+          width: 100%;
         }
-        .appliance-detail-overview {
-          align-items: start;
-          display: grid;
+        .appliance-comparison-table th,
+        .appliance-comparison-table td {
+          border-bottom: 1px solid var(--divider-color, #d8dde6);
+          padding: 10px;
+          text-align: left;
+          vertical-align: top;
+        }
+        .appliance-comparison-table th,
+        .appliance-comparison-table p {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .appliance-comparison-table p { margin: 4px 0 0; }
+        .appliance-comparison-table ha-icon { vertical-align: middle; }
+        .hvac-efficiency-heading {
+          align-items: center;
+          display: flex;
           gap: 16px;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
-        .appliance-detail-timeline {
-          align-self: start;
+        .hvac-efficiency-gauge {
+          align-items: center;
+          background: conic-gradient(var(--primary-color, #0b6bcb) var(--hvac-score), var(--divider-color, #d8dde6) 0);
+          border-radius: 50%;
+          display: flex;
+          height: 76px;
+          justify-content: center;
+          position: relative;
+          width: 76px;
         }
-        .appliance-comparison {
-          background: var(--secondary-background-color, #f4f6f8);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 6px;
-          display: grid;
-          gap: 6px;
-          min-width: 0;
-          padding: 12px;
+        .hvac-efficiency-gauge::before {
+          background: var(--card-background-color, #fff);
+          border-radius: 50%;
+          content: "";
+          inset: 8px;
+          position: absolute;
         }
-        .appliance-comparison .comparison-label {
-          color: var(--secondary-text-color, #5f6b7a);
-          font-size: 12px;
-        }
-        .appliance-comparison strong {
-          font-size: 20px;
-        }
-        .appliance-comparison-columns {
-          display: grid;
-          gap: 12px;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-        .appliance-comparison-columns > div {
-          display: grid;
-          gap: 4px;
-          min-width: 0;
-        }
-        .appliance-comparison-columns span {
-          color: var(--secondary-text-color, #5f6b7a);
-          font-size: 12px;
-        }
-        .appliance-comparison .comparison-summary {
-          color: var(--secondary-text-color, #5f6b7a);
-          margin: 0;
-        }
-        .appliance-comparison p {
-          margin: 0;
-        }
+        .hvac-efficiency-gauge strong { position: relative; }
         .appliance-timeline {
           list-style: none;
           margin: 0;
@@ -1209,6 +1199,39 @@ export class PanelShellMethods {
             content: attr(data-label);
             font-size: 12px;
             font-weight: 700;
+          }
+          .appliance-comparison-table,
+          .appliance-comparison-table tbody,
+          .appliance-comparison-table tr,
+          .appliance-comparison-table td {
+            display: block;
+            width: 100%;
+          }
+          .appliance-comparison-table thead {
+            clip: rect(0 0 0 0);
+            clip-path: inset(50%);
+            height: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: nowrap;
+            width: 1px;
+          }
+          .appliance-comparison-table tr {
+            border-bottom: 1px solid var(--divider-color, #d8dde6);
+            padding: 8px 0;
+          }
+          .appliance-comparison-table td {
+            border: 0;
+            box-sizing: border-box;
+            display: grid;
+            gap: 8px;
+            grid-template-columns: minmax(88px, 0.55fr) minmax(0, 1fr);
+            padding: 5px 0;
+          }
+          .appliance-comparison-table td::before {
+            color: var(--secondary-text-color, #5f6b7a);
+            content: attr(data-label);
+            font-size: 12px;
           }
         }
         @media (prefers-reduced-motion: reduce) {

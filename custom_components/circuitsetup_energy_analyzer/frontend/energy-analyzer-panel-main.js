@@ -911,15 +911,15 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!Number.isFinite(seconds)) {
       return this._panelText("common.unknown");
     }
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.round((seconds % 3600) / 60);
-    if (hours && minutes) {
-      return `${hours}h ${minutes}m`;
-    }
-    if (hours) {
-      return `${hours}h`;
-    }
-    return `${minutes}m`;
+    const wholeSeconds = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(wholeSeconds / 3600);
+    const minutes = Math.floor((wholeSeconds % 3600) / 60);
+    const remainingSeconds = wholeSeconds % 60;
+    return [
+      hours ? `${hours}h` : "",
+      minutes ? `${minutes}m` : "",
+      remainingSeconds || (!hours && !minutes) ? `${remainingSeconds}s` : "",
+    ].filter(Boolean).join(" ");
   }
 
   _formatConfidence(value) {

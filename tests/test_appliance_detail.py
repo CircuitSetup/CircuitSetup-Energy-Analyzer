@@ -46,6 +46,10 @@ def _config(
         mode=mode,
         sensors=(
             SensorRef(f"sensor.{circuit_id}_power", SensorRole.REAL_POWER),
+            SensorRef(f"sensor.{circuit_id}_current", SensorRole.CURRENT),
+            SensorRef(f"sensor.{circuit_id}_apparent_power", SensorRole.APPARENT_POWER),
+            SensorRef(f"sensor.{circuit_id}_reactive_power", SensorRole.REACTIVE_POWER),
+            SensorRef(f"sensor.{circuit_id}_power_factor", SensorRole.POWER_FACTOR),
             SensorRef(f"sensor.{circuit_id}_energy", SensorRole.ENERGY),
         ),
     )
@@ -246,7 +250,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
         "status": "fresh",
         "label": "Fresh",
         "available_source_count": 2,
-        "configured_source_count": 2,
+        "configured_source_count": 6,
         "stale_source_count": 0,
         "missing_required_roles": [],
     }
@@ -782,15 +786,14 @@ def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
 
     payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
 
-    assert payload["history"] == {
-        "entities": ["sensor.fridge_power", "sensor.fridge_energy"],
-        "entity_series": [
-            {"entity_id": "sensor.fridge_power", "unit": "W"},
-            {"entity_id": "sensor.fridge_energy", "unit": "kWh"},
-        ],
-        "default_hours": 168,
-        "period_hours": [24, 168, 720],
-    }
+    assert payload["history"]["entity_series"] == [
+        {"entity_id": "sensor.fridge_power", "unit": "W"},
+        {"entity_id": "sensor.fridge_current", "unit": "A"},
+        {"entity_id": "sensor.fridge_power_factor", "unit": "PF"},
+        {"entity_id": "sensor.fridge_energy", "unit": "kWh"},
+    ]
+    assert "sensor.fridge_apparent_power" not in payload["history"]["entities"]
+    assert "sensor.fridge_reactive_power" not in payload["history"]["entities"]
 
 
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:

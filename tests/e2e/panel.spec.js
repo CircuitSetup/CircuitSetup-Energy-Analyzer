@@ -4022,7 +4022,7 @@ test("Appliance Detail omits session timeline and page-level controls", async ({
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
-  const predictiveHealth = panel.locator("[data-appliance-health]");
+  const predictiveHealth = panel.locator("[data-appliance-behavior-health]");
   await expect(predictiveHealth).toBeVisible();
   await expect(predictiveHealth).toContainText("Possible degradation");
   await expect(predictiveHealth).toContainText("30%");
@@ -4266,14 +4266,14 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await expect(panel.locator(".appliance-detail-facts .metric-heading")).toHaveText([
     "Activity",
     "Power",
-    "Confidence",
     "Health",
     "Energy",
     "Runtime Today",
     "Runs Today",
   ]);
   await expect(panel.getByRole("heading", { name: "Today vs Normal" })).toBeVisible();
-  await expect(panel.getByText("Projected end of day")).toBeVisible();
+  await expect(panel.locator("[data-appliance-comparison-table]")).toBeVisible();
+  await expect(panel.getByRole("columnheader", { name: "Projected" })).toBeVisible();
   const dailyCost = panel.locator("[data-appliance-daily-cost]");
   await expect(dailyCost).toBeVisible();
   await expect(dailyCost.locator("svg.chart")).toHaveCount(1);

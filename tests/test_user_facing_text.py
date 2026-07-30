@@ -1798,7 +1798,6 @@ const dailyMetricOrder = [
 assert.ok(dailyMetricOrder.every((index) => index >= 0));
 assert.deepEqual(dailyMetricOrder, [...dailyMetricOrder].sort((left, right) => left - right));
 for (const removed of [
-  ">Learning<",
   ">Source<",
   ">Mains Source<",
   ">Data Quality<",
@@ -1871,7 +1870,7 @@ const html = panel._renderApplianceComparisons([{
 }]);
 for (const expected of [
   "Energy so far",
-  "Projected end of day",
+  "Projected",
   "1.9 kWh",
   "Projected range 1.7 kWh - 2.1 kWh",
   "Completed-day normal range 1.4 kWh - 1.8 kWh",
@@ -2061,7 +2060,7 @@ for (const expected of [
   'icon="mdi:counter"',
   'icon="mdi:cash"',
   'class="appliance-timeline"',
-  'class="appliance-comparison-grid"',
+  'data-appliance-comparison-table',
 ]) {
   if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
 }
@@ -2089,17 +2088,17 @@ def test_appliance_detail_renders_predictive_health_evidence() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
-const learning = panel._renderApplianceHealth({
+const learning = panel._renderApplianceBehaviorHealth([], {
   status: "learning",
   reason: "insufficient_history",
   confidence: 0,
 });
-assert.ok(learning.includes('data-appliance-health'));
+assert.ok(learning.includes('data-appliance-behavior-health'));
 assert.ok(learning.includes("Predictive Health"));
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("More completed appliance history is needed"));
 
-const possibleIssue = panel._renderApplianceHealth({
+const possibleIssue = panel._renderApplianceBehaviorHealth([], {
   status: "possible_degradation",
   reason: "sustained_change",
   confidence: 0.91,
@@ -2110,7 +2109,7 @@ const possibleIssue = panel._renderApplianceHealth({
   recent_count: 3,
   context: { season: "summer", weather_mode: "cooling" },
   last_eligible_date_or_session: "2026-07-27",
-});
+}, { items: [] });
 for (const expected of [
   "Possible degradation",
   "Sustained efficiency change",
@@ -2250,7 +2249,7 @@ panel._applianceDetail = {
   },
 };
 const html = panel._renderApplianceDetailBody();
-assert.ok(html.includes('class="appliance-detail-overview"'));
+assert.ok(html.includes('class="panel summary appliance-detail-facts"'));
 assert.ok(html.includes("Appliance Activity History"));
 assert.ok(!html.includes("Why Energy Changed"));
 assert.ok(!html.includes("What To Check First"));
@@ -2410,8 +2409,8 @@ for (const expected of [
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
-if ((html.match(/class="chart"/g) || []).length !== 4) {
-  throw new Error(`expected separate power, amps, power factor, and energy charts: ${html}`);
+if ((html.match(/class="chart"/g) || []).length !== 3) {
+  throw new Error(`expected combined power and amps plus power factor and energy charts: ${html}`);
 }
 const axisLabels = [...html.matchAll(/class="axis-label"[^>]*>([^<]+)<\\/text>/g)]
   .map((match) => match[1]);
@@ -4551,6 +4550,16 @@ def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
     assert null_guard in formatter
     assert formatter.index(null_guard) < formatter.index(coercion)
 
+    _run_panel_node_script(
+        '''
+const panel = new context.Panel();
+assert.equal(panel._formatDuration(0), "0s");
+assert.equal(panel._formatDuration(61), "1m 1s");
+assert.equal(panel._formatDuration(3661), "1h 1m 1s");
+assert.equal(panel._formatDuration(null), "Unknown");
+'''
+    )
+
 
 def test_appliance_detail_percent_comparisons_format_without_extra_space() -> None:
     _run_panel_node_script(
@@ -4629,21 +4638,6 @@ def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks()
         "data-appliance-insights-source-path",
         'querySelectorAll("[data-appliance-insights-detail-path]")',
         'querySelectorAll("[data-appliance-insights-source-path]")',
-    ):
-        assert expected in asset
-
-
-def test_appliance_detail_panel_renders_why_energy_changed() -> None:
-    asset = _frontend_source()
-
-    for expected in (
-        "_renderWhyEnergyChanged",
-        'this._panelText("appliance_detail.why_energy_changed")',
-        "energy_change_explanation",
-        "runtime_contribution_percent",
-        "running_power_contribution_percent",
-        "cycle_count_contribution_percent",
-        "unexplained_percent",
     ):
         assert expected in asset
 
