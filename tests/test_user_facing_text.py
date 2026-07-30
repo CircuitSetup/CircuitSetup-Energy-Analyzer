@@ -175,6 +175,41 @@ def _translations() -> dict:
     )
 
 
+def test_hvac_associations_card_text_has_required_labels_and_placeholders() -> None:
+    live_cards = _translations()["config_panel"]["dashboard"]["live_cards"]
+    expected = {
+        "hvac_associations_title",
+        "heating",
+        "cooling",
+        "learned_baseline",
+        "efficiency_percent",
+        "recent_response",
+        "learning",
+        "tracking",
+        "needs_attention",
+        "stable",
+        "faster",
+        "slower",
+        "supporting_blower",
+        "mapped_temperature",
+        "minutes_per_degree",
+        "not_available",
+        "retry",
+        "load_error",
+        "open_detail",
+        "no_hvac_associations",
+    }
+
+    assert expected <= live_cards.keys()
+    assert all(live_cards[key] for key in expected)
+    assert re.findall(r"{(.*?)}", live_cards["mapped_temperature"]) == ["name"]
+    assert re.findall(r"{(.*?)}", live_cards["minutes_per_degree"]) == [
+        "value",
+        "unit",
+    ]
+    assert re.findall(r"{(.*?)}", live_cards["no_hvac_associations"]) == []
+
+
 def _iter_translation_strings(value, path: tuple[str, ...] = ()):
     if isinstance(value, str):
         yield path, value

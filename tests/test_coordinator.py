@@ -39,6 +39,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
     ENTITY_DETAIL_EXPERT,
+    EVENT_HVAC_ASSOCIATION_UPDATED,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
     AnalyzerState,
@@ -61,6 +62,30 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+
+def test_coordinator_fires_hvac_association_revision_event_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    events: list[tuple[str, dict[str, object]]] = []
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            bus=SimpleNamespace(
+                async_fire=lambda event_type, data: events.append((event_type, data))
+            )
+        ),
+        entry_id="entry-1",
+    )
+    coordinator.state.hvac_association_revision_by_circuit["heat_pump"] = 1
+
+    coordinator.async_set_updated_data(coordinator.state)
+    coordinator.async_set_updated_data(coordinator.state)
+
+    assert events == [
+        (EVENT_HVAC_ASSOCIATION_UPDATED, {"entry_id": "entry-1"})
+    ]
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,11 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+    CONF_LINKED_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_ENTITIES,
+    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP,
     DATA_RELOAD_COUNT,
     DOMAIN,
 )
@@ -82,6 +87,263 @@ def _coordinator(
             learning_by_circuit={default_config.circuit_id: False},
         ),
     )
+
+
+def _hvac_association_coordinator(
+    config: CircuitConfig,
+    *,
+    streams: dict[str, object] | None = None,
+    settings: dict[str, object] | None = None,
+    entry_id: str = "entry-1",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        entry_id=entry_id,
+        entry_data={CONF_THERMOSTAT_ENTITIES: ["climate.downstairs"]},
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                config.circuit_id: {
+                    CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.downstairs"],
+                    **(settings or {}),
+                }
+            }
+        },
+        circuit_configs=(config,),
+        state=SimpleNamespace(
+            hvac_efficiency_by_circuit={
+                config.circuit_id: {"status": "ready", "streams": streams or {}}
+            },
+            hvac_thermostat_setup_issues_by_circuit={},
+        ),
+    )
+
+
+def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="heat_pump",
+        name="Heat Pump",
+        appliance_profile=ApplianceProfile.HEAT_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(),
+    )
+    streams = {
+        "heat_pump|climate.downstairs|heating": {
+            "status": "ready",
+            "score": 92.0,
+            "finding": "slower",
+            "change_ratio": 0.087,
+            "recent_minutes_per_degree": 10.87,
+            "context": {
+                "mode": "heating",
+                "thermostat_entity_id": "climate.downstairs",
+            },
+        },
+        "heat_pump|climate.downstairs|cooling": {
+            "status": "ready",
+            "score": 108.0,
+            "finding": "faster",
+            "recent_minutes_per_degree": 7.5,
+            "context": {
+                "mode": "cooling",
+                "thermostat_entity_id": "climate.downstairs",
+            },
+        },
+    }
+    coordinator = _hvac_association_coordinator(config, streams=streams)
+    coordinator.entry_data[CONF_THERMOSTAT_ENTITIES].append("climate.upstairs")
+    coordinator.options[CONF_ADVANCED_SETTINGS]["heat_pump"][
+        CONF_LINKED_THERMOSTAT_ENTITIES
+    ].append("climate.upstairs")
+
+    payload = hvac_associations_payload([coordinator], entry_id="entry-1")
+
+    assert [item["thermostat_entity_id"] for item in payload["items"]] == [
+        "climate.downstairs",
+        "climate.upstairs",
+    ]
+    assert payload["items"][0]["modes"]["heating"]["score"] == 92.0
+    assert payload["items"][0]["modes"]["heating"]["change_percent"] == 8.7
+    assert payload["items"][0]["modes"]["cooling"]["score"] == 108.0
+    assert payload["items"][1]["status"] == "learning"
+
+
+def test_hvac_associations_payload_exposes_bounded_supporting_blowers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "heat_pump",
+        "Heat Pump",
+        ApplianceProfile.HEAT_PUMP,
+        CircuitMode.SINGLE_PHASE,
+        (),
+    )
+    streams = {
+        "heat_pump|climate.downstairs|cooling": {
+            "status": "ready",
+            "context": {
+                "supporting_blower_ids": ["blower", "", "air_handler", "blower"]
+            },
+            "current_episode": {"unbounded": ["not", "for", "panel"]},
+        }
+    }
+
+    payload = hvac_associations_payload(
+        [_hvac_association_coordinator(config, streams=streams)]
+    )
+
+    mode = payload["items"][0]["modes"]["cooling"]
+    assert mode["supporting_blower_ids"] == ["air_handler", "blower"]
+    assert "current_episode" not in mode
+
+
+@pytest.mark.parametrize(
+    ("profile", "settings", "modes"),
+    [
+        (ApplianceProfile.HVAC_COMPRESSOR, {}, {"cooling"}),
+        (ApplianceProfile.ELECTRIC_HEAT, {}, {"heating"}),
+        (ApplianceProfile.HEAT_PUMP, {}, {"heating", "cooling"}),
+        (ApplianceProfile.MINI_SPLIT, {}, {"heating", "cooling"}),
+        (ApplianceProfile.HVAC, {}, {"heating", "cooling"}),
+        (ApplianceProfile.HVAC_BLOWER, {}, set()),
+        (
+            ApplianceProfile.HVAC_BLOWER,
+            {CONF_BLOWER_REPRESENTS_GAS_HEAT: True},
+            {"heating"},
+        ),
+    ],
+)
+def test_hvac_associations_payload_exposes_only_applicable_modes(
+    profile: ApplianceProfile, settings: dict[str, object], modes: set[str]
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig("hvac", "HVAC", profile, CircuitMode.SINGLE_PHASE, ())
+    payload = hvac_associations_payload(
+        [_hvac_association_coordinator(config, settings=settings)]
+    )
+
+    assert set(payload["items"][0]["modes"]) == modes
+
+
+def test_hvac_associations_payload_marks_setup_issues_and_avoids_hass() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    coordinator = _hvac_association_coordinator(config)
+    class ForbiddenHassAccess:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"unexpected hass access: {name}")
+
+    coordinator.hass = ForbiddenHassAccess()
+    coordinator.state.hvac_thermostat_setup_issues_by_circuit = {
+        "hvac": [{"issue": "missing_thermostat"}]
+    }
+
+    payload = hvac_associations_payload([coordinator])
+
+    assert payload["items"][0]["status"] == "needs_attention"
+
+
+def test_hvac_associations_payload_scopes_setup_issues_to_matching_mapping(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    coordinator = _hvac_association_coordinator(
+        config,
+        streams={
+            "hvac|climate.downstairs|heating": {
+                "status": "ready",
+                "context": {
+                    "mode": "heating",
+                    "thermostat_entity_id": "climate.downstairs",
+                },
+            }
+        },
+    )
+    coordinator.entry_data[CONF_THERMOSTAT_ENTITIES].append("climate.upstairs")
+    coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"][
+        CONF_LINKED_THERMOSTAT_ENTITIES
+    ].append("climate.upstairs")
+    coordinator.options[CONF_ADVANCED_SETTINGS]["hvac"][
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP
+    ] = {"climate.upstairs": "sensor.upstairs_temperature"}
+
+    class ForbiddenHassAccess:
+        def __getattr__(self, name: str) -> object:
+            raise AssertionError(f"unexpected hass access: {name}")
+
+    coordinator.hass = ForbiddenHassAccess()
+    coordinator.state.hvac_thermostat_setup_issues_by_circuit = {
+        "hvac": [{"source_entities": ["sensor.upstairs_temperature"]}]
+    }
+
+    payload = hvac_associations_payload([coordinator])
+
+    assert [item["status"] for item in payload["items"]] == [
+        "ready",
+        "needs_attention",
+    ]
+
+
+def test_hvac_associations_payload_filters_coordinators_by_entry_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    payload = hvac_associations_payload(
+        [
+            _hvac_association_coordinator(config, entry_id="entry-1"),
+            _hvac_association_coordinator(config, entry_id="entry-2"),
+        ],
+        entry_id="entry-2",
+    )
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["entry_id"] == "entry-2"
+
+
+def test_hvac_associations_payload_detail_links_keep_entry_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        hvac_associations_payload,
+    )
+
+    config = CircuitConfig(
+        "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
+    )
+    payload = hvac_associations_payload(
+        [
+            _hvac_association_coordinator(config, entry_id="entry one"),
+            _hvac_association_coordinator(config, entry_id="entry/two"),
+        ]
+    )
+
+    assert [
+        parse_qs(urlparse(item["detail_path"]).query)["entry_id"]
+        for item in payload["items"]
+    ] == [["entry one"], ["entry/two"]]
+    for item in payload["items"]:
+        query = parse_qs(urlparse(item["detail_path"]).query)
+        assert query["circuit_id"] == ["hvac"]
+        assert query["appliance_detail"] == ["1"]
 
 
 def test_alert_evidence_payload_matches_exact_alert_id() -> None:
@@ -3439,6 +3701,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         APPLIANCE_DETAIL_API_PATH,
         APPLIANCE_INSIGHTS_API_PATH,
         EVIDENCE_API_PATH,
+        HVAC_ASSOCIATIONS_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
         SETUP_HEALTH_API_PATH,
@@ -3485,12 +3748,19 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
     assert STATIC_URL_PATH in str(http.static_paths[0])
     assert [view.url for view in http.views] == [
         EVIDENCE_API_PATH,
+        HVAC_ASSOCIATIONS_API_PATH,
         APPLIANCE_DETAIL_API_PATH,
         APPLIANCE_INSIGHTS_API_PATH,
         SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
     ]
+    assert {view.name for view in http.views} >= {
+        "api:circuitsetup_energy_analyzer:hvac_associations"
+    }
+    assert HVAC_ASSOCIATIONS_API_PATH == (
+        "/api/circuitsetup_energy_analyzer/hvac_associations"
+    )
     assert frontend.removed == [(PANEL_URL_PATH, {"warn_if_unknown": False})]
     assert len(panel_custom.panels) == 1
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
@@ -3647,7 +3917,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 6
+    assert len(http.views) == 7
     assert resource_updates == [
         (
             "dashboard-graph-module",
