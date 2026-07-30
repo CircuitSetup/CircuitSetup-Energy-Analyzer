@@ -37,6 +37,7 @@ ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
 CONTEXT_GRAPH_CARD = "custom:circuitsetup-energy-analyzer-context-graph"
 DATE_RANGE_CARD = "custom:circuitsetup-energy-analyzer-date-range"
 SUMMARY_CARD = "custom:circuitsetup-energy-analyzer-summary"
+HVAC_ASSOCIATIONS_CARD = "custom:circuitsetup-energy-analyzer-hvac-associations"
 SECTIONS_FOOTER_MIN_VERSION = (2026, 3)
 DASHBOARD_CUSTOM_CARD_TYPES = (
     HOUSE_FLOW_CARD,
@@ -45,6 +46,7 @@ DASHBOARD_CUSTOM_CARD_TYPES = (
     CONTEXT_GRAPH_CARD,
     DATE_RANGE_CARD,
     SUMMARY_CARD,
+    HVAC_ASSOCIATIONS_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
 )
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
@@ -651,6 +653,16 @@ def _build_energy_costs_view(
     contextual_graphs: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     cards = list(contextual_graphs)
+    if context.hvac:
+        cards.append(
+            {
+                "type": HVAC_ASSOCIATIONS_CARD,
+                "title": _dashboard_text("cards", "hvac_associations"),
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/hvac_associations",
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
+        )
     appliance_power_rows = _published_nilm_power_rows(
         context.registry_lookup,
         context.entry_id,

@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     DATE_RANGE_CARD,
     ENERGY_COST_CARD,
     HOUSE_FLOW_CARD,
+    HVAC_ASSOCIATIONS_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
     SUMMARY_CARD,
     build_recommended_dashboard,
@@ -348,7 +349,7 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     [
         (
             DASHBOARD_LAYOUT_SIMPLE,
-            ["overview"],
+            ["overview", "energy-costs"],
         ),
         (
             DASHBOARD_LAYOUT_STANDARD,
@@ -745,7 +746,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         "custom:circuitsetup-energy-analyzer-house-flow",
     )
     assert energy_card in home_view["sections"][0]["cards"]
-    assert "energy-costs" not in {
+    assert "energy-costs" in {
         view["path"] for view in _dashboard_views(dashboard)
     }
     assert energy_card["grid_options"]["columns"] == 24
@@ -782,6 +783,64 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
     assert "sensor.mains_cost_cycle" in billing_entities
     assert "sensor.mains_cost_cycle_forecast" in billing_entities
     assert all("cost_today" not in entity_id for entity_id in billing_entities)
+
+
+def test_hvac_associations_card_is_on_energy_costs_only() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert HVAC_ASSOCIATIONS_CARD not in cards_by_view["overview"]
+    assert HVAC_ASSOCIATIONS_CARD not in cards_by_view.get("insights", set())
+    card = _card_of_type(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "energy-costs"
+        ),
+        HVAC_ASSOCIATIONS_CARD,
+    )
+    assert card["title"] == "HVAC & Thermostats"
+    assert card["entry_id"] is None
+    assert card["api_path"] == "circuitsetup_energy_analyzer/hvac_associations"
+    assert card["labels"]["hvac_associations_title"] == "HVAC & Thermostats"
+
+
+def test_hvac_associations_card_is_omitted_without_hvac() -> None:
+    dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
+
+    assert HVAC_ASSOCIATIONS_CARD not in {
+        str(card["type"])
+        for card in _dashboard_cards(dashboard)
+        if isinstance(card.get("type"), str)
+    }
+
+
+def test_hvac_associations_card_is_shown_in_simple_layout() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(), DASHBOARD_LAYOUT_SIMPLE
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert "insights" not in cards_by_view
 
 
 def test_appliance_timeline_uses_activity_summary_entities() -> None:
@@ -935,6 +994,7 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
 
     assert [view["path"] for view in _dashboard_views(dashboard)] == [
         "overview",
+        "energy-costs",
         "insights",
     ]
     assert dashboard["views"][0]["type"] == "sections"
@@ -1167,6 +1227,7 @@ def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
     assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
     assert preflight["will_include"] == [
         "Home",
+        "Energy & Costs",
         "Insights",
     ]
     assert preflight["nilm_enabled"] is True
@@ -1556,7 +1617,10 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     refs = _entity_refs(history_graph)
 
     assert history_graph["type"] == CONTEXT_GRAPH_CARD
-    assert graph_cards == [history_graph]
+    assert {card["type"] for card in graph_cards} == {
+        HVAC_ASSOCIATIONS_CARD,
+        CONTEXT_GRAPH_CARD,
+    }
     assert "sensor.compressor_w" in refs
     assert "sensor.compressor_va" not in refs
     assert "sensor.compressor_var" not in refs
