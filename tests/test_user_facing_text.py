@@ -2137,7 +2137,7 @@ const panel = new context.Panel();
 panel._hass = { config: { unit_system: { temperature: "°F" } } };
 const ready = panel._renderHvacEfficiency({
   status: "ready",
-  summary_score: 80,
+  summary_score: 110,
   trend: "slower",
   threshold_pct: 25,
   learning: {
@@ -2184,7 +2184,8 @@ const ready = panel._renderHvacEfficiency({
 for (const expected of [
   'data-hvac-efficiency',
   "HVAC Thermostat Efficiency",
-  "80 / 100",
+  "110 / 100",
+  'style="--hvac-score:55%"',
   "100 is the learned baseline",
   "Alert threshold: 25% response change",
   "Heating",

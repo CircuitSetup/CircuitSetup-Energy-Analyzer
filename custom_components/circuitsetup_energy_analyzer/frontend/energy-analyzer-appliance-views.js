@@ -731,7 +731,7 @@ export function createApplianceViewMethods({
     const modes = `${renderMode("heating")}${renderMode("cooling")}`;
     const score = finite(efficiency.summary_score) ? Number(efficiency.summary_score) : null;
     const gauge = score !== null
-      ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(100, score))}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
+      ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(200, score)) / 2}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
       : "";
     return `<section class="panel" data-hvac-efficiency>
       <h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2>
