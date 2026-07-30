@@ -43,6 +43,27 @@ def _frontend_source() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in FRONTEND_ASSETS)
 
 
+def test_frontend_inherits_home_assistant_typography() -> None:
+    panel_shell = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
+    dashboard = DASHBOARD_GRAPHS_ASSET.read_text(encoding="utf-8")
+    combined = f"{panel_shell}\n{dashboard}"
+
+    assert "font-family: Roboto, Noto, sans-serif" not in combined
+    assert "font-family: var(--paper-font-body1_-_font-family" not in combined
+    assert ":host {" in panel_shell
+    assert "font-family: inherit;" in panel_shell
+    assert "font-family: inherit;" in dashboard
+
+
+def test_panel_uses_content_header_and_home_assistant_card_tokens() -> None:
+    asset = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
+
+    assert '<header class="page-header">' in asset
+    assert 'class="panel page-header"' not in asset
+    assert "var(--ha-card-border-radius" in asset
+    assert "var(--ha-card-box-shadow" in asset
+
+
 def _run_panel_node_script(body: str) -> None:
     translation_path = INTEGRATION_DIR / "translations" / "en.json"
     panel_text_statement = (
@@ -6390,7 +6411,7 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
         assert declaration in summary_style
 
 
-def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
+def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:
     asset = _frontend_source()
     surface_rule = re.search(
         r"\.section-surface\s*\{(?P<body>.*?)\}",
@@ -6400,12 +6421,14 @@ def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
 
     assert surface_rule is not None
     for declaration in (
-        "background: var(--card-background-color, #fff);",
-        "border: 1px solid var(--divider-color, #d8dde6);",
-        "border-radius: 8px;",
-        "padding: 16px;",
+        "background: var(--ha-card-background, var(--card-background-color));",
+        "border: var(--ha-card-border-width, 1px) solid",
+        "var(--ha-card-border-color, var(--divider-color));",
+        "border-radius: var(--ha-card-border-radius, 12px);",
+        "box-shadow: var(--ha-card-box-shadow);",
     ):
         assert declaration in surface_rule.group("body")
+    assert ".section-surface {\n          padding: 16px;" in asset
     for marker in (
         'class="evidence-section evidence-meta summary section-surface"',
         'class="evidence-section comparison section-surface"',
@@ -6533,10 +6556,10 @@ def test_alert_evidence_render_contracts() -> None:
         querySelectorAll() { return []; },
       };
       panel._render();
-      const start = panel.shadowRoot.innerHTML.indexOf('<section class="panel page-header">');
+      const start = panel.shadowRoot.innerHTML.indexOf('<header class="page-header">');
       const header = panel.shadowRoot.innerHTML.slice(
         start,
-        panel.shadowRoot.innerHTML.indexOf("</section>", start),
+        panel.shadowRoot.innerHTML.indexOf("</header>", start),
       );
       assert.ok(header.includes("Last Seen"));
       assert.ok(header.includes("2026-07-09"));

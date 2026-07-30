@@ -248,10 +248,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _styles() {
       return `
-        :host { display: block; }
+        :host { display: block; font-family: inherit; }
         * { box-sizing: border-box; letter-spacing: 0; }
-        ha-card { background: var(--card-background-color, #fff); overflow: hidden; }
-        .dashboard-card { color: var(--primary-text-color, #111827); display: grid; font-family: Roboto, Noto, sans-serif; font-size: 14px; gap: 16px; line-height: 20px; padding: 16px; }
+        ha-card { background: var(--ha-card-background, var(--card-background-color)); border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color)); border-radius: var(--ha-card-border-radius, 12px); box-shadow: var(--ha-card-box-shadow); overflow: hidden; }
+        .dashboard-card { color: var(--primary-text-color, #111827); display: grid; font-family: inherit; font-size: 14px; gap: 16px; line-height: 20px; padding: 16px; }
         h2, h3, p { margin: 0; }
         h2 { font-size: 24px; font-weight: 400; line-height: 32px; }
         h3 { font-size: 20px; font-weight: 400; line-height: 28px; }
@@ -295,7 +295,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .timeline-axis span { text-align: center; }
         .timeline-axis span:first-child { text-align: left; }
         .timeline-axis span:last-child { text-align: right; }
-        .chart-frame { font-family: Roboto, Noto, sans-serif; overflow: visible; position: relative; }
+        .chart-frame { font-family: inherit; overflow: visible; position: relative; }
         .chart { display: block; height: auto; max-width: 100%; min-height: 200px; width: 100%; }
         .chart [data-chart-point] { cursor: crosshair; opacity: 0.55; }
         .chart [data-chart-point][data-selected="true"] { opacity: 1; stroke: var(--card-background-color, #fff); stroke-width: 2; }
@@ -2893,10 +2893,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     this.shadowRoot.innerHTML = `
       <ha-card>
         <style>
+          ha-card {
+            background: var(--ha-card-background, var(--card-background-color));
+            border: var(--ha-card-border-width, 1px) solid
+              var(--ha-card-border-color, var(--divider-color));
+            border-radius: var(--ha-card-border-radius, 12px);
+            box-shadow: var(--ha-card-box-shadow);
+          }
           .dashboard-graphs {
             color: var(--primary-text-color, #111827);
             display: grid;
-            font-family: Roboto, Noto, sans-serif;
+            font-family: inherit;
             font-size: 14px;
             gap: 16px;
             line-height: 20px;
@@ -2984,7 +2991,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             margin-top: 8px;
           }
           .chart-frame {
-            font-family: Roboto, Noto, sans-serif;
+            font-family: inherit;
             overflow: visible;
             position: relative;
           }

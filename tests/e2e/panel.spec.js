@@ -4513,3 +4513,14 @@ test("failed NILM request can be retried", async ({ page }) => {
   await expect(panel.locator('[data-nilm-lane="needs_review"]')).toBeVisible();
   expect(attempts).toBe(2);
 });
+
+test("integration surfaces inherit the Home Assistant font", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?setup_health=1");
+  await page.evaluate(() => {
+    document.body.style.fontFamily = '"Courier New", monospace';
+  });
+  await expect.poll(() => panel.locator("h1").evaluate(
+    (heading) => getComputedStyle(heading).fontFamily,
+  )).toContain("Courier New");
+});

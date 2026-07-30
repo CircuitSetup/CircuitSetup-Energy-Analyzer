@@ -63,13 +63,13 @@ export class PanelShellMethods {
     this.shadowRoot.innerHTML = `
       <style>
         :host {
+          background: var(--primary-background-color);
+          color: var(--primary-text-color);
           display: block;
+          font-family: inherit;
           min-height: 100vh;
           box-sizing: border-box;
           padding: 24px;
-          color: var(--primary-text-color, #1f2933);
-          background: var(--primary-background-color, #f7f8fa);
-          font-family: var(--paper-font-body1_-_font-family, system-ui, sans-serif);
         }
         .shell {
           max-width: 1120px;
@@ -87,12 +87,16 @@ export class PanelShellMethods {
         h2 {
           font-size: 18px;
         }
+        .panel,
+        .section-surface {
+          background: var(--ha-card-background, var(--card-background-color));
+          border: var(--ha-card-border-width, 1px) solid
+            var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
+          box-shadow: var(--ha-card-box-shadow);
+        }
         .panel {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 8px;
           padding: 18px;
-          box-shadow: var(--ha-card-box-shadow, 0 1px 3px rgba(15, 23, 42, 0.12));
         }
         .page-header {
           display: grid;
@@ -128,9 +132,6 @@ export class PanelShellMethods {
           gap: 6px;
         }
         .section-surface {
-          background: var(--card-background-color, #fff);
-          border: 1px solid var(--divider-color, #d8dde6);
-          border-radius: 8px;
           padding: 16px;
         }
         .legend {
@@ -387,7 +388,7 @@ export class PanelShellMethods {
           margin-top: 8px;
         }
         .chart-frame {
-          font-family: Roboto, Noto, sans-serif;
+          font-family: inherit;
           overflow: visible;
           position: relative;
         }
@@ -1218,12 +1219,12 @@ export class PanelShellMethods {
         }
       </style>
       <main class="shell">
-        <section class="panel page-header">
+        <header class="page-header">
           <p class="status">${this._escape(statusText)}</p>
           <h1>${this._escape(headerTitle)}</h1>
           <p class="muted">${this._escape(headerMessage)}</p>
           ${!setupHealthRoute && !suggestedSettingsRoute && !applianceInsightsRoute && !applianceDetailRoute && !nilmWorkspaceRoute && alert && alert.last_seen ? `<p class="muted evidence-timestamp"><strong>${this._escape(this._panelText("evidence.labels.last_seen"))}:</strong> ${this._escape(this._formatDateTime(alert.last_seen))}</p>` : ""}
-        </section>
+        </header>
       ${this._loading ? `<section class="panel loading-skeleton ${nilmWorkspaceRoute ? "nilm-loading-skeleton" : ""}" data-loading-skeleton role="status" aria-label="${this._escape(loadingText)}"></section>` : ""}
       ${this._lastActionMessage ? `<section class="panel"><p>${this._escape(this._lastActionMessage)}</p></section>` : ""}
       ${this._error ? `<section class="panel error"><p>${this._escape(this._error)}</p><button class="secondary" id="retry">${this._escape(this._panelText("common.retry"))}</button></section>` : ""}
