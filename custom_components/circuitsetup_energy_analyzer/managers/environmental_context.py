@@ -597,6 +597,18 @@ class EnvironmentalContextManager:
             evidence["friendly_summary"] = (
                 "Configured water-flow sensors are currently unavailable."
             )
+            for field in (
+                "baseline_context",
+                "baseline_fallback_level",
+                "confidence",
+                "contextual_baseline_confidence",
+                "contextual_status",
+                "flow_active_minutes",
+                "mismatch_minutes",
+                "recent_flow_explains_activity",
+                "recent_related_runtime_minutes",
+            ):
+                evidence.pop(field, None)
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
         return evidence
 

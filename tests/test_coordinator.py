@@ -1523,6 +1523,17 @@ def test_coordinator_preserves_unavailable_flow_sensor_state() -> None:
         "sensor_unavailable",
         "Configured water-flow sensors are currently unavailable.",
     )
+    assert {
+        "baseline_context",
+        "baseline_fallback_level",
+        "confidence",
+        "contextual_baseline_confidence",
+        "contextual_status",
+        "flow_active_minutes",
+        "mismatch_minutes",
+        "recent_flow_explains_activity",
+        "recent_related_runtime_minutes",
+    }.isdisjoint(evidence)
 
 
 def test_coordinator_keeps_disabled_flow_relationship_unconfigured() -> None:
