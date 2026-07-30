@@ -175,17 +175,25 @@ def test_hvac_associations_payload_exposes_bounded_supporting_blowers() -> None:
     )
 
     config = CircuitConfig(
-        "heat_pump", "Heat Pump", ApplianceProfile.HEAT_PUMP, CircuitMode.SINGLE_PHASE, ()
+        "heat_pump",
+        "Heat Pump",
+        ApplianceProfile.HEAT_PUMP,
+        CircuitMode.SINGLE_PHASE,
+        (),
     )
     streams = {
         "heat_pump|climate.downstairs|cooling": {
             "status": "ready",
-            "context": {"supporting_blower_ids": ["blower", "", "air_handler", "blower"]},
+            "context": {
+                "supporting_blower_ids": ["blower", "", "air_handler", "blower"]
+            },
             "current_episode": {"unbounded": ["not", "for", "panel"]},
         }
     }
 
-    payload = hvac_associations_payload([_hvac_association_coordinator(config, streams=streams)])
+    payload = hvac_associations_payload(
+        [_hvac_association_coordinator(config, streams=streams)]
+    )
 
     mode = payload["items"][0]["modes"]["cooling"]
     assert mode["supporting_blower_ids"] == ["air_handler", "blower"]
