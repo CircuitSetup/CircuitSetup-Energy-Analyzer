@@ -282,6 +282,20 @@ def test_edge_detector_rejects_one_sample_excursion_with_confirmation() -> None:
     assert edges == []
 
 
+def test_edge_detector_honors_confirmation_tolerance_near_threshold() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_tolerance_ratio=0.15,
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 100.0), sample(20, 51.0)]
+    )
+
+    assert edges == []
+
+
 def test_edge_detector_keeps_original_timestamp_for_confirmed_level() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
 

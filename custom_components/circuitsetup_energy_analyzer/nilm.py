@@ -548,10 +548,7 @@ class NilmEdgeDetector:
         baseline: CircuitSample,
     ) -> bool:
         transition = abs(float(reference.real_power) - float(baseline.real_power))
-        tolerance = max(
-            self.min_delta_w * 0.5,
-            transition * self.confirmation_tolerance_ratio,
-        )
+        tolerance = transition * self.confirmation_tolerance_ratio
         return abs(float(sample.real_power) - float(reference.real_power)) <= tolerance
 
     def _edge_between(
