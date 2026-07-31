@@ -983,6 +983,7 @@ def pair_nilm_sessions_for_signatures(
 
     used_on_indices: set[int] = set()
     used_off_indices: set[int] = set()
+    force_open_on_indices: set[int] = set()
     sessions: list[NilmSession] = []
     eligible_candidates = [
         candidate
@@ -1005,6 +1006,8 @@ def pair_nilm_sessions_for_signatures(
             item.signature_fingerprint,
         ),
     ):
+        if candidate.on_index in force_open_on_indices:
+            continue
         if (
             candidate.on_index in used_on_indices
             or candidate.off_index in used_off_indices
@@ -1019,6 +1022,10 @@ def pair_nilm_sessions_for_signatures(
             and candidate.score - alternate.score <= ambiguity_margin
         }
         alternate_match_count = len(alternate_off_indices)
+        confidence = candidate.score * (0.85**alternate_match_count)
+        if confidence <= min_confidence:
+            force_open_on_indices.add(candidate.on_index)
+            continue
         used_on_indices.add(candidate.on_index)
         used_off_indices.add(candidate.off_index)
         sessions.append(
@@ -1027,7 +1034,7 @@ def pair_nilm_sessions_for_signatures(
                 candidate.off_edge,
                 mains_circuit_id=mains_circuit_id,
                 signature_fingerprint=candidate.signature_fingerprint,
-                confidence=candidate.score * (0.85**alternate_match_count),
+                confidence=confidence,
                 assignment_id=candidate.assignment_id,
                 ambiguous=alternate_match_count > 0,
                 alternate_match_count=alternate_match_count,
@@ -1041,7 +1048,11 @@ def pair_nilm_sessions_for_signatures(
         key=lambda item: -max(candidate.score for candidate in by_pair[item]),
     ):
         on_index, off_index = pair
-        if on_index in used_on_indices or off_index in used_off_indices:
+        if (
+            on_index in used_on_indices
+            or on_index in force_open_on_indices
+            or off_index in used_off_indices
+        ):
             continue
         candidate = max(by_pair[pair], key=lambda item: item.score)
         used_on_indices.add(on_index)
@@ -1120,7 +1131,9 @@ def pair_nilm_sessions_for_signatures(
             and _nilm_signature_pair_score(on_edge, off_edge, spec) is not None
             for off_index, off_edge in enumerate(off_edges)
         )
-        if candidate_eligible_off or too_early_off:
+        if on_index not in force_open_on_indices and (
+            candidate_eligible_off or too_early_off
+        ):
             continue
         sessions.append(
             _open_nilm_session(

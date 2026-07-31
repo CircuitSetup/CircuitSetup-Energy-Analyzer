@@ -1075,6 +1075,25 @@ def test_global_session_pairing_marks_alternate_off_edge_ambiguity() -> None:
     assert ambiguous.confidence < simple.confidence
 
 
+def test_global_session_pairing_keeps_open_below_penalized_confidence() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)]
+        + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].end is None
+
+
 def test_global_session_pairing_opens_on_edge_after_off_edge_is_consumed() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(300, 500.0), edge(600, -500.0)],

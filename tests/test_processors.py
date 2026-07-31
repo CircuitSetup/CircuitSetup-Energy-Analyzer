@@ -6881,6 +6881,35 @@ def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() 
     assert merged[0]["assignment_id"] is None
 
 
+def test_nilm_session_history_closes_open_session_across_owner_fingerprints() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "open",
+                "signature_fingerprint": "off-500",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+        [
+            {
+                "session_id": "closed",
+                "signature_fingerprint": "on-500",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["closed"]
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 
