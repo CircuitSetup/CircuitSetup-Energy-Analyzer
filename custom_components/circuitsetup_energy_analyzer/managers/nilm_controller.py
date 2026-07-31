@@ -978,6 +978,7 @@ class NilmController:
         confirmed = set(
             self._clean_string_list(assignment.get("confirmed_session_ids"))
         )
+        confirmed_aliases: dict[str, str] = {}
         durations: list[float] = []
         for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
             circuit_id,
@@ -991,9 +992,13 @@ class NilmController:
             )
             session_ids = {str(session.get("session_id") or "").strip()}
             if preserved_close is not None:
-                session_ids.add(
-                    str(preserved_close.get("session_id") or "").strip()
-                )
+                preserved_session_id = str(
+                    preserved_close.get("session_id") or ""
+                ).strip()
+                session_ids.add(preserved_session_id)
+                session_id = str(session.get("session_id") or "").strip()
+                if session_id in confirmed and preserved_session_id:
+                    confirmed_aliases[session_id] = preserved_session_id
             if confirmed.isdisjoint(session_ids):
                 continue
             if preserved_close is not None:
@@ -1030,6 +1035,11 @@ class NilmController:
             self._sample_processor.refresh_session_history(
                 circuit_id,
                 self._coordinator.store_data,
+            )
+        if confirmed_aliases:
+            assignment["confirmed_session_ids"] = self._clean_string_list(
+                confirmed_aliases.get(session_id, session_id)
+                for session_id in assignment.get("confirmed_session_ids", ())
             )
 
     def apply_alert_feedback(

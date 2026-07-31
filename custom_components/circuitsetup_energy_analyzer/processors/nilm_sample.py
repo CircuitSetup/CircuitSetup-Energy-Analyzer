@@ -474,11 +474,17 @@ def _merge_nilm_session_history(
         session_id = str(update.get("session_id") or "").strip()
         if not session_id:
             continue
+        payload = dict(update)
+        existing_session = merged.get(session_id)
+        if existing_session is not None and payload.get("end") is None:
+            preserved_close = existing_session.get("_duration_bound_close")
+            if isinstance(preserved_close, Mapping):
+                payload["_duration_bound_close"] = dict(preserved_close)
         _remove_replaced_nilm_sessions(
             merged,
             on_edge_id=str(update.get("on_edge_id") or "").strip(),
         )
-        merged[session_id] = dict(update)
+        merged[session_id] = payload
     return sorted(
         merged.values(),
         key=lambda session: str(session.get("end") or session.get("start") or ""),

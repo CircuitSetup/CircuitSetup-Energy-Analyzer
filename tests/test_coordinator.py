@@ -7654,6 +7654,18 @@ async def test_nilm_validation_refreshes_history_for_new_duration_bounds() -> No
     assert revised["end"] is None
     assert revised["assignment_id"] == "assignment-load"
 
+    coordinator._nilm_unmatched_edges["mains"] = []
+    await coordinator.async_reject_nilm_session("mains", "confirmed-short")
+
+    restored = next(
+        session
+        for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
+        if session.get("on_edge_id") == stale_session["on_edge_id"]
+    )
+    assert restored["session_id"] == stale_session["session_id"]
+    assert restored["end"] == stale_session["end"]
+    assert restored["duration_seconds"] == stale_session["duration_seconds"]
+
 
 @pytest.mark.asyncio
 async def test_nilm_validation_reopens_stale_history_without_live_edges() -> None:
@@ -7748,6 +7760,18 @@ async def test_nilm_validation_reopens_stale_history_without_live_edges() -> Non
     assert reconfirmed["session_id"] == "stale-long"
     assert reconfirmed["end"] == "2026-06-02T13:00:00+00:00"
     assert assignment["max_duration_seconds"] == pytest.approx(3900.0)
+    assert assignment["confirmed_session_ids"] == [
+        "confirmed-short",
+        "stale-long",
+    ]
+
+    assignment = await coordinator.async_reject_nilm_session(
+        "mains",
+        "confirmed-short",
+    )
+
+    assert assignment["confirmed_session_ids"] == ["stale-long"]
+    assert assignment["max_duration_seconds"] == pytest.approx(7200.0)
 
 
 @pytest.mark.asyncio
