@@ -76,6 +76,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._rollingContributionByCircuit = {};
         this._applianceRangeTotals = {};
         this._applianceRangeKey = "";
+        this._historicalAmpsKey = "";
+        this._historicalAmpsSeries = null;
         this._chartZoomWindows && this._chartZoomWindows.clear();
         this._render();
       };
@@ -197,6 +199,131 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return Number.isFinite(value) ? value * factor : null;
     }
 
+    _watts(entityId) {
+      const value = this._number(entityId);
+      const factor = { W: 1, kW: 1000, MW: 1000000, mW: 0.001 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
+    _volts(entityId) {
+      const value = this._number(entityId);
+      const factor = { V: 1, kV: 1000, mV: 0.001 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
+    _powerFactor(entityId) {
+      const value = this._number(entityId);
+      if (!Number.isFinite(value)) return null;
+      const unit = this._unit(entityId).toLowerCase();
+      const normalized = unit.includes("%") || value > 1 && value <= 100
+        ? value / 100
+        : value;
+      return Math.abs(normalized) <= 1 ? normalized : null;
+    }
+
+    _completeEntityValues(entityIds, converter) {
+      const ids = Array.isArray(entityIds) ? entityIds : [];
+      if (!ids.length) return null;
+      const values = ids.map((entityId) => converter(entityId));
+      return values.every(Number.isFinite) ? values : null;
+    }
+
+    _completeEntitySum(entityIds, converter) {
+      const values = this._completeEntityValues(entityIds, converter);
+      return values ? values.reduce((total, value) => total + value, 0) : null;
+    }
+
+    _sourceEntries(circuit, role) {
+      const entityKey = `${role}_entities`;
+      const legKey = `${role}_legs`;
+      const entities = Array.isArray(circuit[entityKey]) ? circuit[entityKey] : [];
+      const legs = Array.isArray(circuit[legKey]) ? circuit[legKey] : [];
+      const entries = entities.map((entity, index) => ({
+        entity,
+        leg: legs[index] || null,
+      }));
+      if (role !== "power" || !Array.isArray(circuit.chart_power_entities)) return entries;
+      const byEntity = new Map(entries.map((entry) => [entry.entity, entry]));
+      return circuit.chart_power_entities.map((entity) => (
+        byEntity.get(entity) || { entity, leg: null }
+      ));
+    }
+
+    _sourceValues(circuit, role, converter) {
+      const values = this._sourceEntries(circuit, role).map((source) => ({
+        ...source,
+        value: converter(source.entity),
+      }));
+      return values.length && values.every((source) => Number.isFinite(source.value))
+        ? values
+        : null;
+    }
+
+    _pairedSourceValue(source, index, values, count, legAware) {
+      if (values.length === 1) {
+        return !values[0].leg || values[0].leg === source.leg ? values[0] : null;
+      }
+      if (values.length !== count) return null;
+      if (!legAware) return values[index];
+      return values.find((value) => value.leg && value.leg === source.leg) || null;
+    }
+
+    _derivedPower(circuit) {
+      const currents = this._sourceValues(circuit, "current", (entityId) => this._amps(entityId));
+      const volts = this._sourceValues(circuit, "voltage", (entityId) => this._volts(entityId));
+      const factors = this._sourceValues(circuit, "power_factor", (entityId) => this._powerFactor(entityId));
+      if (!currents || !volts || !factors) return null;
+      const legAware = [currents, volts, factors].some((values) => values.some((value) => value.leg));
+      let total = 0;
+      for (let index = 0; index < currents.length; index += 1) {
+        const voltage = this._pairedSourceValue(currents[index], index, volts, currents.length, legAware);
+        const factor = this._pairedSourceValue(currents[index], index, factors, currents.length, legAware);
+        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value)) return null;
+        total += currents[index].value * voltage.value * factor.value;
+      }
+      return total;
+    }
+
+    _derivedAmps(circuit) {
+      const power = this._sourceValues(circuit, "power", (entityId) => this._watts(entityId));
+      const volts = this._sourceValues(circuit, "voltage", (entityId) => this._volts(entityId));
+      const factors = this._sourceValues(circuit, "power_factor", (entityId) => this._powerFactor(entityId));
+      if (!power || !volts || !factors) return null;
+      const legAware = [power, volts, factors].some((values) => values.some((value) => value.leg));
+      let total = 0;
+      for (let index = 0; index < power.length; index += 1) {
+        const voltage = this._pairedSourceValue(power[index], index, volts, power.length, legAware);
+        const factor = this._pairedSourceValue(power[index], index, factors, power.length, legAware);
+        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value) || voltage.value <= 0 || factor.value === 0) return null;
+        total += power[index].value / (voltage.value * factor.value);
+      }
+      return total;
+    }
+
+    _powerEntityIds(circuit) {
+      return Array.isArray(circuit.chart_power_entities)
+        ? circuit.chart_power_entities
+        : (circuit.power_entities || []);
+    }
+
+    _circuitPower(circuit) {
+      return this._completeEntitySum(this._powerEntityIds(circuit), (entityId) => this._watts(entityId))
+        ?? this._derivedPower(circuit);
+    }
+
+    _circuitAmps(circuit) {
+      return this._completeEntitySum(circuit.current_entities, (entityId) => this._amps(entityId))
+        ?? this._derivedAmps(circuit);
+    }
+
+    _completeCircuitTotal(circuits, value) {
+      if (!circuits.length) return null;
+      const values = circuits.map((circuit) => value(circuit));
+      return values.every(Number.isFinite)
+        ? values.reduce((total, current) => total + current, 0)
+        : null;
+    }
+
     _formatValue(value, unit = "") {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
@@ -226,7 +353,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const running = String((this._state(appliance.activity_entity) || {}).state || "").toLowerCase() === "running";
       return {
         ...appliance,
-        power: this._sum(appliance.power_entities),
+        power: this._circuitPower(appliance),
         energy: rangeTotals
           ? rangeTotals.energy ?? null
           : this._number(appliance.energy_today_entity),
@@ -528,6 +655,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             name: config && config.name || this._friendlyEntityName(entityId),
             unit: this._unit(entityId),
             axis: config && config.axis || "left",
+            hidden: Boolean(config && config.hidden),
+            leg: config && config.leg,
             points: this._boundedChartPoints(points),
           });
         }
@@ -611,6 +740,57 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         </div>
         <div class="bars">${top.map((item) => `<div class="bar-row"><span>${this._escape(item.name)}</span><span class="bar-track"><span class="bar-fill" style="display:block;width:${Math.max(item[key] / max * 100, 2)}%"></span></span><strong>${this._escape(this._formatValue(item[key], unit))}</strong></div>`).join("")}</div>
       </section>`;
+    }
+
+    _historyRequest(start, end, entityIds, rangeDays = null) {
+      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
+      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
+        return this._rawHistoryRequest(start, end, entityIds);
+      }
+      const period = spanDays <= 90
+        ? "hour"
+        : spanDays <= 730
+          ? "day"
+          : spanDays <= 5_110 ? "week" : "month";
+      return this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: start,
+        end_time: end,
+        statistic_ids: entityIds,
+        period,
+        types: ["mean"],
+      }).then(async (result) => {
+        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
+          (rows || []).flatMap((row) => {
+            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
+            return row.mean !== null
+              && row.mean !== undefined
+              && Number.isFinite(Number(row.mean))
+              && Number.isFinite(time) ? [{
+              entity_id: entityId,
+              state: row.mean,
+              last_changed: new Date(time).toISOString(),
+              statistics_period: period,
+            }] : [];
+          })
+        ));
+        const missing = entityIds.filter((entityId) => (
+          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
+        ));
+        if (!missing.length) return statistics;
+        try {
+          const fallback = await this._rawHistoryRequest(start, end, missing);
+          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
+        } catch (_error) {
+          return statistics;
+        }
+      });
+    }
+
+    _rawHistoryRequest(start, end, entityIds) {
+      const ids = encodeURIComponent(entityIds.join(","));
+      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      return this._hass.callApi("GET", path);
     }
   }
 
@@ -1323,14 +1503,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this.style.display = "";
       this._ensureHistory(entities);
       const range = validRange(this._dashboardRange);
-      const currentSeries = this._groupDashboardHistorySeries(
-        this._normalizedCurrentSeries(
-          this._normalizedPowerSeries(
-            this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
-            config.y_axis_label,
-          ),
-        ),
+      const currentSeries = this._mainsAwareSeries(
+        this._history,
         entities,
+        Date.parse(range.start),
+        config.y_axis_label,
       );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
@@ -1338,18 +1515,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const previousStart = Date.parse(previousRange.start);
       const previousDuration = Date.parse(previousRange.end) - previousStart;
       const comparisonSeries = range.compare
-        ? this._groupDashboardHistorySeries(
-          this._normalizedCurrentSeries(
-            this._normalizedPowerSeries(
-              this._dashboardHistorySeries(
-                this._comparisonHistory,
-                entities,
-                Date.parse(previousRange.start),
-              ),
-              config.y_axis_label,
-            ),
-          ),
+        ? this._mainsAwareSeries(
+          this._comparisonHistory,
           entities,
+          Date.parse(previousRange.start),
+          config.y_axis_label,
         ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
@@ -1387,8 +1557,31 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._attachChartInspectors();
     }
 
+    _mainsAwareSeries(payload, entities, rangeStart, targetUnit) {
+      const raw = this._dashboardHistorySeries(payload, entities, rangeStart);
+      const normalizedSources = this._normalizedPowerFactorSeries(
+        this._normalizedVoltageSeries(this._normalizedCurrentSeries(raw)),
+      );
+      const powerNormalizedSources = this._normalizedPowerSeries(normalizedSources, targetUnit);
+      const grouped = this._groupDashboardHistorySeries(powerNormalizedSources, entities);
+      const directPower = grouped.filter((item) => item.series_id === "mains:power");
+      const calculated = this._calculatedMainsPowerSeries(powerNormalizedSources, entities);
+      const powerSeries = directPower.length
+        ? directPower
+        : calculated
+          ? [{
+            ...calculated,
+            series_id: "mains:power",
+          }]
+          : [];
+      return this._normalizedPowerSeries([
+        ...grouped.filter((item) => item.series_id !== "mains:power" && !item.hidden),
+        ...powerSeries,
+      ], targetUnit);
+    }
+
     _normalizedPowerSeries(series, targetUnit = "") {
-      const wattsPerUnit = { W: 1, kW: 1000 };
+      const wattsPerUnit = { W: 1, kW: 1000, MW: 1000000, mW: 0.001 };
       const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
       const normalizedUnit = wattsPerUnit[targetUnit] ? targetUnit : target && target.unit;
       if (!normalizedUnit) return series;
@@ -1420,6 +1613,94 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           })),
         };
       });
+    }
+
+    _normalizedVoltageSeries(series) {
+      const voltsPerUnit = { V: 1, mV: 0.001, kV: 1000 };
+      return series.map((item) => {
+        const factor = item.series_id === "mains:voltage" && voltsPerUnit[item.unit];
+        if (!factor) return item;
+        return {
+          ...item,
+          unit: "V",
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) ? point.value * factor : point.value,
+          })),
+        };
+      });
+    }
+
+    _normalizedPowerFactorSeries(series) {
+      return series.map((item) => {
+        if (item.series_id !== "mains:power_factor") return item;
+        const percent = String(item.unit || "").includes("%");
+        return {
+          ...item,
+          unit: "",
+          points: item.points.map((point) => {
+            const normalized = Number.isFinite(point.value) && (percent || point.value > 1 && point.value <= 100)
+              ? point.value / 100
+              : point.value;
+            return {
+              ...point,
+              value: Number.isFinite(normalized) && Math.abs(normalized) <= 1 ? normalized : null,
+            };
+          }),
+        };
+      });
+    }
+
+    _calculatedMainsPowerSeries(series, configuredEntities = []) {
+      const currents = series.filter((item) => item.series_id === "mains:current");
+      const volts = series.filter((item) => item.series_id === "mains:voltage");
+      const factors = series.filter((item) => item.series_id === "mains:power_factor");
+      for (const seriesId of ["mains:current", "mains:voltage", "mains:power_factor"]) {
+        const expected = configuredEntities.filter((item) => item.series_id === seriesId).length;
+        const available = series.filter((item) => item.series_id === seriesId).length;
+        if (expected && available !== expected) return null;
+      }
+      if (!currents.length || !volts.length || !factors.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      for (const time of timestamps) {
+        for (const item of [...currents, ...volts, ...factors]) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        let power = 0;
+        const legAware = [currents, volts, factors].some((values) => values.some((value) => value.leg));
+        for (let index = 0; index < currents.length; index += 1) {
+          const current = latest.get(currents[index]);
+          const voltageItem = this._pairedSourceValue(currents[index], index, volts, currents.length, legAware);
+          const factorItem = this._pairedSourceValue(currents[index], index, factors, currents.length, legAware);
+          const voltage = voltageItem && latest.get(voltageItem);
+          const factor = factorItem && latest.get(factorItem);
+          if (!Number.isFinite(current) || !Number.isFinite(voltage) || !Number.isFinite(factor)) {
+            power = Number.NaN;
+            break;
+          }
+          power += current * voltage * factor;
+        }
+        points.push({ time, value: Number.isFinite(power) ? power : null });
+      }
+      return points.length
+        ? {
+          entity_id: "mains:calculated_power",
+          series_id: "mains:calculated_power",
+          name: "Mains total power (calculated)",
+          unit: "W",
+          axis: "left",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
     }
 
     _resolvedEntities(config) {
@@ -1569,56 +1850,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           && !this.shadowRoot.querySelector('[data-chart-tooltip][aria-hidden="false"]');
     }
 
-    _historyRequest(start, end, entityIds, rangeDays = null) {
-      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
-      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
-        return this._rawHistoryRequest(start, end, entityIds);
-      }
-      const period = spanDays <= 90
-        ? "hour"
-        : spanDays <= 730
-          ? "day"
-          : spanDays <= 5_110 ? "week" : "month";
-      return this._hass.callWS({
-        type: "recorder/statistics_during_period",
-        start_time: start,
-        end_time: end,
-        statistic_ids: entityIds,
-        period,
-        types: ["mean"],
-      }).then(async (result) => {
-        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
-          (rows || []).flatMap((row) => {
-            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
-            return row.mean !== null
-              && row.mean !== undefined
-              && Number.isFinite(Number(row.mean))
-              && Number.isFinite(time) ? [{
-              entity_id: entityId,
-              state: row.mean,
-              last_changed: new Date(time).toISOString(),
-              statistics_period: period,
-            }] : [];
-          })
-        ));
-        const missing = entityIds.filter((entityId) => (
-          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
-        ));
-        if (!missing.length) return statistics;
-        try {
-          const fallback = await this._rawHistoryRequest(start, end, missing);
-          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
-        } catch (_error) {
-          return statistics;
-        }
-      });
-    }
-
-    _rawHistoryRequest(start, end, entityIds) {
-      const ids = encodeURIComponent(entityIds.join(","));
-      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
-      return this._hass.callApi("GET", path);
-    }
   }
 
   class CircuitSetupEnergyAnalyzerSummary extends DashboardCardBase {
@@ -1673,6 +1904,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeTotalsDateKey = "";
       this._rangeTotalsRolloverReloadKey = "";
       this._rangeTotalsReloadTimer = 0;
+      this._historicalAmpsKey = "";
+      this._historicalAmpsSeries = null;
+      this._historicalAmpsLoading = false;
+      this._historicalAmpsRefreshTimer = 0;
       this._handleDashboardData = () => this._render();
     }
 
@@ -1683,6 +1918,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
+      clearTimeout(this._historicalAmpsRefreshTimer);
       window.removeEventListener(DATA_EVENT, this._handleDashboardData);
       super.disconnectedCallback();
     }
@@ -1703,6 +1939,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const mains = config.primary_mains || {};
       const appliances = (config.appliances || []).map((item) => this._applianceState(item));
       const contributionAppliances = this._contributionAppliances(appliances);
+      const circuitPower = this._completeCircuitTotal(appliances, (item) => item.power);
+      const knownPower = this._number(mains.monitored_power_entity)
+        ?? circuitPower;
+      const housePower = this._circuitPower(mains) ?? knownPower;
+      const unassignedPower = this._number(mains.balance_power_entity);
+      const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
       const issueCount = appliances.filter((item) => item.issue).length;
       const applianceLiveTotals = this._applianceLiveTotals(config.appliances);
@@ -1724,16 +1966,40 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : null;
       const { days } = this._calendarRange();
       const averageScale = days > 1 ? days : 1;
-      const ampsSeries = this._dashboardSeries("mains:current");
-      const ampsPoints = ampsSeries && ampsSeries.points || [];
-      const currentValues = (mains.current_entities || []).map((entityId) => this._amps(entityId));
-      const liveAmps = currentValues.length && currentValues.every(Number.isFinite)
-        ? currentValues.reduce((total, value) => total + value, 0)
-        : null;
-      const totalAmps = this._rangeIncludesToday()
-        ? liveAmps
-        : ampsPoints.length ? ampsPoints[ampsPoints.length - 1].value : null;
-      const averageAmps = this._seriesAverage(ampsSeries) ?? totalAmps;
+      const includesToday = this._rangeIncludesToday();
+      const ampsSeries = this._dashboardSeries("mains:current") || this._historicalAmpsSeries;
+      if (!includesToday && !ampsSeries) this._ensureHistoricalAmps();
+      const circuitAmps = this._completeCircuitTotal(appliances, (item) => this._circuitAmps(item));
+      const liveAmps = this._circuitAmps(mains) ?? circuitAmps;
+      const ampsValue = includesToday ? liveAmps : this._seriesAverage(ampsSeries);
+      const ampsLabel = includesToday
+        ? this._label("amps_now", "Amps Now")
+        : `${this._label("average_amps", "Average Amps")} (${this._rangeLabel()})`;
+      const hasAmpSource = Boolean(
+        (mains.current_entities || []).length
+        || this._powerEntityIds(mains).length
+          && (mains.voltage_entities || []).length
+          && (mains.power_factor_entities || []).length
+        || appliances.some((item) => (
+          (item.current_entities || []).length
+          || this._powerEntityIds(item).length
+            && (item.voltage_entities || []).length
+            && (item.power_factor_entities || []).length
+        )),
+      );
+      const hasPowerSource = Boolean(
+        mains.monitored_power_entity
+        || this._powerEntityIds(mains).length
+          || (mains.current_entities || []).length
+          && (mains.voltage_entities || []).length
+          && (mains.power_factor_entities || []).length
+        || appliances.some((item) => (
+          this._powerEntityIds(item).length
+          || (item.current_entities || []).length
+            && (item.voltage_entities || []).length
+            && (item.power_factor_entities || []).length
+        )),
+      );
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -1745,7 +2011,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const rangeLabel = this._rangeLabel();
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
-          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
+          ${hasPowerSource ? this._metricHtml(this._label("power_now", "Power Now"), housePower, "W") : ""}
+          ${hasAmpSource ? this._metricHtml(ampsLabel, ampsValue, "A") : ""}
           ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null, days)}
           ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null, days)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
@@ -1764,7 +2031,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ${(config.secondary_mains || []).length ? `<section>
           <h3>${this._escape(this._label("additional_mains", "Additional mains channels"))}</h3>
           <div class="kpis">
-            ${(config.secondary_mains || []).map((item) => this._metricHtml(item.name, this._sum(item.power_entities), this._unit((item.power_entities || [])[0], "W"))).join("")}
+            ${(config.secondary_mains || []).map((item) => this._metricHtml(item.name, this._sum(this._powerEntityIds(item)), this._unit(this._powerEntityIds(item)[0], "W"))).join("")}
           </div>
         </section>` : ""}
       ` : "";
@@ -1799,6 +2066,222 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         });
       }
       this._attachChartInspectors();
+    }
+
+    _historicalAmpCircuits() {
+      const mains = this._dashboardConfig.primary_mains;
+      const hasMainsSources = mains && (
+        (mains.current_entities || []).length
+        || this._powerEntityIds(mains).length
+          && (mains.voltage_entities || []).length
+          && (mains.power_factor_entities || []).length
+      );
+      return hasMainsSources
+        ? [mains, ...(this._dashboardConfig.appliances || [])]
+        : (this._dashboardConfig.appliances || []);
+    }
+
+    _historicalAmpConfigs(circuit) {
+      return [
+        ["power", "mains:power"],
+        ["current", "mains:current"],
+        ["voltage", "mains:voltage"],
+        ["power_factor", "mains:power_factor"],
+      ].flatMap(([role, series_id]) => this._sourceEntries(circuit, role).map((source) => ({
+        entity: source.entity,
+        role,
+        series_id,
+        leg: source.leg,
+      })));
+    }
+
+    _historySourceValue(config, state) {
+      const value = Number.parseFloat(String(state ?? ""));
+      if (!Number.isFinite(value)) return null;
+      const unit = this._unit(config.entity);
+      const factors = {
+        power: { W: 1, kW: 1000, MW: 1000000, mW: 0.001 },
+        current: { A: 1, mA: 0.001, kA: 1000 },
+        voltage: { V: 1, mV: 0.001, kV: 1000 },
+      }[config.role];
+      if (factors) return value * (factors[unit] ?? 1);
+      const normalized = unit.toLowerCase().includes("%") || value > 1 && value <= 100
+        ? value / 100
+        : value;
+      return Math.abs(normalized) <= 1 ? normalized : null;
+    }
+
+    _historySourceSeries(payload, configs, rangeStart) {
+      const configByEntity = new Map(configs.map((config) => [config.entity, config]));
+      const parsed = [];
+      for (const group of Array.isArray(payload) ? payload : []) {
+        const rows = Array.isArray(group) ? group : [group];
+        const entityId = rows.find((row) => row && row.entity_id)?.entity_id;
+        const config = configByEntity.get(entityId);
+        if (!config) continue;
+        const points = rows.flatMap((row) => {
+          const time = Date.parse(row.last_changed || row.last_updated || "");
+          const value = this._historySourceValue(config, row.state);
+          return Number.isFinite(time)
+            ? [{ time: Math.max(rangeStart, time), value: Number.isFinite(value) ? value : null }]
+            : [];
+        });
+        if (points.length) parsed.push({ ...config, points: this._boundedChartPoints(points) });
+      }
+      return parsed;
+    }
+
+    _sumHistoricalSeries(series) {
+      if (!series.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      for (const time of timestamps) {
+        for (const item of series) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        const values = series.map((item) => latest.get(item));
+        points.push({
+          time,
+          value: values.every(Number.isFinite)
+            ? values.reduce((total, value) => total + value, 0)
+            : null,
+        });
+      }
+      return points.length
+        ? {
+          entity_id: "mains:current",
+          series_id: "mains:current",
+          name: "Mains total amps",
+          unit: "A",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
+    }
+
+    _hasUsableHistoricalSeries(series) {
+      return Boolean(series?.points?.some((point) => Number.isFinite(point.value)));
+    }
+
+    _derivedHistoricalAmpsSeries(series, configs) {
+      const powers = series.filter((item) => item.series_id === "mains:power");
+      const volts = series.filter((item) => item.series_id === "mains:voltage");
+      const factors = series.filter((item) => item.series_id === "mains:power_factor");
+      for (const [seriesId, role] of [
+        ["mains:power", "power"],
+        ["mains:voltage", "voltage"],
+        ["mains:power_factor", "power_factor"],
+      ]) {
+        const expected = configs.filter((item) => item.role === role).length;
+        const available = series.filter((item) => item.series_id === seriesId).length;
+        if (expected && available !== expected) return null;
+      }
+      if (!powers.length || !volts.length || !factors.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      const legAware = [powers, volts, factors].some((values) => values.some((value) => value.leg));
+      for (const time of timestamps) {
+        for (const item of [...powers, ...volts, ...factors]) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        let amps = 0;
+        for (let index = 0; index < powers.length; index += 1) {
+          const power = latest.get(powers[index]);
+          const voltageSource = this._pairedSourceValue(powers[index], index, volts, powers.length, legAware);
+          const factorSource = this._pairedSourceValue(powers[index], index, factors, powers.length, legAware);
+          const voltage = voltageSource && latest.get(voltageSource);
+          const factor = factorSource && latest.get(factorSource);
+          if (!Number.isFinite(power) || !Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor === 0) {
+            amps = Number.NaN;
+            break;
+          }
+          amps += power / (voltage * factor);
+        }
+        points.push({ time, value: Number.isFinite(amps) ? amps : null });
+      }
+      return points.length
+        ? {
+          entity_id: "mains:current",
+          series_id: "mains:current",
+          name: "Mains total amps (calculated)",
+          unit: "A",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
+    }
+
+    _historicalCircuitAmpsSeries(payload, circuit, rangeStart) {
+      const configs = this._historicalAmpConfigs(circuit);
+      const series = this._historySourceSeries(payload, configs, rangeStart);
+      const currentSeries = series.filter((item) => item.series_id === "mains:current");
+      const expectedCurrent = configs.filter((item) => item.role === "current").length;
+      const direct = expectedCurrent && currentSeries.length === expectedCurrent
+        ? this._sumHistoricalSeries(currentSeries)
+        : null;
+      return this._hasUsableHistoricalSeries(direct)
+        ? direct
+        : this._derivedHistoricalAmpsSeries(series, configs);
+    }
+
+    _ensureHistoricalAmps() {
+      if (this._historicalAmpsLoading || typeof this._hass.callApi !== "function") return;
+      const range = validRange(this._dashboardRange);
+      const circuits = this._historicalAmpCircuits();
+      const configs = circuits.flatMap((circuit) => this._historicalAmpConfigs(circuit));
+      const entityIds = [...new Set(configs.map((config) => config.entity))];
+      const key = `${range.start}|${range.end}|${entityIds.join(",")}`;
+      if (key === this._historicalAmpsKey) return;
+      clearTimeout(this._historicalAmpsRefreshTimer);
+      this._historicalAmpsRefreshTimer = 0;
+      this._historicalAmpsKey = key;
+      this._historicalAmpsSeries = null;
+      if (!entityIds.length) return;
+      this._historicalAmpsLoading = true;
+      this._historyRequest(range.start, range.end, entityIds).then((payload) => {
+        if (this._historicalAmpsKey !== key) return;
+        const circuitSeries = circuits
+          .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)));
+        const hasMainsSources = circuits[0] === this._dashboardConfig.primary_mains;
+        const mainsSeries = hasMainsSources ? circuitSeries[0] : null;
+        const fallbackCircuits = hasMainsSources ? circuits.slice(1) : circuits;
+        const fallbackSeries = hasMainsSources ? circuitSeries.slice(1) : circuitSeries;
+        const fallback = fallbackSeries.length === fallbackCircuits.length
+          && fallbackSeries.every((series) => this._hasUsableHistoricalSeries(series))
+          ? this._sumHistoricalSeries(fallbackSeries)
+          : null;
+        this._historicalAmpsSeries = this._hasUsableHistoricalSeries(mainsSeries)
+          ? mainsSeries
+          : fallback;
+      }).catch(() => {
+        if (this._historicalAmpsKey === key) {
+          this._historicalAmpsSeries = null;
+          this._historicalAmpsRefreshTimer = setTimeout(() => {
+            this._historicalAmpsRefreshTimer = 0;
+            if (this._historicalAmpsKey === key) {
+              this._historicalAmpsKey = "";
+              if (this.isConnected) this._render();
+            }
+          }, 5_000);
+        }
+      }).finally(() => {
+        this._historicalAmpsLoading = false;
+        if (this.isConnected) this._render();
+      });
     }
 
     _metricHtml(label, value, unit, average = null, averageDays = 1) {
@@ -1903,21 +2386,34 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
         && (!mains.circuit_id || item.circuit_id === mains.circuit_id)
       ));
-      this._rangeSummary = this._retainedRangeTotals(
+      const retainedMainsTotals = this._retainedRangeTotals(
         retainedMains,
         startKey,
         endKey,
         todayKey,
       );
+      const retainedApplianceTotal = (key) => startKey < todayKey
+        ? this._completeCircuitTotal(
+          appliances,
+          (appliance) => this._rollingContributionByCircuit[appliance.circuit_id]?.[key],
+        )
+        : undefined;
+      this._rangeSummary = {
+        energy: retainedMainsTotals.energy ?? retainedApplianceTotal("energy"),
+        cost: retainedMainsTotals.cost ?? retainedApplianceTotal("cost"),
+      };
       const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const retainedAppliances = appliances.map((appliance) => retainedItems.find((item) => (
+        item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
+      )));
       const retainedSources = [
-        retainedMains,
-        ...appliances.map((appliance) => retainedItems.find((item) => (
-          item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
-        ))),
-      ].filter(Boolean);
+        ...(retainedMains ? [retainedMains] : []),
+        ...(Number.isFinite(retainedMainsTotals.energy) && Number.isFinite(retainedMainsTotals.cost)
+          ? retainedAppliances.filter(Boolean)
+          : retainedAppliances),
+      ];
       const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
-        (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
+        item && (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
       const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
       if (

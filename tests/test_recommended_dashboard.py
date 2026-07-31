@@ -522,6 +522,8 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
             SensorRef("sensor.mains_power_harmonic", SensorRole.REAL_POWER),
             SensorRef("sensor.mains_l1_current", SensorRole.CURRENT),
             SensorRef("sensor.mains_l2_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_line_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
         ),
     )
     states = {
@@ -603,6 +605,20 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
             "series_id": "mains:current",
             "axis": "right",
         },
+        {
+            "entity": "sensor.mains_line_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
     ]
     summary = _card_with_title(home, "Home energy summary")
     assert summary["primary_mains"]["power_entities"] == [
@@ -613,11 +629,155 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_frequency",
         "sensor.mains_power_harmonic",
     ]
+    assert summary["primary_mains"]["chart_power_entities"] == [
+        "sensor.mains_watts",
+        "sensor.mains_active_power",
+        "sensor.mains_power",
+    ]
     assert summary["primary_mains"]["current_entities"] == [
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
     ]
+    assert summary["primary_mains"]["voltage_entities"] == [
+        "sensor.mains_line_voltage",
+    ]
+    assert summary["primary_mains"]["power_factor_entities"] == [
+        "sensor.mains_power_factor",
+    ]
     assert [card["grid_options"]["columns"] for card in cards[:5]] == [24] * 5
+
+
+def test_home_mains_graph_preserves_legs_for_derived_sources() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT, leg="l1"),
+            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="L2"),
+            SensorRef("sensor.mains_l2_voltage", SensorRole.VOLTAGE, leg="line2"),
+            SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE, leg="phase1"),
+            SensorRef("sensor.mains_l2_pf", SensorRole.POWER_FACTOR, leg="leg2"),
+            SensorRef("sensor.mains_l1_pf", SensorRole.POWER_FACTOR, leg="LEFT"),
+        ),
+    )
+    dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)
+    home = _dashboard_views(dashboard)[0]
+    graph = _card_with_title(home, "Mains total power and amps")
+    summary = _card_with_title(home, "Home energy summary")
+
+    assert [row["leg"] for row in graph["entities"]] == ["a", "b", "b", "a", "b", "a"]
+    assert summary["primary_mains"]["current_legs"] == ["a", "b"]
+    assert summary["primary_mains"]["voltage_legs"] == ["b", "a"]
+    assert summary["primary_mains"]["power_factor_legs"] == ["b", "a"]
+
+
+def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.panel_channel", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    dashboard = build_recommended_dashboard(
+        (_circuits()[0], mains),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+    graph = home["sections"][0]["cards"][0]
+
+    assert graph["y_axis_label"] == "W"
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+        {
+            "entity": "sensor.mains_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
+    ]
+
+
+def test_home_mains_graph_keeps_hidden_calculation_sources_with_chart_power() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    states = {
+        "sensor.mains_power": SimpleNamespace(
+            state="1000",
+            attributes={
+                "friendly_name": "Mains Active Power",
+                "unit_of_measurement": "W",
+            },
+        ),
+    }
+    dashboard = build_recommended_dashboard(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+    )
+    home = _dashboard_views(dashboard)[0]
+    graph = _card_with_title(home, "Mains total power and amps")
+
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_power",
+            "name": "Mains total power",
+            "series_id": "mains:power",
+            "axis": "left",
+        },
+        {
+            "entity": "sensor.mains_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+        {
+            "entity": "sensor.mains_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
+    ]
 
 
 def test_home_voltage_card_uses_native_gauges_with_adaptive_ranges() -> None:
@@ -737,6 +897,7 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
         "sensor.mains_channel_a",
         "sensor.main_panel_channel_1",
         "sensor.main_panel_channel_2",
+        "sensor.main_panel_channel_3",
         "sensor.high_voltage_panel_active_power",
     ]
     assert summary["primary_mains"]["power_entities"] == [
@@ -799,6 +960,30 @@ def test_home_card_receives_every_appliance_for_live_sorting() -> None:
     assert all(
         appliance["circuit_id"] != "mains" for appliance in home_card["appliances"]
     )
+
+
+def test_home_card_includes_appliance_electrical_sources_for_live_totals() -> None:
+    appliance = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.washer_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.washer_current", SensorRole.CURRENT),
+            SensorRef("sensor.washer_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.washer_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    dashboard = build_recommended_dashboard((appliance,), DASHBOARD_LAYOUT_STANDARD)
+    home = _dashboard_views(dashboard)[0]
+    home_card = _card_of_type(home, HOUSE_FLOW_CARD)
+
+    payload = home_card["appliances"][0]
+    assert payload["power_entities"] == ["sensor.washer_power"]
+    assert payload["current_entities"] == ["sensor.washer_current"]
+    assert payload["voltage_entities"] == ["sensor.washer_voltage"]
+    assert payload["power_factor_entities"] == ["sensor.washer_power_factor"]
 
 
 def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
@@ -1060,6 +1245,7 @@ def test_mains_view_identifies_primary_and_additional_mains_channels() -> None:
             "circuit_id": "garage_mains",
             "name": "Garage subpanel",
             "power_entities": ["sensor.garage_mains_power"],
+            "chart_power_entities": ["sensor.garage_mains_power"],
         }
     ]
 
