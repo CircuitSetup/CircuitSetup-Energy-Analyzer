@@ -164,6 +164,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._applianceDetailHistoryHours = 0;
     this._applianceDetailHistoryBounds = null;
     this._applianceDetailHistoryWindow = null;
+    this._sumpDriverAnalysis = null;
+    this._sumpDriverHistoryLoading = false;
+    this._sumpDriverHistoryError = "";
+    this._sumpDriverHiddenLayers = new Set();
     this._setupHealth = null;
     this._nilmWorkspaceHistorySeries = [];
     this._loading = true;
@@ -305,6 +309,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._applianceDetailHistoryHours = 0;
     this._applianceDetailHistoryBounds = null;
     this._applianceDetailHistoryWindow = null;
+    this._sumpDriverAnalysis = null;
+    this._sumpDriverHistoryLoading = false;
+    this._sumpDriverHistoryError = "";
+    this._sumpDriverHiddenLayers.clear();
     this._setupHealth = null;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
