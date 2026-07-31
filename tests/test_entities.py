@@ -4078,7 +4078,10 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
     assert states["assignment-washer"].is_running is True
 
 
-def test_nilm_virtual_states_assign_overlapping_signatures_once() -> None:
+@pytest.mark.parametrize("hidden_state", ["ignored", "expected"])
+def test_nilm_virtual_states_assign_overlapping_signatures_once(
+    hidden_state: str,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
         nilm_virtual_appliance_states,
@@ -4091,6 +4094,7 @@ def test_nilm_virtual_states_assign_overlapping_signatures_once() -> None:
                 "mains": [
                     {"signature_id": "120-w", "typical_watts": 120.0},
                     {"signature_id": "187-w", "typical_watts": 187.0},
+                    {"signature_id": "hidden-120-w", "typical_watts": 120.0},
                 ]
             },
             nilm_appliance_assignments_by_circuit={
@@ -4104,6 +4108,12 @@ def test_nilm_virtual_states_assign_overlapping_signatures_once() -> None:
                         "assignment_id": "assignment-187",
                         "display_name": "187 W appliance",
                         "signature_fingerprints": ["187-w"],
+                    },
+                    {
+                        "assignment_id": "hidden-120",
+                        "display_name": "Hidden 120 W appliance",
+                        "signature_fingerprints": ["hidden-120-w"],
+                        "lifecycle_state": hidden_state,
                     },
                 ]
             },

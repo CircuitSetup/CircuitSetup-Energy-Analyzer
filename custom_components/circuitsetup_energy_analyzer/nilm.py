@@ -1050,6 +1050,23 @@ def pair_nilm_sessions_for_signatures(
         ):
             continue
         candidate = max(by_pair[pair], key=lambda item: item.score)
+        alternate_off_indices = {
+            alternate_off_index
+            for alternate_on_index, alternate_off_index in ambiguous_pairs
+            if alternate_on_index == on_index
+            and alternate_off_index != off_index
+            and alternate_off_index not in used_off_indices
+            and candidate.score
+            - max(
+                alternate.score
+                for alternate in by_pair[(alternate_on_index, alternate_off_index)]
+            )
+            <= ambiguity_margin
+        }
+        confidence = candidate.score * (0.85 ** len(alternate_off_indices))
+        if confidence <= min_confidence:
+            force_open_on_indices.add(on_index)
+            continue
         used_on_indices.add(on_index)
         used_off_indices.add(off_index)
         sessions.append(
@@ -1058,10 +1075,12 @@ def pair_nilm_sessions_for_signatures(
                 candidate.off_edge,
                 mains_circuit_id=mains_circuit_id,
                 signature_fingerprint=candidate.signature_fingerprint,
-                confidence=candidate.score,
+                confidence=confidence,
                 assignment_id=None,
                 ambiguous=True,
-                alternate_match_count=len(by_pair[pair]) - 1,
+                alternate_match_count=(
+                    len(by_pair[pair]) - 1 + len(alternate_off_indices)
+                ),
                 known_load_masked=False,
                 known_load_confidence=None,
             )

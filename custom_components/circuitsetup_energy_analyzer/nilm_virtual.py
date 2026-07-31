@@ -103,7 +103,7 @@ def nilm_virtual_appliance_states(
                 if (
                     _published_assignment(assignment)
                     if published_only
-                    else str(assignment.get("lifecycle_state") or "") != "retired"
+                    else _matching_assignment(assignment)
                 )
             ],
             edges,
@@ -625,10 +625,17 @@ def _nilm_time_zone(coordinator: Any) -> str:
 
 
 def _published_assignment(assignment: Mapping[str, Any]) -> bool:
-    return (
-        assignment.get("publish_entities") is True
-        and str(assignment.get("lifecycle_state") or "") != "retired"
+    return assignment.get("publish_entities") is True and _matching_assignment(
+        assignment
     )
+
+
+def _matching_assignment(assignment: Mapping[str, Any]) -> bool:
+    return str(assignment.get("lifecycle_state") or "") not in {
+        "ignored",
+        "expected",
+        "retired",
+    }
 
 
 def _assignment_for_state(
