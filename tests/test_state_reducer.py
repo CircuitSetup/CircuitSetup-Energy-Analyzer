@@ -463,6 +463,10 @@ def test_state_reducer_clears_only_direct_appliance_state() -> None:
         "fridge|climate.kitchen|cooling": {"active": True},
         "washer|climate.laundry|cooling": {"active": True},
     }
+    state.hvac_efficiency_by_circuit = {
+        "fridge": {"streams": {"climate.kitchen": {}}},
+        "washer": {"streams": {"climate.laundry": {}}},
+    }
 
     reducer = StateReducer()
     assert reducer.clear_direct_appliance_state(state, "fridge")
@@ -484,6 +488,10 @@ def test_state_reducer_clears_only_direct_appliance_state() -> None:
     assert set(state.hvac_current_episode_by_stream) == {
         "washer|climate.laundry|cooling"
     }
+    assert state.hvac_efficiency_by_circuit == {
+        "washer": {"streams": {"climate.laundry": {}}}
+    }
+    assert state.hvac_association_revision_by_circuit == {"fridge": 1}
 
 
 def test_state_reducer_hydrates_context_state_from_store() -> None:

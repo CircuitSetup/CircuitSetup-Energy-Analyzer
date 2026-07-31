@@ -130,7 +130,7 @@ class StateReducer:
             "run_cycle_status_by_circuit", "run_cycle_evidence_by_circuit",
             "appliance_health_status_by_circuit",
             "appliance_health_evidence_by_circuit",
-            "hvac_efficiency_by_circuit", "hvac_thermostat_setup_issues_by_circuit",
+            "hvac_thermostat_setup_issues_by_circuit",
             "weather_context_by_circuit", "rain_pump_context_by_circuit",
             "water_flow_context_by_circuit", "water_context_history_by_circuit",
             "power_quality_score_by_circuit", "power_quality_evidence_by_circuit",
@@ -140,6 +140,9 @@ class StateReducer:
             "always_on_limit_usage_by_circuit", "standby_evidence_by_circuit",
         )
         removed |= _pop_circuit_state(state, circuit_id, roots)
+        if circuit_id in state.hvac_efficiency_by_circuit:
+            clear_hvac_efficiency(state, circuit_id)
+            removed = True
         prefix = f"{circuit_id}|"
         for root in (
             "hvac_current_episode_by_stream",
