@@ -983,11 +983,27 @@ class NilmController:
             circuit_id,
             (),
         ):
-            if (
-                not isinstance(session, Mapping)
-                or str(session.get("session_id") or "").strip() not in confirmed
-            ):
+            if not isinstance(session, Mapping):
                 continue
+            preserved_close = session.get("_duration_bound_close")
+            preserved_close = (
+                preserved_close if isinstance(preserved_close, Mapping) else None
+            )
+            session_ids = {str(session.get("session_id") or "").strip()}
+            if preserved_close is not None:
+                session_ids.add(
+                    str(preserved_close.get("session_id") or "").strip()
+                )
+            if confirmed.isdisjoint(session_ids):
+                continue
+            if preserved_close is not None:
+                preserved_duration = self._nonnegative_float_value(
+                    preserved_close.get("duration_seconds"),
+                    default=0.0,
+                )
+                if preserved_duration > 0.0:
+                    durations.append(preserved_duration)
+                    continue
             start = self._datetime_or_none(session.get("start"))
             end = self._datetime_or_none(session.get("end"))
             if start is not None and end is not None and end > start:
