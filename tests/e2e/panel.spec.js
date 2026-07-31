@@ -1327,6 +1327,56 @@ test("completed day derives average amps from appliance current history", async 
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("3 A");
 });
 
+test("completed day reloads fallback amps when the range changes", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-02T12:00:00.000Z") });
+  const historyDates = [];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      const date = url.pathname.includes("2026-07-31") ? "2026-07-31" : "2026-07-30";
+      historyDates.push(date);
+      await route.fulfill({
+        json: [[{
+          entity_id: "sensor.fridge_current",
+          state: date === "2026-07-31" ? "2" : "4",
+          last_changed: `${date}T00:00:00.000Z`,
+        }]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{ circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] }],
+    },
+    {
+      "sensor.fridge_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    },
+  );
+  const setRange = async (date) => page.evaluate((start) => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: `${start}T00:00:00.000Z`,
+        end: `${start}T23:59:59.999Z`,
+        compare: false,
+      },
+    }));
+  }, date);
+
+  await setRange("2026-07-31");
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("2 A");
+  const jul30CallsBefore = historyDates.filter((date) => date === "2026-07-30").length;
+  await setRange("2026-07-30");
+  await expect.poll(() => historyDates.filter((date) => date === "2026-07-30").length).toBeGreaterThan(jul30CallsBefore);
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 30)" })).toContainText("4 A");
+});
+
 test("completed day does not carry amps through unavailable history", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {

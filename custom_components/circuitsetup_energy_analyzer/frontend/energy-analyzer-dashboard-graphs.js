@@ -76,6 +76,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         this._rollingContributionByCircuit = {};
         this._applianceRangeTotals = {};
         this._applianceRangeKey = "";
+        this._historicalAmpsKey = "";
+        this._historicalAmpsSeries = null;
         this._chartZoomWindows && this._chartZoomWindows.clear();
         this._render();
       };
