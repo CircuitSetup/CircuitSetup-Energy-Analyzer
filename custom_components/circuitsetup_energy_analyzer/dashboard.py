@@ -542,7 +542,7 @@ def _mains_chart_power_entities(
         unit, device_class = _entity_power_metadata(hass, entity_id)
         if "harmonic" in label:
             continue
-        if unit and unit not in {"w", "kw"}:
+        if unit and unit not in {"w", "kw", "mw"}:
             continue
         if any(token in label for token in included):
             accepted.append(entity_id)
@@ -660,7 +660,7 @@ def _mains_power_current_rows(
             for index, entity_id in enumerate(mains.current_entities)
         ],
     ]
-    if calculated_power and not mains.chart_power_entities:
+    if calculated_power:
         rows.extend(
             {
                 "entity": entity_id,

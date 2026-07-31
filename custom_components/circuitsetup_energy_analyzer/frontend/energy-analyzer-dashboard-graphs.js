@@ -260,7 +260,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _pairedSourceValue(source, index, values, count, legAware) {
-      if (values.length === 1) return values[0];
+      if (values.length === 1) {
+        return !values[0].leg || values[0].leg === source.leg ? values[0] : null;
+      }
       if (values.length !== count) return null;
       if (!legAware) return values[index];
       return values.find((value) => value.leg && value.leg === source.leg) || null;

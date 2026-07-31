@@ -1133,6 +1133,35 @@ test("home summary pairs live derived metrics by leg", async ({ page }) => {
   await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("4,500 W");
 });
 
+test("home summary rejects a legged singleton source for another leg", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
+        current_legs: ["a", "b"],
+        voltage_entities: ["sensor.mains_l1_voltage"],
+        voltage_legs: ["a"],
+        power_factor_entities: ["sensor.mains_l1_power_factor"],
+        power_factor_legs: ["a"],
+      },
+    },
+    {
+      "sensor.mains_l1_current": { state: "10", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_l2_current": { state: "20", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_l1_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_l1_power_factor": { state: "0.5", attributes: {} },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("Unavailable");
+});
+
 test("home summary derives zero power when live PF is zero", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
   await mockPanelApi(page);

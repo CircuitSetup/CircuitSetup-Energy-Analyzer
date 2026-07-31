@@ -605,6 +605,20 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
             "series_id": "mains:current",
             "axis": "right",
         },
+        {
+            "entity": "sensor.mains_line_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
     ]
     summary = _card_with_title(home, "Home energy summary")
     assert summary["primary_mains"]["power_entities"] == [
@@ -683,6 +697,66 @@ def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() 
 
     assert graph["y_axis_label"] == "W"
     assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+        {
+            "entity": "sensor.mains_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
+    ]
+
+
+def test_home_mains_graph_keeps_hidden_calculation_sources_with_chart_power() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    states = {
+        "sensor.mains_power": SimpleNamespace(
+            state="1000",
+            attributes={
+                "friendly_name": "Mains Active Power",
+                "unit_of_measurement": "W",
+            },
+        ),
+    }
+    dashboard = build_recommended_dashboard(
+        (mains,),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+    )
+    home = _dashboard_views(dashboard)[0]
+    graph = _card_with_title(home, "Mains total power and amps")
+
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_power",
+            "name": "Mains total power",
+            "series_id": "mains:power",
+            "axis": "left",
+        },
         {
             "entity": "sensor.mains_current",
             "name": "Total Amps",
@@ -823,6 +897,7 @@ def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None
         "sensor.mains_channel_a",
         "sensor.main_panel_channel_1",
         "sensor.main_panel_channel_2",
+        "sensor.main_panel_channel_3",
         "sensor.high_voltage_panel_active_power",
     ]
     assert summary["primary_mains"]["power_entities"] == [
