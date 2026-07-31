@@ -174,22 +174,30 @@ class NilmSampleProcessor:
 
     def refresh_session_history(self, circuit_id: str, store_data: Any) -> bool:
         """Recompute persisted sessions from current edges and assignments."""
-        session_payloads = _nilm_session_history_payloads(
+        assignments = store_data.nilm_appliance_assignments_by_circuit.get(
             circuit_id,
-            self.unmatched_edges_by_circuit[circuit_id],
-            store_data.nilm_signatures.get(circuit_id, []),
-            store_data.nilm_appliance_assignments_by_circuit.get(circuit_id, []),
+            [],
         )
-        if not session_payloads:
-            return False
         existing_sessions = store_data.nilm_session_history_by_circuit.get(
             circuit_id,
             [],
         )
-        next_sessions = _merge_nilm_session_history(
+        next_sessions = _reconcile_nilm_session_duration_bounds(
+            circuit_id,
             existing_sessions,
-            session_payloads,
+            assignments,
         )
+        session_payloads = _nilm_session_history_payloads(
+            circuit_id,
+            self.unmatched_edges_by_circuit[circuit_id],
+            store_data.nilm_signatures.get(circuit_id, []),
+            assignments,
+        )
+        if session_payloads:
+            next_sessions = _merge_nilm_session_history(
+                next_sessions,
+                session_payloads,
+            )
         if next_sessions == existing_sessions:
             return False
         store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
@@ -473,6 +481,69 @@ def _merge_nilm_session_history(
         merged[session_id] = dict(update)
     return sorted(
         merged.values(),
+        key=lambda session: str(session.get("end") or session.get("start") or ""),
+        reverse=True,
+    )
+
+
+def _reconcile_nilm_session_duration_bounds(
+    circuit_id: str,
+    sessions: Iterable[Any],
+    assignments: Iterable[Any],
+) -> list[dict[str, Any]]:
+    assignments_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignments
+        if isinstance(assignment, Mapping)
+    }
+    reconciled: list[dict[str, Any]] = []
+    for session in sessions:
+        if not isinstance(session, Mapping):
+            continue
+        payload = dict(session)
+        assignment = assignments_by_id.get(
+            str(payload.get("assignment_id") or "").strip()
+        )
+        duration = _optional_float(payload.get("duration_seconds"))
+        minimum = _optional_float(
+            assignment.get("min_duration_seconds") if assignment else None
+        )
+        maximum = _optional_float(
+            assignment.get("max_duration_seconds") if assignment else None
+        )
+        outside_bounds = duration is not None and (
+            (minimum is not None and duration < minimum)
+            or (maximum is not None and duration > maximum)
+        )
+        fingerprint = str(payload.get("signature_fingerprint") or "").strip()
+        on_edge_id = str(payload.get("on_edge_id") or "").strip()
+        confidence = _optional_float(payload.get("confidence"))
+        if (
+            payload.get("end") is not None
+            and outside_bounds
+            and fingerprint
+            and on_edge_id
+        ):
+            payload.update(
+                {
+                    "session_id": "|".join(
+                        (circuit_id, fingerprint, on_edge_id, "open")
+                    ),
+                    "off_edge_id": None,
+                    "end": None,
+                    "duration_seconds": None,
+                    "estimated_energy_kwh": 0.0,
+                    "confidence": min(
+                        max(confidence if confidence is not None else 0.35, 0.0),
+                        0.35,
+                    ),
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                }
+            )
+        reconciled.append(payload)
+    return sorted(
+        reconciled,
         key=lambda session: str(session.get("end") or session.get("start") or ""),
         reverse=True,
     )
