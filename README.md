@@ -151,7 +151,10 @@ questions instead of raw diagnostic entity lists:
   when that evidence is available. Eligible direct-circuit pages also show
   **Water Flow Context** when retained water-flow correlation evidence exists,
   including flow state, appliance and mapped-appliance runtime, mismatch
-  duration, confidence, learning progress, and configured flow sources.
+  duration, confidence, learning progress, and configured flow sources. Sump
+  pump pages add a 30-day **Pump Drivers Over Time** chart that aligns completed
+  pump cycles with rain, compressor-only humidity changes, and supporting blower
+  activity.
 - **Appliance Status** keeps activity, health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed
@@ -409,7 +412,7 @@ A good dashboard order is:
 When a single appliance needs review, use this pattern:
 
 1. **Appliance status card**: Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
-2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days. Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, use the explicit zoom and pan controls, or open the visible range with its History arrow.
+2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days (30 days for sump pumps). Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, use the explicit zoom and pan controls, or open the visible range with its History arrow. Sump-pump cycle markers distinguish rain, HVAC-plus-humidity, combined, unexplained, and unclassified activity.
 3. **Appliance automations**: Activity Summary state or `is_running` attribute for washer, dryer, pump, microwave, or appliance-complete automations.
 4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
 5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
@@ -732,6 +735,17 @@ retained as a predictive-health comparison dimension. When rain and AC activity
 are present, higher pump activity can be expected instead of automatically
 becoming a possible issue. Rain evidence still carries more weight than
 compressor-only context.
+
+On a sump pump's Appliance Detail page, **Pump Drivers Over Time** performs a
+display-time join against Recorder history. Numeric rain rate is integrated as
+accumulation; otherwise binary rain history is shown without an accumulation
+claim. Humidity is considered only during compressor operation and compared
+with the learned 90th-percentile humidity baseline from at least 15 completed,
+rain-free compressor cycles. Blower operation appears only as supporting
+evidence. Completed pump cycles are grouped as rain, HVAC plus elevated
+humidity, combined, unexplained, or unclassified; unclassified cycles are
+excluded from percentages. These groups describe timing relationships, not
+proven causes.
 
 Configure the global rain source during setup or later from **Configure**. Tune the per-circuit rain response window and activity threshold from:
 
