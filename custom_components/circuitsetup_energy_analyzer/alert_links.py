@@ -10,7 +10,6 @@ DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
     "/circuitsetup-energy-analyzer/alert-evidence"
 )
 MAX_GRAPH_ENTITIES = 8
-MAX_GRAPH_CONTEXT_PADDING = timedelta(hours=24)
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
@@ -51,9 +50,26 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         (SensorRole.ENERGY, SensorRole.REAL_POWER),
     ),
     (
-        ("demand", "always_on", "standby", "cycle", "activity"),
+        ("solar", "mains_balance"),
+        (SensorRole.REAL_POWER,),
+    ),
+    (
+        (
+            "demand",
+            "always_on",
+            "standby",
+            "cycle",
+            "activity",
+            "schedule",
+            "running",
+            "runtime",
+        ),
         (SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),
+    (("frequency",), (SensorRole.FREQUENCY,)),
+    (("real_power",), (SensorRole.REAL_POWER,)),
+    (("current",), (SensorRole.CURRENT,)),
+    (("nilm",), (SensorRole.REAL_POWER,)),
     (
         ("rain_pump", "water_flow", "pump", "flow"),
         (SensorRole.REAL_POWER, SensorRole.CURRENT, SensorRole.ENERGY),
@@ -62,16 +78,6 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         ("voltage", "sag", "swell"),
         (SensorRole.VOLTAGE, SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),
-)
-
-_DEFAULT_ROLES = (
-    SensorRole.REAL_POWER,
-    SensorRole.CURRENT,
-    SensorRole.PEAK_CURRENT,
-    SensorRole.REACTIVE_POWER,
-    SensorRole.APPARENT_POWER,
-    SensorRole.POWER_FACTOR,
-    SensorRole.ENERGY,
 )
 
 
@@ -113,9 +119,13 @@ def alert_graph_entities(
     if config is None or max_entities <= 0:
         return ()
 
+    roles = _roles_for_feature(_feature_for_alert(alert))
+    if not roles and alert.value_metric:
+        roles = _roles_for_feature(alert.value_metric)
+
     selected: list[str] = []
     seen: set[str] = set()
-    for role in _roles_for_feature(_feature_for_alert(alert)):
+    for role in roles:
         for sensor in config.sensors:
             if sensor.role != role or sensor.entity_id in seen:
                 continue
@@ -142,17 +152,16 @@ def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
     return tuple(entities)
 
 
-def alert_graph_window(
-    alert: AlertEvidence, *, padding: timedelta = timedelta(hours=2)
-) -> tuple[datetime, datetime]:
-    """Return the graph window ending at the alert evidence."""
+def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
+    """Return the graph window containing only the alert evidence."""
     raw_start = alert.first_seen or alert.timestamp
     raw_end = alert.last_seen or alert.timestamp
     start = min(raw_start, raw_end)
     end = max(raw_start, raw_end)
-    span_padding = min((end - start) / 2, MAX_GRAPH_CONTEXT_PADDING)
-    context_padding = max(padding, span_padding)
-    return (start - context_padding, end)
+    if start == end:
+        point_padding = timedelta(minutes=15)
+        return (start - point_padding, end + point_padding)
+    return (start, end)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
@@ -160,7 +169,7 @@ def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
     for hints, roles in _FEATURE_ROLE_HINTS:
         if any(hint in normalized for hint in hints):
             return roles
-    return _DEFAULT_ROLES
+    return ()
 
 
 def _feature_for_alert(alert: AlertEvidence) -> str:
