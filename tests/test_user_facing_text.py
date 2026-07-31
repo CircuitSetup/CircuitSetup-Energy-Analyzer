@@ -699,6 +699,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
+            "circuit_is_shared": "This circuit also powers unrelated loads",
             "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
@@ -709,6 +710,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
+        assert "primary appliance" in descriptions["circuit_is_shared"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]

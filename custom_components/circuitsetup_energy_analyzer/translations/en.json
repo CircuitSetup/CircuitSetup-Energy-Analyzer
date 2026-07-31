@@ -38,13 +38,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-        "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
-          "appliance_profile": "Appliance Type",
+        "appliance_profile": "Appliance Type",
+        "circuit_is_shared": "This circuit also powers unrelated loads",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -52,7 +53,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-          "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -102,7 +104,8 @@
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
       "invalid_known_load_circuits": "Known load circuits must be selected from configured appliance circuits.",
-      "invalid_water_flow_sensor_entities": "Water flow sensor entity IDs must be text values."
+      "invalid_water_flow_sensor_entities": "Water flow sensor entity IDs must be text values.",
+      "mixed_dual_phase_not_supported": "Shared dual-phase analysis is not supported."
     }
   },
   "options": {
@@ -518,13 +521,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-        "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Mode and Power Flow are selected automatically from Appliance Type. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
-          "appliance_profile": "Appliance Type",
+        "appliance_profile": "Appliance Type",
+        "circuit_is_shared": "This circuit also powers unrelated loads",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -532,7 +536,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-          "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
+        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
@@ -546,7 +551,8 @@
       "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
-      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again."
+      "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
+      "mixed_dual_phase_not_supported": "Shared dual-phase analysis is not supported."
     }
   },
   "entity": {

@@ -51,6 +51,126 @@ from custom_components.circuitsetup_energy_analyzer.models import SensorRole
 CONF_DEMO_SOURCE_BUNDLE_ENABLED = "demo_source_bundle_enabled"
 
 
+def test_assignment_schema_defaults_shared_from_saved_mode() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    schema = config_flow._assignment_schema(
+        {
+            "entity_ids": ("sensor.kitchen_power",),
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": "refrigerator",
+            "mode": "mixed",
+        }
+    )
+
+    assert _schema_default(schema, "circuit_is_shared") is True
+
+
+def test_specific_profile_can_save_shared_single_phase_assignment() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuit = config_flow._circuit_from_assignment_group(
+        {
+            "circuit_id": "kitchen_refrigerator",
+            "entity_ids": ("sensor.kitchen_power",),
+            "name": "Kitchen Refrigerator",
+            "appliance_profile": "refrigerator",
+            "mode": "single_phase",
+        },
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.kitchen_power"],
+            "circuit_name": "Kitchen Refrigerator",
+            "appliance_profile": "refrigerator",
+            "circuit_is_shared": True,
+            "circuit_retention_mode": "standard",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["appliance_profile"] == "refrigerator"
+    assert circuit["mode"] == "mixed"
+    assert "circuit_is_shared" not in circuit
+
+
+@pytest.mark.parametrize("profile", ["mains_nilm", "solar_inverter"])
+def test_shared_assignment_rejects_ineligible_profiles(profile: str) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    with pytest.raises(
+        config_flow.SetupValidationError, match="mixed_dual_phase_not_supported"
+    ):
+        config_flow._circuit_from_assignment_group(
+            {
+                "circuit_id": "mains",
+                "entity_ids": ("sensor.mains_power",),
+                "name": "Mains",
+                "appliance_profile": profile,
+            },
+            {
+                "include_circuit": True,
+                "included_sensors": ["sensor.mains_power"],
+                "circuit_name": "Mains",
+                "appliance_profile": profile,
+                "circuit_is_shared": True,
+            },
+        )
+
+
+def test_shared_assignment_rejects_inferred_dual_phase() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    with pytest.raises(
+        config_flow.SetupValidationError, match="mixed_dual_phase_not_supported"
+    ):
+        config_flow._circuit_from_assignment_group(
+            {
+                "circuit_id": "garage_ev",
+                "entity_ids": (
+                    "sensor.garage_ev_l1_power",
+                    "sensor.garage_ev_l2_power",
+                ),
+                "name": "Garage EV",
+                "appliance_profile": "ev_charger",
+            },
+            {
+                "include_circuit": True,
+                "included_sensors": [
+                    "sensor.garage_ev_l1_power",
+                    "sensor.garage_ev_l2_power",
+                ],
+                "circuit_name": "Garage EV",
+                "appliance_profile": "ev_charger",
+                "circuit_is_shared": True,
+            },
+        )
+
+
+def test_saved_mixed_two_leg_assignment_round_trips() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuit = config_flow._circuit_from_assignment_group(
+        {
+            "circuit_id": "legacy_mixed",
+            "entity_ids": ("sensor.legacy_l1_power", "sensor.legacy_l2_power"),
+            "name": "Legacy Mixed",
+            "appliance_profile": "refrigerator",
+            "mode": "mixed",
+            "saved_mode": "mixed",
+        },
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.legacy_l1_power", "sensor.legacy_l2_power"],
+            "circuit_name": "Legacy Mixed",
+            "appliance_profile": "refrigerator",
+            "circuit_is_shared": True,
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["mode"] == "mixed"
+
+
 def _assert_create_entry_result(
     result: dict[str, object],
     expected_data: dict[str, object],
@@ -3176,6 +3296,7 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "included_sensors",
         "circuit_name",
         "appliance_profile",
+        "circuit_is_shared",
         "circuit_retention_mode",
     }
     assert _schema_default(result["data_schema"], "circuit_name") == (
@@ -3192,6 +3313,64 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "circuit_mode": "dual_phase",
         "power_flow": "load",
     }
+
+
+@pytest.mark.asyncio
+async def test_options_shared_dual_phase_error_keeps_selection() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.roof_solar_l1_power",
+                "sensor.roof_solar_l2_power",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "roof_solar",
+                    "name": "Roof Solar",
+                    "appliance_profile": "solar_inverter",
+                    "mode": "dual_phase",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.roof_solar_l1_power",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.roof_solar_l2_power",
+                            "role": "real_power",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    await flow.async_step_assign()
+    await flow.async_step_select_assignment({"selected_assignment": "roof_solar"})
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": [
+                "sensor.roof_solar_l1_power",
+                "sensor.roof_solar_l2_power",
+            ],
+            "circuit_name": "Roof Solar",
+            "appliance_profile": "solar_inverter",
+            "circuit_is_shared": True,
+            "circuit_retention_mode": "standard",
+        }
+    )
+
+    assert result["errors"] == {"base": "mixed_dual_phase_not_supported"}
+    assert (
+        _schema_default(result["data_schema"], "appliance_profile") == "solar_inverter"
+    )
+    assert _schema_default(result["data_schema"], "circuit_is_shared") is True
 
 
 @pytest.mark.asyncio
