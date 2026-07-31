@@ -1,5 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
+from custom_components.circuitsetup_energy_analyzer.alerting import (
+    ConservativeAlertPolicy,
+)
 from custom_components.circuitsetup_energy_analyzer.cold_storage import (
     COLD_STORAGE_MEDIAN_CURRENT_FEATURE,
     COLD_STORAGE_MEDIAN_POWER_FEATURE,
@@ -9,6 +13,8 @@ from custom_components.circuitsetup_energy_analyzer.cold_storage import (
     ColdStorageWindowSummary,
     select_cold_storage_signature_evidence,
 )
+from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     BaselineStats,
@@ -16,6 +22,16 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitMode,
     CircuitSample,
 )
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    NormalizedCircuitSample,
+)
+from custom_components.circuitsetup_energy_analyzer.processors.base import (
+    ProcessingContext,
+)
+from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+    RunCycleProcessor,
+)
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 START = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
 
@@ -207,3 +223,62 @@ def test_signature_evidence_rejects_one_signal_and_non_cold_profiles() -> None:
         )
         is None
     )
+
+
+def test_short_defrost_window_does_not_combine_with_later_signature_changes() -> (
+    None
+):
+    state = AnalyzerState(learning_by_circuit={"fridge": True})
+    store_data = FeatureStoreData(
+        baselines={
+            f"fridge:{feature}": baseline
+            for feature, baseline in _signature_baselines().items()
+        }
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        learning_mature=lambda _config, _now: False,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    alerts = []
+
+    for minute in range(0, 151, 5):
+        abnormal = minute <= 30 or minute >= 95
+        pulse = minute % 20 == 0
+        now = START + timedelta(minutes=minute)
+        result = processor.process(
+            NormalizedCircuitSample(
+                timestamp=now,
+                circuit_id="fridge",
+                real_power=(
+                    (125.0 if pulse else 150.0)
+                    if abnormal
+                    else (160.0 if pulse else 100.0)
+                ),
+                current=(
+                    (1.45 if pulse else 1.8)
+                    if abnormal
+                    else (1.9 if pulse else 1.2)
+                ),
+                power_factor=0.60 if abnormal else (0.86 if pulse else 0.60),
+            ),
+            config,
+            ProcessingContext(
+                now=now,
+                hass=SimpleNamespace(data={DOMAIN: {}}),
+                state=state,
+                store_data=store_data,
+                options={},
+                entry_data={},
+                known_load_circuit_ids=frozenset(),
+                sensitivity="standard",
+            ),
+        )
+        alerts.extend(result.alerts)
+
+    assert alerts == []

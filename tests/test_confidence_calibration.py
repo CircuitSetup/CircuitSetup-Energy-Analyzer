@@ -45,6 +45,7 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
     "fixture_name",
     [
         "normal_refrigerator_week",
+        "refrigerator_cycle_signature_change",
         "refrigerator_energy_drift",
         "normal_washer_cycle",
         "normal_dishwasher_cycle",
@@ -414,8 +415,9 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 15 |" in report
+    assert "| Fixtures | 16 |" in report
     assert "normal_refrigerator_week" in report
+    assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
     assert "normal_washer_cycle" in report
     assert "normal_dishwasher_cycle" in report

@@ -1,0 +1,85 @@
+schema_version: 1
+id: refrigerator_cycle_signature_change
+description: Refrigerator loses its correlated PF/power/current compressor pulses while workload remains elevated, then recovers.
+scenario_type: abnormal
+appliance_profile: refrigerator
+circuit_mode: single_phase
+power_flow: load
+start_time: "2026-07-24T20:45:00+00:00"
+sample_interval_seconds: 300
+retention_mode: standard
+
+circuits:
+  - circuit_id: refrigerator
+    name: Basement Fridge
+    appliance_profile: refrigerator
+    circuit_mode: single_phase
+    power_flow: load
+    sources:
+      power: sensor.refrigerator_power
+      current: sensor.refrigerator_current
+      power_factor: sensor.refrigerator_power_factor
+
+segments:
+  - pattern: cold_storage_signature
+    start_t: 0
+    duration_seconds: 432000
+    sample_interval_seconds: 300
+    excursion_interval_seconds: 1200
+    base_power_w: 100.0
+    base_current_a: 1.2
+    base_power_factor: 0.60
+    excursion_power_w: 160.0
+    excursion_current_a: 1.9
+    excursion_power_factor: 0.86
+  - pattern: cold_storage_signature
+    start_t: 432000
+    duration_seconds: 93600
+    sample_interval_seconds: 300
+    excursion_interval_seconds: 1200
+    base_power_w: 150.0
+    base_current_a: 1.8
+    base_power_factor: 0.60
+    excursion_power_w: 125.0
+    excursion_current_a: 1.45
+    excursion_power_factor: 0.60
+  - pattern: cold_storage_signature
+    start_t: 525600
+    duration_seconds: 21600
+    sample_interval_seconds: 300
+    excursion_interval_seconds: 1200
+    base_power_w: 100.0
+    base_current_a: 1.2
+    base_power_factor: 0.60
+    excursion_power_w: 160.0
+    excursion_current_a: 1.9
+    excursion_power_factor: 0.86
+
+labels:
+  abnormal_condition_start_t: 432000
+  expected_events: []
+  expected_alerts:
+    - circuit_id: refrigerator
+      feature: cold_storage_cycle_signature_change
+      earliest_t: 438300
+      latest_t: 438300
+      severity: warning
+      min_repeated_count: 3
+      min_confidence: 0.6
+  expected_no_alerts:
+    - circuit_id: refrigerator
+      feature: "*"
+      start_t: 0
+      end_t: 431999
+    - circuit_id: refrigerator
+      feature: cold_storage_cycle_signature_change
+      start_t: 432000
+      end_t: 438299
+
+calibration_expectations:
+  max_false_positive_alerts: 0
+  min_true_positive_alerts: 1
+  max_false_negative_alerts: 0
+  max_detection_latency_seconds: 6300
+  expected_precision_at_least: 1.0
+  expected_recall_at_least: 1.0
