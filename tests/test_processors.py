@@ -6968,6 +6968,48 @@ def test_nilm_session_history_closes_open_session_across_owner_fingerprints() ->
     assert [session["session_id"] for session in merged] == ["closed"]
 
 
+def test_nilm_session_history_preserves_close_across_open_fingerprints() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    assignment = {
+        "assignment_id": "dryer",
+        "rejected_session_ids": ["open-old"],
+    }
+    preserved_close = {
+        "session_id": "closed",
+        "off_edge_id": "off-1",
+        "end": "2026-07-31T12:05:00+00:00",
+        "duration_seconds": 300.0,
+    }
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "open-old",
+                "signature_fingerprint": "signature-old",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+                "_duration_bound_close": preserved_close,
+            }
+        ],
+        [
+            {
+                "session_id": "open-new",
+                "signature_fingerprint": "signature-new",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+        assignments=[assignment],
+    )
+
+    assert merged[0]["_duration_bound_close"] == preserved_close
+    assert assignment["rejected_session_ids"] == ["open-new"]
+
+
 @pytest.mark.parametrize("existing_off_edge_id", ["off-1", "off-old"])
 def test_nilm_session_history_replaces_stale_closed_edge_pair(
     existing_off_edge_id: str,

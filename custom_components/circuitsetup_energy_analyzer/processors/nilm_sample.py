@@ -197,6 +197,7 @@ class NilmSampleProcessor:
             next_sessions = _merge_nilm_session_history(
                 next_sessions,
                 session_payloads,
+                assignments=assignments,
             )
         if next_sessions == existing_sessions:
             return False
@@ -463,7 +464,14 @@ def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
 def _merge_nilm_session_history(
     existing: Iterable[Any],
     updates: Iterable[Mapping[str, Any]],
+    *,
+    assignments: Iterable[Any] = (),
 ) -> list[dict[str, Any]]:
+    assignments_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignments
+        if isinstance(assignment, Mapping)
+    }
     merged: dict[str, dict[str, Any]] = {}
     for session in existing:
         if isinstance(session, Mapping):
@@ -475,14 +483,36 @@ def _merge_nilm_session_history(
         if not session_id:
             continue
         payload = dict(update)
+        on_edge_id = str(update.get("on_edge_id") or "").strip()
         existing_session = merged.get(session_id)
+        if existing_session is None and on_edge_id:
+            existing_session = next(
+                (
+                    session
+                    for session in merged.values()
+                    if str(session.get("on_edge_id") or "").strip() == on_edge_id
+                ),
+                None,
+            )
         if existing_session is not None and payload.get("end") is None:
             preserved_close = existing_session.get("_duration_bound_close")
             if isinstance(preserved_close, Mapping):
                 payload["_duration_bound_close"] = dict(preserved_close)
+                assignment_id = str(
+                    payload.get("assignment_id")
+                    or existing_session.get("assignment_id")
+                    or ""
+                ).strip()
+                _replace_nilm_assignment_rejection(
+                    assignments_by_id.get(assignment_id),
+                    old_session_id=str(
+                        existing_session.get("session_id") or ""
+                    ).strip(),
+                    new_session_id=session_id,
+                )
         _remove_replaced_nilm_sessions(
             merged,
-            on_edge_id=str(update.get("on_edge_id") or "").strip(),
+            on_edge_id=on_edge_id,
         )
         merged[session_id] = payload
     return sorted(
