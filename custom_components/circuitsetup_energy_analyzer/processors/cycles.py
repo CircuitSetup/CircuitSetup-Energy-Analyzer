@@ -304,6 +304,7 @@ class RunCycleProcessor:
         policy = self._alert_policy_for_circuit(config.circuit_id)
         if not summary.valid:
             policy.reset_episode(config.circuit_id, COLD_STORAGE_SIGNATURE_FEATURE)
+            self._cold_storage_recovery_windows[config.circuit_id] = 0
             if active_alert is not None:
                 result.preserved_alerts.append(active_alert)
             return result
@@ -396,9 +397,6 @@ class RunCycleProcessor:
             return result
 
         self._cold_storage_recovery_windows[config.circuit_id] = 0
-        if active_alert is not None:
-            result.preserved_alerts.append(active_alert)
-            return result
         observation = Observation(
             circuit_id=config.circuit_id,
             feature=evidence.feature,
@@ -413,6 +411,9 @@ class RunCycleProcessor:
             features=evidence.features,
         )
         result.observations.append(observation)
+        if active_alert is not None:
+            result.preserved_alerts.append(active_alert)
+            return result
         alert = policy.observe(observation)
         if alert is None:
             if active_alert is not None:
