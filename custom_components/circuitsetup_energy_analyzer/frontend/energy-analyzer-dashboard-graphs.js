@@ -2070,7 +2070,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           && (mains.voltage_entities || []).length
           && (mains.power_factor_entities || []).length
       );
-      return hasMainsSources ? [mains] : (this._dashboardConfig.appliances || []);
+      return hasMainsSources
+        ? [mains, ...(this._dashboardConfig.appliances || [])]
+        : (this._dashboardConfig.appliances || []);
     }
 
     _historicalAmpConfigs(circuit) {
@@ -2158,6 +2160,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : null;
     }
 
+    _hasUsableHistoricalSeries(series) {
+      return Boolean(series?.points?.some((point) => Number.isFinite(point.value)));
+    }
+
     _derivedHistoricalAmpsSeries(series, configs) {
       const powers = series.filter((item) => item.series_id === "mains:power");
       const volts = series.filter((item) => item.series_id === "mains:voltage");
@@ -2221,8 +2227,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const direct = expectedCurrent && currentSeries.length === expectedCurrent
         ? this._sumHistoricalSeries(currentSeries)
         : null;
-      return direct
-        || this._derivedHistoricalAmpsSeries(series, configs);
+      return this._hasUsableHistoricalSeries(direct)
+        ? direct
+        : this._derivedHistoricalAmpsSeries(series, configs);
     }
 
     _ensureHistoricalAmps() {
@@ -2242,9 +2249,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         if (this._historicalAmpsKey !== key) return;
         const circuitSeries = circuits
           .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)));
-        this._historicalAmpsSeries = circuitSeries.length === circuits.length && circuitSeries.every(Boolean)
-          ? this._sumHistoricalSeries(circuitSeries)
+        const hasMainsSources = circuits[0] === this._dashboardConfig.primary_mains;
+        const mainsSeries = hasMainsSources ? circuitSeries[0] : null;
+        const fallbackCircuits = hasMainsSources ? circuits.slice(1) : circuits;
+        const fallbackSeries = hasMainsSources ? circuitSeries.slice(1) : circuitSeries;
+        const fallback = fallbackSeries.length === fallbackCircuits.length
+          && fallbackSeries.every((series) => this._hasUsableHistoricalSeries(series))
+          ? this._sumHistoricalSeries(fallbackSeries)
           : null;
+        this._historicalAmpsSeries = this._hasUsableHistoricalSeries(mainsSeries)
+          ? mainsSeries
+          : fallback;
       }).catch(() => {
         if (this._historicalAmpsKey === key) this._historicalAmpsSeries = null;
       }).finally(() => {

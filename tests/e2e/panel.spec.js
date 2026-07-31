@@ -1356,6 +1356,49 @@ test("completed day derives average amps from appliance current history", async 
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("3 A");
 });
 
+test("completed day falls back to appliance current history when mains history is missing", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_current", state: "2", last_changed: "2026-07-31T00:00:00.000Z" },
+          { state: "4", last_changed: "2026-07-31T12:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { current_entities: ["sensor.mains_current"] },
+      appliances: [{ circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] }],
+    },
+    {
+      "sensor.mains_current": { state: "10", attributes: { unit_of_measurement: "A" } },
+      "sensor.fridge_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("3 A");
+});
+
 test("completed day reloads fallback amps when the range changes", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-02T12:00:00.000Z") });
   const historyDates = [];
@@ -1522,6 +1565,57 @@ test("completed day derives average amps from power, voltage, and PF history", a
       },
     },
     {
+      "sensor.mains_power": { state: "1000", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "0.5", attributes: {} },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("20 A");
+});
+
+test("completed day derives amps when direct current history has no usable values", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [{ entity_id: "sensor.mains_current", state: "unavailable", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power", state: "1000", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_voltage", state: "100", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power_factor", state: "0.5", last_changed: "2026-07-31T00:00:00.000Z" }],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        current_entities: ["sensor.mains_current"],
+        power_entities: ["sensor.mains_power"],
+        voltage_entities: ["sensor.mains_voltage"],
+        power_factor_entities: ["sensor.mains_power_factor"],
+      },
+    },
+    {
+      "sensor.mains_current": { state: "10", attributes: { unit_of_measurement: "A" } },
       "sensor.mains_power": { state: "1000", attributes: { unit_of_measurement: "W" } },
       "sensor.mains_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
       "sensor.mains_power_factor": { state: "0.5", attributes: {} },
