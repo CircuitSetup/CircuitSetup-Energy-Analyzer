@@ -327,6 +327,20 @@ def test_edge_detector_keeps_pending_transition_after_delayed_confirmation() -> 
     assert edges[0].delta_w == 1_000.0
 
 
+def test_edge_detector_drops_timed_out_reversion_to_baseline() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 1_000.0), sample(30, 0.0)]
+    )
+
+    assert edges == []
+
+
 def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> None:
     known_event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=11),
@@ -1079,6 +1093,25 @@ def test_global_session_pairing_opens_on_edge_after_off_edge_is_consumed() -> No
     assert sessions[0].end is None
     assert sessions[1].start == BASE_TIME + timedelta(seconds=300)
     assert sessions[1].end == BASE_TIME + timedelta(seconds=600)
+
+
+def test_global_session_pairing_opens_session_beyond_learned_duration() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(3600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+                "max_duration_seconds": 600.0,
+            }
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].end is None
 
 
 def test_global_session_pairing_rejects_short_closed_transition() -> None:

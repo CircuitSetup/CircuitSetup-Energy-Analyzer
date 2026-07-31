@@ -508,6 +508,8 @@ class NilmEdgeDetector:
                 if self._same_level(sample, candidate, baseline):
                     edge = self._edge_between(baseline, candidate)
                     return [edge] if edge is not None else []
+                if self._same_level(sample, baseline, baseline):
+                    return []
             edge = self._edge_between(previous, sample)
             return [edge] if edge is not None else []
         if pending is not None:
@@ -1060,15 +1062,7 @@ def pair_nilm_sessions_for_signatures(
         )
 
     for on_index, on_edge in enumerate(on_edges):
-        if on_index in used_on_indices or _nilm_on_edge_has_compatible_off(
-            on_edge,
-            (
-                off_edge
-                for off_index, off_edge in enumerate(off_edges)
-                if off_index not in used_off_indices
-            ),
-            max_duration=max_duration,
-        ):
+        if on_index in used_on_indices:
             continue
         ranked_specs = sorted(
             (
@@ -1097,12 +1091,43 @@ def pair_nilm_sessions_for_signatures(
         ):
             continue
         spec = ranked_specs[0][1]
+        assignment_id = _nilm_session_spec_assignment_id(spec)
+        fingerprint = _nilm_session_spec_fingerprint(spec)
+        candidate_eligible_off = any(
+            candidate.on_index == on_index
+            and candidate.off_index not in used_off_indices
+            and (
+                candidate.assignment_id == assignment_id
+                if assignment_id
+                else candidate.signature_fingerprint == fingerprint
+            )
+            for candidate in candidates
+        )
+        spec_min_duration = _nilm_session_spec_duration(
+            spec,
+            "min_duration_seconds",
+            min_duration,
+        )
+        too_early_off = any(
+            off_index not in used_off_indices
+            and _nilm_session_pair_score(
+                on_edge,
+                off_edge,
+                min_duration=timedelta(seconds=1),
+                max_duration=spec_min_duration,
+            )
+            is not None
+            and _nilm_signature_pair_score(on_edge, off_edge, spec) is not None
+            for off_index, off_edge in enumerate(off_edges)
+        )
+        if candidate_eligible_off or too_early_off:
+            continue
         sessions.append(
             _open_nilm_session(
                 on_edge,
                 mains_circuit_id=mains_circuit_id,
-                signature_fingerprint=_nilm_session_spec_fingerprint(spec),
-                assignment_id=_nilm_session_spec_assignment_id(spec),
+                signature_fingerprint=fingerprint,
+                assignment_id=assignment_id,
                 known_load_masked=False,
                 known_load_confidence=None,
             )
@@ -1210,24 +1235,6 @@ def _nilm_signature_edge_score(
             scores.append(1.0)
 
     return sum(scores) / len(scores) if scores else 1.0
-
-
-def _nilm_on_edge_has_compatible_off(
-    on_edge: NilmEdge,
-    off_edges: Iterable[NilmEdge],
-    *,
-    max_duration: timedelta,
-) -> bool:
-    return any(
-        _nilm_session_pair_score(
-            on_edge,
-            off_edge,
-            min_duration=timedelta(seconds=1),
-            max_duration=max_duration,
-        )
-        is not None
-        for off_edge in off_edges
-    )
 
 
 def unmatched_load_percentage(total_events: int, unmatched_events: int) -> float:
