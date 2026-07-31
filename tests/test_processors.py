@@ -6795,6 +6795,16 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
             "keep_assignment_for_masking": False,
         },
         {
+            "assignment_id": "ignored",
+            "signature_fingerprints": ["ignored-signature"],
+            "lifecycle_state": "ignored",
+        },
+        {
+            "assignment_id": "expected",
+            "signature_fingerprints": ["expected-signature"],
+            "lifecycle_state": "expected",
+        },
+        {
             "assignment_id": "masking",
             "signature_fingerprints": ["masking-signature"],
             "conversion_state": "direct_meter",
@@ -6802,7 +6812,13 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
         },
     ]
 
-    assert _nilm_session_specs([], assignments) == [
+    assert _nilm_session_specs(
+        [
+            {"signature_id": "ignored-signature"},
+            {"signature_id": "expected-signature"},
+        ],
+        assignments,
+    ) == [
         ("masking-signature", "masking")
     ]
 
@@ -6908,6 +6924,36 @@ def test_nilm_session_history_closes_open_session_across_owner_fingerprints() ->
     )
 
     assert [session["session_id"] for session in merged] == ["closed"]
+
+
+def test_nilm_session_history_replaces_stale_closed_edge_pair() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "stale",
+                "signature_fingerprint": "signature-a",
+                "assignment_id": "appliance-a",
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+            }
+        ],
+        [
+            {
+                "session_id": "current",
+                "signature_fingerprint": "signature-b",
+                "assignment_id": None,
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+                "ambiguous": True,
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["current"]
 
 
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:

@@ -405,18 +405,26 @@ def _nilm_session_specs(
     for assignment in assignments:
         if not isinstance(assignment, Mapping):
             continue
-        if str(assignment.get("lifecycle_state") or "").strip() == "retired":
-            continue
-        if (
+        fingerprints = [
+            str(value or "").strip()
+            for value in _list_items(assignment.get("signature_fingerprints"))
+            if str(value or "").strip()
+        ]
+        hidden = str(assignment.get("lifecycle_state") or "").strip() in {
+            "ignored",
+            "expected",
+            "retired",
+        } or (
             assignment.get("conversion_state") == "direct_meter"
             and assignment.get("keep_assignment_for_masking") is False
-        ):
+        )
+        if hidden:
+            seen_fingerprints.update(fingerprints)
             continue
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
-        for value in _list_items(assignment.get("signature_fingerprints")):
-            fingerprint = str(value or "").strip()
+        for fingerprint in fingerprints:
             key = (fingerprint, assignment_id)
-            if fingerprint and key not in seen:
+            if key not in seen:
                 specs.append(key)
                 seen.add(key)
                 seen_fingerprints.add(fingerprint)
@@ -453,11 +461,12 @@ def _merge_nilm_session_history(
         if not session_id:
             continue
         if update.get("off_edge_id"):
-            _remove_open_nilm_session(
+            _remove_replaced_nilm_sessions(
                 merged,
                 signature_fingerprint=str(
                     update.get("signature_fingerprint") or ""
                 ).strip(),
+                off_edge_id=str(update.get("off_edge_id") or "").strip(),
                 on_edge_id=str(update.get("on_edge_id") or "").strip(),
                 assignment_id=str(update.get("assignment_id") or "").strip(),
                 any_signature=bool(update.get("ambiguous")),
@@ -470,30 +479,37 @@ def _merge_nilm_session_history(
     )
 
 
-def _remove_open_nilm_session(
+def _remove_replaced_nilm_sessions(
     sessions: dict[str, dict[str, Any]],
     *,
     signature_fingerprint: str,
     on_edge_id: str,
+    off_edge_id: str,
     assignment_id: str = "",
     any_signature: bool = False,
 ) -> None:
-    if not signature_fingerprint or not on_edge_id:
+    if not on_edge_id:
         return
     for session_id, session in list(sessions.items()):
+        existing_off_edge_id = str(session.get("off_edge_id") or "").strip()
         if (
-            (
-                any_signature
-                or str(session.get("signature_fingerprint") or "").strip()
-                == signature_fingerprint
+            str(session.get("on_edge_id") or "").strip() == on_edge_id
+            and (
+                (off_edge_id and existing_off_edge_id == off_edge_id)
                 or (
-                    assignment_id
-                    and str(session.get("assignment_id") or "").strip()
-                    == assignment_id
+                    not existing_off_edge_id
+                    and (
+                        any_signature
+                        or str(session.get("signature_fingerprint") or "").strip()
+                        == signature_fingerprint
+                        or (
+                            assignment_id
+                            and str(session.get("assignment_id") or "").strip()
+                            == assignment_id
+                        )
+                    )
                 )
             )
-            and str(session.get("on_edge_id") or "").strip() == on_edge_id
-            and not str(session.get("off_edge_id") or "").strip()
         ):
             sessions.pop(session_id, None)
 

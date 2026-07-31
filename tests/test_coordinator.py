@@ -7543,6 +7543,47 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_session_validation_keeps_duration_bounds_ordered() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "legacy-short",
+                        "assignment_id": "assignment-load",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:00:10+00:00",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-load",
+                        "session_ids": ["legacy-short"],
+                        "confidence": 0.8,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    assignment = await coordinator.async_validate_nilm_session(
+        "mains",
+        "legacy-short",
+    )
+
+    assert assignment["min_duration_seconds"] == pytest.approx(30.0)
+    assert assignment["max_duration_seconds"] == pytest.approx(30.0)
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_history_validation_confirms_matches() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

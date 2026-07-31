@@ -1003,12 +1003,10 @@ class NilmController:
         typical = float(median(durations))
         # ponytail: half/double the median until labelled volume supports percentiles.
         assignment["typical_duration_seconds"] = round(typical, 3)
-        assignment["min_duration_seconds"] = round(
-            max(30.0, min(min(durations), typical * 0.5)),
-            3,
-        )
+        minimum = max(30.0, min(min(durations), typical * 0.5))
+        assignment["min_duration_seconds"] = round(minimum, 3)
         assignment["max_duration_seconds"] = round(
-            max(max(durations), typical * 2.0),
+            max(minimum, max(durations), typical * 2.0),
             3,
         )
 
