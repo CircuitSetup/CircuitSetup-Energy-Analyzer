@@ -473,6 +473,11 @@ class NilmEdgeDetector:
         self._previous: CircuitSample | None = None
         self._pending: tuple[CircuitSample, CircuitSample, int] | None = None
 
+    @property
+    def has_pending_transition(self) -> bool:
+        """Return whether a transition still needs confirmation."""
+        return self._pending is not None
+
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
             self._previous = None
@@ -997,15 +1002,21 @@ def pair_nilm_sessions_for_signatures(
             or candidate.off_index in used_off_indices
         ):
             continue
-        alternate_off_indices = {
-            alternate.off_index
+        close_alternates = [
+            alternate
             for alternate in eligible_candidates
             if alternate.on_index == candidate.on_index
             and alternate.off_index != candidate.off_index
             and alternate.off_index not in used_off_indices
             and candidate.score - alternate.score <= ambiguity_margin
+        ]
+        alternate_off_indices = {
+            alternate.off_index for alternate in close_alternates
         }
         alternate_match_count = len(alternate_off_indices)
+        assignment_ids = {candidate.assignment_id}
+        assignment_ids.update(alternate.assignment_id for alternate in close_alternates)
+        assignment_id = candidate.assignment_id if len(assignment_ids) == 1 else None
         confidence = candidate.score * (0.85**alternate_match_count)
         if confidence <= min_confidence:
             force_open_on_indices.add(candidate.on_index)
@@ -1019,7 +1030,7 @@ def pair_nilm_sessions_for_signatures(
                 mains_circuit_id=mains_circuit_id,
                 signature_fingerprint=candidate.signature_fingerprint,
                 confidence=confidence,
-                assignment_id=candidate.assignment_id,
+                assignment_id=assignment_id,
                 ambiguous=alternate_match_count > 0,
                 alternate_match_count=alternate_match_count,
                 known_load_masked=False,

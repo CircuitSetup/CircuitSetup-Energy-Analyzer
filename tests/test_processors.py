@@ -7199,9 +7199,13 @@ def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> N
     assert merged[0]["off_edge_id"] == "edge-off"
 
 
-@pytest.mark.parametrize("event_sample", [1, 2])
+@pytest.mark.parametrize(
+    ("event_sample", "noisy_confirmation"),
+    [(1, False), (2, False), (1, True)],
+)
 def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     event_sample: int,
+    noisy_confirmation: bool,
 ) -> None:
     from collections import defaultdict
 
@@ -7269,7 +7273,7 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
         timestamp=now + timedelta(seconds=5),
         circuit_id="fridge",
         event_type=EventType.START,
-        features={"startup_power_w": 320.0},
+        features={"startup_power_w": 390.0 if noisy_confirmation else 320.0},
     )
     processor.process(
         sample(1, 420.0),
@@ -7278,15 +7282,19 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
         events=(known_event,) if event_sample == 1 else (),
     )
     result = processor.process(
-        sample(2, 420.0),
+        sample(2, 490.0 if noisy_confirmation else 420.0),
         config,
         context,
         events=(known_event,) if event_sample == 2 else (),
     )
+    if noisy_confirmation:
+        result = processor.process(sample(3, 490.0), config, context, events=())
 
     assert len(observed_matches) == 1
     assert observed_matches[0].known_circuit_id == "fridge"
-    assert observed_matches[0].edge.timestamp == now + timedelta(seconds=5)
+    assert observed_matches[0].edge.timestamp == now + timedelta(
+        seconds=10 if noisy_confirmation else 5
+    )
     assert processor.total_events_by_circuit["mains"] == 1
     assert processor.unmatched_edges_by_circuit["mains"] == []
     updates = {update.path: update.value for update in result.state_updates}
