@@ -7715,6 +7715,19 @@ async def test_nilm_validation_reopens_stale_history_without_live_edges() -> Non
     assert reopened["duration_seconds"] is None
     assert reopened["estimated_energy_kwh"] == pytest.approx(0.0)
 
+    await coordinator.async_reject_nilm_session("mains", "confirmed-short")
+
+    restored = next(
+        session
+        for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
+        if session.get("on_edge_id") == "on-edge"
+    )
+    assert restored["session_id"] == "stale-long"
+    assert restored["off_edge_id"] == "off-edge"
+    assert restored["end"] == "2026-06-02T13:00:00+00:00"
+    assert restored["duration_seconds"] == pytest.approx(3600.0)
+    assert restored["estimated_energy_kwh"] == pytest.approx(0.65)
+
 
 @pytest.mark.asyncio
 async def test_nilm_assignment_history_validation_confirms_matches() -> None:

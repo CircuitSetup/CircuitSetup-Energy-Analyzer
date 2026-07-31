@@ -504,7 +504,13 @@ def _reconcile_nilm_session_duration_bounds(
         assignment = assignments_by_id.get(
             str(payload.get("assignment_id") or "").strip()
         )
-        duration = _optional_float(payload.get("duration_seconds"))
+        stored_close = payload.get("_duration_bound_close")
+        close_payload = stored_close if isinstance(stored_close, Mapping) else None
+        duration = _optional_float(
+            close_payload.get("duration_seconds")
+            if close_payload is not None
+            else payload.get("duration_seconds")
+        )
         minimum = _optional_float(
             assignment.get("min_duration_seconds") if assignment else None
         )
@@ -524,6 +530,19 @@ def _reconcile_nilm_session_duration_bounds(
             and fingerprint
             and on_edge_id
         ):
+            payload["_duration_bound_close"] = {
+                key: payload.get(key)
+                for key in (
+                    "session_id",
+                    "off_edge_id",
+                    "end",
+                    "duration_seconds",
+                    "estimated_energy_kwh",
+                    "confidence",
+                    "ambiguous",
+                    "alternate_match_count",
+                )
+            }
             payload.update(
                 {
                     "session_id": "|".join(
@@ -541,6 +560,9 @@ def _reconcile_nilm_session_duration_bounds(
                     "alternate_match_count": 0,
                 }
             )
+        elif payload.get("end") is None and close_payload and not outside_bounds:
+            payload.update(close_payload)
+            payload.pop("_duration_bound_close", None)
         reconciled.append(payload)
     return sorted(
         reconciled,
