@@ -962,6 +962,7 @@ def pair_nilm_sessions_for_signatures(
             continue
         if len(assigned) > 1:
             ambiguous_pairs.add(pair)
+            preferred_candidates[pair] = ranked[0]
             continue
         if (
             len(ranked) > 1
@@ -969,21 +970,13 @@ def pair_nilm_sessions_for_signatures(
             and ranked[0].score - ranked[1].score <= ambiguity_margin
         ):
             ambiguous_pairs.add(pair)
+        preferred_candidates.setdefault(pair, ranked[0])
 
     used_on_indices: set[int] = set()
     used_off_indices: set[int] = set()
     force_open_on_indices: set[int] = set()
     sessions: list[NilmSession] = []
-    eligible_candidates = [
-        candidate
-        for candidate in candidates
-        if (candidate.on_index, candidate.off_index) not in ambiguous_pairs
-        and (
-            (candidate.on_index, candidate.off_index) not in preferred_candidates
-            or preferred_candidates[(candidate.on_index, candidate.off_index)]
-            == candidate
-        )
-    ]
+    eligible_candidates = list(preferred_candidates.values())
     # ponytail: greedy global assignment is intentionally bounded; replace it with
     # maximum-weight matching only if labelled replay data shows a measurable gap.
     for candidate in sorted(
@@ -1013,11 +1006,20 @@ def pair_nilm_sessions_for_signatures(
         alternate_off_indices = {
             alternate.off_index for alternate in close_alternates
         }
-        alternate_match_count = len(alternate_off_indices)
-        assignment_ids = {candidate.assignment_id}
-        assignment_ids.update(alternate.assignment_id for alternate in close_alternates)
-        assignment_id = candidate.assignment_id if len(assignment_ids) == 1 else None
-        confidence = candidate.score * (0.85**alternate_match_count)
+        pair = (candidate.on_index, candidate.off_index)
+        pair_ambiguous = pair in ambiguous_pairs
+        alternate_match_count = len(alternate_off_indices) + (
+            len(by_pair[pair]) - 1 if pair_ambiguous else 0
+        )
+        assignment_ids = {None if pair_ambiguous else candidate.assignment_id}
+        assignment_ids.update(
+            None
+            if (alternate.on_index, alternate.off_index) in ambiguous_pairs
+            else alternate.assignment_id
+            for alternate in close_alternates
+        )
+        assignment_id = next(iter(assignment_ids)) if len(assignment_ids) == 1 else None
+        confidence = candidate.score * (0.85 ** len(alternate_off_indices))
         if confidence <= min_confidence:
             force_open_on_indices.add(candidate.on_index)
             continue
@@ -1031,56 +1033,8 @@ def pair_nilm_sessions_for_signatures(
                 signature_fingerprint=candidate.signature_fingerprint,
                 confidence=confidence,
                 assignment_id=assignment_id,
-                ambiguous=alternate_match_count > 0,
+                ambiguous=pair_ambiguous or bool(alternate_off_indices),
                 alternate_match_count=alternate_match_count,
-                known_load_masked=False,
-                known_load_confidence=None,
-            )
-        )
-
-    for pair in sorted(
-        ambiguous_pairs,
-        key=lambda item: -max(candidate.score for candidate in by_pair[item]),
-    ):
-        on_index, off_index = pair
-        if (
-            on_index in used_on_indices
-            or on_index in force_open_on_indices
-            or off_index in used_off_indices
-        ):
-            continue
-        candidate = max(by_pair[pair], key=lambda item: item.score)
-        alternate_off_indices = {
-            alternate_off_index
-            for alternate_on_index, alternate_off_index in ambiguous_pairs
-            if alternate_on_index == on_index
-            and alternate_off_index != off_index
-            and alternate_off_index not in used_off_indices
-            and candidate.score
-            - max(
-                alternate.score
-                for alternate in by_pair[(alternate_on_index, alternate_off_index)]
-            )
-            <= ambiguity_margin
-        }
-        confidence = candidate.score * (0.85 ** len(alternate_off_indices))
-        if confidence <= min_confidence:
-            force_open_on_indices.add(on_index)
-            continue
-        used_on_indices.add(on_index)
-        used_off_indices.add(off_index)
-        sessions.append(
-            _closed_nilm_session(
-                candidate.on_edge,
-                candidate.off_edge,
-                mains_circuit_id=mains_circuit_id,
-                signature_fingerprint=candidate.signature_fingerprint,
-                confidence=confidence,
-                assignment_id=None,
-                ambiguous=True,
-                alternate_match_count=(
-                    len(by_pair[pair]) - 1 + len(alternate_off_indices)
-                ),
                 known_load_masked=False,
                 known_load_confidence=None,
             )

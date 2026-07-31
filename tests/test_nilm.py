@@ -1022,6 +1022,30 @@ def test_global_session_pairing_keeps_open_below_ambiguous_pair_confidence() -> 
     assert sessions[0].assignment_id is None
 
 
+def test_global_session_pairing_preserves_earlier_owner_ambiguous_pair() -> None:
+    session = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "load-a",
+                "typical_watts": 500.0,
+                "assignment_id": "load-a",
+            },
+            {
+                "signature_fingerprint": "load-b",
+                "typical_watts": 500.0,
+                "assignment_id": "load-b",
+                "max_duration_seconds": 400.0,
+            },
+        ],
+    )[0]
+
+    assert session.end == BASE_TIME + timedelta(seconds=300)
+    assert session.ambiguous is True
+    assert session.assignment_id is None
+
+
 def test_global_session_pairing_keeps_assigned_off_signature() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(300, -500.0)],
