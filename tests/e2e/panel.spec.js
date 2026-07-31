@@ -1327,6 +1327,92 @@ test("completed day derives average amps from appliance current history", async 
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("3 A");
 });
 
+test("completed day does not carry amps through unavailable history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_current", state: "2", last_changed: "2026-07-31T00:00:00.000Z" },
+          { state: "unavailable", last_changed: "2026-07-31T12:00:00.000Z" },
+          { state: "4", last_changed: "2026-07-31T18:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{ circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] }],
+    },
+    {
+      "sensor.fridge_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("2.67 A");
+});
+
+test("completed day does not sum partial appliance amp history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_current", state: "2", last_changed: "2026-07-31T00:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [
+        { circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] },
+        { circuit_id: "hvac", name: "HVAC", current_entities: ["sensor.hvac_current"] },
+      ],
+    },
+    {
+      "sensor.fridge_current": { state: "2", attributes: { unit_of_measurement: "A" } },
+      "sensor.hvac_current": { state: "8", attributes: { unit_of_measurement: "A" } },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("Unavailable");
+});
+
 test("completed day derives average amps from power, voltage, and PF history", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {

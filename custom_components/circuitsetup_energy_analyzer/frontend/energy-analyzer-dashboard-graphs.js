@@ -2110,8 +2110,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         const points = rows.flatMap((row) => {
           const time = Date.parse(row.last_changed || row.last_updated || "");
           const value = this._historySourceValue(config, row.state);
-          return Number.isFinite(time) && Number.isFinite(value)
-            ? [{ time: Math.max(rangeStart, time), value }]
+          return Number.isFinite(time)
+            ? [{ time: Math.max(rangeStart, time), value: Number.isFinite(value) ? value : null }]
             : [];
         });
         if (points.length) parsed.push({ ...config, points: this._boundedChartPoints(points) });
@@ -2136,9 +2136,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           indexes.set(item, index);
         }
         const values = series.map((item) => latest.get(item));
-        if (values.every(Number.isFinite)) {
-          points.push({ time, value: values.reduce((total, value) => total + value, 0) });
-        }
+        points.push({
+          time,
+          value: values.every(Number.isFinite)
+            ? values.reduce((total, value) => total + value, 0)
+            : null,
+        });
       }
       return points.length
         ? {
@@ -2193,7 +2196,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           }
           amps += power / (voltage * factor);
         }
-        if (Number.isFinite(amps)) points.push({ time, value: amps });
+        points.push({ time, value: Number.isFinite(amps) ? amps : null });
       }
       return points.length
         ? {
@@ -2234,9 +2237,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._hass.callApi("GET", path).then((payload) => {
         if (this._historicalAmpsKey !== key) return;
         const circuitSeries = circuits
-          .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)))
-          .filter(Boolean);
-        this._historicalAmpsSeries = this._sumHistoricalSeries(circuitSeries);
+          .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)));
+        this._historicalAmpsSeries = circuitSeries.length === circuits.length && circuitSeries.every(Boolean)
+          ? this._sumHistoricalSeries(circuitSeries)
+          : null;
       }).catch(() => {
         if (this._historicalAmpsKey === key) this._historicalAmpsSeries = null;
       }).finally(() => {
