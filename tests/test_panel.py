@@ -1758,13 +1758,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
 
     assert payload["status"] == "ok"
     assert payload["history"]["hours"] == 24.0
-    assert payload["history"]["entities"] == [
-        "sensor.mains_power",
-        "sensor.mains_reactive_power",
-        "sensor.pool_pump_power",
-        "sensor.pool_pump_power_leg_2",
-        "sensor.solar_power",
-    ]
+    assert payload["history"]["entities"] == ["sensor.mains_power"]
     assert payload["history"]["api_path"].startswith(
         "circuitsetup_energy_analyzer/nilm_workspace_history?"
     )
@@ -2782,6 +2776,37 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
     assert appliances["assignment-dryer"]["estimated_power_w"] == 420.0
 
 
+def test_nilm_workspace_pairs_overlapping_signatures_exclusively() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_sessions,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    sessions = _nilm_workspace_sessions(
+        [
+            NilmEdge(start, 150.0, 0.0, 150.0, 0.0, "on"),
+            NilmEdge(
+                start + timedelta(minutes=5),
+                -150.0,
+                0.0,
+                -150.0,
+                0.0,
+                "off",
+            ),
+        ],
+        "mains",
+        signatures=[
+            {"signature_id": "120-w", "typical_watts": 120.0},
+            {"signature_id": "187-w", "typical_watts": 187.0},
+        ],
+        assignments=[],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0]["signature_fingerprint"] == "120-w"
+
+
 def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
@@ -3102,7 +3127,6 @@ def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
 
 def test_nilm_workspace_history_rows_are_capped() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
-        MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
         _bounded_history_rows,
     )
 
@@ -3114,15 +3138,16 @@ def test_nilm_workspace_history_rows_are_capped() -> None:
                     datetime(2026, 6, 6, tzinfo=UTC) + timedelta(seconds=index)
                 ),
             }
-            for index in range(MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY + 100)
+            for index in range(2260)
         ]
     }
 
     bounded = _bounded_history_rows(rows)
 
     assert len(bounded) == 1
-    assert len(bounded[0]) == MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY
+    assert len(bounded[0]) == 2160
     assert bounded[0][0]["entity_id"] == "sensor.mains_power"
+    assert bounded[0][-1]["state"] == "2259"
 
 
 @pytest.mark.asyncio

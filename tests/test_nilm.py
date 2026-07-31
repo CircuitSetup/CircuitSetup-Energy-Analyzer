@@ -20,6 +20,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     cluster_recurring_signatures,
     mask_known_loads,
     pair_nilm_sessions,
+    pair_nilm_sessions_for_signatures,
     unmatched_load_percentage,
 )
 from custom_components.circuitsetup_energy_analyzer.normalize import (
@@ -262,6 +263,93 @@ def test_edge_detector_invalidates_previous_sample_across_missing_real_power() -
             ),
             sample(10, 180.0),
         ]
+    )
+
+    assert edges == []
+
+
+def test_edge_detector_rejects_one_sample_excursion_with_confirmation() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 1_000.0),
+            sample(20, 0.0),
+        ]
+    )
+
+    assert edges == []
+
+
+def test_edge_detector_honors_confirmation_tolerance_near_threshold() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_tolerance_ratio=0.15,
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 100.0), sample(20, 51.0)]
+    )
+
+    assert edges == []
+
+
+def test_edge_detector_keeps_original_timestamp_for_confirmed_level() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 1_000.0),
+            sample(20, 980.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 1_000.0
+
+
+def test_edge_detector_does_not_debounce_sparse_samples() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([sample(0, 0.0), sample(30, 1_000.0)])
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=30)
+
+
+def test_edge_detector_keeps_pending_transition_after_delayed_confirmation() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 1_000.0), sample(30, 1_000.0)]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 1_000.0
+
+
+def test_edge_detector_drops_timed_out_reversion_to_baseline() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 1_000.0), sample(30, 0.0)]
     )
 
     assert edges == []
@@ -891,6 +979,338 @@ def test_pair_nilm_sessions_uses_stable_ids_for_same_edges() -> None:
     assert reordered.session_id == original.session_id
     assert reordered.on_edge_id == original.on_edge_id
     assert reordered.off_edge_id == original.off_edge_id
+
+
+def test_global_session_pairing_assigns_each_edge_pair_once() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 150.0), edge(300, -150.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "120-w", "typical_watts": 120.0},
+            {"signature_fingerprint": "187-w", "typical_watts": 187.0},
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "120-w"
+    assert sessions[0].off_edge_id is not None
+
+
+def test_global_session_pairing_records_close_signature_match_as_ambiguous() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 125.0), edge(300, -125.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "120-w", "typical_watts": 120.0},
+            {"signature_fingerprint": "130-w", "typical_watts": 130.0},
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].off_edge_id is not None
+    assert sessions[0].ambiguous is True
+    assert sessions[0].assignment_id is None
+
+
+def test_global_session_pairing_does_not_replace_better_unassigned_match() -> None:
+    signature_specs = [
+        {"signature_fingerprint": "unassigned-500", "typical_watts": 500.0},
+        {
+            "signature_fingerprint": "assigned-510",
+            "typical_watts": 510.0,
+            "assignment_id": "dryer",
+        },
+    ]
+    closed = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )[0]
+    opened = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )[0]
+
+    assert closed.signature_fingerprint == "unassigned-500"
+    assert closed.ambiguous is True
+    assert closed.assignment_id is None
+    assert opened.signature_fingerprint == "unassigned-500"
+    assert opened.ambiguous is True
+    assert opened.assignment_id is None
+
+
+def test_global_session_pairing_keeps_open_below_ambiguous_pair_confidence() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)]
+        + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "load-a",
+                "typical_watts": 500.0,
+                "assignment_id": "load-a",
+            },
+            {
+                "signature_fingerprint": "load-b",
+                "typical_watts": 500.0,
+                "assignment_id": "load-b",
+            },
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].end is None
+    assert sessions[0].assignment_id is None
+
+
+def test_global_session_pairing_preserves_earlier_owner_ambiguous_pair() -> None:
+    session = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "load-a",
+                "typical_watts": 500.0,
+                "assignment_id": "load-a",
+            },
+            {
+                "signature_fingerprint": "load-b",
+                "typical_watts": 500.0,
+                "assignment_id": "load-b",
+                "max_duration_seconds": 400.0,
+            },
+        ],
+    )[0]
+
+    assert session.end == BASE_TIME + timedelta(seconds=300)
+    assert session.ambiguous is True
+    assert session.assignment_id is None
+
+
+def test_global_session_pairing_keeps_assigned_off_signature() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "off-500",
+                "median_delta_w": -500.0,
+                "assignment_id": "dryer",
+            },
+            {
+                "signature_fingerprint": "on-500",
+                "median_delta_w": 500.0,
+            },
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "off-500"
+    assert sessions[0].assignment_id == "dryer"
+
+
+def test_global_session_pairing_deduplicates_same_assignment_signatures() -> None:
+    signature_specs = [
+        {
+            "signature_fingerprint": "on-500",
+            "median_delta_w": 500.0,
+            "assignment_id": "dryer",
+        },
+        {
+            "signature_fingerprint": "off-500",
+            "median_delta_w": -500.0,
+            "assignment_id": "dryer",
+        },
+    ]
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].ambiguous is False
+
+    open_sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )
+
+    assert len(open_sessions) == 1
+    assert open_sessions[0].assignment_id == "dryer"
+
+
+def test_global_session_pairing_marks_alternate_off_edge_ambiguity() -> None:
+    spec = {
+        "signature_fingerprint": "dryer",
+        "typical_watts": 500.0,
+        "assignment_id": "dryer",
+    }
+    simple = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[spec],
+    )[0]
+    ambiguous = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[spec],
+    )[0]
+
+    assert ambiguous.ambiguous is True
+    assert ambiguous.alternate_match_count == 1
+    assert ambiguous.confidence < simple.confidence
+
+
+def test_global_session_pairing_clears_owner_across_assignment_alternates() -> None:
+    session = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "load-a",
+                "typical_watts": 500.0,
+                "assignment_id": "load-a",
+                "max_duration_seconds": 400.0,
+            },
+            {
+                "signature_fingerprint": "load-b",
+                "typical_watts": 500.0,
+                "assignment_id": "load-b",
+                "min_duration_seconds": 500.0,
+            },
+        ],
+    )[0]
+
+    assert session.ambiguous is True
+    assert session.assignment_id is None
+
+
+def test_global_session_pairing_keeps_open_below_penalized_confidence() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)]
+        + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].end is None
+
+
+def test_global_session_pairing_opens_on_edge_after_off_edge_is_consumed() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, 500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert len(sessions) == 2
+    assert sessions[0].start == BASE_TIME
+    assert sessions[0].end == BASE_TIME + timedelta(seconds=600)
+    assert sessions[1].start == BASE_TIME + timedelta(seconds=300)
+    assert sessions[1].end is None
+
+
+def test_global_session_pairing_closes_overlapping_runs() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 500.0),
+            edge(300, 500.0),
+            edge(600, -500.0),
+            edge(900, -500.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert [(session.start, session.end) for session in sessions] == [
+        (BASE_TIME, BASE_TIME + timedelta(seconds=600)),
+        (
+            BASE_TIME + timedelta(seconds=300),
+            BASE_TIME + timedelta(seconds=900),
+        ),
+    ]
+
+
+def test_global_session_pairing_opens_session_beyond_learned_duration() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(3600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+                "max_duration_seconds": 600.0,
+            }
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].end is None
+
+
+def test_global_session_pairing_rejects_short_closed_transition() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(20, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "heater", "typical_watts": 500.0},
+        ],
+    )
+
+    assert sessions == []
+
+
+def test_global_session_pairing_uses_reactive_signature_to_choose_owner() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 500.0, delta_var=300.0, delta_va=600.0),
+            edge(300, -500.0, delta_var=-300.0, delta_va=-600.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "resistive",
+                "typical_watts": 500.0,
+                "median_delta_var": 0.0,
+                "median_delta_va": 500.0,
+            },
+            {
+                "signature_fingerprint": "motor",
+                "typical_watts": 500.0,
+                "median_delta_var": 300.0,
+                "median_delta_va": 600.0,
+            },
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "motor"
 
 
 def _required_nilm_api(name: str):

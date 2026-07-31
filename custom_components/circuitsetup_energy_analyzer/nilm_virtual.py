@@ -16,7 +16,7 @@ from .nilm import (
     build_nilm_appliance_identity,
     evaluate_nilm_validation_readiness,
     nilm_session_to_dict,
-    pair_nilm_sessions,
+    pair_nilm_sessions_for_signatures,
     summarize_nilm_assignment_sessions,
 )
 
@@ -90,9 +90,26 @@ def nilm_virtual_appliance_states(
         circuit_id_text = str(circuit_id or "").strip()
         edges = _nilm_edges_for_circuit(coordinator, circuit_id_text)
         signatures_by_id = _nilm_signatures_by_id(coordinator, circuit_id_text)
-        for assignment in _iter_items(assignments):
-            if not isinstance(assignment, Mapping):
-                continue
+        assignment_list = [
+            assignment
+            for assignment in _iter_items(assignments)
+            if isinstance(assignment, Mapping)
+        ]
+        derived_sessions = _nilm_assignment_sessions(
+            circuit_id_text,
+            [
+                assignment
+                for assignment in assignment_list
+                if (
+                    _published_assignment(assignment)
+                    if published_only
+                    else _matching_assignment(assignment)
+                )
+            ],
+            edges,
+            signatures_by_id,
+        )
+        for assignment in assignment_list:
             if published_only and not _published_assignment(assignment):
                 continue
             state = _nilm_virtual_appliance_state(
@@ -100,7 +117,7 @@ def nilm_virtual_appliance_states(
                 circuit_id_text,
                 assignment,
                 edges,
-                signatures_by_id,
+                derived_sessions,
             )
             if state is not None:
                 states.append(state)
@@ -390,17 +407,16 @@ def _nilm_virtual_appliance_state(
     circuit_id: str,
     assignment: Mapping[str, Any],
     edges: list[NilmEdge],
-    signatures_by_id: Mapping[str, Mapping[str, Any]],
+    circuit_sessions: Iterable[NilmSession],
 ) -> NilmVirtualApplianceState | None:
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     if not assignment_id:
         return None
-    derived_sessions = _nilm_assignment_sessions(
-        circuit_id,
-        assignment,
-        edges,
-        signatures_by_id,
-    )
+    derived_sessions = [
+        session
+        for session in circuit_sessions
+        if session.assignment_id == assignment_id
+    ]
     session_payloads = _merged_assignment_session_payloads(
         coordinator,
         circuit_id,
@@ -609,10 +625,17 @@ def _nilm_time_zone(coordinator: Any) -> str:
 
 
 def _published_assignment(assignment: Mapping[str, Any]) -> bool:
-    return (
-        assignment.get("publish_entities") is True
-        and str(assignment.get("lifecycle_state") or "") != "retired"
+    return assignment.get("publish_entities") is True and _matching_assignment(
+        assignment
     )
+
+
+def _matching_assignment(assignment: Mapping[str, Any]) -> bool:
+    return str(assignment.get("lifecycle_state") or "") not in {
+        "ignored",
+        "expected",
+        "retired",
+    }
 
 
 def _assignment_for_state(
@@ -724,29 +747,29 @@ def _nilm_alert_features(
 
 def _nilm_assignment_sessions(
     circuit_id: str,
-    assignment: Mapping[str, Any],
+    assignments: Iterable[Mapping[str, Any]],
     edges: list[NilmEdge],
     signatures_by_id: Mapping[str, Mapping[str, Any]],
 ) -> list[NilmSession]:
-    sessions: list[NilmSession] = []
-    assignment_id = str(assignment.get("assignment_id") or "").strip() or None
-    for value in _iter_items(assignment.get("signature_fingerprints")):
-        fingerprint = str(value or "").strip()
-        if not fingerprint:
-            continue
-        signature_edges = _nilm_edges_matching_signature(
-            edges,
-            signatures_by_id.get(fingerprint),
-        )
-        sessions.extend(
-            pair_nilm_sessions(
-                signature_edges,
-                mains_circuit_id=circuit_id,
-                signature_fingerprint=fingerprint,
-                assignment_id=assignment_id,
-            )
-        )
-    return sessions
+    specs: list[dict[str, Any]] = []
+    for assignment in assignments:
+        assignment_id = str(assignment.get("assignment_id") or "").strip() or None
+        for value in _iter_items(assignment.get("signature_fingerprints")):
+            fingerprint = str(value or "").strip()
+            if not fingerprint:
+                continue
+            spec = dict(signatures_by_id.get(fingerprint) or {})
+            spec["signature_fingerprint"] = fingerprint
+            spec["assignment_id"] = assignment_id
+            for key in ("min_duration_seconds", "max_duration_seconds"):
+                if key in assignment:
+                    spec[key] = assignment[key]
+            specs.append(spec)
+    return pair_nilm_sessions_for_signatures(
+        edges,
+        mains_circuit_id=circuit_id,
+        signature_specs=specs,
+    )
 
 
 def _nilm_signatures_by_id(
@@ -766,48 +789,6 @@ def _nilm_signatures_by_id(
             if value:
                 signatures[value] = signature
     return signatures
-
-
-def _nilm_edges_matching_signature(
-    edges: list[NilmEdge],
-    signature: Mapping[str, Any] | None,
-) -> list[NilmEdge]:
-    if signature is None:
-        return edges
-    watts = _signature_watts(signature)
-    split_phase_type = str(signature.get("split_phase_type") or "").strip()
-    return [
-        edge
-        for edge in edges
-        if _nilm_edge_matches_watts(edge, watts)
-        and _nilm_edge_matches_split_phase(edge, split_phase_type)
-    ]
-
-
-def _signature_watts(signature: Mapping[str, Any]) -> float | None:
-    for key in ("median_delta_w", "typical_watts"):
-        value = signature.get(key)
-        if isinstance(value, (int, float)) and abs(float(value)) > 0:
-            return abs(float(value))
-    return None
-
-
-def _nilm_edge_matches_watts(edge: NilmEdge, watts: float | None) -> bool:
-    if watts is None:
-        return True
-    tolerance = max(watts * 0.25, 50.0)
-    return abs(abs(float(edge.delta_w)) - watts) <= tolerance
-
-
-def _nilm_edge_matches_split_phase(edge: NilmEdge, split_phase_type: str) -> bool:
-    if split_phase_type in {"", "unknown", "mixed"}:
-        return True
-    edge_type = str(edge.split_phase_type or "").strip()
-    if edge_type in {"", "unknown", "mixed"}:
-        return True
-    if split_phase_type == edge_type:
-        return True
-    return split_phase_type == "single_leg" and edge_type.startswith("single_leg")
 
 
 def _nilm_edges_for_circuit(coordinator: Any, circuit_id: str) -> list[NilmEdge]:

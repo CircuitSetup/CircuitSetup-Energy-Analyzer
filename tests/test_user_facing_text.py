@@ -1530,8 +1530,6 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         '_panelText("nilm_workspace.review_lanes")',
         '_panelText("nilm_workspace.known_load_overlays")',
         '_panelText("nilm_workspace.solar_net_overlays")',
-        "data-nilm-overlay-toggle",
-        "_toggleNilmOverlaySeries",
         "_visibleNilmWorkspaceSeries",
         '_panelText("nilm_workspace.estimated_appliances_title")',
         "data-nilm-appliance-detail-path",
@@ -3283,6 +3281,65 @@ def test_nilm_workspace_places_graph_before_review_and_diagnostics() -> None:
 
     assert graph < lanes < review < secondary
     assert "_renderNilmReviewQueue" not in asset
+
+
+def test_nilm_graph_uses_dense_watt_series_and_disables_selection_tooltips() -> None:
+    _run_panel_node_script(
+        """
+(() => {
+  const panel = makePanel({
+    _hass: { states: {
+      "sensor.mains_power": { attributes: { unit_of_measurement: "kW" } },
+    } },
+  });
+  const start = Date.parse("2026-07-31T12:00:00Z");
+  const history = [Array.from({ length: 2160 }, (_item, index) => ({
+    entity_id: "sensor.mains_power",
+    state: String(index / 1000),
+    last_changed: new Date(start + index * 10000).toISOString(),
+  }))];
+  panel._nilmWorkspaceHistorySeries = history;
+  const nilmSeries = panel._visibleNilmWorkspaceSeries(makeWorkspace(), null);
+  assert.equal(nilmSeries[0].points.length, 2160);
+  assert.equal(nilmSeries[0].unit, "W");
+  assert.equal(nilmSeries[0].points[1000].value, 1000);
+  assert.equal(panel._chartSeries(history)[0].points.length, 240);
+
+  panel._nilmIntervalEditorOpen = true;
+  panel._nilmWorkspaceHistoryLoading = false;
+  panel._nilmWorkspaceHistoryError = "";
+  const graph = panel._renderNilmGraph(
+    makeWorkspace({ known_load_overlays: [{ entity_ids: ["sensor.pump_power"] }] }),
+    { start, end: start + 2159 * 10000 },
+    [],
+  );
+  assert.ok(graph.includes('class="axis-label"'));
+  assert.ok(graph.includes(">W</text>"));
+  assert.ok(graph.includes('data-nilm-chart-select="1"'));
+  assert.ok(!graph.includes("data-nilm-overlay-toggle"));
+
+  const listeners = [];
+  const tooltip = {
+    hidden: "false",
+    setAttribute(name, value) { if (name === "aria-hidden") this.hidden = value; },
+  };
+  const point = { addEventListener() {} };
+  const svg = {
+    dataset: { nilmChartSelect: "1" },
+    addEventListener(type) { listeners.push(type); },
+    querySelectorAll() { return [point]; },
+    querySelector() { return {}; },
+    closest() { return { querySelector() { return tooltip; } }; },
+  };
+  panel.shadowRoot = {
+    querySelectorAll(selector) { return selector === "svg.chart" ? [svg] : []; },
+  };
+  panel._attachChartInspectors();
+  assert.equal(tooltip.hidden, "true");
+  assert.ok(!listeners.includes("pointermove"));
+})();
+"""
+    )
 
 
 def test_nilm_lane_rendering_contracts() -> None:

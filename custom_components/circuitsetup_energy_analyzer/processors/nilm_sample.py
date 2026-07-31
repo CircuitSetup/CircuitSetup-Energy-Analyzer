@@ -5,20 +5,20 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
     NilmEdge,
     NilmEdgeDetector,
-    NilmSession,
     NilmSignature,
     classify_signature,
     cluster_recurring_signatures,
     mask_known_loads,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
-    pair_nilm_sessions,
+    pair_nilm_sessions_for_signatures,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -65,6 +65,7 @@ class NilmSampleProcessor:
         self.unmatched_edges_by_circuit = unmatched_edges_by_circuit
         self.ignored_signatures = ignored_signatures
         self._known_load_events = known_load_events
+        self._pending_known_load_events: dict[str, tuple[CircuitEvent, ...]] = {}
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
 
@@ -86,22 +87,31 @@ class NilmSampleProcessor:
         min_delta_w = self._min_delta_w_for_circuit(circuit_id)
         detector = self.detectors.setdefault(
             circuit_id,
-            NilmEdgeDetector(min_delta_w=min_delta_w),
+            NilmEdgeDetector(
+                min_delta_w=min_delta_w,
+                confirmation_samples=2,
+                confirmation_max_interval=timedelta(seconds=15),
+            ),
         )
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
-        known_events = tuple(self._known_load_events(circuit_id, events))
+        current_known_events = tuple(self._known_load_events(circuit_id, events))
+        pending_known_events = self._pending_known_load_events.pop(circuit_id, ())
+        known_events = (*pending_known_events, *current_known_events)
         alerts: list[AlertEvidence] = []
         store_dirty = False
         existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
         candidate_edges = [*existing_unmatched, *edges]
         matched_edges = ()
-        if candidate_edges and known_events:
+        defer_known_events = detector.has_pending_transition and not edges
+        if candidate_edges and known_events and not defer_known_events:
             mask = mask_known_loads(candidate_edges, known_events)
             matched_edges = mask.matched_edges
             next_unmatched = list(mask.unmatched_edges)
         else:
             next_unmatched = candidate_edges
+        if defer_known_events and known_events:
+            self._pending_known_load_events[circuit_id] = known_events
 
         next_unmatched = _newest_nilm_edges(
             next_unmatched,
@@ -147,31 +157,8 @@ class NilmSampleProcessor:
                     inventory
                 )
                 store_dirty = True
-            session_payloads = _nilm_session_history_payloads(
-                circuit_id,
-                self.unmatched_edges_by_circuit[circuit_id],
-                payloads,
-                context.store_data.nilm_appliance_assignments_by_circuit.get(
-                    circuit_id,
-                    [],
-                ),
-            )
-            if session_payloads:
-                existing_sessions = (
-                    context.store_data.nilm_session_history_by_circuit.get(
-                        circuit_id,
-                        [],
-                    )
-                )
-                next_sessions = _merge_nilm_session_history(
-                    existing_sessions,
-                    session_payloads,
-                )
-                if next_sessions != existing_sessions:
-                    context.store_data.nilm_session_history_by_circuit[circuit_id] = (
-                        next_sessions
-                    )
-                    store_dirty = True
+            if self.refresh_session_history(circuit_id, context.store_data):
+                store_dirty = True
 
         return FeatureResult(
             alerts=alerts,
@@ -184,6 +171,38 @@ class NilmSampleProcessor:
             ),
             store_dirty=store_dirty,
         )
+
+    def refresh_session_history(self, circuit_id: str, store_data: Any) -> bool:
+        """Recompute persisted sessions from current edges and assignments."""
+        assignments = store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        existing_sessions = store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        next_sessions = _reconcile_nilm_session_duration_bounds(
+            circuit_id,
+            existing_sessions,
+            assignments,
+        )
+        session_payloads = _nilm_session_history_payloads(
+            circuit_id,
+            self.unmatched_edges_by_circuit[circuit_id],
+            store_data.nilm_signatures.get(circuit_id, []),
+            assignments,
+        )
+        if session_payloads:
+            next_sessions = _merge_nilm_session_history(
+                next_sessions,
+                session_payloads,
+                assignments=assignments,
+            )
+        if next_sessions == existing_sessions:
+            return False
+        store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
+        return True
 
     def refresh_state(
         self,
@@ -348,24 +367,35 @@ def _nilm_session_history_payloads(
     edge_list = list(edges)
     if not edge_list:
         return []
+    assignment_list = [
+        assignment for assignment in assignments if isinstance(assignment, Mapping)
+    ]
     signatures_by_key = _nilm_signatures_by_key(signatures)
-    payloads: list[dict[str, Any]] = []
+    assignment_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignment_list
+    }
+    matcher_specs: list[dict[str, Any]] = []
     for signature_fingerprint, assignment_id in _nilm_session_specs(
         signatures,
-        assignments,
+        assignment_list,
     ):
-        signature = signatures_by_key.get(signature_fingerprint)
-        payloads.extend(
-            nilm_session_to_dict(session)
-            for session in pair_nilm_sessions(
-                edge_list,
-                mains_circuit_id=circuit_id,
-                signature_fingerprint=signature_fingerprint,
-                assignment_id=assignment_id,
-            )
-            if signature is None or _nilm_session_matches_signature(session, signature)
+        spec = dict(signatures_by_key.get(signature_fingerprint) or {})
+        spec["signature_fingerprint"] = signature_fingerprint
+        spec["assignment_id"] = assignment_id
+        assignment = assignment_by_id.get(assignment_id or "", {})
+        for key in ("min_duration_seconds", "max_duration_seconds"):
+            if key in assignment:
+                spec[key] = assignment[key]
+        matcher_specs.append(spec)
+    return [
+        nilm_session_to_dict(session)
+        for session in pair_nilm_sessions_for_signatures(
+            edge_list,
+            mains_circuit_id=circuit_id,
+            signature_specs=matcher_specs,
         )
-    return payloads
+    ]
 
 
 def _nilm_signatures_by_key(
@@ -390,18 +420,26 @@ def _nilm_session_specs(
     for assignment in assignments:
         if not isinstance(assignment, Mapping):
             continue
-        if str(assignment.get("lifecycle_state") or "").strip() == "retired":
-            continue
-        if (
+        fingerprints = [
+            str(value or "").strip()
+            for value in _list_items(assignment.get("signature_fingerprints"))
+            if str(value or "").strip()
+        ]
+        hidden = str(assignment.get("lifecycle_state") or "").strip() in {
+            "ignored",
+            "expected",
+            "retired",
+        } or (
             assignment.get("conversion_state") == "direct_meter"
             and assignment.get("keep_assignment_for_masking") is False
-        ):
+        )
+        if hidden:
+            seen_fingerprints.update(fingerprints)
             continue
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
-        for value in _list_items(assignment.get("signature_fingerprints")):
-            fingerprint = str(value or "").strip()
+        for fingerprint in fingerprints:
             key = (fingerprint, assignment_id)
-            if fingerprint and key not in seen:
+            if key not in seen:
                 specs.append(key)
                 seen.add(key)
                 seen_fingerprints.add(fingerprint)
@@ -423,26 +461,17 @@ def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
     ).strip()
 
 
-def _nilm_session_matches_signature(
-    session: NilmSession,
-    signature: Mapping[str, Any],
-) -> bool:
-    typical_watts = _optional_float(
-        signature.get("typical_watts"),
-        signature.get("median_delta_w"),
-    )
-    if typical_watts is None:
-        return True
-    return abs(session.median_power_w - abs(typical_watts)) <= max(
-        abs(typical_watts) * 0.25,
-        50.0,
-    )
-
-
 def _merge_nilm_session_history(
     existing: Iterable[Any],
     updates: Iterable[Mapping[str, Any]],
+    *,
+    assignments: Iterable[Any] = (),
 ) -> list[dict[str, Any]]:
+    assignments_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignments
+        if isinstance(assignment, Mapping)
+    }
     merged: dict[str, dict[str, Any]] = {}
     for session in existing:
         if isinstance(session, Mapping):
@@ -453,15 +482,39 @@ def _merge_nilm_session_history(
         session_id = str(update.get("session_id") or "").strip()
         if not session_id:
             continue
-        if update.get("off_edge_id"):
-            _remove_open_nilm_session(
-                merged,
-                signature_fingerprint=str(
-                    update.get("signature_fingerprint") or ""
-                ).strip(),
-                on_edge_id=str(update.get("on_edge_id") or "").strip(),
+        payload = dict(update)
+        on_edge_id = str(update.get("on_edge_id") or "").strip()
+        existing_session = merged.get(session_id)
+        if existing_session is None and on_edge_id:
+            existing_session = next(
+                (
+                    session
+                    for session in merged.values()
+                    if str(session.get("on_edge_id") or "").strip() == on_edge_id
+                ),
+                None,
             )
-        merged[session_id] = dict(update)
+        if existing_session is not None and payload.get("end") is None:
+            preserved_close = existing_session.get("_duration_bound_close")
+            if isinstance(preserved_close, Mapping):
+                payload["_duration_bound_close"] = dict(preserved_close)
+                assignment_id = str(
+                    payload.get("assignment_id")
+                    or existing_session.get("assignment_id")
+                    or ""
+                ).strip()
+                _replace_nilm_assignment_rejection(
+                    assignments_by_id.get(assignment_id),
+                    old_session_id=str(
+                        existing_session.get("session_id") or ""
+                    ).strip(),
+                    new_session_id=session_id,
+                )
+        _remove_replaced_nilm_sessions(
+            merged,
+            on_edge_id=on_edge_id,
+        )
+        merged[session_id] = payload
     return sorted(
         merged.values(),
         key=lambda session: str(session.get("end") or session.get("start") or ""),
@@ -469,22 +522,142 @@ def _merge_nilm_session_history(
     )
 
 
-def _remove_open_nilm_session(
+def _reconcile_nilm_session_duration_bounds(
+    circuit_id: str,
+    sessions: Iterable[Any],
+    assignments: Iterable[Any],
+) -> list[dict[str, Any]]:
+    assignments_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignments
+        if isinstance(assignment, Mapping)
+    }
+    reconciled: list[dict[str, Any]] = []
+    for session in sessions:
+        if not isinstance(session, Mapping):
+            continue
+        payload = dict(session)
+        assignment = assignments_by_id.get(
+            str(payload.get("assignment_id") or "").strip()
+        )
+        stored_close = payload.get("_duration_bound_close")
+        close_payload = stored_close if isinstance(stored_close, Mapping) else None
+        duration = _optional_float(
+            close_payload.get("duration_seconds")
+            if close_payload is not None
+            else payload.get("duration_seconds")
+        )
+        minimum = _optional_float(
+            assignment.get("min_duration_seconds") if assignment else None
+        )
+        maximum = _optional_float(
+            assignment.get("max_duration_seconds") if assignment else None
+        )
+        outside_bounds = duration is not None and (
+            (minimum is not None and duration < minimum)
+            or (maximum is not None and duration > maximum)
+        )
+        fingerprint = str(payload.get("signature_fingerprint") or "").strip()
+        on_edge_id = str(payload.get("on_edge_id") or "").strip()
+        confidence = _optional_float(payload.get("confidence"))
+        if (
+            payload.get("end") is not None
+            and outside_bounds
+            and fingerprint
+            and on_edge_id
+        ):
+            closed_session_id = str(payload.get("session_id") or "").strip()
+            open_session_id = "|".join(
+                (circuit_id, fingerprint, on_edge_id, "open")
+            )
+            payload["_duration_bound_close"] = {
+                key: payload.get(key)
+                for key in (
+                    "session_id",
+                    "off_edge_id",
+                    "end",
+                    "duration_seconds",
+                    "estimated_energy_kwh",
+                    "confidence",
+                    "ambiguous",
+                    "alternate_match_count",
+                )
+            }
+            _replace_nilm_assignment_rejection(
+                assignment,
+                old_session_id=closed_session_id,
+                new_session_id=open_session_id,
+            )
+            payload.update(
+                {
+                    "session_id": open_session_id,
+                    "off_edge_id": None,
+                    "end": None,
+                    "duration_seconds": None,
+                    "estimated_energy_kwh": 0.0,
+                    "confidence": min(
+                        max(confidence if confidence is not None else 0.35, 0.0),
+                        0.35,
+                    ),
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                }
+            )
+        elif payload.get("end") is None and close_payload and not outside_bounds:
+            _replace_nilm_assignment_rejection(
+                assignment,
+                old_session_id=str(payload.get("session_id") or "").strip(),
+                new_session_id=str(
+                    close_payload.get("session_id") or ""
+                ).strip(),
+            )
+            payload.update(close_payload)
+            payload.pop("_duration_bound_close", None)
+        reconciled.append(payload)
+    return sorted(
+        reconciled,
+        key=lambda session: str(session.get("end") or session.get("start") or ""),
+        reverse=True,
+    )
+
+
+def _remove_replaced_nilm_sessions(
     sessions: dict[str, dict[str, Any]],
     *,
-    signature_fingerprint: str,
     on_edge_id: str,
 ) -> None:
-    if not signature_fingerprint or not on_edge_id:
+    if not on_edge_id:
         return
     for session_id, session in list(sessions.items()):
-        if (
-            str(session.get("signature_fingerprint") or "").strip()
-            == signature_fingerprint
-            and str(session.get("on_edge_id") or "").strip() == on_edge_id
-            and not str(session.get("off_edge_id") or "").strip()
-        ):
+        if str(session.get("on_edge_id") or "").strip() == on_edge_id:
             sessions.pop(session_id, None)
+
+
+def _replace_nilm_assignment_rejection(
+    assignment: Mapping[str, Any] | None,
+    *,
+    old_session_id: str,
+    new_session_id: str,
+) -> None:
+    if (
+        not isinstance(assignment, MutableMapping)
+        or not old_session_id
+        or not new_session_id
+    ):
+        return
+    rejected = [
+        str(value or "").strip()
+        for value in _list_items(assignment.get("rejected_session_ids"))
+        if str(value or "").strip()
+    ]
+    if old_session_id not in rejected:
+        return
+    assignment["rejected_session_ids"] = list(
+        dict.fromkeys(
+            new_session_id if session_id == old_session_id else session_id
+            for session_id in rejected
+        )
+    )
 
 
 def _optional_float(*values: Any) -> float | None:

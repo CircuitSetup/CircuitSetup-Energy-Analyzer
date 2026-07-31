@@ -8,8 +8,13 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
-from .models import ApplianceProfile, CircuitConfig, CircuitMode
-from .nilm import NilmEdge, NilmSession, nilm_session_to_dict, pair_nilm_sessions
+from .models import ApplianceProfile, CircuitConfig, CircuitMode, SensorRole
+from .nilm import (
+    NilmEdge,
+    NilmSession,
+    nilm_session_to_dict,
+    pair_nilm_sessions_for_signatures,
+)
 from .panel_common import (
     _circuit_payload,
     _datetime_from_iso,
@@ -91,7 +96,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
 MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
 MAX_NILM_WORKSPACE_HISTORY_ENTITIES = 8
-MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY = 240
+MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY = 2160
 MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
 MAX_NILM_WORKSPACE_EDGES = 40
 MAX_NILM_WORKSPACE_SESSIONS = 20
@@ -1455,17 +1460,19 @@ def _nilm_workspace_history_payload(
 
 def _nilm_workspace_history_entities(
     config: CircuitConfig,
-    known_load_overlays: list[dict[str, Any]],
-    solar_overlays: list[dict[str, Any]],
+    _known_load_overlays: list[dict[str, Any]],
+    _solar_overlays: list[dict[str, Any]],
 ) -> list[str]:
-    entity_ids = [*_sensor_entity_ids(config)]
-    for overlay in [*known_load_overlays, *solar_overlays]:
-        entity_ids.extend(
-            str(entity_id)
-            for entity_id in _iter_items(overlay.get("entity_ids"))
-            if str(entity_id).strip()
-        )
-    return _unique_strings(entity_ids)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
+    sensors = tuple(getattr(config, "sensors", ()) or ())
+    real_power_ids = _unique_strings(
+        sensor.entity_id
+        for sensor in sensors
+        if getattr(sensor, "role", None) == SensorRole.REAL_POWER
+        and getattr(sensor, "entity_id", None)
+    )
+    if real_power_ids or any(getattr(sensor, "role", None) for sensor in sensors):
+        return real_power_ids[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
+    return _sensor_entity_ids(config)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
 
 
 def _sensor_entity_ids(config: Any) -> list[str]:
@@ -1509,32 +1516,33 @@ def _nilm_workspace_sessions(
     reviewed_session_ids: Mapping[str, set[str]] | None = None,
     limit: int | None = MAX_NILM_WORKSPACE_SESSIONS,
 ) -> list[dict[str, Any]]:
-    sessions: list[NilmSession] = []
     signature_by_id = {
         key: signature
         for signature in signatures
         for key in _nilm_signature_lookup_keys(signature)
     }
+    assignment_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignments
+    }
+    matcher_specs: list[dict[str, Any]] = []
     for signature_fingerprint, assignment_id in _nilm_workspace_session_specs(
         signatures,
         assignments,
     ):
-        signature = signature_by_id.get(signature_fingerprint)
-        session_edges = (
-            _nilm_edges_matching_signature(edges, signature)
-            if signature is not None
-            else edges
-        )
-        sessions.extend(
-            pair_nilm_sessions(
-                session_edges,
-                mains_circuit_id=circuit_id,
-                signature_fingerprint=signature_fingerprint,
-                assignment_id=assignment_id,
-            )
-        )
-        if limit is not None and len(sessions) >= limit:
-            break
+        spec = dict(signature_by_id.get(signature_fingerprint) or {})
+        spec["signature_fingerprint"] = signature_fingerprint
+        spec["assignment_id"] = assignment_id
+        assignment = assignment_by_id.get(assignment_id or "", {})
+        for key in ("min_duration_seconds", "max_duration_seconds"):
+            if key in assignment:
+                spec[key] = assignment[key]
+        matcher_specs.append(spec)
+    sessions = pair_nilm_sessions_for_signatures(
+        edges,
+        signature_specs=matcher_specs,
+        mains_circuit_id=circuit_id,
+    )
     payloads = [
         _nilm_session_payload(
             session,
@@ -1755,27 +1763,6 @@ def _merge_nilm_session_payloads(
         merged.append(dict(session))
         seen.add(session_id)
     return merged
-
-
-def _nilm_edges_matching_signature(
-    edges: list[NilmEdge],
-    signature: Mapping[str, Any],
-) -> list[NilmEdge]:
-    typical_watts = _clamped_float(signature.get("typical_watts"), default=0.0)
-    split_phase_type = str(signature.get("split_phase_type") or "").strip()
-    return [
-        edge
-        for edge in edges
-        if (
-            not typical_watts
-            or abs(abs(edge.delta_w) - typical_watts) <= max(typical_watts * 0.25, 50.0)
-        )
-        and (
-            not split_phase_type
-            or split_phase_type == "unknown"
-            or edge.split_phase_type in {split_phase_type, "unknown"}
-        )
-    ]
 
 
 def _nilm_session_payload(
