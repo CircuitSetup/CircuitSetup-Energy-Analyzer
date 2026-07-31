@@ -294,7 +294,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       for (let index = 0; index < power.length; index += 1) {
         const voltage = this._pairedSourceValue(power[index], index, volts, power.length, legAware);
         const factor = this._pairedSourceValue(power[index], index, factors, power.length, legAware);
-        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value) || voltage.value <= 0 || factor.value <= 0) return null;
+        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value) || voltage.value <= 0 || factor.value === 0) return null;
         total += power[index].value / (voltage.value * factor.value);
       }
       return total;
@@ -2104,7 +2104,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const normalized = unit.toLowerCase().includes("%") || value > 1 && value <= 100
         ? value / 100
         : value;
-      return normalized >= 0 && normalized <= 1 ? normalized : null;
+      return Math.abs(normalized) <= 1 ? normalized : null;
     }
 
     _historySourceSeries(payload, configs, rangeStart) {
@@ -2202,7 +2202,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           const factorSource = this._pairedSourceValue(powers[index], index, factors, powers.length, legAware);
           const voltage = voltageSource && latest.get(voltageSource);
           const factor = factorSource && latest.get(factorSource);
-          if (!Number.isFinite(power) || !Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor <= 0) {
+          if (!Number.isFinite(power) || !Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor === 0) {
             amps = Number.NaN;
             break;
           }

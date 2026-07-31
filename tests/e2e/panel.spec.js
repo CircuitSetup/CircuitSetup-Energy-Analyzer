@@ -1260,6 +1260,31 @@ test("home summary derives signed power from a negative power factor", async ({ 
   await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("-600 W");
 });
 
+test("home summary derives amps from signed power and power factor", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        power_entities: ["sensor.mains_power"],
+        voltage_entities: ["sensor.mains_voltage"],
+        power_factor_entities: ["sensor.mains_power_factor"],
+      },
+    },
+    {
+      "sensor.mains_power": { state: "-1000", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "-0.5", attributes: {} },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Amps Now" })).toContainText("20 A");
+});
+
 test("mains graph pairs calculated history by leg", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
@@ -1660,15 +1685,15 @@ test("completed day does not sum partial appliance amp history", async ({ page }
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("Unavailable");
 });
 
-test("completed day derives average amps from power, voltage, and PF history", async ({ page }) => {
+test("completed day derives average amps from signed power and PF history", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.includes("/history/period")) {
       await route.fulfill({
         json: [
-          [{ entity_id: "sensor.mains_power", state: "1000", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power", state: "-1000", last_changed: "2026-07-31T00:00:00.000Z" }],
           [{ entity_id: "sensor.mains_voltage", state: "100", last_changed: "2026-07-31T00:00:00.000Z" }],
-          [{ entity_id: "sensor.mains_power_factor", state: "0.5", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power_factor", state: "-0.5", last_changed: "2026-07-31T00:00:00.000Z" }],
         ],
       });
       return true;
@@ -1690,9 +1715,9 @@ test("completed day derives average amps from power, voltage, and PF history", a
       },
     },
     {
-      "sensor.mains_power": { state: "1000", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_power": { state: "-1000", attributes: { unit_of_measurement: "W" } },
       "sensor.mains_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
-      "sensor.mains_power_factor": { state: "0.5", attributes: {} },
+      "sensor.mains_power_factor": { state: "-0.5", attributes: {} },
     },
   );
   await page.evaluate(() => {
