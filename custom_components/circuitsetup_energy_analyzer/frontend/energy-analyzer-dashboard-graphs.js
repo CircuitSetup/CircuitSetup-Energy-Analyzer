@@ -741,6 +741,57 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <div class="bars">${top.map((item) => `<div class="bar-row"><span>${this._escape(item.name)}</span><span class="bar-track"><span class="bar-fill" style="display:block;width:${Math.max(item[key] / max * 100, 2)}%"></span></span><strong>${this._escape(this._formatValue(item[key], unit))}</strong></div>`).join("")}</div>
       </section>`;
     }
+
+    _historyRequest(start, end, entityIds, rangeDays = null) {
+      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
+      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
+        return this._rawHistoryRequest(start, end, entityIds);
+      }
+      const period = spanDays <= 90
+        ? "hour"
+        : spanDays <= 730
+          ? "day"
+          : spanDays <= 5_110 ? "week" : "month";
+      return this._hass.callWS({
+        type: "recorder/statistics_during_period",
+        start_time: start,
+        end_time: end,
+        statistic_ids: entityIds,
+        period,
+        types: ["mean"],
+      }).then(async (result) => {
+        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
+          (rows || []).flatMap((row) => {
+            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
+            return row.mean !== null
+              && row.mean !== undefined
+              && Number.isFinite(Number(row.mean))
+              && Number.isFinite(time) ? [{
+              entity_id: entityId,
+              state: row.mean,
+              last_changed: new Date(time).toISOString(),
+              statistics_period: period,
+            }] : [];
+          })
+        ));
+        const missing = entityIds.filter((entityId) => (
+          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
+        ));
+        if (!missing.length) return statistics;
+        try {
+          const fallback = await this._rawHistoryRequest(start, end, missing);
+          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
+        } catch (_error) {
+          return statistics;
+        }
+      });
+    }
+
+    _rawHistoryRequest(start, end, entityIds) {
+      const ids = encodeURIComponent(entityIds.join(","));
+      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
+      return this._hass.callApi("GET", path);
+    }
   }
 
   class CircuitSetupEnergyAnalyzerDateRange extends DashboardCardBase {
@@ -1530,7 +1581,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _normalizedPowerSeries(series, targetUnit = "") {
-      const wattsPerUnit = { W: 1, kW: 1000, MW: 1000000 };
+      const wattsPerUnit = { W: 1, kW: 1000, MW: 1000000, mW: 0.001 };
       const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
       const normalizedUnit = wattsPerUnit[targetUnit] ? targetUnit : target && target.unit;
       if (!normalizedUnit) return series;
@@ -1587,12 +1638,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return {
           ...item,
           unit: "",
-          points: item.points.map((point) => ({
-            ...point,
-            value: Number.isFinite(point.value) && (percent || point.value > 1 && point.value <= 100)
+          points: item.points.map((point) => {
+            const normalized = Number.isFinite(point.value) && (percent || point.value > 1 && point.value <= 100)
               ? point.value / 100
-              : point.value,
-          })),
+              : point.value;
+            return {
+              ...point,
+              value: Number.isFinite(normalized) && Math.abs(normalized) <= 1 ? normalized : null,
+            };
+          }),
         };
       });
     }
@@ -1796,56 +1850,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           && !this.shadowRoot.querySelector('[data-chart-tooltip][aria-hidden="false"]');
     }
 
-    _historyRequest(start, end, entityIds, rangeDays = null) {
-      const spanDays = rangeDays ?? this._calendarRange({ start, end }).days;
-      if (spanDays <= 1 || typeof this._hass.callWS !== "function") {
-        return this._rawHistoryRequest(start, end, entityIds);
-      }
-      const period = spanDays <= 90
-        ? "hour"
-        : spanDays <= 730
-          ? "day"
-          : spanDays <= 5_110 ? "week" : "month";
-      return this._hass.callWS({
-        type: "recorder/statistics_during_period",
-        start_time: start,
-        end_time: end,
-        statistic_ids: entityIds,
-        period,
-        types: ["mean"],
-      }).then(async (result) => {
-        const statistics = Object.entries(result || {}).map(([entityId, rows]) => (
-          (rows || []).flatMap((row) => {
-            const time = typeof row.start === "number" ? row.start : Date.parse(row.start);
-            return row.mean !== null
-              && row.mean !== undefined
-              && Number.isFinite(Number(row.mean))
-              && Number.isFinite(time) ? [{
-              entity_id: entityId,
-              state: row.mean,
-              last_changed: new Date(time).toISOString(),
-              statistics_period: period,
-            }] : [];
-          })
-        ));
-        const missing = entityIds.filter((entityId) => (
-          !Object.prototype.hasOwnProperty.call(result || {}, entityId)
-        ));
-        if (!missing.length) return statistics;
-        try {
-          const fallback = await this._rawHistoryRequest(start, end, missing);
-          return [...statistics, ...(Array.isArray(fallback) ? fallback : [])];
-        } catch (_error) {
-          return statistics;
-        }
-      });
-    }
-
-    _rawHistoryRequest(start, end, entityIds) {
-      const ids = encodeURIComponent(entityIds.join(","));
-      const path = `history/period/${start}?filter_entity_id=${ids}&end_time=${encodeURIComponent(end)}&minimal_response=1&no_attributes=1`;
-      return this._hass.callApi("GET", path);
-    }
   }
 
   class CircuitSetupEnergyAnalyzerSummary extends DashboardCardBase {
@@ -2248,8 +2252,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._historicalAmpsSeries = null;
       if (!entityIds.length) return;
       this._historicalAmpsLoading = true;
-      const path = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(range.end)}&minimal_response=1&no_attributes=1`;
-      this._hass.callApi("GET", path).then((payload) => {
+      this._historyRequest(range.start, range.end, entityIds).then((payload) => {
         if (this._historicalAmpsKey !== key) return;
         const circuitSeries = circuits
           .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)));
@@ -2383,12 +2386,22 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         (!this._dashboardConfig.entry_id || item.entry_id === this._dashboardConfig.entry_id)
         && (!mains.circuit_id || item.circuit_id === mains.circuit_id)
       ));
-      this._rangeSummary = this._retainedRangeTotals(
+      const retainedMainsTotals = this._retainedRangeTotals(
         retainedMains,
         startKey,
         endKey,
         todayKey,
       );
+      const retainedApplianceTotal = (key) => startKey < todayKey
+        ? this._completeCircuitTotal(
+          appliances,
+          (appliance) => this._rollingContributionByCircuit[appliance.circuit_id]?.[key],
+        )
+        : undefined;
+      this._rangeSummary = {
+        energy: retainedMainsTotals.energy ?? retainedApplianceTotal("energy"),
+        cost: retainedMainsTotals.cost ?? retainedApplianceTotal("cost"),
+      };
       const completedDayKey = this._shiftDateKey(todayKey, -1);
       const retainedSources = [
         retainedMains,
