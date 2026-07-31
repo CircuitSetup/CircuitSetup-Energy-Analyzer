@@ -465,17 +465,10 @@ def _merge_nilm_session_history(
         session_id = str(update.get("session_id") or "").strip()
         if not session_id:
             continue
-        if update.get("off_edge_id") or update.get("ambiguous"):
-            _remove_replaced_nilm_sessions(
-                merged,
-                signature_fingerprint=str(
-                    update.get("signature_fingerprint") or ""
-                ).strip(),
-                off_edge_id=str(update.get("off_edge_id") or "").strip(),
-                on_edge_id=str(update.get("on_edge_id") or "").strip(),
-                assignment_id=str(update.get("assignment_id") or "").strip(),
-                any_signature=bool(update.get("ambiguous")),
-            )
+        _remove_replaced_nilm_sessions(
+            merged,
+            on_edge_id=str(update.get("on_edge_id") or "").strip(),
+        )
         merged[session_id] = dict(update)
     return sorted(
         merged.values(),
@@ -487,35 +480,12 @@ def _merge_nilm_session_history(
 def _remove_replaced_nilm_sessions(
     sessions: dict[str, dict[str, Any]],
     *,
-    signature_fingerprint: str,
     on_edge_id: str,
-    off_edge_id: str,
-    assignment_id: str = "",
-    any_signature: bool = False,
 ) -> None:
     if not on_edge_id:
         return
     for session_id, session in list(sessions.items()):
-        existing_off_edge_id = str(session.get("off_edge_id") or "").strip()
-        if (
-            str(session.get("on_edge_id") or "").strip() == on_edge_id
-            and (
-                (off_edge_id and existing_off_edge_id)
-                or (
-                    not existing_off_edge_id
-                    and (
-                        any_signature
-                        or str(session.get("signature_fingerprint") or "").strip()
-                        == signature_fingerprint
-                        or (
-                            assignment_id
-                            and str(session.get("assignment_id") or "").strip()
-                            == assignment_id
-                        )
-                    )
-                )
-            )
-        ):
+        if str(session.get("on_edge_id") or "").strip() == on_edge_id:
             sessions.pop(session_id, None)
 
 

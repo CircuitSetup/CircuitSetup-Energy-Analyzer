@@ -7001,6 +7001,35 @@ def test_nilm_session_history_replaces_stale_closed_edge_pair(
     assert [session["session_id"] for session in merged] == ["current"]
 
 
+def test_nilm_session_history_replaces_stale_close_with_reopened_session() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "closed",
+                "signature_fingerprint": "dryer",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+            }
+        ],
+        [
+            {
+                "session_id": "reopened",
+                "signature_fingerprint": "dryer",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["reopened"]
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 
