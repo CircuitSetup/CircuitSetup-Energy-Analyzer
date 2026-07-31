@@ -497,14 +497,19 @@ class NilmEdgeDetector:
         previous: CircuitSample,
         sample: CircuitSample,
     ) -> list[NilmEdge]:
+        pending = self._pending
         if (
             self.confirmation_max_interval is not None
             and sample.timestamp - previous.timestamp > self.confirmation_max_interval
         ):
             self._pending = None
+            if pending is not None:
+                baseline, candidate, _count = pending
+                if self._same_level(sample, candidate, baseline):
+                    edge = self._edge_between(baseline, candidate)
+                    return [edge] if edge is not None else []
             edge = self._edge_between(previous, sample)
             return [edge] if edge is not None else []
-        pending = self._pending
         if pending is not None:
             baseline, candidate, count = pending
             if self._same_level(sample, candidate, baseline):
@@ -874,10 +879,15 @@ def pair_nilm_sessions_for_signatures(
         spec
         for spec in signature_specs
         if _nilm_session_spec_fingerprint(spec)
-        and str(spec.get("direction") or "").lower() != "off"
         and (
-            _nilm_number(spec.get("median_delta_w")) is None
-            or float(spec["median_delta_w"]) >= 0
+            _nilm_session_spec_assignment_id(spec)
+            or (
+                str(spec.get("direction") or "").lower() != "off"
+                and (
+                    _nilm_number(spec.get("median_delta_w")) is None
+                    or float(spec["median_delta_w"]) >= 0
+                )
+            )
         )
     ]
     if not specs:
@@ -941,6 +951,7 @@ def pair_nilm_sessions_for_signatures(
                 )
 
     ambiguous_pairs: set[tuple[int, int]] = set()
+    preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
     by_pair: dict[tuple[int, int], list[_NilmSessionCandidate]] = {}
     for candidate in candidates:
         by_pair.setdefault((candidate.on_index, candidate.off_index), []).append(
@@ -948,6 +959,15 @@ def pair_nilm_sessions_for_signatures(
         )
     for pair, pair_candidates in by_pair.items():
         ranked = sorted(pair_candidates, key=lambda item: -item.score)
+        assigned = [
+            candidate
+            for candidate in ranked
+            if candidate.assignment_id
+            and ranked[0].score - candidate.score <= ambiguity_margin
+        ]
+        if len(assigned) == 1:
+            preferred_candidates[pair] = assigned[0]
+            continue
         if (
             len(ranked) > 1
             and ranked[0].signature_fingerprint != ranked[1].signature_fingerprint
@@ -969,7 +989,10 @@ def pair_nilm_sessions_for_signatures(
             item.signature_fingerprint,
         ),
     ):
-        if (candidate.on_index, candidate.off_index) in ambiguous_pairs:
+        pair = (candidate.on_index, candidate.off_index)
+        if pair in ambiguous_pairs or (
+            pair in preferred_candidates and preferred_candidates[pair] != candidate
+        ):
             continue
         if (
             candidate.on_index in used_on_indices
@@ -988,6 +1011,31 @@ def pair_nilm_sessions_for_signatures(
                 assignment_id=candidate.assignment_id,
                 ambiguous=False,
                 alternate_match_count=0,
+                known_load_masked=False,
+                known_load_confidence=None,
+            )
+        )
+
+    for pair in sorted(
+        ambiguous_pairs,
+        key=lambda item: -max(candidate.score for candidate in by_pair[item]),
+    ):
+        on_index, off_index = pair
+        if on_index in used_on_indices or off_index in used_off_indices:
+            continue
+        candidate = max(by_pair[pair], key=lambda item: item.score)
+        used_on_indices.add(on_index)
+        used_off_indices.add(off_index)
+        sessions.append(
+            _closed_nilm_session(
+                candidate.on_edge,
+                candidate.off_edge,
+                mains_circuit_id=mains_circuit_id,
+                signature_fingerprint=candidate.signature_fingerprint,
+                confidence=candidate.score,
+                assignment_id=None,
+                ambiguous=True,
+                alternate_match_count=len(by_pair[pair]) - 1,
                 known_load_masked=False,
                 known_load_confidence=None,
             )
@@ -1014,6 +1062,14 @@ def pair_nilm_sessions_for_signatures(
         )
         if not ranked_specs:
             continue
+        assigned_specs = [
+            match
+            for match in ranked_specs
+            if _nilm_session_spec_assignment_id(match[1])
+            and ranked_specs[0][0] - match[0] <= ambiguity_margin
+        ]
+        if len(assigned_specs) == 1:
+            ranked_specs = assigned_specs
         if (
             len(ranked_specs) > 1
             and ranked_specs[0][0] - ranked_specs[1][0] <= ambiguity_margin

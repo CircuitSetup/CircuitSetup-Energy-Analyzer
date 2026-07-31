@@ -6394,6 +6394,49 @@ def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
     assert sessions[0]["signature_fingerprint"] == "120-w"
 
 
+def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    on_edge = NilmEdge(start, 125.0, 0.0, 125.0, 0.0, "on")
+    existing = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [{"signature_id": "120-w", "typical_watts": 120.0}],
+        [],
+    )
+    updates = _nilm_session_history_payloads(
+        "mains",
+        [
+            on_edge,
+            NilmEdge(
+                start + timedelta(minutes=5),
+                -125.0,
+                0.0,
+                -125.0,
+                0.0,
+                "off",
+            ),
+        ],
+        [
+            {"signature_id": "120-w", "typical_watts": 120.0},
+            {"signature_id": "130-w", "typical_watts": 130.0},
+        ],
+        [],
+    )
+
+    merged = _merge_nilm_session_history(existing, updates)
+
+    assert len(merged) == 1
+    assert merged[0]["end"] == "2026-07-31T12:05:00+00:00"
+    assert merged[0]["ambiguous"] is True
+    assert merged[0]["assignment_id"] is None
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 

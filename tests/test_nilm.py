@@ -311,6 +311,22 @@ def test_edge_detector_does_not_debounce_sparse_samples() -> None:
     assert edges[0].timestamp == BASE_TIME + timedelta(seconds=30)
 
 
+def test_edge_detector_keeps_pending_transition_after_delayed_confirmation() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [sample(0, 0.0), sample(10, 1_000.0), sample(30, 1_000.0)]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 1_000.0
+
+
 def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> None:
     known_event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=11),
@@ -952,7 +968,7 @@ def test_global_session_pairing_assigns_each_edge_pair_once() -> None:
     assert sessions[0].off_edge_id is not None
 
 
-def test_global_session_pairing_leaves_close_signature_match_unresolved() -> None:
+def test_global_session_pairing_records_close_signature_match_as_ambiguous() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 125.0), edge(300, -125.0)],
         mains_circuit_id="mains",
@@ -962,7 +978,32 @@ def test_global_session_pairing_leaves_close_signature_match_unresolved() -> Non
         ],
     )
 
-    assert sessions == []
+    assert len(sessions) == 1
+    assert sessions[0].off_edge_id is not None
+    assert sessions[0].ambiguous is True
+    assert sessions[0].assignment_id is None
+
+
+def test_global_session_pairing_keeps_assigned_off_signature() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "off-500",
+                "median_delta_w": -500.0,
+                "assignment_id": "dryer",
+            },
+            {
+                "signature_fingerprint": "on-500",
+                "median_delta_w": 500.0,
+            },
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "off-500"
+    assert sessions[0].assignment_id == "dryer"
 
 
 def test_global_session_pairing_rejects_short_closed_transition() -> None:

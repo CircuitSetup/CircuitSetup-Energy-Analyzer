@@ -459,6 +459,7 @@ def _merge_nilm_session_history(
                     update.get("signature_fingerprint") or ""
                 ).strip(),
                 on_edge_id=str(update.get("on_edge_id") or "").strip(),
+                any_signature=bool(update.get("ambiguous")),
             )
         merged[session_id] = dict(update)
     return sorted(
@@ -473,13 +474,17 @@ def _remove_open_nilm_session(
     *,
     signature_fingerprint: str,
     on_edge_id: str,
+    any_signature: bool = False,
 ) -> None:
     if not signature_fingerprint or not on_edge_id:
         return
     for session_id, session in list(sessions.items()):
         if (
-            str(session.get("signature_fingerprint") or "").strip()
-            == signature_fingerprint
+            (
+                any_signature
+                or str(session.get("signature_fingerprint") or "").strip()
+                == signature_fingerprint
+            )
             and str(session.get("on_edge_id") or "").strip() == on_edge_id
             and not str(session.get("off_edge_id") or "").strip()
         ):
