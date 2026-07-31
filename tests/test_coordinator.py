@@ -113,6 +113,187 @@ async def test_mark_circuit_mixed_persists_cleans_saves_then_reloads() -> None:
     assert calls[0][1][CONF_CIRCUITS][0]["mode"] == "mixed"
 
 
+def _mixed_transition_coordinator(mode: str = "single_phase", *, power_flow="load"):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    circuit = {
+        "circuit_id": "fridge",
+        "name": "Fridge",
+        "mode": mode,
+        "power_flow": power_flow,
+        "appliance_profile": "refrigerator",
+        "sensors": [],
+    }
+    return EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: [circuit]}
+    )
+
+
+def _spy_mixed_transition(coordinator):
+    calls = []
+    coordinator.config_entry_controller.async_update_options = AsyncMock(
+        side_effect=lambda updates: calls.append("persist")
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock(side_effect=lambda circuit_id: calls.append("dismiss"))
+    )
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        lambda circuit_id, values: calls.append("cleanup") or True
+    )
+    coordinator.state_reducer.clear_direct_appliance_state = lambda *args: True
+    coordinator.state_reducer.refresh_recent_activity_state = lambda *args: None
+    coordinator.refresh_ux_state_for_circuit = lambda *args: None
+    coordinator._async_save_store = AsyncMock(
+        side_effect=lambda now: calls.append("save")
+    )
+    coordinator.config_entry_controller.async_reload = AsyncMock(
+        side_effect=lambda: calls.append("reload")
+    )
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_mark_already_mixed_cleans_saves_and_reloads_without_write() -> None:
+    coordinator = _mixed_transition_coordinator("mixed")
+    calls = _spy_mixed_transition(coordinator)
+
+    await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == ["dismiss", "cleanup", "save", "reload"]
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_persistence_failure_stops_cleanup_and_reload() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+    coordinator.config_entry_controller.async_update_options.side_effect = RuntimeError(
+        "persist failed"
+    )
+
+    with pytest.raises(RuntimeError, match="persist failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_cleanup_failure_reloads_then_raises_cleanup() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+
+    def fail_cleanup(circuit_id, values):
+        calls.append("cleanup")
+        raise RuntimeError("cleanup failed")
+
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        fail_cleanup
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == ["persist", "dismiss", "cleanup", "reload"]
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_cleanup_remains_primary_when_reload_also_fails() -> None:
+    coordinator = _mixed_transition_coordinator()
+    _spy_mixed_transition(coordinator)
+
+    def fail_cleanup(circuit_id, values):
+        raise RuntimeError("cleanup failed")
+
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        fail_cleanup
+    )
+    coordinator.config_entry_controller.async_reload.side_effect = RuntimeError(
+        "reload failed"
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed") as raised:
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert str(raised.value.__cause__) == "reload failed"
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_reload_failure_keeps_persisted_mixed_options() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+
+    async def persist(updates):
+        coordinator.options.update(updates)
+        calls.append("persist")
+
+    coordinator.config_entry_controller.async_update_options.side_effect = persist
+    coordinator.config_entry_controller.async_reload.side_effect = RuntimeError(
+        "reload failed"
+    )
+
+    with pytest.raises(RuntimeError, match="reload failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert coordinator.options[CONF_CIRCUITS][0]["mode"] == "mixed"
+    assert "save" in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("circuit_id", "mode", "power_flow"),
+    [
+        ("unknown", "single_phase", "load"),
+        ("fridge", "mains_nilm", "load"),
+        ("fridge", "single_phase", "generation"),
+        ("fridge", "dual_phase", "load"),
+    ],
+)
+async def test_mark_mixed_rejects_ineligible_without_side_effects(
+    circuit_id, mode, power_flow
+) -> None:
+    coordinator = _mixed_transition_coordinator(mode, power_flow=power_flow)
+    calls = _spy_mixed_transition(coordinator)
+
+    with pytest.raises(ValueError):
+        await coordinator.async_mark_circuit_mixed(circuit_id)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_start_reconciles_saved_mixed_direct_state_and_saves_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    store_data = FeatureStoreData(
+        baselines={"fridge:run_cycle": BaselineStats("run_cycle", 1, 1, 0, 1, 1, 1)},
+        standby_by_circuit={"fridge": {"samples": []}},
+        energy_usage_by_circuit={"fridge": {"days": [{"date": "2026-07-31"}]}},
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [{
+                "circuit_id": "fridge", "name": "Fridge", "mode": "mixed",
+                "appliance_profile": "refrigerator", "sensors": [],
+            }]
+        },
+        store=store,
+        store_data=store_data,
+    )
+    coordinator.source_updates.async_start = AsyncMock()
+
+    await coordinator.async_start(())
+
+    assert store_data.baselines == {}
+    assert store_data.standby_by_circuit == {}
+    assert "fridge" in store_data.energy_usage_by_circuit
+    store.async_save.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_mixed_result_boundary_keeps_only_aggregate_alerts() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

@@ -8,6 +8,7 @@ from .. import notifications
 from ..appliance_notifications import (
     alert_notification_category,
     decide_notification_delivery,
+    mixed_circuit_allows_alert,
     preferences_from_dict,
 )
 from ..cold_storage import (
@@ -385,6 +386,7 @@ class NotificationController:
             notifications.notification_id_for_alert(alert)
             for alert in alerts
             if alert.circuit_id == circuit_id
+            and not mixed_circuit_allows_alert(alert.feature)
         }
         delivery = self._delivery_state()
         queue_changed = False

@@ -29,18 +29,25 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> None:
     now = datetime(2026, 7, 31, tzinfo=UTC)
     target = AlertEvidence(now, "fridge", Severity.WARNING, "cycle", feature="cycle")
+    aggregate = AlertEvidence(
+        now, "fridge", Severity.WARNING, "capacity", feature="circuit_capacity"
+    )
     other = AlertEvidence(now, "washer", Severity.WARNING, "cycle", feature="cycle")
     target_id = notification_id_for_alert(target)
     other_id = notification_id_for_alert(other)
+    aggregate_id = notification_id_for_alert(aggregate)
     dirty = []
     coordinator = SimpleNamespace(
         hass=SimpleNamespace(),
         store_data=SimpleNamespace(
-            alerts=[target, other],
+            alerts=[target, aggregate, other],
             settings_recommendation_notification_episode_key=(),
             notification_delivery_state={
-                "deferred": [{"alert_id": target_id}, {"alert_id": other_id}],
-                "daily": [{"alert_id": target_id}],
+                "deferred": [
+                    {"alert_id": target_id}, {"alert_id": aggregate_id},
+                    {"alert_id": other_id},
+                ],
+                "daily": [{"alert_id": target_id}, {"alert_id": aggregate_id}],
             },
         ),
         state=SimpleNamespace(active_alerts_by_circuit={}),
@@ -52,8 +59,8 @@ async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> Non
     await controller.async_dismiss_circuit_alert_notifications("fridge")
 
     assert coordinator.store_data.notification_delivery_state == {
-        "deferred": [{"alert_id": other_id}],
-        "daily": [],
+        "deferred": [{"alert_id": aggregate_id}, {"alert_id": other_id}],
+        "daily": [{"alert_id": aggregate_id}],
     }
     assert dirty == [True]
 

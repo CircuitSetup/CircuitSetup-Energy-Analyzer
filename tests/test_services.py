@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from datetime import UTC, date, datetime
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import voluptuous as vol
@@ -4293,3 +4294,25 @@ def test_mark_circuit_mixed_uses_circuit_service_schema() -> None:
     )
 
     assert _SERVICE_SCHEMAS[SERVICE_MARK_CIRCUIT_MIXED] is CIRCUIT_SERVICE_SCHEMA
+
+
+@pytest.mark.asyncio
+async def test_mark_circuit_mixed_dispatches_to_coordinator() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        SERVICE_MARK_CIRCUIT_MIXED,
+        _dispatch_service,
+    )
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="fridge")],
+        async_mark_circuit_mixed=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry": coordinator}})
+
+    await _dispatch_service(
+        hass, SERVICE_MARK_CIRCUIT_MIXED, {ATTR_CIRCUIT_ID: "fridge"}
+    )
+
+    coordinator.async_mark_circuit_mixed.assert_awaited_once_with("fridge")
