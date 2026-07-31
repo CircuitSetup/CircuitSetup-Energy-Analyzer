@@ -1,3 +1,14 @@
+mark_circuit_mixed:
+  name: Mark circuit mixed
+  description: Confirm that a circuit supplies multiple appliances and remove direct-appliance state.
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Circuit to classify as mixed.
+      required: true
+      selector:
+        text:
+
 relearn_baseline:
   name: Relearn baseline
   description: "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity."

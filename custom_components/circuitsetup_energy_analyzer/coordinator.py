@@ -19,6 +19,7 @@ from .config_parsing import (
     mains_context_config_from_sources,
 )
 from .const import (
+    CONF_CIRCUITS,
     DOMAIN,
     EVENT_HVAC_ASSOCIATION_UPDATED,
 )
@@ -203,6 +204,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
+        self._mixed_startup_store_dirty = False
+        for config in self.circuit_configs:
+            if config.mode is CircuitMode.MIXED:
+                self._mixed_startup_store_dirty |= (
+                    self.store_persistence.clear_direct_appliance_state_for_circuit(
+                        config.circuit_id, self._baseline_values
+                    )
+                )
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
@@ -225,6 +234,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.evidence_actions.async_expire_maintenance_if_due(
             self.current_time()
         )
+        if self._mixed_startup_store_dirty:
+            await self._async_save_store(self.current_time())
+            self._mixed_startup_store_dirty = False
         entities = [
             str(entity_id)
             for entity_id in source_entities
@@ -736,6 +748,60 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             preset,
         )
+
+    async def async_mark_circuit_mixed(self, circuit_id: str) -> None:
+        """Persist a user-confirmed shared circuit and reconcile direct state."""
+        config = self.circuit_registry.config_for_circuit(circuit_id)
+        if (
+            config is None
+            or config.mode in (CircuitMode.MAINS_NILM, CircuitMode.DUAL_PHASE)
+            or config.power_flow.value != "load"
+        ):
+            raise ValueError(f"Circuit cannot be marked mixed: {circuit_id}")
+        if config.mode is not CircuitMode.MIXED:
+            circuits = [dict(item) for item in self.options.get(
+                CONF_CIRCUITS, self.entry_data.get(CONF_CIRCUITS, [])
+            )]
+            found = False
+            for item in circuits:
+                if item.get("circuit_id") == circuit_id:
+                    item["mode"] = CircuitMode.MIXED.value
+                    found = True
+                    break
+            if not found:
+                raise ValueError(f"Circuit is not explicitly configured: {circuit_id}")
+            await self.config_entry_controller.async_update_options(
+                {CONF_CIRCUITS: circuits}
+            )
+
+        cleanup_error: BaseException | None = None
+        try:
+            await (
+                self.notification_controller.async_dismiss_circuit_alert_notifications(
+                    circuit_id
+                )
+            )
+            self.store_persistence.clear_direct_appliance_state_for_circuit(
+                circuit_id, self._baseline_values
+            )
+            self.state_reducer.clear_direct_appliance_state(self.state, circuit_id)
+            now = self.current_time()
+            self.state_reducer.refresh_recent_activity_state(
+                self.state, self.store_data, circuit_id, now
+            )
+            self.refresh_ux_state_for_circuit(circuit_id, now)
+            self.async_set_updated_data(self.state)
+            await self._async_save_store(now)
+        except BaseException as err:
+            cleanup_error = err
+        try:
+            await self.config_entry_controller.async_reload()
+        except BaseException as reload_error:
+            if cleanup_error is not None:
+                raise cleanup_error from reload_error
+            raise
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
         """Persist the entity detail level and reload desired entities."""

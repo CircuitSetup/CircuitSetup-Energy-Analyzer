@@ -66,6 +66,54 @@ from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreD
 
 
 @pytest.mark.asyncio
+async def test_mark_circuit_mixed_persists_cleans_saves_then_reloads() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    circuits = [
+        {
+            "circuit_id": "fridge",
+            "name": "Fridge",
+            "mode": "single_phase",
+            "appliance_profile": "refrigerator",
+            "sensors": [],
+        }
+    ]
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits}
+    )
+    calls = []
+    coordinator.config_entry_controller.async_update_options = AsyncMock(
+        side_effect=lambda updates: calls.append(("persist", updates))
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock(side_effect=lambda circuit_id: calls.append(("dismiss", circuit_id)))
+    )
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        lambda circuit_id, values: calls.append(("store", circuit_id)) or True
+    )
+    coordinator.state_reducer.clear_direct_appliance_state = (
+        lambda state, circuit_id: calls.append(("state", circuit_id)) or True
+    )
+    coordinator.state_reducer.refresh_recent_activity_state = lambda *args: None
+    coordinator.refresh_ux_state_for_circuit = lambda *args: None
+    coordinator._async_save_store = AsyncMock(
+        side_effect=lambda now: calls.append(("save", now))
+    )
+    coordinator.config_entry_controller.async_reload = AsyncMock(
+        side_effect=lambda: calls.append(("reload", None))
+    )
+
+    await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert [call[0] for call in calls] == [
+        "persist", "dismiss", "store", "state", "save", "reload"
+    ]
+    assert calls[0][1][CONF_CIRCUITS][0]["mode"] == "mixed"
+
+
+@pytest.mark.asyncio
 async def test_mixed_result_boundary_keeps_only_aggregate_alerts() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

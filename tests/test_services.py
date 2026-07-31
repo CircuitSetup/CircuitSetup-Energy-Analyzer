@@ -4283,3 +4283,13 @@ def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> Non
     assert _boolean_value(0) is False
     with pytest.raises(Exception, match="Expected a boolean"):
         _boolean_value("sometimes")
+
+
+def test_mark_circuit_mixed_uses_circuit_service_schema() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _SERVICE_SCHEMAS,
+        CIRCUIT_SERVICE_SCHEMA,
+        SERVICE_MARK_CIRCUIT_MIXED,
+    )
+
+    assert _SERVICE_SCHEMAS[SERVICE_MARK_CIRCUIT_MIXED] is CIRCUIT_SERVICE_SCHEMA

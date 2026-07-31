@@ -23,6 +23,7 @@ except ModuleNotFoundError:
     er = None
 
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
+SERVICE_MARK_CIRCUIT_MIXED = "mark_circuit_mixed"
 SERVICE_PAUSE_ALERTS = "pause_alerts"
 SERVICE_ACKNOWLEDGE_ALERT = "acknowledge_alert"
 SERVICE_EXPORT_DIAGNOSTICS = "export_diagnostics"
@@ -453,6 +454,7 @@ RECOMMENDATION_ACTION_SERVICE_SCHEMA = _recommendation_action_schema()
 
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
+    SERVICE_MARK_CIRCUIT_MIXED: CIRCUIT_SERVICE_SCHEMA,
     SERVICE_PAUSE_ALERTS: _circuit_schema(ATTR_DURATION),
     SERVICE_ACKNOWLEDGE_ALERT: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_EXPORT_DIAGNOSTICS: CIRCUIT_SERVICE_SCHEMA,
@@ -1054,6 +1056,8 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
     for coordinator in _target_coordinators(hass, circuit_id):
         if service == SERVICE_RELEARN_BASELINE:
             await _call_if_present(coordinator, "async_relearn_baseline", circuit_id)
+        elif service == SERVICE_MARK_CIRCUIT_MIXED:
+            await _call_if_present(coordinator, "async_mark_circuit_mixed", circuit_id)
         elif service == SERVICE_PAUSE_ALERTS:
             await _call_if_present(
                 coordinator,

@@ -386,6 +386,22 @@ class NotificationController:
             for alert in alerts
             if alert.circuit_id == circuit_id
         }
+        delivery = self._delivery_state()
+        queue_changed = False
+        for queue_name in ("deferred", "daily"):
+            queue = delivery.get(queue_name)
+            if not isinstance(queue, list):
+                continue
+            retained = [
+                item
+                for item in queue
+                if not isinstance(item, dict) or item.get("alert_id") not in alert_ids
+            ]
+            if retained != queue:
+                delivery[queue_name] = retained
+                queue_changed = True
+        if queue_changed:
+            self._coordinator.store_persistence.mark_dirty()
         for alert_id in sorted(alert_ids):
             await self.async_dismiss_alert_notification(alert_id)
 

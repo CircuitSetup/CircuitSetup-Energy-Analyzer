@@ -425,6 +425,25 @@ def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:
     assert state.alert_evidence_by_circuit == {}
 
 
+def test_state_reducer_clears_only_direct_appliance_state() -> None:
+    state = AnalyzerState()
+    state.run_cycle_status_by_circuit = {"fridge": "running", "washer": "idle"}
+    state.daily_energy_usage_by_circuit = {"fridge": 2.0}
+    state.hvac_current_episode_by_stream = {
+        "fridge|climate.kitchen|cooling": {"active": True},
+        "washer|climate.laundry|cooling": {"active": True},
+    }
+
+    reducer = StateReducer()
+    assert reducer.clear_direct_appliance_state(state, "fridge")
+    assert not reducer.clear_direct_appliance_state(state, "fridge")
+    assert state.run_cycle_status_by_circuit == {"washer": "idle"}
+    assert state.daily_energy_usage_by_circuit == {"fridge": 2.0}
+    assert set(state.hvac_current_episode_by_stream) == {
+        "washer|climate.laundry|cooling"
+    }
+
+
 def test_state_reducer_hydrates_context_state_from_store() -> None:
     state = AnalyzerState()
     store_data = FeatureStoreData()

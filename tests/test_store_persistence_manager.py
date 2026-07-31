@@ -107,6 +107,31 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     assert manager.dirty is True
 
 
+def test_store_persistence_clears_direct_state_idempotently() -> None:
+    store_data = FeatureStoreData(
+        baselines={
+            "fridge:run_cycle": BaselineStats("run_cycle", 1, 1, 0, 1, 1, 1),
+            "washer:run_cycle": BaselineStats("run_cycle", 1, 1, 0, 1, 1, 1),
+        },
+        standby_by_circuit={"fridge": {"samples": []}, "washer": {"samples": []}},
+        energy_usage_by_circuit={"fridge": {"days": [{"date": "2026-07-31"}]}},
+    )
+    manager = object.__new__(StorePersistenceManager)
+    manager._coordinator = SimpleNamespace(store_data=store_data)
+    manager._dirty_generation = 0
+    manager.dirty = False
+    baseline_values = {"fridge:run_cycle": [1.0], "washer:run_cycle": [1.0]}
+
+    assert manager.clear_direct_appliance_state_for_circuit("fridge", baseline_values)
+    assert not manager.clear_direct_appliance_state_for_circuit(
+        "fridge", baseline_values
+    )
+    assert set(store_data.baselines) == {"washer:run_cycle"}
+    assert set(baseline_values) == {"washer:run_cycle"}
+    assert store_data.standby_by_circuit == {"washer": {"samples": []}}
+    assert "fridge" in store_data.energy_usage_by_circuit
+
+
 def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
     now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
     store_data = FeatureStoreData(
