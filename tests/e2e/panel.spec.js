@@ -1079,6 +1079,101 @@ test("home summary converts megawatt power sources to watts", async ({ page }) =
   await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("1,000,000 W");
 });
 
+test("home summary uses filtered mains power sources for live totals", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        power_entities: ["sensor.mains_voltage_power", "sensor.mains_power"],
+        chart_power_entities: ["sensor.mains_power"],
+      },
+    },
+    {
+      "sensor.mains_voltage_power": { state: "230", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_power": { state: "1000", attributes: { unit_of_measurement: "W" } },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("1,000 W");
+});
+
+test("home summary pairs live derived metrics by leg", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        current_entities: ["sensor.mains_l1_current", "sensor.mains_l2_current"],
+        current_legs: ["a", "b"],
+        voltage_entities: ["sensor.mains_l2_voltage", "sensor.mains_l1_voltage"],
+        voltage_legs: ["b", "a"],
+        power_factor_entities: ["sensor.mains_l2_power_factor", "sensor.mains_l1_power_factor"],
+        power_factor_legs: ["b", "a"],
+      },
+    },
+    {
+      "sensor.mains_l1_current": { state: "10", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_l2_current": { state: "20", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_l1_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_l2_voltage": { state: "200", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_l1_power_factor": { state: "0.5", attributes: {} },
+      "sensor.mains_l2_power_factor": { state: "1", attributes: {} },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("4,500 W");
+});
+
+test("mains graph pairs calculated history by leg", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [{ entity_id: "sensor.mains_l1_current", state: "10", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l2_current", state: "20", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l2_voltage", state: "200", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l1_voltage", state: "100", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l2_power_factor", state: "1", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l1_power_factor", state: "0.5", last_changed: "2026-07-31T00:00:00.000Z" }],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const graph = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "Mains total power and amps",
+      entities: [
+        { entity: "sensor.mains_l1_current", name: "Total Amps", series_id: "mains:current", axis: "right", leg: "a" },
+        { entity: "sensor.mains_l2_current", name: "Total Amps", series_id: "mains:current", axis: "right", leg: "b" },
+        { entity: "sensor.mains_l2_voltage", name: "Mains voltage", series_id: "mains:voltage", axis: "left", hidden: true, leg: "b" },
+        { entity: "sensor.mains_l1_voltage", name: "Mains voltage", series_id: "mains:voltage", axis: "left", hidden: true, leg: "a" },
+        { entity: "sensor.mains_l2_power_factor", name: "Mains power factor", series_id: "mains:power_factor", axis: "left", hidden: true, leg: "b" },
+        { entity: "sensor.mains_l1_power_factor", name: "Mains power factor", series_id: "mains:power_factor", axis: "left", hidden: true, leg: "a" },
+      ],
+    },
+  );
+
+  const values = await graph.locator('[data-chart-point][data-chart-name="Mains total power (calculated)"]')
+    .evaluateAll((points) => points.map((point) => Number(String(point.dataset.chartValue).replaceAll(",", ""))));
+  expect(values).toEqual([4500]);
+});
+
 test("home summary omits derived amps without power factor", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
   await mockPanelApi(page);

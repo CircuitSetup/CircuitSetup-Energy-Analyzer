@@ -231,43 +231,79 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return values ? values.reduce((total, value) => total + value, 0) : null;
     }
 
-    _pairedValue(values, index, count) {
+    _sourceEntries(circuit, role) {
+      const entityKey = `${role}_entities`;
+      const legKey = `${role}_legs`;
+      const entities = Array.isArray(circuit[entityKey]) ? circuit[entityKey] : [];
+      const legs = Array.isArray(circuit[legKey]) ? circuit[legKey] : [];
+      const entries = entities.map((entity, index) => ({
+        entity,
+        leg: legs[index] || null,
+      }));
+      if (role !== "power" || !Array.isArray(circuit.chart_power_entities)) return entries;
+      const byEntity = new Map(entries.map((entry) => [entry.entity, entry]));
+      return circuit.chart_power_entities.map((entity) => (
+        byEntity.get(entity) || { entity, leg: null }
+      ));
+    }
+
+    _sourceValues(circuit, role, converter) {
+      const values = this._sourceEntries(circuit, role).map((source) => ({
+        ...source,
+        value: converter(source.entity),
+      }));
+      return values.length && values.every((source) => Number.isFinite(source.value))
+        ? values
+        : null;
+    }
+
+    _pairedSourceValue(source, index, values, count, legAware) {
       if (values.length === 1) return values[0];
-      return values.length === count ? values[index] : null;
+      if (values.length !== count) return null;
+      if (!legAware) return values[index];
+      return values.find((value) => value.leg && value.leg === source.leg) || null;
     }
 
     _derivedPower(circuit) {
-      const currents = this._completeEntityValues(circuit.current_entities, (entityId) => this._amps(entityId));
-      const volts = this._completeEntityValues(circuit.voltage_entities, (entityId) => this._volts(entityId));
-      const factors = this._completeEntityValues(circuit.power_factor_entities, (entityId) => this._powerFactor(entityId));
+      const currents = this._sourceValues(circuit, "current", (entityId) => this._amps(entityId));
+      const volts = this._sourceValues(circuit, "voltage", (entityId) => this._volts(entityId));
+      const factors = this._sourceValues(circuit, "power_factor", (entityId) => this._powerFactor(entityId));
       if (!currents || !volts || !factors) return null;
+      const legAware = [currents, volts, factors].some((values) => values.some((value) => value.leg));
       let total = 0;
       for (let index = 0; index < currents.length; index += 1) {
-        const voltage = this._pairedValue(volts, index, currents.length);
-        const factor = this._pairedValue(factors, index, currents.length);
-        if (!Number.isFinite(voltage) || !Number.isFinite(factor)) return null;
-        total += currents[index] * voltage * factor;
+        const voltage = this._pairedSourceValue(currents[index], index, volts, currents.length, legAware);
+        const factor = this._pairedSourceValue(currents[index], index, factors, currents.length, legAware);
+        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value)) return null;
+        total += currents[index].value * voltage.value * factor.value;
       }
       return total;
     }
 
     _derivedAmps(circuit) {
-      const power = this._completeEntityValues(circuit.power_entities, (entityId) => this._watts(entityId));
-      const volts = this._completeEntityValues(circuit.voltage_entities, (entityId) => this._volts(entityId));
-      const factors = this._completeEntityValues(circuit.power_factor_entities, (entityId) => this._powerFactor(entityId));
+      const power = this._sourceValues(circuit, "power", (entityId) => this._watts(entityId));
+      const volts = this._sourceValues(circuit, "voltage", (entityId) => this._volts(entityId));
+      const factors = this._sourceValues(circuit, "power_factor", (entityId) => this._powerFactor(entityId));
       if (!power || !volts || !factors) return null;
+      const legAware = [power, volts, factors].some((values) => values.some((value) => value.leg));
       let total = 0;
       for (let index = 0; index < power.length; index += 1) {
-        const voltage = this._pairedValue(volts, index, power.length);
-        const factor = this._pairedValue(factors, index, power.length);
-        if (!Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor <= 0) return null;
-        total += power[index] / (voltage * factor);
+        const voltage = this._pairedSourceValue(power[index], index, volts, power.length, legAware);
+        const factor = this._pairedSourceValue(power[index], index, factors, power.length, legAware);
+        if (!voltage || !factor || !Number.isFinite(voltage.value) || !Number.isFinite(factor.value) || voltage.value <= 0 || factor.value <= 0) return null;
+        total += power[index].value / (voltage.value * factor.value);
       }
       return total;
     }
 
+    _powerEntityIds(circuit) {
+      return Array.isArray(circuit.chart_power_entities)
+        ? circuit.chart_power_entities
+        : (circuit.power_entities || []);
+    }
+
     _circuitPower(circuit) {
-      return this._completeEntitySum(circuit.power_entities, (entityId) => this._watts(entityId))
+      return this._completeEntitySum(this._powerEntityIds(circuit), (entityId) => this._watts(entityId))
         ?? this._derivedPower(circuit);
     }
 
@@ -616,6 +652,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             unit: this._unit(entityId),
             axis: config && config.axis || "left",
             hidden: Boolean(config && config.hidden),
+            leg: config && config.leg,
             points: this._boundedChartPoints(points),
           });
         }
@@ -1581,10 +1618,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           indexes.set(item, index);
         }
         let power = 0;
+        const legAware = [currents, volts, factors].some((values) => values.some((value) => value.leg));
         for (let index = 0; index < currents.length; index += 1) {
           const current = latest.get(currents[index]);
-          const voltageItem = volts.length === 1 ? volts[0] : volts[index];
-          const factorItem = factors.length === 1 ? factors[0] : factors[index];
+          const voltageItem = this._pairedSourceValue(currents[index], index, volts, currents.length, legAware);
+          const factorItem = this._pairedSourceValue(currents[index], index, factors, currents.length, legAware);
           const voltage = voltageItem && latest.get(voltageItem);
           const factor = factorItem && latest.get(factorItem);
           if (!Number.isFinite(current) || !Number.isFinite(voltage) || !Number.isFinite(factor)) {
@@ -1925,24 +1963,24 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : `${this._label("average_amps", "Average Amps")} (${this._rangeLabel()})`;
       const hasAmpSource = Boolean(
         (mains.current_entities || []).length
-        || (mains.power_entities || []).length
+        || this._powerEntityIds(mains).length
           && (mains.voltage_entities || []).length
           && (mains.power_factor_entities || []).length
         || appliances.some((item) => (
           (item.current_entities || []).length
-          || (item.power_entities || []).length
+          || this._powerEntityIds(item).length
             && (item.voltage_entities || []).length
             && (item.power_factor_entities || []).length
         )),
       );
       const hasPowerSource = Boolean(
         mains.monitored_power_entity
-        || (mains.power_entities || []).length
-        || (mains.current_entities || []).length
+        || this._powerEntityIds(mains).length
+          || (mains.current_entities || []).length
           && (mains.voltage_entities || []).length
           && (mains.power_factor_entities || []).length
         || appliances.some((item) => (
-          (item.power_entities || []).length
+          this._powerEntityIds(item).length
           || (item.current_entities || []).length
             && (item.voltage_entities || []).length
             && (item.power_factor_entities || []).length
@@ -1979,7 +2017,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         ${(config.secondary_mains || []).length ? `<section>
           <h3>${this._escape(this._label("additional_mains", "Additional mains channels"))}</h3>
           <div class="kpis">
-            ${(config.secondary_mains || []).map((item) => this._metricHtml(item.name, this._sum(item.power_entities), this._unit((item.power_entities || [])[0], "W"))).join("")}
+            ${(config.secondary_mains || []).map((item) => this._metricHtml(item.name, this._sum(this._powerEntityIds(item)), this._unit(this._powerEntityIds(item)[0], "W"))).join("")}
           </div>
         </section>` : ""}
       ` : "";

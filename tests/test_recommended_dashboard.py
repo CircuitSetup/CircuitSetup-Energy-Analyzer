@@ -615,6 +615,11 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_frequency",
         "sensor.mains_power_harmonic",
     ]
+    assert summary["primary_mains"]["chart_power_entities"] == [
+        "sensor.mains_watts",
+        "sensor.mains_active_power",
+        "sensor.mains_power",
+    ]
     assert summary["primary_mains"]["current_entities"] == [
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
@@ -626,6 +631,32 @@ def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
         "sensor.mains_power_factor",
     ]
     assert [card["grid_options"]["columns"] for card in cards[:5]] == [24] * 5
+
+
+def test_home_mains_graph_preserves_legs_for_derived_sources() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT, leg="a"),
+            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="b"),
+            SensorRef("sensor.mains_l2_voltage", SensorRole.VOLTAGE, leg="b"),
+            SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE, leg="a"),
+            SensorRef("sensor.mains_l2_pf", SensorRole.POWER_FACTOR, leg="b"),
+            SensorRef("sensor.mains_l1_pf", SensorRole.POWER_FACTOR, leg="a"),
+        ),
+    )
+    dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)
+    home = _dashboard_views(dashboard)[0]
+    graph = _card_with_title(home, "Mains total power and amps")
+    summary = _card_with_title(home, "Home energy summary")
+
+    assert [row["leg"] for row in graph["entities"]] == ["a", "b", "b", "a", "b", "a"]
+    assert summary["primary_mains"]["current_legs"] == ["a", "b"]
+    assert summary["primary_mains"]["voltage_legs"] == ["b", "a"]
+    assert summary["primary_mains"]["power_factor_legs"] == ["b", "a"]
 
 
 def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() -> None:
@@ -1139,6 +1170,7 @@ def test_mains_view_identifies_primary_and_additional_mains_channels() -> None:
             "circuit_id": "garage_mains",
             "name": "Garage subpanel",
             "power_entities": ["sensor.garage_mains_power"],
+            "chart_power_entities": ["sensor.garage_mains_power"],
         }
     ]
 

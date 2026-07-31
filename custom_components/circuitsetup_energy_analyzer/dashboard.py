@@ -89,9 +89,13 @@ class DashboardCircuit:
     detail_path: str
     power_entities: tuple[str, ...]
     chart_power_entities: tuple[str, ...]
+    power_legs: tuple[str | None, ...]
     current_entities: tuple[str, ...]
+    current_legs: tuple[str | None, ...]
     voltage_entities: tuple[str, ...]
+    voltage_legs: tuple[str | None, ...]
     power_factor_entities: tuple[str, ...]
+    power_factor_legs: tuple[str | None, ...]
     entities: Mapping[str, str]
 
 
@@ -448,7 +452,16 @@ def _dashboard_circuit(
 ) -> DashboardCircuit:
     circuit_id = _circuit_id(circuit)
     is_mains = _is_mains_circuit(circuit)
-    power_entities = _source_entities_for_role(circuit, "real_power", hass=hass)
+    source_refs = {
+        role: _source_refs_for_role(circuit, role, hass=hass)
+        for role in ("real_power", "current", "voltage", "power_factor")
+    }
+    power_entities = tuple(entity_id for entity_id, _leg in source_refs["real_power"])
+    current_entities = tuple(entity_id for entity_id, _leg in source_refs["current"])
+    voltage_entities = tuple(entity_id for entity_id, _leg in source_refs["voltage"])
+    power_factor_entities = tuple(
+        entity_id for entity_id, _leg in source_refs["power_factor"]
+    )
     entities = {}
     for entity_key, entity_domain in _DASHBOARD_ENTITY_DOMAINS.items():
         entity_id = _resolved_entity_id(
@@ -477,41 +490,42 @@ def _dashboard_circuit(
             if is_mains
             else power_entities
         ),
-        current_entities=_source_entities_for_role(
-            circuit,
-            "current",
-            hass=hass,
-        ),
-        voltage_entities=_source_entities_for_role(
-            circuit,
-            "voltage",
-            hass=hass,
-        ),
-        power_factor_entities=_source_entities_for_role(
-            circuit,
-            "power_factor",
-            hass=hass,
+        power_legs=tuple(leg for _entity_id, leg in source_refs["real_power"]),
+        current_entities=current_entities,
+        current_legs=tuple(leg for _entity_id, leg in source_refs["current"]),
+        voltage_entities=voltage_entities,
+        voltage_legs=tuple(leg for _entity_id, leg in source_refs["voltage"]),
+        power_factor_entities=power_factor_entities,
+        power_factor_legs=tuple(
+            leg for _entity_id, leg in source_refs["power_factor"]
         ),
         entities=entities,
     )
 
 
-def _source_entities_for_role(
+def _source_refs_for_role(
     circuit: Any,
     role: str,
     *,
     hass: Any | None,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, str | None], ...]:
     sensors = _circuit_value(circuit, "sensors") or ()
-    entity_ids = []
+    refs: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
     for sensor in sensors:
         sensor_role = _entry_value(sensor, "role")
         if _normalized_value(sensor_role) != role:
             continue
         entity_id = str(_entry_value(sensor, "entity_id") or "").strip()
-        if entity_id and not _entity_is_apparent_or_reactive_power(hass, entity_id):
-            entity_ids.append(entity_id)
-    return _dedupe(entity_ids)
+        if (
+            entity_id
+            and entity_id not in seen
+            and not _entity_is_apparent_or_reactive_power(hass, entity_id)
+        ):
+            leg = _entry_value(sensor, "leg")
+            refs.append((entity_id, str(leg).strip() if leg else None))
+            seen.add(entity_id)
+    return tuple(refs)
 
 
 def _mains_chart_power_entities(
@@ -640,8 +654,9 @@ def _mains_power_current_rows(
                 "name": _dashboard_text("live_cards", "total_amps"),
                 "series_id": "mains:current",
                 "axis": current_axis,
+                **_source_leg_field(mains.current_legs, index),
             }
-            for entity_id in mains.current_entities
+            for index, entity_id in enumerate(mains.current_entities)
         ],
     ]
     if calculated_power and not mains.chart_power_entities:
@@ -652,8 +667,9 @@ def _mains_power_current_rows(
                 "series_id": "mains:voltage",
                 "axis": "left",
                 "hidden": True,
+                **_source_leg_field(mains.voltage_legs, index),
             }
-            for entity_id in mains.voltage_entities
+            for index, entity_id in enumerate(mains.voltage_entities)
         )
         rows.extend(
             {
@@ -662,10 +678,19 @@ def _mains_power_current_rows(
                 "series_id": "mains:power_factor",
                 "axis": "left",
                 "hidden": True,
+                **_source_leg_field(mains.power_factor_legs, index),
             }
-            for entity_id in mains.power_factor_entities
+            for index, entity_id in enumerate(mains.power_factor_entities)
         )
     return rows
+
+
+def _source_leg_field(
+    legs: tuple[str | None, ...],
+    index: int,
+) -> dict[str, str]:
+    leg = legs[index] if index < len(legs) else None
+    return {"leg": leg} if leg else {}
 
 
 def _mains_calculated_power_available(mains: DashboardCircuit | None) -> bool:
@@ -857,6 +882,7 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
                     "circuit_id": circuit.circuit_id,
                     "name": circuit.name,
                     "power_entities": list(circuit.power_entities),
+                    "chart_power_entities": list(circuit.chart_power_entities),
                 }
                 for circuit in context.mains[1:]
             ],
@@ -1025,6 +1051,7 @@ def _appliance_card_payload(
         "current_entities": list(circuit.current_entities),
         "voltage_entities": list(circuit.voltage_entities),
         "power_factor_entities": list(circuit.power_factor_entities),
+        **_source_leg_payload(circuit),
         **_named_entities(
             circuit,
             {
@@ -1038,6 +1065,19 @@ def _appliance_card_payload(
     if live_context is not None:
         payload.update(_live_today_entity_payload(live_context, circuit))
     return payload
+
+
+def _source_leg_payload(circuit: DashboardCircuit) -> dict[str, list[str | None]]:
+    return {
+        key: list(legs)
+        for key, legs in (
+            ("power_legs", circuit.power_legs),
+            ("current_legs", circuit.current_legs),
+            ("voltage_legs", circuit.voltage_legs),
+            ("power_factor_legs", circuit.power_factor_legs),
+        )
+        if any(leg is not None for leg in legs)
+    }
 
 
 def _summary_card(
@@ -1071,6 +1111,8 @@ def _dashboard_circuit_payload(
         "current_entities": list(circuit.current_entities),
         "voltage_entities": list(circuit.voltage_entities),
         "power_factor_entities": list(circuit.power_factor_entities),
+        "chart_power_entities": list(circuit.chart_power_entities),
+        **_source_leg_payload(circuit),
         **_named_entities(circuit, {key: f"{key}_entity" for key in keys}),
     }
     if live_context is not None:
