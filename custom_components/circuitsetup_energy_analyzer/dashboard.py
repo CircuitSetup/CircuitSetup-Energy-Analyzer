@@ -1022,6 +1022,9 @@ def _appliance_card_payload(
         "area": circuit.area,
         "detail_path": circuit.detail_path,
         "power_entities": list(circuit.power_entities),
+        "current_entities": list(circuit.current_entities),
+        "voltage_entities": list(circuit.voltage_entities),
+        "power_factor_entities": list(circuit.power_factor_entities),
         **_named_entities(
             circuit,
             {

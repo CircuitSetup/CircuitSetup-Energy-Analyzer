@@ -199,7 +199,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     _watts(entityId) {
       const value = this._number(entityId);
-      const factor = { W: 1, kW: 1000, mW: 0.001 }[this._unit(entityId)] ?? 1;
+      const factor = { W: 1, kW: 1000, MW: 1000000, mW: 0.001 }[this._unit(entityId)] ?? 1;
       return Number.isFinite(value) ? value * factor : null;
     }
 
@@ -615,6 +615,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             name: config && config.name || this._friendlyEntityName(entityId),
             unit: this._unit(entityId),
             axis: config && config.axis || "left",
+            hidden: Boolean(config && config.hidden),
             points: this._boundedChartPoints(points),
           });
         }
@@ -1472,7 +1473,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const powerNormalizedSources = this._normalizedPowerSeries(normalizedSources, targetUnit);
       const grouped = this._groupDashboardHistorySeries(powerNormalizedSources, entities);
       const directPower = grouped.filter((item) => item.series_id === "mains:power");
-      const calculated = this._calculatedMainsPowerSeries(powerNormalizedSources);
+      const calculated = this._calculatedMainsPowerSeries(powerNormalizedSources, entities);
       const powerSeries = directPower.length
         ? directPower
         : calculated
@@ -1488,7 +1489,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _normalizedPowerSeries(series, targetUnit = "") {
-      const wattsPerUnit = { W: 1, kW: 1000 };
+      const wattsPerUnit = { W: 1, kW: 1000, MW: 1000000 };
       const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
       const normalizedUnit = wattsPerUnit[targetUnit] ? targetUnit : target && target.unit;
       if (!normalizedUnit) return series;
@@ -1555,10 +1556,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       });
     }
 
-    _calculatedMainsPowerSeries(series) {
+    _calculatedMainsPowerSeries(series, configuredEntities = []) {
       const currents = series.filter((item) => item.series_id === "mains:current");
       const volts = series.filter((item) => item.series_id === "mains:voltage");
       const factors = series.filter((item) => item.series_id === "mains:power_factor");
+      for (const seriesId of ["mains:current", "mains:voltage", "mains:power_factor"]) {
+        const expected = configuredEntities.filter((item) => item.series_id === seriesId).length;
+        const available = series.filter((item) => item.series_id === seriesId).length;
+        if (expected && available !== expected) return null;
+      }
       if (!currents.length || !volts.length || !factors.length) return null;
       const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
         .sort((left, right) => left - right);
@@ -1919,10 +1925,14 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : `${this._label("average_amps", "Average Amps")} (${this._rangeLabel()})`;
       const hasAmpSource = Boolean(
         (mains.current_entities || []).length
-        || (mains.power_entities || []).length && (mains.voltage_entities || []).length
+        || (mains.power_entities || []).length
+          && (mains.voltage_entities || []).length
+          && (mains.power_factor_entities || []).length
         || appliances.some((item) => (
           (item.current_entities || []).length
-          || (item.power_entities || []).length && (item.voltage_entities || []).length
+          || (item.power_entities || []).length
+            && (item.voltage_entities || []).length
+            && (item.power_factor_entities || []).length
         )),
       );
       const hasPowerSource = Boolean(
@@ -1931,7 +1941,12 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         || (mains.current_entities || []).length
           && (mains.voltage_entities || []).length
           && (mains.power_factor_entities || []).length
-        || appliances.some((item) => (item.power_entities || []).length),
+        || appliances.some((item) => (
+          (item.power_entities || []).length
+          || (item.current_entities || []).length
+            && (item.voltage_entities || []).length
+            && (item.power_factor_entities || []).length
+        )),
       );
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";

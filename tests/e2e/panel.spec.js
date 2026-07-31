@@ -1014,11 +1014,92 @@ test("mains graph calculates power across the selected range from amps, volts, a
 
   const graph = page.locator("circuitsetup-energy-analyzer-context-graph");
   await expect(graph.locator(".legend")).toContainText("Mains total power (calculated)");
+  await expect(graph.locator(".legend")).not.toContainText("Mains voltage");
+  await expect(graph.locator(".legend")).not.toContainText("Mains power factor");
   const values = await graph.locator('[data-chart-point][data-chart-name="Mains total power (calculated)"]')
     .evaluateAll((points) => points.map((point) => Number(String(point.dataset.chartValue).replaceAll(",", ""))));
   expect(values).toEqual([1080, 540]);
   await expect(page.locator("circuitsetup-energy-analyzer-house-flow .metric")
     .filter({ hasText: "Power Now" })).toContainText("1,080 W");
+});
+
+test("mains graph does not calculate power from incomplete configured histories", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [{ entity_id: "sensor.mains_l1_current", state: "10", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l2_current", state: "5", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l1_voltage", state: "120", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_l1_power_factor", state: "0.9", last_changed: "2026-07-31T00:00:00.000Z" }],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const graph = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "Mains total power and amps",
+      entities: [
+        { entity: "sensor.mains_l1_current", name: "Total Amps", series_id: "mains:current", axis: "right" },
+        { entity: "sensor.mains_l2_current", name: "Total Amps", series_id: "mains:current", axis: "right" },
+        { entity: "sensor.mains_l1_voltage", name: "Mains voltage", series_id: "mains:voltage", axis: "left", hidden: true },
+        { entity: "sensor.mains_l2_voltage", name: "Mains voltage", series_id: "mains:voltage", axis: "left", hidden: true },
+        { entity: "sensor.mains_l1_power_factor", name: "Mains power factor", series_id: "mains:power_factor", axis: "left", hidden: true },
+        { entity: "sensor.mains_l2_power_factor", name: "Mains power factor", series_id: "mains:power_factor", axis: "left", hidden: true },
+      ],
+    },
+  );
+
+  await expect(graph.locator(".legend")).not.toContainText("Mains total power (calculated)");
+});
+
+test("home summary converts megawatt power sources to watts", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { power_entities: ["sensor.mains_power_megawatt"] },
+    },
+    {
+      "sensor.mains_power_megawatt": { state: "1", attributes: { unit_of_measurement: "MW" } },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("1,000,000 W");
+});
+
+test("home summary omits derived amps without power factor", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        power_entities: ["sensor.mains_power"],
+        voltage_entities: ["sensor.mains_voltage"],
+      },
+    },
+    {
+      "sensor.mains_power": { state: "1200", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_voltage": { state: "120", attributes: { unit_of_measurement: "V" } },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Amps Now" })).toHaveCount(0);
 });
 
 test("completed day labels amps as the time-weighted average", async ({ page }) => {

@@ -856,6 +856,30 @@ def test_home_card_receives_every_appliance_for_live_sorting() -> None:
     )
 
 
+def test_home_card_includes_appliance_electrical_sources_for_live_totals() -> None:
+    appliance = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(
+            SensorRef("sensor.washer_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.washer_current", SensorRole.CURRENT),
+            SensorRef("sensor.washer_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.washer_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    dashboard = build_recommended_dashboard((appliance,), DASHBOARD_LAYOUT_STANDARD)
+    home = _dashboard_views(dashboard)[0]
+    home_card = _card_of_type(home, HOUSE_FLOW_CARD)
+
+    payload = home_card["appliances"][0]
+    assert payload["power_entities"] == ["sensor.washer_power"]
+    assert payload["current_entities"] == ["sensor.washer_current"]
+    assert payload["voltage_entities"] == ["sensor.washer_voltage"]
+    assert payload["power_factor_entities"] == ["sensor.washer_power_factor"]
+
+
 def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
