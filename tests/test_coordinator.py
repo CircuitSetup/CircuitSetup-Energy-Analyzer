@@ -4891,6 +4891,51 @@ async def test_runtime_does_not_persist_processor_alerts_while_learning() -> Non
 
 
 @pytest.mark.asyncio
+async def test_runtime_allows_self_mature_cold_storage_alert_during_learning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    ready_signature = AlertEvidence(
+        timestamp=datetime(2026, 7, 29, 22, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Compressor signature changed.",
+        feature="cold_storage_cycle_signature_change",
+        features={
+            "signature_ready": True,
+            "signature_baseline_windows": 96.0,
+            "signature_baseline_confidence": 1.0,
+        },
+    )
+    ordinary_alert = replace(
+        ready_signature,
+        feature="run_cycle_duration_s",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(),
+        now_fn=lambda: ready_signature.timestamp,
+    )
+    coordinator.state.learning_by_circuit["fridge"] = True
+    coordinator._notify_alert = AsyncMock()
+
+    _, active_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(
+            alerts=[ready_signature, ordinary_alert],
+            notifications=[ready_signature, ordinary_alert],
+        )
+    )
+
+    assert active_alerts == [ready_signature]
+    assert coordinator.store_data.alerts == [ready_signature]
+    coordinator._notify_alert.assert_awaited_once_with(ready_signature)
+
+
+@pytest.mark.asyncio
 async def test_runtime_applies_learning_updates_before_filtering_alerts() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
