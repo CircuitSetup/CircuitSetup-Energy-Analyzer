@@ -103,13 +103,14 @@ class NilmSampleProcessor:
         existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
         candidate_edges = [*existing_unmatched, *edges]
         matched_edges = ()
-        if candidate_edges and known_events:
+        defer_known_events = detector.has_pending_transition and not edges
+        if candidate_edges and known_events and not defer_known_events:
             mask = mask_known_loads(candidate_edges, known_events)
             matched_edges = mask.matched_edges
             next_unmatched = list(mask.unmatched_edges)
         else:
             next_unmatched = candidate_edges
-        if detector.has_pending_transition and known_events:
+        if defer_known_events and known_events:
             self._pending_known_load_events[circuit_id] = known_events
 
         next_unmatched = _newest_nilm_edges(

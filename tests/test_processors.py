@@ -7232,12 +7232,13 @@ def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> N
 
 
 @pytest.mark.parametrize(
-    ("event_sample", "noisy_confirmation"),
-    [(1, False), (2, False), (1, True)],
+    ("event_sample", "noisy_confirmation", "older_unmatched"),
+    [(1, False, False), (2, False, False), (1, True, False), (1, False, True)],
 )
 def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     event_sample: int,
     noisy_confirmation: bool,
+    older_unmatched: bool,
 ) -> None:
     from collections import defaultdict
 
@@ -7249,6 +7250,7 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
         CircuitEvent,
         EventType,
     )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -7285,6 +7287,10 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
         observe_topology=lambda _config, match, _context: observed_matches.append(match)
         or [],
     )
+    if older_unmatched:
+        processor.unmatched_edges_by_circuit["mains"] = [
+            NilmEdge(now, 320.0, 0.0, 320.0, 0.0, "on")
+        ]
 
     def sample(index: int, watts: float) -> NormalizedCircuitSample:
         return NormalizedCircuitSample(
@@ -7328,9 +7334,13 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
         seconds=10 if noisy_confirmation else 5
     )
     assert processor.total_events_by_circuit["mains"] == 1
-    assert processor.unmatched_edges_by_circuit["mains"] == []
+    assert [
+        edge.timestamp for edge in processor.unmatched_edges_by_circuit["mains"]
+    ] == ([now] if older_unmatched else [])
     updates = {update.path: update.value for update in result.state_updates}
-    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == 0.0
+    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == (
+        100.0 if older_unmatched else 0.0
+    )
 
 
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
