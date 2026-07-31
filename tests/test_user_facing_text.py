@@ -5323,6 +5323,53 @@ for (const expected of [
     )
 
 
+def test_mark_circuit_mixed_requires_confirmation_and_reports_result() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const calls = [];
+  const panel = new context.Panel();
+  panel._payload = { actions: { mark_circuit_mixed: {
+    domain: "circuitsetup_energy_analyzer",
+    service: "mark_circuit_mixed",
+    data: { circuit_id: "fridge" },
+  } } };
+  panel._hass = { callService: async (...args) => { calls.push(args); } };
+  panel._render = () => {};
+  panel._scrollToTop = () => {};
+  panel._loadEvidence = async () => {};
+  panel._loadedRouteKey = panel._routeKey();
+
+  const evidence = panel._renderActionDisclosure("tune", "Tune", "Tune it", [
+    panel._actionButton("mark_circuit_mixed", panel._panelText("actions.labels.mark_circuit_mixed"), true),
+  ]);
+  assert.match(evidence, /This circuit powers other loads/);
+
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  assert.equal(calls.length, 0);
+  const confirmation = panel._renderActionConfirmation();
+  for (const expected of ["keep aggregate history", "stop direct-appliance classifications and alerts", "reload the integration"]) {
+    assert.ok(confirmation.includes(expected), confirmation);
+  }
+  assert.ok(!confirmation.includes("detected another load"), confirmation);
+  panel._cancelActionConfirmation();
+  assert.equal(calls.length, 0);
+
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  await panel._confirmPendingAction();
+  assert.deepEqual(calls, [["circuitsetup_energy_analyzer", "mark_circuit_mixed", { circuit_id: "fridge" }]]);
+  assert.equal(panel._lastActionMessage, "Circuit marked as mixed.");
+
+  panel._hass.callService = async () => { throw new Error("service failed"); };
+  panel._renderAndScrollToTop = () => {};
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  await panel._confirmPendingAction();
+  assert.match(panel._error, /service failed/);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
 def test_dynamic_alert_evidence_panel_orders_recommendation_actions() -> None:
     asset = _frontend_source()
 

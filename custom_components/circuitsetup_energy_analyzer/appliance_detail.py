@@ -1102,6 +1102,25 @@ def _primary_appliance_expectations_for_circuit(
             ),
         )
 
+    if config.mode is CircuitMode.MIXED:
+        return (
+            _expectation(
+                config,
+                title="Shared circuit measurement",
+                status="not_enough_data",
+                source_type=expectation_source,
+                observed="This measurement covers the whole shared circuit.",
+                expected=(
+                    "Reviewed Experimental NILM is required for appliance-specific evidence."
+                ),
+                why_it_matters=(
+                    "Direct appliance classifications do not apply to shared loads."
+                ),
+                what_to_check_first=("Review Experimental NILM assignments.",),
+                evidence_path=evidence_path,
+            ),
+        )
+
     electrical_attrs = electrical_health_attributes(state, circuit_id)
     if _mapping_status(state, "leg_imbalance_status_by_circuit", circuit_id) == (
         "imbalanced"

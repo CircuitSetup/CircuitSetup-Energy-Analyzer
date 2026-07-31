@@ -405,6 +405,57 @@ def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     assert "workspace_call_api_path" not in payload["nilm"]
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode", "expected"),
+    (
+        (ApplianceProfile.REFRIGERATOR, CircuitMode.SINGLE_PHASE, True),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED, False),
+        (ApplianceProfile.HVAC, CircuitMode.DUAL_PHASE, False),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, False),
+        (ApplianceProfile.SOLAR_INVERTER, CircuitMode.DUAL_PHASE, False),
+    ),
+)
+def test_mixed_circuit_action_only_for_dedicated_single_phase_loads(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    expected: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        _actions_for_context,
+    )
+
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=profile,
+        mode=mode,
+        sensors=(),
+    )
+    actions = _actions_for_context(
+        _coordinator(config=config),
+        config=config,
+        alert_id=None,
+        circuit_id="fridge",
+    )
+
+    if expected:
+        assert actions["mark_circuit_mixed"] == {
+            "domain": DOMAIN,
+            "service": "mark_circuit_mixed",
+            "data": {"circuit_id": "fridge"},
+        }
+    else:
+        assert "mark_circuit_mixed" not in actions
+
+
+def test_panel_module_version_follows_401_frontend() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
+        PANEL_MODULE_VERSION,
+    )
+
+    assert PANEL_MODULE_VERSION == "20260731-4"
+
+
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,

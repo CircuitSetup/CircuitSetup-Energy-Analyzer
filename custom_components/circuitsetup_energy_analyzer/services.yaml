@@ -1,6 +1,6 @@
 mark_circuit_mixed:
   name: Mark circuit mixed
-  description: Confirm that a circuit supplies multiple appliances and remove direct-appliance state.
+  description: "Advanced/script action: confirm that a circuit supplies multiple appliances and remove direct-appliance state. The normal user path is the evidence panel's This circuit powers other loads action."
   fields:
     circuit_id:
       name: Circuit ID

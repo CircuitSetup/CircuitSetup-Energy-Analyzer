@@ -1375,8 +1375,11 @@
       "confirmations": {
         "relearn_title": "Relearn Baseline",
         "relearn_message": "This clears the stored baseline and related learned alert state, then it will restart learning for this circuit.",
+        "mixed_title": "Mark Circuit as Mixed",
+        "mixed_message": "This will keep aggregate history, stop direct-appliance classifications and alerts, and reload the integration.",
         "cancel": "Cancel",
-        "confirm_relearn": "Relearn"
+        "confirm_relearn": "Relearn",
+        "confirm_mixed": "Mark as Mixed"
       },
       "headers": {
         "alert_evidence": "Alert Evidence",
@@ -1438,6 +1441,7 @@
         "marked_unhelpful": "Marked as not helpful.",
         "alert_pause_updated": "Alert pause updated.",
         "baseline_relearn_requested": "Baseline relearn requested.",
+        "circuit_marked_mixed": "Circuit marked as mixed.",
         "opening_advanced_settings": "Opening Advanced Circuit Settings.",
         "opening_evidence": "Opening evidence.",
         "opening_nilm_assignment_review": "Opening NILM assignment review.",
@@ -1503,6 +1507,7 @@
           "pause_alerts": "Pause Alerts",
           "preview_evidence": "Review Evidence",
           "relearn_baseline": "Relearn Baseline",
+          "mark_circuit_mixed": "This circuit powers other loads",
           "remove_assignment": "Remove Assignment",
           "remove_ha_device": "Remove HA Device",
           "resume_alerts": "Resume Alerts",

@@ -1094,6 +1094,25 @@ def test_mixed_appliance_detail_expectations_keep_mixed_source() -> None:
     assert detail["expectations"][0]["source_type"] == "mixed"
 
 
+def test_specific_profile_mixed_detail_explains_shared_measurement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        _config(profile=ApplianceProfile.REFRIGERATOR, mode=CircuitMode.MIXED),
+    )
+
+    detail = appliance_detail_payload([coordinator], circuit_id="fridge")["detail"]
+    expectation = detail["expectations"][0]
+
+    assert expectation["source_type"] == "mixed"
+    assert "whole shared circuit" in expectation["observed"]
+    assert "Reviewed Experimental NILM" in expectation["expected"]
+    assert "appliance-specific evidence" in expectation["expected"]
+
+
 def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

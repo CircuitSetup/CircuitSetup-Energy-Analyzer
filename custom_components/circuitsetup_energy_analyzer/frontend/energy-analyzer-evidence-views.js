@@ -106,6 +106,7 @@ export function createEvidenceViewMethods({
       mark_unhelpful: "messages.marked_unhelpful",
       pause_alerts: "messages.alert_pause_updated",
       relearn_baseline: "messages.baseline_relearn_requested",
+      mark_circuit_mixed: "messages.circuit_marked_mixed",
     };
     return this._panelText(messages[actionKey] || "common.action_complete");
   }
@@ -174,6 +175,7 @@ export function createEvidenceViewMethods({
       ${this._renderActionDisclosure("tune", this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
         this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
         this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+        this._actionButton("mark_circuit_mixed", this._panelText("actions.labels.mark_circuit_mixed"), true),
         this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
       ])}
       ${this._renderAlertRecommendationsDisclosure()}
