@@ -2743,6 +2743,7 @@ def assignment_groups_from_sources(
                     )
                 ),
                 "saved_mode": str(saved_circuit.get("mode") or ""),
+                "saved_entity_ids": tuple(saved_sensor_entities),
                 "power_flow": _normalize_power_flow(
                     str(saved_circuit.get("power_flow") or "")
                 ),
@@ -3144,6 +3145,7 @@ def _circuit_from_assignment_group(
     legacy_mixed = (
         str(group.get("saved_mode") or "") == CircuitMode.MIXED.value
         and str(group.get("mode") or "") == CircuitMode.MIXED.value
+        and set(entity_ids) == set(group.get("saved_entity_ids", ()))
     )
     if shared and (
         profile in {
