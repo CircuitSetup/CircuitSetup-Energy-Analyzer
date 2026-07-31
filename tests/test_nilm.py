@@ -1006,6 +1006,39 @@ def test_global_session_pairing_keeps_assigned_off_signature() -> None:
     assert sessions[0].assignment_id == "dryer"
 
 
+def test_global_session_pairing_deduplicates_same_assignment_signatures() -> None:
+    signature_specs = [
+        {
+            "signature_fingerprint": "on-500",
+            "median_delta_w": 500.0,
+            "assignment_id": "dryer",
+        },
+        {
+            "signature_fingerprint": "off-500",
+            "median_delta_w": -500.0,
+            "assignment_id": "dryer",
+        },
+    ]
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].ambiguous is False
+
+    open_sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )
+
+    assert len(open_sessions) == 1
+    assert open_sessions[0].assignment_id == "dryer"
+
+
 def test_global_session_pairing_rejects_short_closed_transition() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(20, -500.0)],

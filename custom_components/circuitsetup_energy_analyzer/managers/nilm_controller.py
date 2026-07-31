@@ -1452,6 +1452,7 @@ class NilmController:
         ]
         target["confirmed_session_ids"] = confirmed
         target["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(circuit_id, target)
         target["confirmed_sessions"] = len(confirmed)
         target["rejected_sessions"] = len(rejected)
         validation_total = len(confirmed) + len(rejected)

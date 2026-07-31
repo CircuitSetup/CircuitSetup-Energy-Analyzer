@@ -8188,6 +8188,59 @@ async def test_nilm_assignment_merge_preserves_target_validation_decision() -> N
 
 
 @pytest.mark.asyncio
+async def test_nilm_assignment_merge_recomputes_duration_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "source-session",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T13:00:00+00:00",
+                    },
+                    {
+                        "session_id": "target-session",
+                        "start": "2026-06-02T14:00:00+00:00",
+                        "end": "2026-06-02T14:10:00+00:00",
+                    },
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "source",
+                        "confirmed_session_ids": ["source-session"],
+                    },
+                    {
+                        "assignment_id": "target",
+                        "confirmed_session_ids": ["target-session"],
+                        "typical_duration_seconds": 600.0,
+                        "min_duration_seconds": 300.0,
+                        "max_duration_seconds": 1200.0,
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 16, 0, tzinfo=UTC),
+    )
+
+    merged = await coordinator.async_merge_nilm_assignments(
+        "mains",
+        "source",
+        "target",
+    )
+
+    assert merged["typical_duration_seconds"] == pytest.approx(2100.0)
+    assert merged["min_duration_seconds"] == pytest.approx(600.0)
+    assert merged["max_duration_seconds"] == pytest.approx(4200.0)
+
+
+@pytest.mark.asyncio
 async def test_nilm_signature_assignment_clears_ignored_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

@@ -959,14 +959,18 @@ def pair_nilm_sessions_for_signatures(
         )
     for pair, pair_candidates in by_pair.items():
         ranked = sorted(pair_candidates, key=lambda item: -item.score)
-        assigned = [
-            candidate
-            for candidate in ranked
-            if candidate.assignment_id
-            and ranked[0].score - candidate.score <= ambiguity_margin
-        ]
+        assigned: dict[str, _NilmSessionCandidate] = {}
+        for candidate in ranked:
+            if (
+                candidate.assignment_id
+                and ranked[0].score - candidate.score <= ambiguity_margin
+            ):
+                assigned.setdefault(candidate.assignment_id, candidate)
         if len(assigned) == 1:
-            preferred_candidates[pair] = assigned[0]
+            preferred_candidates[pair] = next(iter(assigned.values()))
+            continue
+        if len(assigned) > 1:
+            ambiguous_pairs.add(pair)
             continue
         if (
             len(ranked) > 1
@@ -1062,14 +1066,13 @@ def pair_nilm_sessions_for_signatures(
         )
         if not ranked_specs:
             continue
-        assigned_specs = [
-            match
-            for match in ranked_specs
-            if _nilm_session_spec_assignment_id(match[1])
-            and ranked_specs[0][0] - match[0] <= ambiguity_margin
-        ]
+        assigned_specs: dict[str, tuple[float, Mapping[str, Any]]] = {}
+        for match in ranked_specs:
+            assignment_id = _nilm_session_spec_assignment_id(match[1])
+            if assignment_id and ranked_specs[0][0] - match[0] <= ambiguity_margin:
+                assigned_specs.setdefault(assignment_id, match)
         if len(assigned_specs) == 1:
-            ranked_specs = assigned_specs
+            ranked_specs = [next(iter(assigned_specs.values()))]
         if (
             len(ranked_specs) > 1
             and ranked_specs[0][0] - ranked_specs[1][0] <= ambiguity_margin
