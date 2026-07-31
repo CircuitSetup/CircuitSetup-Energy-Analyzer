@@ -195,6 +195,93 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return Number.isFinite(value) ? value * factor : null;
     }
 
+    _watts(entityId) {
+      const value = this._number(entityId);
+      const factor = { W: 1, kW: 1000, mW: 0.001 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
+    _volts(entityId) {
+      const value = this._number(entityId);
+      const factor = { V: 1, kV: 1000, mV: 0.001 }[this._unit(entityId)] ?? 1;
+      return Number.isFinite(value) ? value * factor : null;
+    }
+
+    _powerFactor(entityId) {
+      const value = this._number(entityId);
+      if (!Number.isFinite(value)) return null;
+      const unit = this._unit(entityId).toLowerCase();
+      const normalized = unit.includes("%") || value > 1 && value <= 100
+        ? value / 100
+        : value;
+      return normalized > 0 && normalized <= 1 ? normalized : null;
+    }
+
+    _completeEntityValues(entityIds, converter) {
+      const ids = Array.isArray(entityIds) ? entityIds : [];
+      if (!ids.length) return null;
+      const values = ids.map((entityId) => converter(entityId));
+      return values.every(Number.isFinite) ? values : null;
+    }
+
+    _completeEntitySum(entityIds, converter) {
+      const values = this._completeEntityValues(entityIds, converter);
+      return values ? values.reduce((total, value) => total + value, 0) : null;
+    }
+
+    _pairedValue(values, index, count) {
+      if (values.length === 1) return values[0];
+      return values.length === count ? values[index] : null;
+    }
+
+    _derivedPower(circuit) {
+      const currents = this._completeEntityValues(circuit.current_entities, (entityId) => this._amps(entityId));
+      const volts = this._completeEntityValues(circuit.voltage_entities, (entityId) => this._volts(entityId));
+      const factors = this._completeEntityValues(circuit.power_factor_entities, (entityId) => this._powerFactor(entityId));
+      if (!currents || !volts || !factors) return null;
+      let total = 0;
+      for (let index = 0; index < currents.length; index += 1) {
+        const voltage = this._pairedValue(volts, index, currents.length);
+        const factor = this._pairedValue(factors, index, currents.length);
+        if (!Number.isFinite(voltage) || !Number.isFinite(factor)) return null;
+        total += currents[index] * voltage * factor;
+      }
+      return total;
+    }
+
+    _derivedAmps(circuit) {
+      const power = this._completeEntityValues(circuit.power_entities, (entityId) => this._watts(entityId));
+      const volts = this._completeEntityValues(circuit.voltage_entities, (entityId) => this._volts(entityId));
+      const factors = this._completeEntityValues(circuit.power_factor_entities, (entityId) => this._powerFactor(entityId));
+      if (!power || !volts || !factors) return null;
+      let total = 0;
+      for (let index = 0; index < power.length; index += 1) {
+        const voltage = this._pairedValue(volts, index, power.length);
+        const factor = this._pairedValue(factors, index, power.length);
+        if (!Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor <= 0) return null;
+        total += power[index] / (voltage * factor);
+      }
+      return total;
+    }
+
+    _circuitPower(circuit) {
+      return this._completeEntitySum(circuit.power_entities, (entityId) => this._watts(entityId))
+        ?? this._derivedPower(circuit);
+    }
+
+    _circuitAmps(circuit) {
+      return this._completeEntitySum(circuit.current_entities, (entityId) => this._amps(entityId))
+        ?? this._derivedAmps(circuit);
+    }
+
+    _completeCircuitTotal(circuits, value) {
+      if (!circuits.length) return null;
+      const values = circuits.map((circuit) => value(circuit));
+      return values.every(Number.isFinite)
+        ? values.reduce((total, current) => total + current, 0)
+        : null;
+    }
+
     _formatValue(value, unit = "") {
       if (!Number.isFinite(value)) {
         return this._label("unavailable", "Unavailable");
@@ -224,7 +311,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const running = String((this._state(appliance.activity_entity) || {}).state || "").toLowerCase() === "running";
       return {
         ...appliance,
-        power: this._sum(appliance.power_entities),
+        power: this._circuitPower(appliance),
         energy: rangeTotals
           ? rangeTotals.energy ?? null
           : this._number(appliance.energy_today_entity),
@@ -1320,14 +1407,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this.style.display = "";
       this._ensureHistory(entities);
       const range = validRange(this._dashboardRange);
-      const currentSeries = this._groupDashboardHistorySeries(
-        this._normalizedCurrentSeries(
-          this._normalizedPowerSeries(
-            this._dashboardHistorySeries(this._history, entities, Date.parse(range.start)),
-            config.y_axis_label,
-          ),
-        ),
+      const currentSeries = this._mainsAwareSeries(
+        this._history,
         entities,
+        Date.parse(range.start),
+        config.y_axis_label,
       );
       const previousRange = this._previousRange(range);
       const currentStart = Date.parse(range.start);
@@ -1335,18 +1419,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const previousStart = Date.parse(previousRange.start);
       const previousDuration = Date.parse(previousRange.end) - previousStart;
       const comparisonSeries = range.compare
-        ? this._groupDashboardHistorySeries(
-          this._normalizedCurrentSeries(
-            this._normalizedPowerSeries(
-              this._dashboardHistorySeries(
-                this._comparisonHistory,
-                entities,
-                Date.parse(previousRange.start),
-              ),
-              config.y_axis_label,
-            ),
-          ),
+        ? this._mainsAwareSeries(
+          this._comparisonHistory,
           entities,
+          Date.parse(previousRange.start),
+          config.y_axis_label,
         ).map((item) => ({
           ...item,
           name: `${item.name} (${this._label("previous", "previous")})`,
@@ -1384,6 +1461,29 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._attachChartInspectors();
     }
 
+    _mainsAwareSeries(payload, entities, rangeStart, targetUnit) {
+      const raw = this._dashboardHistorySeries(payload, entities, rangeStart);
+      const normalizedSources = this._normalizedPowerFactorSeries(
+        this._normalizedVoltageSeries(this._normalizedCurrentSeries(raw)),
+      );
+      const powerNormalizedSources = this._normalizedPowerSeries(normalizedSources, targetUnit);
+      const grouped = this._groupDashboardHistorySeries(powerNormalizedSources, entities);
+      const directPower = grouped.filter((item) => item.series_id === "mains:power");
+      const calculated = this._calculatedMainsPowerSeries(powerNormalizedSources);
+      const powerSeries = directPower.length
+        ? directPower
+        : calculated
+          ? [{
+            ...calculated,
+            series_id: "mains:power",
+          }]
+          : [];
+      return this._normalizedPowerSeries([
+        ...grouped.filter((item) => item.series_id !== "mains:power" && !item.hidden),
+        ...powerSeries,
+      ], targetUnit);
+    }
+
     _normalizedPowerSeries(series, targetUnit = "") {
       const wattsPerUnit = { W: 1, kW: 1000 };
       const target = series.find((item) => item.axis !== "right" && wattsPerUnit[item.unit]);
@@ -1417,6 +1517,85 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           })),
         };
       });
+    }
+
+    _normalizedVoltageSeries(series) {
+      const voltsPerUnit = { V: 1, mV: 0.001, kV: 1000 };
+      return series.map((item) => {
+        const factor = item.series_id === "mains:voltage" && voltsPerUnit[item.unit];
+        if (!factor) return item;
+        return {
+          ...item,
+          unit: "V",
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) ? point.value * factor : point.value,
+          })),
+        };
+      });
+    }
+
+    _normalizedPowerFactorSeries(series) {
+      return series.map((item) => {
+        if (item.series_id !== "mains:power_factor") return item;
+        const percent = String(item.unit || "").includes("%");
+        return {
+          ...item,
+          unit: "",
+          points: item.points.map((point) => ({
+            ...point,
+            value: Number.isFinite(point.value) && (percent || point.value > 1 && point.value <= 100)
+              ? point.value / 100
+              : point.value,
+          })),
+        };
+      });
+    }
+
+    _calculatedMainsPowerSeries(series) {
+      const currents = series.filter((item) => item.series_id === "mains:current");
+      const volts = series.filter((item) => item.series_id === "mains:voltage");
+      const factors = series.filter((item) => item.series_id === "mains:power_factor");
+      if (!currents.length || !volts.length || !factors.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      for (const time of timestamps) {
+        for (const item of [...currents, ...volts, ...factors]) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        let power = 0;
+        for (let index = 0; index < currents.length; index += 1) {
+          const current = latest.get(currents[index]);
+          const voltageItem = volts.length === 1 ? volts[0] : volts[index];
+          const factorItem = factors.length === 1 ? factors[0] : factors[index];
+          const voltage = voltageItem && latest.get(voltageItem);
+          const factor = factorItem && latest.get(factorItem);
+          if (!Number.isFinite(current) || !Number.isFinite(voltage) || !Number.isFinite(factor)) {
+            power = Number.NaN;
+            break;
+          }
+          power += current * voltage * factor;
+        }
+        if (Number.isFinite(power)) points.push({ time, value: power });
+      }
+      return points.length
+        ? {
+          entity_id: "mains:calculated_power",
+          series_id: "mains:calculated_power",
+          name: "Mains total power (calculated)",
+          unit: "W",
+          axis: "left",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
     }
 
     _resolvedEntities(config) {
@@ -1700,9 +1879,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const mains = config.primary_mains || {};
       const appliances = (config.appliances || []).map((item) => this._applianceState(item));
       const contributionAppliances = this._contributionAppliances(appliances);
+      const circuitPower = this._completeCircuitTotal(appliances, (item) => item.power);
       const knownPower = this._number(mains.monitored_power_entity)
-        ?? appliances.reduce((total, item) => total + (item.power || 0), 0);
-      const housePower = this._sum(mains.power_entities) ?? knownPower;
+        ?? circuitPower;
+      const housePower = this._circuitPower(mains) ?? knownPower;
       const unassignedPower = this._number(mains.balance_power_entity);
       const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
@@ -1727,15 +1907,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const { days } = this._calendarRange();
       const averageScale = days > 1 ? days : 1;
       const ampsSeries = this._dashboardSeries("mains:current");
-      const ampsPoints = ampsSeries && ampsSeries.points || [];
-      const currentValues = (mains.current_entities || []).map((entityId) => this._amps(entityId));
-      const liveAmps = currentValues.length && currentValues.every(Number.isFinite)
-        ? currentValues.reduce((total, value) => total + value, 0)
-        : null;
-      const totalAmps = this._rangeIncludesToday()
-        ? liveAmps
-        : ampsPoints.length ? ampsPoints[ampsPoints.length - 1].value : null;
-      const averageAmps = this._seriesAverage(ampsSeries) ?? totalAmps;
+      const circuitAmps = this._completeCircuitTotal(appliances, (item) => this._circuitAmps(item));
+      const liveAmps = this._circuitAmps(mains) ?? circuitAmps;
+      const includesToday = this._rangeIncludesToday();
+      const ampsValue = includesToday ? liveAmps : this._seriesAverage(ampsSeries);
+      const ampsLabel = includesToday
+        ? this._label("amps_now", "Amps Now")
+        : `${this._label("average_amps", "Average Amps")} (${this._rangeLabel()})`;
+      const hasAmpSource = Boolean(
+        (mains.current_entities || []).length
+        || (mains.power_entities || []).length && (mains.voltage_entities || []).length
+        || appliances.some((item) => (
+          (item.current_entities || []).length
+          || (item.power_entities || []).length && (item.voltage_entities || []).length
+        )),
+      );
       const healthState = this._state(config.setup_health_entity);
       const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
       const setup = healthState ? `
@@ -1768,7 +1954,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       ` : "";
       const homeContent = config.mode === "mains" ? "" : `
         <div class="kpis">
-          ${(mains.current_entities || []).length ? this._metricHtml(`${this._label("total_amps", "Total Amps")} (${rangeLabel})`, totalAmps, "A", Number.isFinite(averageAmps) ? averageAmps * averageScale : null, days) : ""}
+          ${hasAmpSource ? this._metricHtml(ampsLabel, ampsValue, "A") : ""}
           ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null, days)}
           ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null, days)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}

@@ -87,6 +87,8 @@ class DashboardCircuit:
     power_entities: tuple[str, ...]
     chart_power_entities: tuple[str, ...]
     current_entities: tuple[str, ...]
+    voltage_entities: tuple[str, ...]
+    power_factor_entities: tuple[str, ...]
     entities: Mapping[str, str]
 
 
@@ -448,6 +450,16 @@ def _dashboard_circuit(
             "current",
             hass=hass,
         ),
+        voltage_entities=_source_entities_for_role(
+            circuit,
+            "voltage",
+            hass=hass,
+        ),
+        power_factor_entities=_source_entities_for_role(
+            circuit,
+            "power_factor",
+            hass=hass,
+        ),
         entities=entities,
     )
 
@@ -545,7 +557,9 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
                 "type": CONTEXT_GRAPH_CARD,
                 "title": _dashboard_text("cards", "mains_total_power_and_amps"),
                 "y_axis_label": (
-                    "W" if context.primary_mains.chart_power_entities else "A"
+                    "W"
+                    if _mains_power_sources_available(context.primary_mains)
+                    else "A"
                 ),
                 "entities": mains_rows,
                 "labels": dict(translation_section("dashboard", "live_cards")),
@@ -573,11 +587,12 @@ def _build_home_view(context: DashboardContext) -> dict[str, Any]:
 
 def _mains_power_current_rows(
     mains: DashboardCircuit | None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     if mains is None:
         return []
-    current_axis = "right" if mains.chart_power_entities else "left"
-    return [
+    calculated_power = _mains_calculated_power_available(mains)
+    current_axis = "right" if mains.chart_power_entities or calculated_power else "left"
+    rows: list[dict[str, Any]] = [
         *[
             {
                 "entity": entity_id,
@@ -597,6 +612,44 @@ def _mains_power_current_rows(
             for entity_id in mains.current_entities
         ],
     ]
+    if calculated_power and not mains.chart_power_entities:
+        rows.extend(
+            {
+                "entity": entity_id,
+                "name": "Mains voltage",
+                "series_id": "mains:voltage",
+                "axis": "left",
+                "hidden": True,
+            }
+            for entity_id in mains.voltage_entities
+        )
+        rows.extend(
+            {
+                "entity": entity_id,
+                "name": "Mains power factor",
+                "series_id": "mains:power_factor",
+                "axis": "left",
+                "hidden": True,
+            }
+            for entity_id in mains.power_factor_entities
+        )
+    return rows
+
+
+def _mains_calculated_power_available(mains: DashboardCircuit | None) -> bool:
+    return bool(
+        mains
+        and mains.current_entities
+        and mains.voltage_entities
+        and mains.power_factor_entities
+    )
+
+
+def _mains_power_sources_available(mains: DashboardCircuit | None) -> bool:
+    return bool(
+        mains
+        and (mains.chart_power_entities or _mains_calculated_power_available(mains))
+    )
 
 
 def _appliance_power_rows(context: DashboardContext) -> list[dict[str, str]]:
@@ -919,6 +972,8 @@ def _dashboard_circuit_payload(
         "name": circuit.name,
         "power_entities": list(circuit.power_entities),
         "current_entities": list(circuit.current_entities),
+        "voltage_entities": list(circuit.voltage_entities),
+        "power_factor_entities": list(circuit.power_factor_entities),
         **_named_entities(circuit, {key: f"{key}_entity" for key in keys}),
     }
     if live_context is not None:

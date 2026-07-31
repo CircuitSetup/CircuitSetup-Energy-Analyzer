@@ -521,6 +521,8 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
             SensorRef("sensor.mains_power_harmonic", SensorRole.REAL_POWER),
             SensorRef("sensor.mains_l1_current", SensorRole.CURRENT),
             SensorRef("sensor.mains_l2_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_line_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
         ),
     )
     states = {
@@ -595,6 +597,59 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
     assert summary["primary_mains"]["current_entities"] == [
         "sensor.mains_l1_current",
         "sensor.mains_l2_current",
+    ]
+    assert summary["primary_mains"]["voltage_entities"] == [
+        "sensor.mains_line_voltage",
+    ]
+    assert summary["primary_mains"]["power_factor_entities"] == [
+        "sensor.mains_power_factor",
+    ]
+
+
+def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() -> None:
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.panel_channel", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_current", SensorRole.CURRENT),
+            SensorRef("sensor.mains_voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.mains_power_factor", SensorRole.POWER_FACTOR),
+        ),
+    )
+    dashboard = build_recommended_dashboard(
+        (_circuits()[0], mains),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+    graph = home["sections"][0]["cards"][0]
+
+    assert graph["y_axis_label"] == "W"
+    assert graph["entities"] == [
+        {
+            "entity": "sensor.mains_current",
+            "name": "Total Amps",
+            "series_id": "mains:current",
+            "axis": "right",
+        },
+        {
+            "entity": "sensor.mains_voltage",
+            "name": "Mains voltage",
+            "series_id": "mains:voltage",
+            "axis": "left",
+            "hidden": True,
+        },
+        {
+            "entity": "sensor.mains_power_factor",
+            "name": "Mains power factor",
+            "series_id": "mains:power_factor",
+            "axis": "left",
+            "hidden": True,
+        },
     ]
 
 

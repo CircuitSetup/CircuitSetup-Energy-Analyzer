@@ -1113,6 +1113,8 @@
         "house_power": "House power",
         "mains_total_power": "Mains total power",
         "total_amps": "Total Amps",
+        "amps_now": "Amps Now",
+        "average_amps": "Average Amps",
         "known_monitored_load": "Known monitored load",
         "unassigned_load": "Unassigned load",
         "known_load_coverage": "Known load coverage",
