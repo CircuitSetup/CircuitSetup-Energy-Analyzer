@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlparse
 
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -54,6 +54,7 @@ def _config() -> CircuitConfig:
             ),
             SensorRef("sensor.hvac_power_factor", SensorRole.POWER_FACTOR),
             SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
+            SensorRef("sensor.hvac_frequency", SensorRole.FREQUENCY),
         ),
     )
 
@@ -257,33 +258,85 @@ def test_alert_source_entities_returns_empty_without_config() -> None:
     assert alert_source_entities(None) == ()
 
 
-def test_alert_graph_window_adds_context_before_first_seen() -> None:
+def test_alert_graph_window_matches_sustained_evidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,
     )
 
-    window = alert_graph_window(_alert(), padding=timedelta(hours=2))
-
-    assert window == (
-        datetime(2026, 6, 5, 8, 0, tzinfo=UTC),
+    assert alert_graph_window(_alert()) == (
+        datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
         datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
     )
 
 
-def test_alert_graph_window_adds_proportional_context_for_longer_evidence() -> None:
+def test_alert_graph_entities_covers_current_alert_families() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(_alert("expected_schedule_missed"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+        "sensor.hvac_l1_current",
+        "sensor.hvac_l2_current",
+    )
+    assert alert_graph_entities(_alert("nilm_model_drift"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+    assert alert_graph_entities(_alert("solar_flow"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+
+
+def test_alert_graph_entities_uses_value_metric_when_feature_is_unknown() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    alert = replace(
+        _alert("future_diagnostic"),
+        value_metric="frequency",
+    )
+
+    assert alert_graph_entities(alert, _config()) == ("sensor.hvac_frequency",)
+
+
+def test_alert_graph_entities_omits_unknown_relationship() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(_alert("future_diagnostic"), _config()) == ()
+
+
+def test_alert_graph_window_centers_point_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    timestamp = datetime(2026, 6, 5, 12, 30, tzinfo=UTC)
+    alert = replace(_alert(), first_seen=timestamp, last_seen=timestamp)
+
+    assert alert_graph_window(alert) == (
+        datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+    )
+
+
+def test_alert_graph_window_orders_reversed_evidence_timestamps() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,
     )
 
     alert = replace(
         _alert(),
-        first_seen=datetime(2026, 6, 4, 0, 0, tzinfo=UTC),
-        last_seen=datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+        first_seen=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        last_seen=datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
     )
 
-    window = alert_graph_window(alert)
-
-    assert window == (
-        datetime(2026, 6, 3, 18, 0, tzinfo=UTC),
-        datetime(2026, 6, 4, 12, 0, tzinfo=UTC),
+    assert alert_graph_window(alert) == (
+        datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
     )
