@@ -820,6 +820,54 @@ export class PanelShellMethods {
           background: var(--primary-color, #0b6bcb);
           color: var(--text-primary-color, #fff);
         }
+        .sump-driver-summary {
+          display: grid;
+          gap: 8px;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          margin: 12px 0;
+        }
+        .sump-driver-summary-item {
+          align-items: center;
+          background: var(--secondary-background-color, #f4f6f8);
+          border-radius: 8px;
+          display: grid;
+          gap: 4px 8px;
+          grid-template-columns: auto minmax(0, 1fr);
+          min-width: 0;
+          padding: 10px;
+        }
+        .sump-driver-summary-item .muted {
+          grid-column: 2;
+          margin: 0;
+        }
+        .sump-driver-layers {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin: 10px 0;
+        }
+        .sump-driver-layer {
+          background: var(--secondary-background-color, #f4f6f8);
+          border-color: transparent;
+          color: var(--primary-text-color, #1f2933);
+          min-height: 36px;
+          padding: 6px 9px;
+        }
+        .sump-driver-layer[aria-pressed="false"] {
+          text-decoration: line-through;
+        }
+        .sump-driver-layer[aria-pressed="false"] .swatch {
+          opacity: 0.35;
+        }
+        .sump-cycle-marker {
+          opacity: 0.55;
+          stroke-dasharray: 3 3;
+          stroke-width: 2;
+        }
+        .sump-cycle-dot {
+          stroke: var(--card-background-color, #fff);
+          stroke-width: 2;
+        }
         .appliance-behavior-grid {
           display: grid;
           gap: 12px;
@@ -1318,6 +1366,9 @@ export class PanelShellMethods {
           .appliance-insights-controls {
             grid-template-columns: minmax(0, 1fr);
           }
+          .sump-driver-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
           .appliance-insights-table {
             min-width: 0;
           }
@@ -1419,7 +1470,14 @@ export class PanelShellMethods {
         : undefined;
     });
     this._listen("[data-retry-appliance-history]", () => (
-      this._loadApplianceDetailHistory(
+      this._loadApplianceDetailHistories(
+        this._applianceDetailHistoryHours,
+        this._evidenceRequestId,
+        this._loadedRouteKey || this._routeKey(),
+      )
+    ));
+    this._listen("[data-retry-sump-driver-history]", () => (
+      this._loadSumpDriverHistory(
         this._applianceDetailHistoryHours,
         this._evidenceRequestId,
         this._loadedRouteKey || this._routeKey(),
@@ -1427,11 +1485,20 @@ export class PanelShellMethods {
     ));
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
       button.addEventListener("click", () => {
-        this._loadApplianceDetailHistory(
+        this._loadApplianceDetailHistories(
           Number(button.dataset.applianceHistoryPeriod),
           this._evidenceRequestId,
           this._loadedRouteKey || this._routeKey(),
         );
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-sump-driver-layer]")) {
+      button.addEventListener("click", () => {
+        this._sumpDriverHiddenLayers ||= new Set();
+        const layer = button.dataset.sumpDriverLayer;
+        if (this._sumpDriverHiddenLayers.has(layer)) this._sumpDriverHiddenLayers.delete(layer);
+        else this._sumpDriverHiddenLayers.add(layer);
+        this._render();
       });
     }
     this._listen("[data-retry-nilm-workspace]", () => (

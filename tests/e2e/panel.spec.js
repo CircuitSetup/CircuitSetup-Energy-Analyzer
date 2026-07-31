@@ -5010,6 +5010,293 @@ test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page })
   await expect(efficiency).toContainText("Cooling blower supports air handling");
 });
 
+test("Sump Pump detail attributes completed cycles to rain and HVAC humidity", async ({ page }) => {
+  const now = Date.now();
+  const hour = 3_600_000;
+  const driverHistorySpans = [];
+  const weatherAttributeFlags = [];
+  const at = (hoursAgo) => new Date(now - hoursAgo * hour).toISOString();
+  const rows = (entityId, events) => events
+    .sort((left, right) => Date.parse(left[0]) - Date.parse(right[0]))
+    .map(([lastChanged, state, attributes = {}]) => ({
+      entity_id: entityId,
+      state,
+      attributes,
+      last_changed: lastChanged,
+    }));
+  const baselineStarts = Array.from({ length: 15 }, (_, index) => 384 - index * 24);
+  const compressorEvents = baselineStarts.flatMap((hoursAgo) => [
+    [at(hoursAgo), "Running"],
+    [at(hoursAgo - 0.5), "Idle"],
+  ]);
+  compressorEvents.push(
+    [at(9.1), "Running"], [at(8.6), "Idle"],
+    [at(6.1), "Running"], [at(5.6), "Idle"],
+  );
+  const humidityEvents = baselineStarts.map((hoursAgo) => [
+    at(hoursAgo), "sunny", { humidity: 50 },
+  ]);
+  humidityEvents.push(
+    [at(9.05), "sunny", { humidity: 62 }],
+    [at(8.7), "sunny", { humidity: 62 }],
+    [at(6.05), "rainy", { humidity: 65 }],
+    [at(5.7), "rainy", { humidity: 65 }],
+  );
+  const weatherHistory = rows("weather.home", humidityEvents).map((event) => ({
+    ...event,
+    last_updated: event.last_changed,
+    last_changed: event.state === "sunny" ? at(384) : at(6.05),
+  }));
+  const driverHistory = [
+    rows("sensor.sump_activity", [
+      [at(12), "Running"], [at(11.75), "Idle"],
+      [at(9), "Running"], [at(8.75), "Idle"],
+      [at(6), "Running"], [at(5.75), "Idle"],
+      [at(3), "Running"], [at(2.75), "Idle"],
+    ]),
+    rows("sensor.compressor_activity", compressorEvents),
+    rows("sensor.blower_activity", [
+      [at(6), "Running"], [at(5.7), "Idle"],
+    ]),
+    rows("binary_sensor.rain", [
+      [at(500), "off"],
+      [at(13), "on"], [at(11.5), "off"],
+      [at(7), "on"], [at(5.5), "off"],
+    ]),
+    weatherHistory,
+  ];
+
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/appliance_detail")) {
+      const payload = structuredClone(apiPayload(url.pathname));
+      payload.detail.display_name = "Basement Sump Pump";
+      payload.detail.appliance_profile = "sump_pump";
+      delete payload.detail.hvac_efficiency;
+      payload.detail.sump_driver_context = {
+        default_hours: 720,
+        period_hours: [24, 168, 720],
+        rain_response_window_minutes: 120,
+        pump_activity_entity_id: "sensor.sump_activity",
+        compressor_activity_entity_ids: ["sensor.compressor_activity"],
+        blower_activity_entity_ids: ["sensor.blower_activity"],
+        rain_intensity_entity_id: "",
+        rain_entity_id: "binary_sensor.rain",
+        humidity_entity_id: "weather.home",
+      };
+      payload.history = {
+        entities: ["sensor.sump_power"],
+        entity_series: [{ entity_id: "sensor.sump_power", unit: "W" }],
+        default_hours: 720,
+        period_hours: [24, 168, 720],
+      };
+      await route.fulfill({ json: payload });
+      return true;
+    }
+    if (url.pathname.includes("/history/period")) {
+      const requested = url.searchParams.get("filter_entity_id") || "";
+      if (requested.includes("sensor.sump_activity")) {
+        const start = Date.parse(decodeURIComponent(url.pathname.split("/").at(-1)));
+        const end = Date.parse(url.searchParams.get("end_time"));
+        driverHistorySpans.push(Math.round((end - start) / hour));
+      }
+      if (requested.includes("weather.home")) {
+        weatherAttributeFlags.push(url.searchParams.get("significant_changes_only"));
+      }
+      const requestedEntities = new Set(requested.split(","));
+      const requestedDriverHistory = driverHistory.filter((series) => requestedEntities.has(series[0]?.entity_id));
+      await route.fulfill({
+        json: requestedDriverHistory.length
+          ? requestedDriverHistory
+          : [[{
+            entity_id: "sensor.sump_power",
+            state: "0",
+            last_changed: at(24),
+          }, {
+            entity_id: "sensor.sump_power",
+            state: "700",
+            last_changed: at(12),
+          }]],
+      });
+      return true;
+    }
+    return false;
+  });
+
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=sump");
+  const drivers = panel.locator("[data-sump-driver-history]");
+
+  await expect(drivers).toBeVisible();
+  await expect(drivers).toContainText("Rain 1 of 4 cycles");
+  await expect(drivers).toContainText("HVAC + humidity 1 of 4 cycles");
+  await expect(drivers).toContainText("Combined 1 of 4 cycles");
+  await expect(drivers).toContainText("Unexplained 1 of 4 cycles");
+  await expect(drivers).toContainText("Learned humidity baseline 50%");
+  await expect(drivers).toContainText("Rain uses on/off history; accumulation unavailable.");
+  await expect(drivers.locator('[data-sump-cycle-category="rain"]')).toHaveCount(1);
+  await expect(drivers.locator('[data-sump-cycle-category="hvac_humidity"]')).toHaveCount(1);
+  await expect(drivers.locator('[data-sump-cycle-category="combined"]')).toHaveCount(1);
+  await expect(drivers.locator('[data-sump-cycle-category="unexplained"]')).toHaveCount(1);
+  await expect(drivers.locator('[data-sump-cycle-category="combined"] title')).toContainText("Blower support: yes");
+  await expect(drivers.locator('[data-sump-driver-band="compressor"]')).toHaveCount(17);
+  await expect(drivers.locator('[data-sump-driver-band="blower"]')).toHaveCount(1);
+  expect(weatherAttributeFlags).toContain("0");
+
+  await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
+  await expect.poll(() => drivers.locator("svg.chart").evaluate((chart) => (
+    Math.round((Number(chart.dataset.chartEnd) - Number(chart.dataset.chartStart)) / 3_600_000)
+  ))).toBe(168);
+  await panel.locator('[data-appliance-history-period="24"]').click();
+  await expect.poll(() => driverHistorySpans.at(-1)).toBe(26);
+  await panel.locator('[data-appliance-history-graph-zoom="2"]').click();
+  await expect.poll(() => driverHistorySpans.at(-1)).toBe(170);
+  const rainLayer = drivers.locator('[data-sump-driver-layer="rain"]');
+  await rainLayer.click();
+  await expect(rainLayer).toHaveAttribute("aria-pressed", "false");
+  await expect(drivers.locator("[data-sump-rain-bar]")).toHaveCount(0);
+  await toHaveNoViolations(page);
+});
+
+test("Sump Pump rain calculation converts inches and keeps partial history unknown", async ({ page }) => {
+  await mockPanelApi(page);
+  await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+
+  const result = await page.evaluate(() => {
+    const row = (entityId, time, state, attributes = {}) => ({
+      entity_id: entityId,
+      state,
+      attributes,
+      last_changed: new Date(time).toISOString(),
+    });
+    const context = {
+      pump_activity_entity_id: "sensor.pump",
+      compressor_activity_entity_ids: ["sensor.missing_compressor"],
+      blower_activity_entity_ids: [],
+      rain_intensity_entity_id: "sensor.rain_rate",
+      rain_entity_id: "binary_sensor.rain",
+      humidity_entity_id: "sensor.humidity",
+      rain_response_window_minutes: 0,
+    };
+    const pump = [[
+      row("sensor.pump", 1_000, "Running"),
+      row("sensor.pump", 2_000, "Idle"),
+    ]];
+    const missingCompressor = window.__panel._analyzeSumpDriverHistory([
+      ...pump,
+      [row("binary_sensor.rain", 0, "off")],
+    ], { ...context, rain_intensity_entity_id: "" }, 0, 3_000);
+    const unavailableCompressor = window.__panel._analyzeSumpDriverHistory([
+      ...pump,
+      [
+        row("sensor.missing_compressor", 0, "Idle"),
+        row("sensor.missing_compressor", 1_500, "Unavailable"),
+      ],
+      [row("binary_sensor.rain", 0, "off")],
+    ], { ...context, rain_intensity_entity_id: "" }, 0, 3_000);
+    const unavailableBlower = window.__panel._analyzeSumpDriverHistory([
+      ...pump,
+      [row("sensor.blower", 0, "Unavailable")],
+      [row("binary_sensor.rain", 0, "off")],
+    ], {
+      ...context,
+      compressor_activity_entity_ids: [],
+      blower_activity_entity_ids: ["sensor.blower"],
+      rain_intensity_entity_id: "",
+    }, 0, 3_000);
+    const unsupportedRainUnit = window.__panel._analyzeSumpDriverHistory([
+      ...pump,
+      [row("sensor.rain_rate", 0, "1", { unit_of_measurement: "mm" })],
+      [row("binary_sensor.rain", 0, "on")],
+    ], { ...context, compressor_activity_entity_ids: [] }, 0, 3_000);
+    const partialNumericRain = window.__panel._analyzeSumpDriverHistory([
+      ...pump,
+      [row("sensor.rain_rate", 1_500, "1", { unit_of_measurement: "mm/h" })],
+      [row("binary_sensor.rain", 0, "on")],
+    ], { ...context, compressor_activity_entity_ids: [] }, 0, 3_000);
+    const preWindowCycles = window.__panel._analyzeSumpDriverHistory([
+      [row("sensor.pump", 0, "Running"), row("sensor.pump", 1_000, "Idle")],
+    ], {
+      ...context,
+      compressor_activity_entity_ids: [],
+      rain_intensity_entity_id: "",
+      rain_entity_id: "",
+    }, 2_000, 3_000).cycles.length;
+    return {
+    inches: window.__panel._sumpRainAccumulation([
+      { time: 0, state: "1" },
+      { time: 3_600_000, state: "0" },
+    ], 0, 7_200_000, 25.4),
+    missingNumeric: window.__panel._sumpRainAccumulation([
+      { time: 1_000, state: "0" },
+    ], 0, 2_000, 1),
+    missingBinary: window.__panel._sumpBinaryRain([
+      { time: 1_000, state: "off" },
+    ], 0, 2_000),
+    missingBinaryGap: window.__panel._sumpBinaryRain([
+      { time: 0, state: "off" },
+      { time: 1_000, state: "unavailable" },
+    ], 0, 2_000),
+    observedBinary: window.__panel._sumpBinaryRain([
+      { time: 1_000, state: "on" },
+    ], 0, 2_000),
+    weatherRainValue: window.__panel._sumpRainValue({
+      state: "rainy",
+      attributes: { precipitation: 0.5, precipitation_unit: "in/h" },
+    }),
+    weatherRainState: window.__panel._sumpBinaryRain([
+      { time: 0, state: "rainy" },
+    ], 0, 2_000),
+    weatherSunnyState: window.__panel._sumpBinaryRain([
+      { time: 0, state: "sunny" },
+    ], 0, 2_000),
+    missingHumidity: window.__panel._sumpHumidityMedian([
+      { time: 0, state: "sunny", attributes: { humidity: 50 } },
+      { time: 1_000, state: "unavailable", attributes: {} },
+    ], 0, 2_000),
+    interruptedCycles: window.__panel._sumpActivityIntervals([
+      { time: 0, state: "Running" },
+      { time: 1_000, state: "Unavailable" },
+      { time: 2_000, state: "Idle" },
+    ], 3_000, true).length,
+      fallbackStopCycles: window.__panel._sumpActivityIntervals([
+        { time: 0, state: "Running" },
+        { time: 1_000, state: "On" },
+      ], 2_000, true).length,
+      missingCompressorCategory: missingCompressor.cycles[0].category,
+      unavailableCompressorCategory: unavailableCompressor.cycles[0].category,
+      unavailableBlowerSupport: unavailableBlower.cycles[0].blower,
+      unsupportedRainUnit: {
+        category: unsupportedRainUnit.cycles[0].category,
+        source: unsupportedRainUnit.rainSource,
+      },
+      partialNumericRain: {
+        category: partialNumericRain.cycles[0].category,
+        fallback: partialNumericRain.cycles[0].rainFallback,
+      },
+      preWindowCycles,
+    };
+  });
+
+  expect(result).toEqual({
+    inches: 25.4,
+    missingNumeric: null,
+    missingBinary: null,
+    missingBinaryGap: null,
+    observedBinary: true,
+    weatherRainValue: 0.5,
+    weatherRainState: true,
+    weatherSunnyState: false,
+    missingHumidity: null,
+    interruptedCycles: 0,
+    fallbackStopCycles: 0,
+    missingCompressorCategory: "unclassified",
+    unavailableCompressorCategory: "unclassified",
+    unavailableBlowerSupport: null,
+    unsupportedRainUnit: { category: "rain", source: "binary" },
+    partialNumericRain: { category: "rain", fallback: true },
+    preWindowCycles: 0,
+  });
+});
+
 test("Appliance Detail uses Home Assistant temperature units for HVAC efficiency", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");

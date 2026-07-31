@@ -276,6 +276,88 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
 
 
+def test_sump_pump_detail_exposes_history_driver_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        _config(
+            "sump",
+            name="Basement Sump Pump",
+            profile=ApplianceProfile.SUMP_PUMP,
+        ),
+        _config(
+            "compressor",
+            name="Air Conditioner",
+            profile=ApplianceProfile.HVAC_COMPRESSOR,
+        ),
+        _config(
+            "blower",
+            name="Air Handler",
+            profile=ApplianceProfile.HVAC_BLOWER,
+        ),
+        _config("fridge"),
+    )
+    coordinator.state.rain_pump_context_by_circuit["sump"] = {
+        "rain_sensor_entity": "binary_sensor.rain",
+        "rain_intensity_entity": "sensor.rain_rate",
+        "outdoor_humidity_source_entity": "weather.home",
+        "rain_response_window_minutes": 120,
+        "hvac_compressor_circuits": ["compressor"],
+    }
+    coordinator.hass = SimpleNamespace(
+        entity_registry=SimpleNamespace(
+            entities={
+                "sensor.renamed_sump_activity": SimpleNamespace(
+                    entity_id="sensor.renamed_sump_activity",
+                    unique_id="entry-1_sump_activity_summary",
+                ),
+                "sensor.renamed_compressor_activity": SimpleNamespace(
+                    entity_id="sensor.renamed_compressor_activity",
+                    unique_id="entry-1_compressor_activity_summary",
+                ),
+                "sensor.renamed_blower_activity": SimpleNamespace(
+                    entity_id="sensor.renamed_blower_activity",
+                    unique_id="entry-1_blower_activity_summary",
+                ),
+            }
+        )
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="sump")
+
+    assert payload["detail"]["sump_driver_context"] == {
+        "default_hours": 720,
+        "period_hours": [24, 168, 720],
+        "rain_response_window_minutes": 120,
+        "pump_activity_entity_id": "sensor.renamed_sump_activity",
+        "compressor_activity_entity_ids": [
+            "sensor.renamed_compressor_activity"
+        ],
+        "blower_activity_entity_ids": ["sensor.renamed_blower_activity"],
+        "rain_intensity_entity_id": "sensor.rain_rate",
+        "rain_entity_id": "binary_sensor.rain",
+        "humidity_entity_id": "weather.home",
+    }
+    assert "sump_driver_context" not in appliance_detail_payload(
+        [coordinator],
+        circuit_id="fridge",
+    )["detail"]
+
+    nilm_coordinator = _nilm_coordinator()
+    nilm_coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
+        "appliance_profile"
+    ] = "sump_pump"
+    nilm_detail = appliance_detail_payload(
+        [nilm_coordinator],
+        assignment_id="assignment-dishwasher",
+    )["detail"]
+    assert nilm_detail["source_type"] == "nilm_estimate"
+    assert "sump_driver_context" not in nilm_detail
+
+
 def test_water_flow_context_detail_projects_retained_evidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
