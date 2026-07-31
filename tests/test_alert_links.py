@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import sys
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlparse
 
 from custom_components.circuitsetup_energy_analyzer.models import (
