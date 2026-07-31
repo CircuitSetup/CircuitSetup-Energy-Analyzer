@@ -54,6 +54,7 @@ def _config() -> CircuitConfig:
             ),
             SensorRef("sensor.hvac_power_factor", SensorRole.POWER_FACTOR),
             SensorRef("sensor.hvac_energy", SensorRole.ENERGY),
+            SensorRef("sensor.hvac_frequency", SensorRole.FREQUENCY),
         ),
     )
 
@@ -266,6 +267,48 @@ def test_alert_graph_window_matches_sustained_evidence() -> None:
         datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
         datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
     )
+
+
+def test_alert_graph_entities_covers_current_alert_families() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(_alert("expected_schedule_missed"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+        "sensor.hvac_l1_current",
+        "sensor.hvac_l2_current",
+    )
+    assert alert_graph_entities(_alert("nilm_model_drift"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+    assert alert_graph_entities(_alert("solar_flow"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+
+
+def test_alert_graph_entities_uses_value_metric_when_feature_is_unknown() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    alert = replace(
+        _alert("future_diagnostic"),
+        value_metric="frequency",
+    )
+
+    assert alert_graph_entities(alert, _config()) == ("sensor.hvac_frequency",)
+
+
+def test_alert_graph_entities_omits_unknown_relationship() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    assert alert_graph_entities(_alert("future_diagnostic"), _config()) == ()
 
 
 def test_alert_graph_window_centers_point_alert() -> None:

@@ -50,9 +50,26 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         (SensorRole.ENERGY, SensorRole.REAL_POWER),
     ),
     (
-        ("demand", "always_on", "standby", "cycle", "activity"),
+        ("solar", "mains_balance"),
+        (SensorRole.REAL_POWER,),
+    ),
+    (
+        (
+            "demand",
+            "always_on",
+            "standby",
+            "cycle",
+            "activity",
+            "schedule",
+            "running",
+            "runtime",
+        ),
         (SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),
+    (("frequency",), (SensorRole.FREQUENCY,)),
+    (("real_power",), (SensorRole.REAL_POWER,)),
+    (("current",), (SensorRole.CURRENT,)),
+    (("nilm",), (SensorRole.REAL_POWER,)),
     (
         ("rain_pump", "water_flow", "pump", "flow"),
         (SensorRole.REAL_POWER, SensorRole.CURRENT, SensorRole.ENERGY),
@@ -61,16 +78,6 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         ("voltage", "sag", "swell"),
         (SensorRole.VOLTAGE, SensorRole.REAL_POWER, SensorRole.CURRENT),
     ),
-)
-
-_DEFAULT_ROLES = (
-    SensorRole.REAL_POWER,
-    SensorRole.CURRENT,
-    SensorRole.PEAK_CURRENT,
-    SensorRole.REACTIVE_POWER,
-    SensorRole.APPARENT_POWER,
-    SensorRole.POWER_FACTOR,
-    SensorRole.ENERGY,
 )
 
 
@@ -112,9 +119,13 @@ def alert_graph_entities(
     if config is None or max_entities <= 0:
         return ()
 
+    roles = _roles_for_feature(_feature_for_alert(alert))
+    if not roles and alert.value_metric:
+        roles = _roles_for_feature(alert.value_metric)
+
     selected: list[str] = []
     seen: set[str] = set()
-    for role in _roles_for_feature(_feature_for_alert(alert)):
+    for role in roles:
         for sensor in config.sensors:
             if sensor.role != role or sensor.entity_id in seen:
                 continue
@@ -158,7 +169,7 @@ def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
     for hints, roles in _FEATURE_ROLE_HINTS:
         if any(hint in normalized for hint in hints):
             return roles
-    return _DEFAULT_ROLES
+    return ()
 
 
 def _feature_for_alert(alert: AlertEvidence) -> str:
