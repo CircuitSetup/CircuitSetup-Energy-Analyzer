@@ -1057,6 +1057,7 @@ class NilmController:
             return
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(alert.circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(

@@ -97,7 +97,15 @@ def nilm_virtual_appliance_states(
         ]
         derived_sessions = _nilm_assignment_sessions(
             circuit_id_text,
-            assignment_list,
+            [
+                assignment
+                for assignment in assignment_list
+                if (
+                    _published_assignment(assignment)
+                    if published_only
+                    else str(assignment.get("lifecycle_state") or "") != "retired"
+                )
+            ],
             edges,
             signatures_by_id,
         )

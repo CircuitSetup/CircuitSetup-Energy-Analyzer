@@ -8943,6 +8943,15 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     coordinator = EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
         store_data=FeatureStoreData(
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-1",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:45:00+00:00",
+                    }
+                ]
+            },
             nilm_appliance_assignments_by_circuit={
                 "mains": [
                     {
@@ -9011,6 +9020,13 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     assert assignment["confirmed_sessions"] == 1
     assert assignment["rejected_sessions"] == 0
     assert assignment["false_positive_rate"] == pytest.approx(0.0)
+    assert assignment["typical_duration_seconds"] == pytest.approx(2700.0)
+
+    coordinator.nilm_controller.apply_alert_feedback(alert, "wrong_appliance", now)
+
+    assert "typical_duration_seconds" not in assignment
+    assert "min_duration_seconds" not in assignment
+    assert "max_duration_seconds" not in assignment
 
 
 def test_nilm_controller_applies_alert_feedback_validation() -> None:

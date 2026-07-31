@@ -4130,6 +4130,59 @@ def test_nilm_virtual_states_assign_overlapping_signatures_once() -> None:
     )
 
 
+def test_published_nilm_virtual_state_ignores_retired_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        published_nilm_virtual_appliance_states,
+    )
+
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "published-500", "typical_watts": 500.0},
+                    {"signature_id": "retired-500", "typical_watts": 500.0},
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "published",
+                        "signature_fingerprints": ["published-500"],
+                        "publish_entities": True,
+                        "lifecycle_state": "published",
+                    },
+                    {
+                        "assignment_id": "retired",
+                        "signature_fingerprints": ["retired-500"],
+                        "publish_entities": True,
+                        "lifecycle_state": "retired",
+                    },
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+                    500.0,
+                    0.0,
+                    500.0,
+                    0.0,
+                    "on",
+                )
+            ]
+        },
+    )
+
+    states = published_nilm_virtual_appliance_states(coordinator)
+
+    assert len(states) == 1
+    assert states[0].assignment_id == "published"
+    assert states[0].is_running is True
+
+
 @pytest.mark.asyncio
 async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor
