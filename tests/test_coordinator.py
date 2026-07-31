@@ -7635,6 +7635,7 @@ async def test_nilm_validation_refreshes_history_for_new_duration_bounds() -> No
                         "assignment_id": "assignment-load",
                         "signature_fingerprints": ["signature_1"],
                         "session_ids": ["confirmed-short"],
+                        "rejected_session_ids": [stale_session["session_id"]],
                         "confidence": 0.8,
                     }
                 ]
@@ -7653,6 +7654,10 @@ async def test_nilm_validation_refreshes_history_for_new_duration_bounds() -> No
     )
     assert revised["end"] is None
     assert revised["assignment_id"] == "assignment-load"
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assert assignment["rejected_session_ids"] == [revised["session_id"]]
 
     coordinator._nilm_unmatched_edges["mains"] = []
     await coordinator.async_reject_nilm_session("mains", "confirmed-short")
@@ -7665,6 +7670,8 @@ async def test_nilm_validation_refreshes_history_for_new_duration_bounds() -> No
     assert restored["session_id"] == stale_session["session_id"]
     assert restored["end"] == stale_session["end"]
     assert restored["duration_seconds"] == stale_session["duration_seconds"]
+    assert stale_session["session_id"] in assignment["rejected_session_ids"]
+    assert revised["session_id"] not in assignment["rejected_session_ids"]
 
 
 @pytest.mark.asyncio

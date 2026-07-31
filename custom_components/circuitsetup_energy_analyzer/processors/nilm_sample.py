@@ -536,6 +536,10 @@ def _reconcile_nilm_session_duration_bounds(
             and fingerprint
             and on_edge_id
         ):
+            closed_session_id = str(payload.get("session_id") or "").strip()
+            open_session_id = "|".join(
+                (circuit_id, fingerprint, on_edge_id, "open")
+            )
             payload["_duration_bound_close"] = {
                 key: payload.get(key)
                 for key in (
@@ -549,11 +553,14 @@ def _reconcile_nilm_session_duration_bounds(
                     "alternate_match_count",
                 )
             }
+            _replace_nilm_assignment_rejection(
+                assignment,
+                old_session_id=closed_session_id,
+                new_session_id=open_session_id,
+            )
             payload.update(
                 {
-                    "session_id": "|".join(
-                        (circuit_id, fingerprint, on_edge_id, "open")
-                    ),
+                    "session_id": open_session_id,
                     "off_edge_id": None,
                     "end": None,
                     "duration_seconds": None,
@@ -567,6 +574,13 @@ def _reconcile_nilm_session_duration_bounds(
                 }
             )
         elif payload.get("end") is None and close_payload and not outside_bounds:
+            _replace_nilm_assignment_rejection(
+                assignment,
+                old_session_id=str(payload.get("session_id") or "").strip(),
+                new_session_id=str(
+                    close_payload.get("session_id") or ""
+                ).strip(),
+            )
             payload.update(close_payload)
             payload.pop("_duration_bound_close", None)
         reconciled.append(payload)
@@ -587,6 +601,33 @@ def _remove_replaced_nilm_sessions(
     for session_id, session in list(sessions.items()):
         if str(session.get("on_edge_id") or "").strip() == on_edge_id:
             sessions.pop(session_id, None)
+
+
+def _replace_nilm_assignment_rejection(
+    assignment: Mapping[str, Any] | None,
+    *,
+    old_session_id: str,
+    new_session_id: str,
+) -> None:
+    if (
+        not isinstance(assignment, MutableMapping)
+        or not old_session_id
+        or not new_session_id
+    ):
+        return
+    rejected = [
+        str(value or "").strip()
+        for value in _list_items(assignment.get("rejected_session_ids"))
+        if str(value or "").strip()
+    ]
+    if old_session_id not in rejected:
+        return
+    assignment["rejected_session_ids"] = list(
+        dict.fromkeys(
+            new_session_id if session_id == old_session_id else session_id
+            for session_id in rejected
+        )
+    )
 
 
 def _optional_float(*values: Any) -> float | None:
