@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
     ApplianceProfile,
     BaselineStats,
     CircuitConfig,
     CircuitMode,
+    Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
@@ -94,6 +97,37 @@ def test_open_day_energy_with_only_full_day_baseline_stays_learning() -> None:
     assert comparison["status"] == "learning"
     assert comparison["status"] not in {"higher", "lower"}
     assert comparison.get("comparison_mode") == "same_time_of_day"
+
+
+def test_active_cold_storage_signature_replaces_cycling_normal_expectation() -> None:
+    state = AnalyzerState()
+    state.active_alerts_by_circuit["fridge"] = [
+        AlertEvidence(
+            timestamp=datetime(2026, 7, 29, 22, 15, tzinfo=UTC),
+            circuit_id="fridge",
+            severity=Severity.WARNING,
+            message=(
+                "Possible issue: Fridge's learned compressor pattern has "
+                "disappeared while power and current remain elevated."
+            ),
+            feature="cold_storage_cycle_signature_change",
+            features={
+                "signature_ready": True,
+                "signature_baseline_windows": 96.0,
+                "signature_baseline_confidence": 1.0,
+            },
+        )
+    ]
+
+    expectation = _detail(
+        _config("fridge", ApplianceProfile.REFRIGERATOR),
+        state,
+    )["expectations"][0]
+
+    assert expectation["title"] == "Compressor pattern changed"
+    assert expectation["status"] == "possible_issue"
+    assert "power and current remain elevated" in expectation["observed"]
+    assert "doors" in expectation["what_to_check_first"][0].lower()
 
 
 def test_early_day_energy_uses_same_time_baseline_and_labels_projection() -> None:

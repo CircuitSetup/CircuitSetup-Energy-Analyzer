@@ -45,6 +45,9 @@ class FeedbackAwareAlertPolicy:
             return alert
         return replace(alert, adjusted_min_repeated=min_repeated)
 
+    def reset_episode(self, circuit_id: str, feature: str) -> None:
+        self._policy.reset_episode(circuit_id, feature)
+
 
 class AlertPolicyManager:
     """Provide feedback-aware alert policies for processors."""
