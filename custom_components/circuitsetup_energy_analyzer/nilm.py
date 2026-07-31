@@ -954,7 +954,7 @@ def pair_nilm_sessions_for_signatures(
                 and ranked[0].score - candidate.score <= ambiguity_margin
             ):
                 assigned.setdefault(candidate.assignment_id, candidate)
-        if len(assigned) == 1:
+        if len(assigned) == 1 and ranked[0].assignment_id:
             preferred_candidates[pair] = next(iter(assigned.values()))
             continue
         if len(assigned) > 1:
@@ -1059,7 +1059,9 @@ def pair_nilm_sessions_for_signatures(
             assignment_id = _nilm_session_spec_assignment_id(match[1])
             if assignment_id and ranked_specs[0][0] - match[0] <= ambiguity_margin:
                 assigned_specs.setdefault(assignment_id, match)
-        if len(assigned_specs) == 1:
+        if len(assigned_specs) == 1 and _nilm_session_spec_assignment_id(
+            ranked_specs[0][1]
+        ):
             ranked_specs = [next(iter(assigned_specs.values()))]
         if (
             len(ranked_specs) > 1

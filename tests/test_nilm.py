@@ -1012,6 +1012,34 @@ def test_global_session_pairing_records_close_signature_match_as_ambiguous() -> 
     assert sessions[0].assignment_id is None
 
 
+def test_global_session_pairing_does_not_replace_better_unassigned_match() -> None:
+    signature_specs = [
+        {"signature_fingerprint": "unassigned-500", "typical_watts": 500.0},
+        {
+            "signature_fingerprint": "assigned-510",
+            "typical_watts": 510.0,
+            "assignment_id": "dryer",
+        },
+    ]
+    closed = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )[0]
+    opened = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0)],
+        mains_circuit_id="mains",
+        signature_specs=signature_specs,
+    )[0]
+
+    assert closed.signature_fingerprint == "unassigned-500"
+    assert closed.ambiguous is True
+    assert closed.assignment_id is None
+    assert opened.signature_fingerprint == "unassigned-500"
+    assert opened.ambiguous is True
+    assert opened.assignment_id is None
+
+
 def test_global_session_pairing_keeps_open_below_ambiguous_pair_confidence() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0)]
