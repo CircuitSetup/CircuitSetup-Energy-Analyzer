@@ -45,7 +45,7 @@ export function createApplianceViewMethods({
         return;
       }
       this._applianceDetail = detail;
-      await this._loadApplianceDetailHistory(undefined, requestId, routeKey);
+      await this._loadApplianceDetailHistories(undefined, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -57,6 +57,17 @@ export function createApplianceViewMethods({
         this._render();
       }
     }
+  }
+
+  async _loadApplianceDetailHistories(hours, requestId, routeKey) {
+    const context = this._applianceDetail?.detail?.sump_driver_context;
+    const requestedHours = Number.isFinite(Number(hours))
+      ? Number(hours)
+      : Number(context?.default_hours) || undefined;
+    await Promise.all([
+      this._loadApplianceDetailHistory(requestedHours, requestId, routeKey),
+      this._loadSumpDriverHistory(requestedHours, requestId, routeKey),
+    ]);
   }
 
   async _loadApplianceDetailHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
@@ -128,6 +139,367 @@ export function createApplianceViewMethods({
         this._render();
       }
     }
+  }
+
+  async _loadSumpDriverHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+    const context = this._applianceDetail?.detail?.sump_driver_context;
+    if (!context) {
+      this._sumpDriverAnalysis = null;
+      return;
+    }
+    const periods = Array.isArray(context.period_hours)
+      ? context.period_hours.map(Number).filter(Number.isFinite)
+      : [];
+    const defaultHours = Number(context.default_hours);
+    const requestedHours = periods.includes(Number(hours))
+      ? Number(hours)
+      : periods.includes(defaultHours)
+        ? defaultHours
+        : periods[0];
+    const entities = this._sumpDriverHistoryEntities(context);
+    if (!entities.length || !Number.isFinite(requestedHours) || requestedHours <= 0) {
+      this._sumpDriverAnalysis = null;
+      return;
+    }
+    const end = Date.now();
+    const start = end - requestedHours * 60 * 60 * 1000;
+    const historyStart = start - Math.max(Number(context.rain_response_window_minutes) || 0, 0) * 60_000;
+    this._sumpDriverHistoryLoading = true;
+    this._sumpDriverHistoryError = "";
+    this._sumpDriverAnalysis = null;
+    this._render();
+    const attributeEntities = [...new Set([
+      context.rain_intensity_entity_id,
+      context.humidity_entity_id,
+    ].filter(Boolean))];
+    const stateEntities = entities.filter((entityId) => !attributeEntities.includes(entityId));
+    const paths = [
+      ...(stateEntities.length ? [this._historyApiPathForEntities(
+        stateEntities,
+        new Date(historyStart).toISOString(),
+        new Date(end).toISOString(),
+      )] : []),
+      ...(attributeEntities.length ? [this._historyApiPathForEntities(
+        attributeEntities,
+        new Date(historyStart).toISOString(),
+        new Date(end).toISOString(),
+        { includeAttributes: true, significantChangesOnly: false },
+      )] : []),
+    ];
+    const fetchPath = `/api/${paths[0]}`;
+    try {
+      const responses = await Promise.all(paths.map((apiPath) => this._requestJson(apiPath, `/api/${apiPath}`)));
+      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      this._sumpDriverAnalysis = this._analyzeSumpDriverHistory(
+        responses.flatMap((rows) => Array.isArray(rows) ? rows : []),
+        context,
+        start,
+        end,
+      );
+    } catch (error) {
+      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      this._sumpDriverHistoryError = this._panelTextFormat(
+        "errors.load_appliance_history",
+        { path: fetchPath, message: error.message },
+      );
+    } finally {
+      if (this._isCurrentRequest(requestId, routeKey)) {
+        this._sumpDriverHistoryLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  _sumpDriverHistoryEntities(context) {
+    return [...new Set([
+      context.pump_activity_entity_id,
+      ...(Array.isArray(context.compressor_activity_entity_ids) ? context.compressor_activity_entity_ids : []),
+      ...(Array.isArray(context.blower_activity_entity_ids) ? context.blower_activity_entity_ids : []),
+      context.rain_intensity_entity_id,
+      context.rain_entity_id,
+      context.humidity_entity_id,
+    ].filter(Boolean))];
+  }
+
+  _sumpHistoryEvents(rows, entityId) {
+    const series = rows.find((items) => Array.isArray(items) && items.some((item) => item?.entity_id === entityId)) || [];
+    return series.map((item) => ({
+      time: Date.parse(item.last_updated || item.last_changed || ""),
+      state: item.state,
+      attributes: item.attributes || {},
+    })).filter((item) => Number.isFinite(item.time)).sort((left, right) => left.time - right.time);
+  }
+
+  _sumpActivityIntervals(events, end, completedOnly = false) {
+    const intervals = [];
+    let start = null;
+    for (const event of events) {
+      const state = String(event.state || "").toLowerCase();
+      const running = state === "running";
+      const stopped = state === "idle";
+      if (running && start === null) start = event.time;
+      if (stopped && start !== null) {
+        if (event.time > start) intervals.push({ start, end: event.time, completed: true });
+        start = null;
+      }
+      if (!running && !stopped) start = null;
+    }
+    if (start !== null && !completedOnly && end > start) {
+      intervals.push({ start, end, completed: false });
+    }
+    return intervals;
+  }
+
+  _sumpActivityKnown(events, start, end) {
+    let known = false;
+    for (const event of events) {
+      if (event.time > end) break;
+      const state = String(event.state || "").toLowerCase();
+      const valid = state === "running" || state === "idle";
+      if (event.time <= start) {
+        known = valid;
+      } else if (!known || !valid) {
+        return false;
+      }
+    }
+    return known;
+  }
+
+  _sumpIntervalsOverlap(left, right) {
+    return left.start < right.end && left.end > right.start;
+  }
+
+  _sumpHumidityValue(event) {
+    const value = Number(event?.attributes?.humidity ?? event?.state);
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
+  }
+
+  _sumpRainValue(event) {
+    const stateValue = Number(event?.state);
+    const value = Number.isFinite(stateValue)
+      ? stateValue
+      : Number(event?.attributes?.precipitation);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+
+  _sumpMedian(values) {
+    const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
+    if (!sorted.length) return null;
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[middle]
+      : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  _sumpHumidityMedian(events, start, end) {
+    let prior = null;
+    const values = [];
+    for (const event of events) {
+      const value = this._sumpHumidityValue(event);
+      if (event.time <= start) prior = value;
+      if (event.time > start && event.time <= end) {
+        if (value === null) return null;
+        values.push(value);
+      }
+    }
+    if (prior !== null) values.unshift(prior);
+    return this._sumpMedian(values);
+  }
+
+  _sumpBinaryRainValue(event) {
+    const state = String(event.state || "").trim().toLowerCase();
+    if (["on", "true", "1", "wet", "rain", "raining", "detected", "hail", "lightning-rainy", "pouring", "rainy", "snowy-rainy"].includes(state)) return true;
+    if (["off", "false", "0", "dry", "clear", "none", "clear-night", "cloudy", "exceptional", "fog", "lightning", "partlycloudy", "sunny", "windy", "windy-variant"].includes(state)) return false;
+    return null;
+  }
+
+  _sumpBinaryRain(events, start, end) {
+    let knownAtStart = false;
+    let active = false;
+    for (const event of events) {
+      if (event.time <= start) {
+        const value = this._sumpBinaryRainValue(event);
+        knownAtStart = value !== null;
+        active = value === true;
+      }
+    }
+    if (active) return true;
+    let complete = knownAtStart;
+    for (const event of events) {
+      if (event.time <= start) continue;
+      if (event.time > end) break;
+      const value = this._sumpBinaryRainValue(event);
+      if (value === true) return true;
+      if (value === null) complete = false;
+    }
+    return complete ? false : null;
+  }
+
+  _sumpRainAccumulation(events, start, end, multiplier) {
+    let current = null;
+    let cursor = start;
+    let complete = false;
+    let total = 0;
+    for (const event of events) {
+      const numeric = this._sumpRainValue(event);
+      if (event.time <= start) {
+        current = numeric;
+        complete = numeric !== null;
+        continue;
+      }
+      if (event.time > end) break;
+      if (current !== null) total += current * ((event.time - cursor) / 3_600_000) * multiplier;
+      current = numeric;
+      cursor = event.time;
+      if (numeric === null) complete = false;
+    }
+    if (current !== null) total += current * ((end - cursor) / 3_600_000) * multiplier;
+    return complete ? Math.max(total, 0) : null;
+  }
+
+  _sumpRainBars(events, start, end, multiplier) {
+    const hour = 3_600_000;
+    const buckets = new Map();
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      const next = events[index + 1];
+      const segmentEnd = Math.min(next?.time ?? end, end);
+      let segmentStart = Math.max(event.time, start);
+      const rate = this._sumpRainValue(event);
+      if (rate === null || rate <= 0 || segmentEnd <= segmentStart) continue;
+      while (segmentStart < segmentEnd) {
+        const bucket = Math.floor(segmentStart / hour) * hour;
+        const sliceEnd = Math.min(segmentEnd, bucket + hour);
+        buckets.set(bucket, (buckets.get(bucket) || 0) + rate * ((sliceEnd - segmentStart) / hour) * multiplier);
+        segmentStart = sliceEnd;
+      }
+    }
+    return [...buckets].map(([time, value]) => ({ time: time + hour / 2, value }));
+  }
+
+  _sumpBinaryRainBars(events, start, end) {
+    const points = [];
+    const hour = 3_600_000;
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      if (this._sumpBinaryRainValue(event) !== true) continue;
+      let segmentStart = Math.max(event.time, start);
+      const segmentEnd = Math.min(events[index + 1]?.time ?? end, end);
+      while (segmentEnd > segmentStart) {
+        const sliceEnd = Math.min(segmentEnd, Math.floor(segmentStart / hour) * hour + hour);
+        points.push({ time: segmentStart + (sliceEnd - segmentStart) / 2, value: 1 });
+        segmentStart = sliceEnd;
+      }
+    }
+    return points;
+  }
+
+  _sumpHumidityPoints(events, intervals) {
+    return intervals.map((interval) => {
+      const points = [];
+      const values = events.filter((event) => event.time > interval.start && event.time < interval.end && this._sumpHumidityValue(event) !== null);
+      const startValue = this._sumpHumidityMedian(events, interval.start, interval.start);
+      const endValue = this._sumpHumidityMedian(events, interval.end, interval.end);
+      if (startValue !== null) points.push({ time: interval.start, value: startValue });
+      points.push(...values.map((event) => ({ time: event.time, value: this._sumpHumidityValue(event) })));
+      if (endValue !== null) points.push({ time: interval.end, value: endValue });
+      return this._boundedChartPoints(points);
+    }).filter((points) => points.length);
+  }
+
+  _analyzeSumpDriverHistory(rows, context, start, end) {
+    const events = (entityId) => this._sumpHistoryEvents(rows, entityId);
+    const pumpIntervals = this._sumpActivityIntervals(events(context.pump_activity_entity_id), end, true)
+      .filter((interval) => interval.end > start && interval.start < end);
+    const compressorEvents = (context.compressor_activity_entity_ids || []).map((entityId) => [entityId, events(entityId)]);
+    const compressorIntervals = compressorEvents.flatMap(([entityId, items]) => (
+      this._sumpActivityIntervals(items, end).map((interval) => ({ ...interval, entityId }))
+    ));
+    const blowerEvents = (context.blower_activity_entity_ids || []).map((entityId) => [entityId, events(entityId)]);
+    const blowerIntervals = blowerEvents.flatMap(([entityId, items]) => (
+      this._sumpActivityIntervals(items, end).map((interval) => ({ ...interval, entityId }))
+    ));
+    const humidityEvents = events(context.humidity_entity_id);
+    const intensityEvents = events(context.rain_intensity_entity_id);
+    const binaryRainEvents = events(context.rain_entity_id);
+    const unitEvent = intensityEvents.find((event) => event.attributes?.unit_of_measurement || event.attributes?.precipitation_unit);
+    const rainUnit = String(unitEvent?.attributes?.unit_of_measurement || unitEvent?.attributes?.precipitation_unit || this._friendlyEntityUnit(context.rain_intensity_entity_id)).toLowerCase().replaceAll(" ", "");
+    const rainMultiplier = /^mm\/(h|hr|hour)$/.test(rainUnit)
+      ? 1
+      : /^(in|inch|inches)\/(h|hr|hour)$/.test(rainUnit)
+        ? 25.4
+        : null;
+    const numericRain = rainMultiplier !== null && intensityEvents.some((event) => this._sumpRainValue(event) !== null);
+    const response = Math.max(Number(context.rain_response_window_minutes) || 0, 0) * 60_000;
+    // ponytail: bounded 30-day scans; index events only if longer periods are added.
+    const rainFor = (interval) => {
+      const windowStart = interval.start - response;
+      if (numericRain) {
+        const amount = this._sumpRainAccumulation(intensityEvents, windowStart, interval.end, rainMultiplier);
+        if (amount !== null) return { active: amount > 0, amount, fallback: false };
+      }
+      return { active: this._sumpBinaryRain(binaryRainEvents, windowStart, interval.end), amount: null, fallback: numericRain };
+    };
+    const baselineValues = compressorIntervals.filter((interval) => interval.completed).map((interval) => ({
+      humidity: this._sumpHumidityMedian(humidityEvents, interval.start, interval.end),
+      rain: rainFor(interval).active,
+    })).filter((item) => item.rain === false && item.humidity !== null).map((item) => item.humidity);
+    const baseline = baselineValues.length >= 15
+      ? [...baselineValues].sort((left, right) => left - right)[Math.ceil(baselineValues.length * 0.9) - 1]
+      : null;
+    const cycles = pumpIntervals.map((cycle) => {
+      const rain = rainFor(cycle);
+      const compressors = compressorIntervals.filter((interval) => this._sumpIntervalsOverlap(interval, cycle));
+      const blowers = blowerIntervals.filter((interval) => this._sumpIntervalsOverlap(interval, cycle));
+      const compressorKnown = compressorEvents.every(([, items]) => this._sumpActivityKnown(items, cycle.start, cycle.end));
+      const blowerKnown = blowerEvents.every(([, items]) => this._sumpActivityKnown(items, cycle.start, cycle.end));
+      const humidityValues = compressors.map((interval) => this._sumpHumidityMedian(
+        humidityEvents,
+        Math.max(interval.start, cycle.start),
+        Math.min(interval.end, cycle.end),
+      )).filter((value) => value !== null);
+      const humidity = humidityValues.length ? Math.max(...humidityValues) : null;
+      const humidityKnown = compressorKnown && (!compressors.length || (baseline !== null && humidity !== null));
+      const humidityHigh = compressors.length > 0 && humidityKnown && humidity > baseline;
+      let category = "unclassified";
+      if (rain.active !== null && humidityKnown) {
+        category = rain.active && humidityHigh
+          ? "combined"
+          : rain.active
+            ? "rain"
+            : humidityHigh
+              ? "hvac_humidity"
+              : "unexplained";
+      }
+      return {
+        ...cycle,
+        category,
+        rainAmount: rain.amount,
+        rainActive: rain.active,
+        rainFallback: rain.fallback,
+        compressor: compressors.length > 0,
+        blower: blowers.length ? true : blowerKnown ? false : null,
+        humidity,
+      };
+    });
+    const counts = Object.fromEntries(["rain", "hvac_humidity", "combined", "unexplained", "unclassified"].map((category) => [category, cycles.filter((cycle) => cycle.category === category).length]));
+    return {
+      start,
+      end,
+      cycles,
+      counts,
+      classifiedCount: cycles.length - counts.unclassified,
+      compressorIntervals,
+      blowerIntervals,
+      humiditySegments: this._sumpHumidityPoints(humidityEvents, compressorIntervals),
+      baseline,
+      baselineCount: baselineValues.length,
+      rainSource: numericRain ? "numeric" : "binary",
+      rainFallbackUsed: cycles.some((cycle) => cycle.rainFallback),
+      rainPoints: numericRain
+        ? this._sumpRainBars(intensityEvents, start, end, rainMultiplier)
+        : this._sumpBinaryRainBars(binaryRainEvents, start, end),
+    };
   }
 
   async _loadApplianceInsights(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
@@ -576,6 +948,7 @@ export function createApplianceViewMethods({
         ${this._renderApplianceAlerts(alerts)}
       </section>` : ""}
       ${this._renderApplianceDetailHistory(payload.history)}
+      ${this._renderSumpDriverHistory(detail.sump_driver_context)}
       ${this._renderApplianceDailyCost(payload, detail)}
       <section class="panel">
         <h2>${this._escape(this._panelText("appliance_detail.today_vs_normal"))}</h2>
@@ -585,6 +958,138 @@ export function createApplianceViewMethods({
       ${this._renderWaterFlowContext(detail.water_flow_context)}
       ${this._renderHvacEfficiency(detail.hvac_efficiency)}
     `;
+  }
+
+  _renderSumpDriverHistory(context) {
+    if (!context) return "";
+    const heading = this._panelText("appliance_detail.sump_driver_history");
+    if (this._sumpDriverHistoryLoading) {
+      return `<section class="panel" data-sump-driver-history><h2>${this._escape(heading)}</h2><div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div></section>`;
+    }
+    if (this._sumpDriverHistoryError) {
+      return `<section class="panel" data-sump-driver-history><h2>${this._escape(heading)}</h2><p class="muted">${this._escape(this._sumpDriverHistoryError)}</p><button type="button" class="secondary" data-retry-sump-driver-history>${this._escape(this._panelText("common.retry"))}</button></section>`;
+    }
+    const analysis = this._sumpDriverAnalysis;
+    if (!analysis) {
+      return `<section class="panel" data-sump-driver-history><h2>${this._escape(heading)}</h2><p class="muted">${this._escape(this._panelText("appliance_detail.sump_driver_unavailable"))}</p></section>`;
+    }
+    const hidden = this._sumpDriverHiddenLayers instanceof Set
+      ? this._sumpDriverHiddenLayers
+      : new Set();
+    const visible = (layer) => !hidden.has(layer);
+    const categoryLabels = {
+      rain: this._panelText("appliance_detail.sump_driver_rain"),
+      hvac_humidity: this._panelText("appliance_detail.sump_driver_hvac_humidity"),
+      combined: this._panelText("appliance_detail.sump_driver_combined"),
+      unexplained: this._panelText("appliance_detail.sump_driver_unexplained"),
+      unclassified: this._panelText("appliance_detail.sump_driver_unclassified"),
+    };
+    const colors = {
+      rain: "#2563eb",
+      hvac_humidity: "#16a34a",
+      combined: "#7c3aed",
+      unexplained: "#64748b",
+      unclassified: "#9ca3af",
+    };
+    const denominator = analysis.classifiedCount;
+    const summary = ["rain", "hvac_humidity", "combined", "unexplained"].map((category) => {
+      const count = analysis.counts[category] || 0;
+      const percent = denominator ? Math.round((count / denominator) * 100) : 0;
+      return `<div class="sump-driver-summary-item"><span class="swatch" style="background:${colors[category]}"></span><strong>${this._escape(`${categoryLabels[category]} ${count} of ${denominator} cycles`)}</strong><span class="muted">${percent}%</span></div>`;
+    }).join("");
+    const layerButtons = [
+      ["rain", this._panelText("appliance_detail.sump_driver_rain_layer"), "#2563eb"],
+      ["humidity", this._panelText("appliance_detail.sump_driver_humidity_layer"), "#16a34a"],
+      ["compressor", this._panelText("appliance_detail.sump_driver_compressor_layer"), "#f97316"],
+      ["blower", this._panelText("appliance_detail.sump_driver_blower_layer"), "#fbbf24"],
+      ["cycles", this._panelText("appliance_detail.sump_driver_cycles_layer"), "#7c3aed"],
+    ].map(([layer, label, color]) => `<button type="button" class="secondary sump-driver-layer" data-sump-driver-layer="${layer}" aria-pressed="${visible(layer)}"><span class="swatch" style="background:${color}"></span>${this._escape(label)}</button>`).join("");
+    const hasHumidity = visible("humidity") && analysis.humiditySegments.length > 0;
+    const rainSeries = visible("rain") && analysis.rainPoints.length
+      ? [{
+          name: analysis.rainSource === "numeric"
+            ? this._panelText("appliance_detail.sump_driver_rain_accumulation")
+            : this._panelText("appliance_detail.sump_driver_rain_active"),
+          unit: analysis.rainSource === "numeric" ? "mm" : "",
+          kind: "bar",
+          axis: hasHumidity ? "right" : "left",
+          color: "#2563eb",
+          sump_layer: "rain",
+          points: analysis.rainPoints,
+        }]
+      : [];
+    const humiditySeries = hasHumidity
+      ? analysis.humiditySegments.map((points) => ({
+          name: this._panelText("appliance_detail.sump_driver_humidity"),
+          unit: "%",
+          color: "#16a34a",
+          points,
+        }))
+      : [];
+    if (hasHumidity && analysis.baseline !== null) {
+      humiditySeries.push({
+        name: this._panelText("appliance_detail.sump_driver_humidity_baseline"),
+        unit: "%",
+        color: "#15803d",
+        line_style: "dashed",
+        points: [
+          { time: analysis.start, value: analysis.baseline },
+          { time: analysis.end, value: analysis.baseline },
+        ],
+      });
+    }
+    const contextBands = [
+      ...(visible("compressor") ? analysis.compressorIntervals.map((interval) => ({ ...interval, kind: "compressor", label: this._panelText("appliance_detail.sump_driver_compressor_layer"), color: "#f97316", opacity: 0.13 })) : []),
+      ...(visible("blower") ? analysis.blowerIntervals.map((interval) => ({ ...interval, kind: "blower", label: this._panelText("appliance_detail.sump_driver_blower_layer"), color: "#fbbf24", opacity: 0.1 })) : []),
+    ];
+    const eventMarkers = visible("cycles") ? analysis.cycles.map((cycle) => {
+      const rainDetail = cycle.rainAmount !== null
+        ? `${this._formatNumber(cycle.rainAmount)} mm`
+        : cycle.rainActive === null
+          ? this._panelText("common.unknown")
+          : cycle.rainActive
+            ? this._panelText("appliance_detail.sump_driver_active")
+            : this._panelText("appliance_detail.sump_driver_inactive");
+      const humidityDetail = cycle.humidity === null ? this._panelText("common.unknown") : `${this._formatNumber(cycle.humidity)}%`;
+      const blowerDetail = cycle.blower === null ? this._panelText("common.unknown") : cycle.blower ? "yes" : "no";
+      const detail = `${categoryLabels[cycle.category]}; ${this._formatDateTime(new Date(cycle.start))}–${this._formatDateTime(new Date(cycle.end))}; Rain: ${rainDetail}; Compressor: ${cycle.compressor ? "yes" : "no"}; Humidity: ${humidityDetail}; Blower support: ${blowerDetail}`;
+      return {
+        time: cycle.start + (cycle.end - cycle.start) / 2,
+        category: cycle.category,
+        label: categoryLabels[cycle.category],
+        detail,
+        color: colors[cycle.category],
+      };
+    }) : [];
+    const graphWindow = this._applianceDetailHistoryGraphWindow() || {
+      start: analysis.start,
+      end: analysis.end,
+    };
+    const graph = (rainSeries.length || humiditySeries.length || contextBands.length || eventMarkers.length)
+      ? this._chartSvg([...humiditySeries, ...rainSeries], {
+          y_axis_label: hasHumidity ? "%" : analysis.rainSource === "numeric" ? "mm" : this._panelText("appliance_detail.sump_driver_rain"),
+          ...(hasHumidity && rainSeries.length ? { right_y_axis_label: analysis.rainSource === "numeric" ? "mm" : this._panelText("appliance_detail.sump_driver_rain") } : {}),
+          graph_window_start: new Date(graphWindow.start).toISOString(),
+          graph_window_end: new Date(graphWindow.end).toISOString(),
+          history_entities: this._sumpDriverHistoryEntities(context),
+          context_bands: contextBands,
+          event_markers: eventMarkers,
+          hide_legend: true,
+        })
+      : `<p class="muted">${this._escape(this._panelText("appliance_detail.sump_driver_no_cycles"))}</p>`;
+    const baselineNote = analysis.baseline !== null
+      ? this._panelTextFormat("appliance_detail.sump_driver_baseline_ready", { value: this._formatNumber(analysis.baseline), count: analysis.baselineCount })
+      : this._panelTextFormat("appliance_detail.sump_driver_baseline_learning", { count: analysis.baselineCount, required: 15 });
+    return `<section class="panel" data-sump-driver-history>
+      <div class="appliance-section-heading"><h2>${this._escape(heading)}</h2><span class="status">${this._escape(`${analysis.cycles.length} ${this._panelText("appliance_detail.sump_driver_completed_cycles")}`)}</span></div>
+      <div class="sump-driver-summary">${summary}</div>
+      ${analysis.counts.unclassified ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.sump_driver_unclassified_note", { count: analysis.counts.unclassified }))}</p>` : ""}
+      <div class="sump-driver-layers" role="group" aria-label="${this._escape(this._panelText("appliance_detail.sump_driver_layers"))}">${layerButtons}</div>
+      ${graph}
+      <p class="muted">${this._escape(baselineNote)}</p>
+      ${analysis.rainSource === "binary" || analysis.rainFallbackUsed ? `<p class="muted">${this._escape(this._panelText("appliance_detail.sump_driver_binary_rain_note"))}</p>` : ""}
+      <p class="muted">${this._escape(this._panelText("appliance_detail.sump_driver_disclaimer"))}</p>
+    </section>`;
   }
 
   _renderApplianceBehaviorHealth(detail) {
@@ -1144,7 +1649,11 @@ export function createApplianceViewMethods({
     if (nextIndex === currentIndex) {
       return undefined;
     }
-    return this._loadApplianceDetailHistory(periods[nextIndex]);
+    return this._loadApplianceDetailHistories(
+      periods[nextIndex],
+      this._evidenceRequestId,
+      this._loadedRouteKey || this._routeKey(),
+    );
   }
 
   _actionableApplianceChecks(checks) {
