@@ -1133,6 +1133,31 @@ test("home summary pairs live derived metrics by leg", async ({ page }) => {
   await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("4,500 W");
 });
 
+test("home summary derives zero power when live PF is zero", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        current_entities: ["sensor.mains_current"],
+        voltage_entities: ["sensor.mains_voltage"],
+        power_factor_entities: ["sensor.mains_power_factor"],
+      },
+    },
+    {
+      "sensor.mains_current": { state: "0", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_voltage": { state: "120", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "0", attributes: {} },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("0 W");
+});
+
 test("mains graph pairs calculated history by leg", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
@@ -1259,6 +1284,95 @@ test("completed day labels amps as the time-weighted average", async ({ page }) 
     .filter({ hasText: "Average Amps (Jul 31)" });
   await expect(amps).toContainText("7.5 A");
   await expect(amps.locator("small")).toHaveCount(0);
+});
+
+test("completed day derives average amps from appliance current history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_current", state: "2", last_changed: "2026-07-31T00:00:00.000Z" },
+          { state: "4", last_changed: "2026-07-31T12:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{ circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] }],
+    },
+    {
+      "sensor.fridge_current": { state: "4", attributes: { unit_of_measurement: "A" } },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("3 A");
+});
+
+test("completed day derives average amps from power, voltage, and PF history", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [{ entity_id: "sensor.mains_power", state: "1000", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_voltage", state: "100", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power_factor", state: "0.5", last_changed: "2026-07-31T00:00:00.000Z" }],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        power_entities: ["sensor.mains_power"],
+        voltage_entities: ["sensor.mains_voltage"],
+        power_factor_entities: ["sensor.mains_power_factor"],
+      },
+    },
+    {
+      "sensor.mains_power": { state: "1000", attributes: { unit_of_measurement: "W" } },
+      "sensor.mains_voltage": { state: "100", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "0.5", attributes: {} },
+    },
+  );
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("circuitsetup-dashboard-range-changed", {
+      detail: {
+        start: "2026-07-31T00:00:00.000Z",
+        end: "2026-07-31T23:59:59.999Z",
+        compare: false,
+      },
+    }));
+  });
+
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("20 A");
 });
 
 test("home summary uses mains totals and derives power from amps, volts, and PF", async ({ page }) => {

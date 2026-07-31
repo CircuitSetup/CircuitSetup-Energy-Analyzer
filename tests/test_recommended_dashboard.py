@@ -640,12 +640,12 @@ def test_home_mains_graph_preserves_legs_for_derived_sources() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(
-            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT, leg="a"),
-            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="b"),
-            SensorRef("sensor.mains_l2_voltage", SensorRole.VOLTAGE, leg="b"),
-            SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE, leg="a"),
-            SensorRef("sensor.mains_l2_pf", SensorRole.POWER_FACTOR, leg="b"),
-            SensorRef("sensor.mains_l1_pf", SensorRole.POWER_FACTOR, leg="a"),
+            SensorRef("sensor.mains_l1_current", SensorRole.CURRENT, leg="l1"),
+            SensorRef("sensor.mains_l2_current", SensorRole.CURRENT, leg="L2"),
+            SensorRef("sensor.mains_l2_voltage", SensorRole.VOLTAGE, leg="line2"),
+            SensorRef("sensor.mains_l1_voltage", SensorRole.VOLTAGE, leg="phase1"),
+            SensorRef("sensor.mains_l2_pf", SensorRole.POWER_FACTOR, leg="leg2"),
+            SensorRef("sensor.mains_l1_pf", SensorRole.POWER_FACTOR, leg="LEFT"),
         ),
     )
     dashboard = build_recommended_dashboard((mains,), DASHBOARD_LAYOUT_STANDARD)

@@ -216,7 +216,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const normalized = unit.includes("%") || value > 1 && value <= 100
         ? value / 100
         : value;
-      return normalized > 0 && normalized <= 1 ? normalized : null;
+      return normalized >= 0 && normalized <= 1 ? normalized : null;
     }
 
     _completeEntityValues(entityIds, converter) {
@@ -1896,6 +1896,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._rangeTotalsDateKey = "";
       this._rangeTotalsRolloverReloadKey = "";
       this._rangeTotalsReloadTimer = 0;
+      this._historicalAmpsKey = "";
+      this._historicalAmpsSeries = null;
+      this._historicalAmpsLoading = false;
       this._handleDashboardData = () => this._render();
     }
 
@@ -1953,10 +1956,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         : null;
       const { days } = this._calendarRange();
       const averageScale = days > 1 ? days : 1;
-      const ampsSeries = this._dashboardSeries("mains:current");
+      const includesToday = this._rangeIncludesToday();
+      const ampsSeries = this._dashboardSeries("mains:current") || this._historicalAmpsSeries;
+      if (!includesToday && !ampsSeries) this._ensureHistoricalAmps();
       const circuitAmps = this._completeCircuitTotal(appliances, (item) => this._circuitAmps(item));
       const liveAmps = this._circuitAmps(mains) ?? circuitAmps;
-      const includesToday = this._rangeIncludesToday();
       const ampsValue = includesToday ? liveAmps : this._seriesAverage(ampsSeries);
       const ampsLabel = includesToday
         ? this._label("amps_now", "Amps Now")
@@ -2052,6 +2056,193 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         });
       }
       this._attachChartInspectors();
+    }
+
+    _historicalAmpCircuits() {
+      const mains = this._dashboardConfig.primary_mains;
+      const hasMainsSources = mains && (
+        (mains.current_entities || []).length
+        || this._powerEntityIds(mains).length
+          && (mains.voltage_entities || []).length
+          && (mains.power_factor_entities || []).length
+      );
+      return hasMainsSources ? [mains] : (this._dashboardConfig.appliances || []);
+    }
+
+    _historicalAmpConfigs(circuit) {
+      return [
+        ["power", "mains:power"],
+        ["current", "mains:current"],
+        ["voltage", "mains:voltage"],
+        ["power_factor", "mains:power_factor"],
+      ].flatMap(([role, series_id]) => this._sourceEntries(circuit, role).map((source) => ({
+        entity: source.entity,
+        role,
+        series_id,
+        leg: source.leg,
+      })));
+    }
+
+    _historySourceValue(config, state) {
+      const value = Number.parseFloat(String(state ?? ""));
+      if (!Number.isFinite(value)) return null;
+      const unit = this._unit(config.entity);
+      const factors = {
+        power: { W: 1, kW: 1000, MW: 1000000, mW: 0.001 },
+        current: { A: 1, mA: 0.001, kA: 1000 },
+        voltage: { V: 1, mV: 0.001, kV: 1000 },
+      }[config.role];
+      if (factors) return value * (factors[unit] ?? 1);
+      const normalized = unit.toLowerCase().includes("%") || value > 1 && value <= 100
+        ? value / 100
+        : value;
+      return normalized >= 0 && normalized <= 1 ? normalized : null;
+    }
+
+    _historySourceSeries(payload, configs, rangeStart) {
+      const configByEntity = new Map(configs.map((config) => [config.entity, config]));
+      const parsed = [];
+      for (const group of Array.isArray(payload) ? payload : []) {
+        const rows = Array.isArray(group) ? group : [group];
+        const entityId = rows.find((row) => row && row.entity_id)?.entity_id;
+        const config = configByEntity.get(entityId);
+        if (!config) continue;
+        const points = rows.flatMap((row) => {
+          const time = Date.parse(row.last_changed || row.last_updated || "");
+          const value = this._historySourceValue(config, row.state);
+          return Number.isFinite(time) && Number.isFinite(value)
+            ? [{ time: Math.max(rangeStart, time), value }]
+            : [];
+        });
+        if (points.length) parsed.push({ ...config, points: this._boundedChartPoints(points) });
+      }
+      return parsed;
+    }
+
+    _sumHistoricalSeries(series) {
+      if (!series.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      for (const time of timestamps) {
+        for (const item of series) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        const values = series.map((item) => latest.get(item));
+        if (values.every(Number.isFinite)) {
+          points.push({ time, value: values.reduce((total, value) => total + value, 0) });
+        }
+      }
+      return points.length
+        ? {
+          entity_id: "mains:current",
+          series_id: "mains:current",
+          name: "Mains total amps",
+          unit: "A",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
+    }
+
+    _derivedHistoricalAmpsSeries(series, configs) {
+      const powers = series.filter((item) => item.series_id === "mains:power");
+      const volts = series.filter((item) => item.series_id === "mains:voltage");
+      const factors = series.filter((item) => item.series_id === "mains:power_factor");
+      for (const [seriesId, role] of [
+        ["mains:power", "power"],
+        ["mains:voltage", "voltage"],
+        ["mains:power_factor", "power_factor"],
+      ]) {
+        const expected = configs.filter((item) => item.role === role).length;
+        const available = series.filter((item) => item.series_id === seriesId).length;
+        if (expected && available !== expected) return null;
+      }
+      if (!powers.length || !volts.length || !factors.length) return null;
+      const timestamps = [...new Set(series.flatMap((item) => item.points.map((point) => point.time)))]
+        .sort((left, right) => left - right);
+      const indexes = new Map(series.map((item) => [item, 0]));
+      const latest = new Map();
+      const points = [];
+      const legAware = [powers, volts, factors].some((values) => values.some((value) => value.leg));
+      for (const time of timestamps) {
+        for (const item of [...powers, ...volts, ...factors]) {
+          let index = indexes.get(item);
+          while (index < item.points.length && item.points[index].time <= time) {
+            latest.set(item, item.points[index].value);
+            index += 1;
+          }
+          indexes.set(item, index);
+        }
+        let amps = 0;
+        for (let index = 0; index < powers.length; index += 1) {
+          const power = latest.get(powers[index]);
+          const voltageSource = this._pairedSourceValue(powers[index], index, volts, powers.length, legAware);
+          const factorSource = this._pairedSourceValue(powers[index], index, factors, powers.length, legAware);
+          const voltage = voltageSource && latest.get(voltageSource);
+          const factor = factorSource && latest.get(factorSource);
+          if (!Number.isFinite(power) || !Number.isFinite(voltage) || !Number.isFinite(factor) || voltage <= 0 || factor <= 0) {
+            amps = Number.NaN;
+            break;
+          }
+          amps += power / (voltage * factor);
+        }
+        if (Number.isFinite(amps)) points.push({ time, value: amps });
+      }
+      return points.length
+        ? {
+          entity_id: "mains:current",
+          series_id: "mains:current",
+          name: "Mains total amps (calculated)",
+          unit: "A",
+          points: this._boundedChartPoints(points),
+        }
+        : null;
+    }
+
+    _historicalCircuitAmpsSeries(payload, circuit, rangeStart) {
+      const configs = this._historicalAmpConfigs(circuit);
+      const series = this._historySourceSeries(payload, configs, rangeStart);
+      const currentSeries = series.filter((item) => item.series_id === "mains:current");
+      const expectedCurrent = configs.filter((item) => item.role === "current").length;
+      const direct = expectedCurrent && currentSeries.length === expectedCurrent
+        ? this._sumHistoricalSeries(currentSeries)
+        : null;
+      return direct
+        || this._derivedHistoricalAmpsSeries(series, configs);
+    }
+
+    _ensureHistoricalAmps() {
+      if (this._historicalAmpsLoading || typeof this._hass.callApi !== "function") return;
+      const range = validRange(this._dashboardRange);
+      const circuits = this._historicalAmpCircuits();
+      const configs = circuits.flatMap((circuit) => this._historicalAmpConfigs(circuit));
+      const entityIds = [...new Set(configs.map((config) => config.entity))];
+      const key = `${range.start}|${range.end}|${entityIds.join(",")}`;
+      if (key === this._historicalAmpsKey) return;
+      this._historicalAmpsKey = key;
+      this._historicalAmpsSeries = null;
+      if (!entityIds.length) return;
+      this._historicalAmpsLoading = true;
+      const path = `history/period/${range.start}?filter_entity_id=${encodeURIComponent(entityIds.join(","))}&end_time=${encodeURIComponent(range.end)}&minimal_response=1&no_attributes=1`;
+      this._hass.callApi("GET", path).then((payload) => {
+        if (this._historicalAmpsKey !== key) return;
+        const circuitSeries = circuits
+          .map((circuit) => this._historicalCircuitAmpsSeries(payload, circuit, Date.parse(range.start)))
+          .filter(Boolean);
+        this._historicalAmpsSeries = this._sumHistoricalSeries(circuitSeries);
+      }).catch(() => {
+        if (this._historicalAmpsKey === key) this._historicalAmpsSeries = null;
+      }).finally(() => {
+        this._historicalAmpsLoading = false;
+        if (this.isConnected) this._render();
+      });
     }
 
     _metricHtml(label, value, unit, average = null, averageDays = 1) {

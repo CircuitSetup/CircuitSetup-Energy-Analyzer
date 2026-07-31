@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
 )
 from .localized_text import translation_section, translation_text
+from .managers.source_samples import normalized_leg
 
 
 def _dashboard_text(*keys: str) -> str:
@@ -522,8 +523,8 @@ def _source_refs_for_role(
             and entity_id not in seen
             and not _entity_is_apparent_or_reactive_power(hass, entity_id)
         ):
-            leg = _entry_value(sensor, "leg")
-            refs.append((entity_id, str(leg).strip() if leg else None))
+            leg = normalized_leg(_entry_value(sensor, "leg"))
+            refs.append((entity_id, leg))
             seen.add(entity_id)
     return tuple(refs)
 
