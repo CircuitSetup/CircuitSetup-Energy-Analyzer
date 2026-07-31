@@ -4630,6 +4630,54 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
 });
 
+test("NILM workspace renders kW history as watts", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.mains_power", state: "0.8", last_changed: "2026-07-13T12:00:00Z" },
+          { entity_id: "sensor.mains_power", state: "1.2", last_changed: "2026-07-13T20:00:00Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await page.evaluate(() => {
+    const hass = window.__panel._hass;
+    window.__panel.hass = {
+      ...hass,
+      states: {
+        ...hass.states,
+        "sensor.mains_power": {
+          state: "1.2",
+          attributes: { unit_of_measurement: "kW" },
+        },
+      },
+    };
+    window.__panel._render();
+  });
+
+  const points = panel.locator("[data-chart-point]");
+  await expect(points).toHaveCount(2);
+  await expect(points.first()).toHaveAttribute("data-chart-value", "800");
+  await expect(points.first()).toHaveAttribute("data-chart-unit", "W");
+  await expect(panel.locator(".axis-label")).toContainText("W");
+
+  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await expect(panel.locator("svg.chart")).toHaveAttribute("data-nilm-chart-select", "1");
+});
+
 test("major panel routes pass automated accessibility checks", async ({ page }) => {
   await mockPanelApi(page);
   for (const query of [

@@ -2030,7 +2030,7 @@ export function createNilmWorkspaceMethods({
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return null;
     }
-    const series = this._chartSeries(this._nilmWorkspaceHistorySeries);
+    const series = this._nilmWorkspaceWattSeries();
     const powerSeries = series.find((item) => {
       const label = `${item.entity_id || ""} ${item.name || ""}`;
       return /power|watt|(?:^|[_\s-])w(?:$|[_\s-])/i.test(label);
@@ -2248,11 +2248,28 @@ export function createNilmWorkspaceMethods({
   }
 
   _visibleNilmWorkspaceSeries(_workspace, graphWindow) {
-    return this._visibleChartSeries(
-      this._nilmWorkspaceHistorySeries,
+    return this._visibleParsedChartSeries(
+      this._nilmWorkspaceWattSeries(),
       graphWindow,
-      MAX_NILM_CHART_POINTS_PER_SERIES,
     );
+  }
+
+  _nilmWorkspaceWattSeries() {
+    return this._chartSeries(
+      this._nilmWorkspaceHistorySeries,
+      [],
+      MAX_NILM_CHART_POINTS_PER_SERIES,
+    ).map((item) => {
+      const factor = String(item.unit || "").trim().toLowerCase() === "kw" ? 1000 : 1;
+      return {
+        ...item,
+        unit: "W",
+        points: factor === 1 ? item.points : item.points.map((point) => ({
+          ...point,
+          value: point.value * factor,
+        })),
+      };
+    });
   }
 
   _isLowNilmConfidence(value) {

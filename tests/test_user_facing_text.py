@@ -3287,16 +3287,22 @@ def test_nilm_graph_uses_dense_watt_series_and_disables_selection_tooltips() -> 
     _run_panel_node_script(
         """
 (() => {
-  const panel = makePanel();
+  const panel = makePanel({
+    _hass: { states: {
+      "sensor.mains_power": { attributes: { unit_of_measurement: "kW" } },
+    } },
+  });
   const start = Date.parse("2026-07-31T12:00:00Z");
   const history = [Array.from({ length: 2160 }, (_item, index) => ({
     entity_id: "sensor.mains_power",
-    state: String(index),
+    state: String(index / 1000),
     last_changed: new Date(start + index * 10000).toISOString(),
   }))];
   panel._nilmWorkspaceHistorySeries = history;
   const nilmSeries = panel._visibleNilmWorkspaceSeries(makeWorkspace(), null);
   assert.equal(nilmSeries[0].points.length, 2160);
+  assert.equal(nilmSeries[0].unit, "W");
+  assert.equal(nilmSeries[0].points[1000].value, 1000);
   assert.equal(panel._chartSeries(history)[0].points.length, 240);
 
   panel._nilmIntervalEditorOpen = true;
