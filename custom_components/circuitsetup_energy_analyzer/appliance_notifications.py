@@ -28,6 +28,7 @@ _NOTIFICATION_CATEGORY_BY_FEATURE = {
     "activity_left_on": "unusual_runtime",
     "always_on_power": "high_daily_energy",
     "billing_cycle_budget": "high_daily_energy",
+    "cold_storage_cycle_signature_change": "unusual_runtime",
     "daily_energy_spike": "high_daily_energy",
     "utility_energy_mismatch": "data_quality_issue",
     "efficiency_degradation": "appliance_health_issue",

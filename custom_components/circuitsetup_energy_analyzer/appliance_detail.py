@@ -18,6 +18,7 @@ from .appliance_detail_models import (
     SourceType,
 )
 from .baseline import build_baseline
+from .cold_storage import COLD_STORAGE_SIGNATURE_FEATURE
 from .local_time import as_ha_local, local_date, local_day_time
 from .models import (
     AlertEvidence,
@@ -1127,6 +1128,41 @@ def _primary_appliance_expectations_for_circuit(
     runtime = _comparison_by_id(comparisons, "runtime_today_seconds")
     profile = config.appliance_profile
     if profile in {ApplianceProfile.REFRIGERATOR, ApplianceProfile.FREEZER}:
+        signature_alert = next(
+            (
+                alert
+                for alert in _active_alert_summaries(
+                    state,
+                    circuit_id,
+                    config=config,
+                )
+                if alert.feature == COLD_STORAGE_SIGNATURE_FEATURE
+            ),
+            None,
+        )
+        if signature_alert is not None:
+            return (
+                _expectation(
+                    config,
+                    title="Compressor pattern changed",
+                    status="possible_issue",
+                    source_type=expectation_source,
+                    observed=signature_alert.message,
+                    expected=(
+                        "The learned PF, power, and current pulse pattern should "
+                        "recur while workload stays near its normal range."
+                    ),
+                    why_it_matters=(
+                        "A missing compressor signature plus higher workload can "
+                        "point to a door, seal, airflow, or cooling problem."
+                    ),
+                    what_to_check_first=(
+                        "Check that doors are fully closed, seals and vents are "
+                        "clear, and temperatures are normal.",
+                    ),
+                    evidence_path=evidence_path,
+                ),
+            )
         if _is_higher(daily):
             return (
                 _expectation(

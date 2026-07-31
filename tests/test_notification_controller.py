@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -831,6 +832,117 @@ async def test_alert_notifications_wait_for_live_learning_state(
     await controller.async_notify_alert(obvious_alert)
     await controller.async_notify_alert(error_alert)
     assert created == [routine_alert, obvious_alert, error_alert]
+
+
+def test_self_mature_cold_storage_alert_bypasses_shared_learning() -> None:
+    controller = notification_controller.NotificationController(
+        SimpleNamespace(
+            state=SimpleNamespace(learning_by_circuit={"fridge": True}),
+            store_data=SimpleNamespace(
+                settings_recommendation_notification_episode_key=(),
+            ),
+        )
+    )
+    ready_signature = AlertEvidence(
+        timestamp=datetime(2026, 7, 29, 22, 0, tzinfo=UTC),
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Compressor signature changed.",
+        feature="cold_storage_cycle_signature_change",
+        features={
+            "signature_ready": True,
+            "signature_baseline_windows": 96.0,
+            "signature_baseline_confidence": 1.0,
+        },
+    )
+    not_ready_signature = replace(
+        ready_signature,
+        features={
+            "signature_ready": True,
+            "signature_baseline_windows": 95.0,
+            "signature_baseline_confidence": 1.0,
+        },
+    )
+    ordinary_alert = replace(
+        ready_signature,
+        feature="run_cycle_duration_s",
+    )
+
+    assert controller.learning_allows_alert(ready_signature) is True
+    assert controller.learning_allows_alert(not_ready_signature) is False
+    assert controller.learning_allows_alert(ordinary_alert) is False
+
+
+@pytest.mark.asyncio
+async def test_self_mature_cold_storage_alert_recovers_during_shared_learning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 7, 29, 22, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Compressor signature changed.",
+        feature="cold_storage_cycle_signature_change",
+        features={
+            "signature_ready": True,
+            "signature_baseline_windows": 96.0,
+            "signature_baseline_confidence": 1.0,
+        },
+    )
+    created: list[AlertEvidence] = []
+
+    async def create_notification(hass, created_alert, *, config=None) -> None:
+        del hass, config
+        created.append(created_alert)
+
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_create_alert_notification",
+        create_notification,
+    )
+    monkeypatch.setattr(
+        notification_controller.notifications,
+        "async_dismiss_persistent_notification",
+        AsyncMock(),
+    )
+    state = SimpleNamespace(
+        learning_by_circuit={"fridge": False},
+        active_alerts_by_circuit={"fridge": [alert]},
+    )
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        state=state,
+        evidence_actions=SimpleNamespace(
+            alerts_paused=lambda circuit_id: False,
+            has_suppressed_alert_feedback=lambda candidate: False,
+        ),
+        circuit_registry=SimpleNamespace(
+            config_for_circuit=lambda circuit_id: SimpleNamespace(name="Fridge"),
+        ),
+        store_data=SimpleNamespace(
+            settings_recommendation_notification_episode_key=(),
+            appliance_notification_preferences={
+                "circuit:fridge": {"lifecycle_update": True},
+            },
+            notification_delivery_state={},
+            learning_started_at_by_circuit={},
+            alerts=[alert],
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+
+    await controller.async_notify_alert(alert)
+    state.learning_by_circuit["fridge"] = True
+    state.active_alerts_by_circuit = {}
+    await controller.async_sync_alert_notifications({"fridge"})
+
+    assert [item.feature for item in created] == [
+        "cold_storage_cycle_signature_change",
+        "alert_recovered",
+    ]
 
 
 @pytest.mark.asyncio

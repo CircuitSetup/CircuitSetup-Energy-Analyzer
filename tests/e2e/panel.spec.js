@@ -5033,6 +5033,13 @@ test("matched alert graph ends at evidence and keeps comparison compact", async 
   const chart = panel.locator("svg.chart");
   await expect(chart).toBeVisible();
   await expect(chart).toHaveAttribute("aria-label", /7:30PM/);
+  const historyPath = await page.evaluate(() => window.__apiCalls
+    .map(({ apiPath }) => apiPath)
+    .find((apiPath) => apiPath.includes("history/period/")) || "");
+  expect(historyPath).toContain("history/period/2026-07-13T17%3A00%3A00Z");
+  expect(historyPath).toContain("filter_entity_id=sensor.kitchen_power");
+  expect(historyPath).toContain("end_time=2026-07-13T19%3A30%3A00Z");
+  expect(historyPath).not.toContain("sensor.kitchen_current");
 
   const layout = await panel.locator(".comparison-scale").evaluate((scale) => {
     const track = scale.querySelector(".comparison-track").getBoundingClientRect();
