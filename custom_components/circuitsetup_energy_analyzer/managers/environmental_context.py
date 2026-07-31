@@ -556,7 +556,7 @@ class EnvironmentalContextManager:
             )
             if isinstance(sample, Mapping)
             and isinstance(sample.get("flow_status"), str)
-            and sample["flow_status"] != "unconfigured"
+            and sample["flow_status"] not in {"sensor_unavailable", "unconfigured"}
         )
         evidence = evaluate_flow_correlation(
             FlowCorrelationInput(
@@ -576,10 +576,39 @@ class EnvironmentalContextManager:
             )
         )
         evidence["flow_sensor_entities"] = list(flow_entities)
-        evidence["flow_sensor_active"] = any(
-            coordinator.context_builder.flow_entity_active(entity_id) is True
+        flow_states = tuple(
+            coordinator.context_builder.flow_entity_active(entity_id)
             for entity_id in flow_entities
         )
+        flow_sensor_active = (
+            True
+            if True in flow_states
+            else False
+            if flow_states and None not in flow_states
+            else None
+        )
+        evidence["flow_sensor_active"] = flow_sensor_active
+        if (
+            flow_entities
+            and flow_sensor_active is None
+            and evidence["status"] != "unconfigured"
+        ):
+            evidence["status"] = "sensor_unavailable"
+            evidence["friendly_summary"] = (
+                "Configured water-flow sensors are currently unavailable."
+            )
+            for field in (
+                "baseline_context",
+                "baseline_fallback_level",
+                "confidence",
+                "contextual_baseline_confidence",
+                "contextual_status",
+                "flow_active_minutes",
+                "mismatch_minutes",
+                "recent_flow_explains_activity",
+                "recent_related_runtime_minutes",
+            ):
+                evidence.pop(field, None)
         evidence["flow_mismatch_threshold_minutes"] = threshold_minutes
         return evidence
 

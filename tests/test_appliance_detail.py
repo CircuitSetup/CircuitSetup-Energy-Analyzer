@@ -46,6 +46,10 @@ def _config(
         mode=mode,
         sensors=(
             SensorRef(f"sensor.{circuit_id}_power", SensorRole.REAL_POWER),
+            SensorRef(f"sensor.{circuit_id}_current", SensorRole.CURRENT),
+            SensorRef(f"sensor.{circuit_id}_apparent_power", SensorRole.APPARENT_POWER),
+            SensorRef(f"sensor.{circuit_id}_reactive_power", SensorRole.REACTIVE_POWER),
+            SensorRef(f"sensor.{circuit_id}_power_factor", SensorRole.POWER_FACTOR),
             SensorRef(f"sensor.{circuit_id}_energy", SensorRole.ENERGY),
         ),
     )
@@ -246,7 +250,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
         "status": "fresh",
         "label": "Fresh",
         "available_source_count": 2,
-        "configured_source_count": 2,
+        "configured_source_count": 6,
         "stale_source_count": 0,
         "missing_required_roles": [],
     }
@@ -266,9 +270,124 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
         "reference_median": 0.4,
     }
     assert "hvac_efficiency" not in detail
+    assert "water_flow_context" not in detail
     assert detail["active_alerts"][0]["feature"] == "daily_energy"
     assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
     assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
+
+
+def test_water_flow_context_detail_projects_retained_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        _config(
+            "washer",
+            name="Laundry Washer",
+            profile=ApplianceProfile.WASHER,
+        ),
+    )
+    coordinator.state.water_flow_context_by_circuit["washer"] = {
+        "status": "possible_flow_without_load",
+        "friendly_summary": "Water flow has no mapped running appliance.",
+        "confidence": 0.75,
+        "flow_sensor_active": True,
+        "flow_active_minutes": 18.5,
+        "appliance_runtime_minutes": 12.0,
+        "mapped_appliance_count": 1,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_related_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+        "mismatch_minutes": 6.5,
+        "flow_mismatch_threshold_minutes": 10,
+        "comparable_window_count": 4,
+        "flow_sensor_entities": [
+            "sensor.house_flow",
+            "binary_sensor.washer_flow",
+            "sensor.house_flow",
+        ],
+    }
+
+    detail = appliance_detail_payload(
+        [coordinator],
+        circuit_id="washer",
+    )["detail"]
+
+    assert detail["water_flow_context"] == {
+        "status": "possible_flow_without_load",
+        "friendly_summary": "Water flow has no mapped running appliance.",
+        "confidence": 0.75,
+        "flow_sensor_active": True,
+        "flow_active_minutes": 18.5,
+        "appliance_runtime_minutes": 12.0,
+        "mapped_appliance_count": 1,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_related_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+        "mismatch_minutes": 6.5,
+        "flow_mismatch_threshold_minutes": 10,
+        "flow_sensors": [
+            {
+                "entity_id": "binary_sensor.washer_flow",
+                "name": "Washer Flow",
+            },
+            {
+                "entity_id": "sensor.house_flow",
+                "name": "House Flow",
+            },
+        ],
+        "learning": {
+            "comparable_window_count": 4,
+            "required_comparable_windows": 10,
+        },
+    }
+
+
+def test_water_flow_context_detail_omits_missing_metrics_and_keeps_zero_values(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        _config(
+            "washer",
+            name="Laundry Washer",
+            profile=ApplianceProfile.WASHER,
+        ),
+    )
+    coordinator.state.water_flow_context_by_circuit["washer"] = {
+        "status": "learning",
+        "confidence": 0.0,
+        "flow_sensor_active": False,
+        "flow_active_minutes": 0.0,
+        "mapped_appliance_count": 0,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+    }
+
+    context = appliance_detail_payload(
+        [coordinator],
+        circuit_id="washer",
+    )["detail"]["water_flow_context"]
+
+    assert context == {
+        "status": "learning",
+        "confidence": 0.0,
+        "flow_sensor_active": False,
+        "flow_active_minutes": 0.0,
+        "mapped_appliance_count": 0,
+        "mapped_appliance_runtime_minutes": 0.0,
+        "recent_flow_explains_activity": False,
+        "flow_sensors": [],
+        "learning": {
+            "comparable_window_count": 0,
+            "required_comparable_windows": 10,
+        },
+    }
 
 
 def test_hvac_appliance_detail_exposes_retained_thermostat_efficiency() -> None:
@@ -782,15 +901,57 @@ def test_direct_appliance_detail_payload_exposes_all_source_history() -> None:
 
     payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
 
-    assert payload["history"] == {
-        "entities": ["sensor.fridge_power", "sensor.fridge_energy"],
-        "entity_series": [
-            {"entity_id": "sensor.fridge_power", "unit": "W"},
-            {"entity_id": "sensor.fridge_energy", "unit": "kWh"},
-        ],
-        "default_hours": 168,
-        "period_hours": [24, 168, 720],
-    }
+    assert payload["history"]["entity_series"] == [
+        {"entity_id": "sensor.fridge_power", "unit": "W"},
+        {"entity_id": "sensor.fridge_current", "unit": "A"},
+        {"entity_id": "sensor.fridge_power_factor", "unit": "PF"},
+        {"entity_id": "sensor.fridge_energy", "unit": "kWh"},
+    ]
+    assert "sensor.fridge_apparent_power" not in payload["history"]["entities"]
+    assert "sensor.fridge_reactive_power" not in payload["history"]["entities"]
+
+
+def test_direct_appliance_detail_omits_va_and_var_with_misclassified_roles() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef("sensor.fridge_watts", SensorRole.REAL_POWER),
+                SensorRef("sensor.var_speed_pump_power", SensorRole.REAL_POWER),
+                SensorRef("sensor.kva_speed_pump_power", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_va", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_var", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_kva", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_mva", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_kvar", SensorRole.REAL_POWER),
+                SensorRef("sensor.fridge_mvar", SensorRole.REAL_POWER),
+                SensorRef(
+                    "sensor.legacy_apparent_meter",
+                    SensorRole.REAL_POWER,
+                    unit="kVA",
+                ),
+            ),
+        ),
+    )
+
+    history = appliance_detail_payload(
+        [coordinator],
+        circuit_id="fridge",
+    )["history"]
+
+    assert history["entities"] == [
+        "sensor.fridge_watts",
+        "sensor.var_speed_pump_power",
+        "sensor.kva_speed_pump_power",
+    ]
 
 
 def test_mains_nilm_appliance_detail_expectations_keep_mains_source() -> None:

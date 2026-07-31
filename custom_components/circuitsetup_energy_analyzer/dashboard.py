@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ ENERGY_COST_CARD = "custom:circuitsetup-energy-analyzer-energy-cost"
 CONTEXT_GRAPH_CARD = "custom:circuitsetup-energy-analyzer-context-graph"
 DATE_RANGE_CARD = "custom:circuitsetup-energy-analyzer-date-range"
 SUMMARY_CARD = "custom:circuitsetup-energy-analyzer-summary"
+HVAC_ASSOCIATIONS_CARD = "custom:circuitsetup-energy-analyzer-hvac-associations"
 SECTIONS_FOOTER_MIN_VERSION = (2026, 3)
 DASHBOARD_CUSTOM_CARD_TYPES = (
     HOUSE_FLOW_CARD,
@@ -45,6 +47,7 @@ DASHBOARD_CUSTOM_CARD_TYPES = (
     CONTEXT_GRAPH_CARD,
     DATE_RANGE_CARD,
     SUMMARY_CARD,
+    HVAC_ASSOCIATIONS_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
 )
 NILM_ESTIMATED_POWER_KEY = "estimated_power"
@@ -105,6 +108,7 @@ class DashboardContext:
     registry_lookup: Mapping[str, Any] | None
     entry_id: str | None
     outdoor_temperature_entity: str | None
+    mains_voltage_entities: tuple[str, ...]
     layout: str
     has_weather: bool
     has_water: bool
@@ -191,6 +195,7 @@ WATER_FLOW_PROFILES = {
 HVAC_WEATHER_PROFILES = {
     "hvac",
     "hvac_compressor",
+    "heat_pump",
     "mini_split",
     "hvac_blower",
     "electric_heat",
@@ -212,6 +217,7 @@ def build_recommended_dashboard(
     hass: Any | None = None,
     entry_id: str | None = None,
     outdoor_temperature_entity: str | None = None,
+    mains_voltage_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Build a recommended Lovelace dashboard config for analyzer circuits."""
     context = _dashboard_context(
@@ -220,14 +226,27 @@ def build_recommended_dashboard(
         hass=hass,
         entry_id=entry_id,
         outdoor_temperature_entity=outdoor_temperature_entity,
+        mains_voltage_entities=mains_voltage_entities,
     )
     home_view = _build_home_view(context)
+    home_cards = home_view["sections"][0]["cards"]
+    if voltage_card := _line_voltage_card(context, hass=hass):
+        summary_card = home_cards.pop()
+        home_cards.append(
+            {
+                "type": "grid",
+                "columns": 1,
+                "square": False,
+                "cards": [summary_card, voltage_card],
+                "grid_options": {"columns": 12},
+            }
+        )
     if context.appliances:
-        home_view["sections"][0]["cards"].extend(
+        home_cards.extend(
             _build_appliances_view(context)["sections"][0]["cards"]
         )
     if context.appliances or context.primary_mains is not None:
-        home_view["sections"][0]["cards"].append(
+        home_cards.append(
             {
                 "type": ENERGY_COST_CARD,
                 "title": _dashboard_text("cards", "energy_and_costs"),
@@ -332,7 +351,10 @@ def build_recommended_dashboard(
             )
         )
         for card in cards:
-            card["grid_options"]["columns"] = card_columns
+            if view["path"] == "overview":
+                card["grid_options"]["columns"] = 24
+            else:
+                card["grid_options"]["columns"] = card_columns
     return {
         "title": DASHBOARD_TITLE,
         "views": views,
@@ -356,6 +378,7 @@ def _dashboard_context(
     hass: Any | None,
     entry_id: str | None,
     outdoor_temperature_entity: str | None,
+    mains_voltage_entities: Iterable[str],
 ) -> DashboardContext:
     registry_lookup = _registry_entity_lookup(hass, entry_id)
     resolved = tuple(
@@ -401,6 +424,15 @@ def _dashboard_context(
         registry_lookup=registry_lookup,
         entry_id=entry_id,
         outdoor_temperature_entity=outdoor_entity,
+        mains_voltage_entities=tuple(
+            _dedupe(
+                sorted(
+                    str(entity_id).strip()
+                    for entity_id in mains_voltage_entities
+                    if str(entity_id).strip()
+                )
+            )
+        ),
         layout=normalize_dashboard_layout(layout),
         has_weather=has_weather,
         has_water=has_water,
@@ -652,6 +684,52 @@ def _mains_power_sources_available(mains: DashboardCircuit | None) -> bool:
     )
 
 
+def _line_voltage_card(
+    context: DashboardContext,
+    *,
+    hass: Any | None,
+) -> dict[str, Any] | None:
+    if not context.mains_voltage_entities:
+        return None
+    gauges = []
+    for entity_id in context.mains_voltage_entities:
+        minimum, maximum = _voltage_gauge_bounds(hass, entity_id)
+        gauges.append(
+            {
+                "type": "gauge",
+                "entity": entity_id,
+                "needle": True,
+                "min": minimum,
+                "max": maximum,
+            }
+        )
+    return {
+        "type": "grid",
+        "title": _dashboard_text("cards", "line_voltage"),
+        "columns": min(2, len(gauges)),
+        "square": False,
+        "cards": gauges,
+        "grid_options": {"columns": 12},
+    }
+
+
+def _voltage_gauge_bounds(hass: Any | None, entity_id: str) -> tuple[int, int]:
+    states = getattr(hass, "states", None)
+    get_state = getattr(states, "get", None)
+    state = get_state(entity_id) if callable(get_state) else None
+    try:
+        value = float(getattr(state, "state", None))
+    except (TypeError, ValueError):
+        return 0, 300
+    if not math.isfinite(value) or value <= 0:
+        return 0, 300
+    margin = max(10.0, value * 0.2)
+    return (
+        max(0, math.floor((value - margin) / 5) * 5),
+        math.ceil((value + margin) / 5) * 5,
+    )
+
+
 def _appliance_power_rows(context: DashboardContext) -> list[dict[str, str]]:
     rows = [
         {
@@ -688,6 +766,7 @@ def _build_appliances_view(context: DashboardContext) -> dict[str, Any]:
                 "title": _dashboard_text("cards", "appliances"),
                 "entry_id": context.entry_id,
                 "api_path": f"{DOMAIN}/appliance_insights",
+                "columns": 2,
                 "appliances": [
                     _appliance_card_payload(circuit, live_context=context)
                     for circuit in context.appliances
@@ -704,6 +783,21 @@ def _build_energy_costs_view(
     contextual_graphs: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     cards = list(contextual_graphs)
+    if context.hvac:
+        cards.append(
+            {
+                "type": HVAC_ASSOCIATIONS_CARD,
+                "title": _dashboard_text("cards", "hvac_associations"),
+                "entry_id": context.entry_id,
+                "api_path": f"{DOMAIN}/hvac_associations",
+                "revision_entities": [
+                    circuit.entities["health_summary"]
+                    for circuit in context.hvac
+                    if circuit.entities.get("health_summary")
+                ],
+                "labels": dict(translation_section("dashboard", "live_cards")),
+            }
+        )
     appliance_power_rows = _published_nilm_power_rows(
         context.registry_lookup,
         context.entry_id,
@@ -1067,15 +1161,18 @@ def dashboard_preflight_summary(
     hass: Any | None = None,
     entry_id: str | None = None,
     outdoor_temperature_entity: str | None = None,
+    mains_voltage_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Return the views and data capabilities the generated dashboard will use."""
     circuit_list = tuple(circuits)
+    voltage_entities = tuple(mains_voltage_entities)
     context = _dashboard_context(
         circuit_list,
         layout,
         hass=hass,
         entry_id=entry_id,
         outdoor_temperature_entity=outdoor_temperature_entity,
+        mains_voltage_entities=voltage_entities,
     )
     dashboard = build_recommended_dashboard(
         circuit_list,
@@ -1083,6 +1180,7 @@ def dashboard_preflight_summary(
         hass=hass,
         entry_id=entry_id,
         outdoor_temperature_entity=outdoor_temperature_entity,
+        mains_voltage_entities=voltage_entities,
     )
     views = [str(view.get("title") or "") for view in dashboard["views"]]
     paths = [str(view.get("path") or "") for view in dashboard["views"]]
@@ -1197,6 +1295,7 @@ def dashboard_storage_payload(
     hass: Any | None = None,
     entry_id: str | None = None,
     outdoor_temperature_entity: str | None = None,
+    mains_voltage_entities: Iterable[str] = (),
 ) -> dict[str, Any]:
     """Return the payload used to create/update a Home Assistant dashboard."""
     return {
@@ -1212,6 +1311,7 @@ def dashboard_storage_payload(
             hass=hass,
             entry_id=entry_id,
             outdoor_temperature_entity=outdoor_temperature_entity,
+            mains_voltage_entities=mains_voltage_entities,
         ),
     }
 

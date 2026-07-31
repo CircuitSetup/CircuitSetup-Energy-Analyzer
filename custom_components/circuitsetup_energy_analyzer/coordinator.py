@@ -19,6 +19,7 @@ from .config_parsing import (
 )
 from .const import (
     DOMAIN,
+    EVENT_HVAC_ASSOCIATION_UPDATED,
 )
 from .expected_schedule import (
     expected_schedule_circuit_ids,
@@ -202,6 +203,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
+
+    def async_set_updated_data(self: Self, data: Any) -> None:
+        """Publish coordinator data and signal HVAC association revisions."""
+        revisions = dict(
+            getattr(data, "hvac_association_revision_by_circuit", {}) or {}
+        )
+        previous = getattr(self, "_published_hvac_association_revisions", None)
+        super().async_set_updated_data(data)
+        self._published_hvac_association_revisions = revisions
+        if previous is None or previous == revisions:
+            return
+        fire = getattr(getattr(self.hass, "bus", None), "async_fire", None)
+        if fire is not None:
+            fire(EVENT_HVAC_ASSOCIATION_UPDATED, {"entry_id": self.entry_id})
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""

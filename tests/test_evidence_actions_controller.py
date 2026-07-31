@@ -29,6 +29,7 @@ class _ActionCoordinator:
         self.state = SimpleNamespace(
             hvac_current_episode_by_stream={},
             hvac_efficiency_by_circuit={},
+            hvac_association_revision_by_circuit={},
         )
         self.store_data = SimpleNamespace(
             maintenance_by_circuit={},
@@ -348,6 +349,7 @@ async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
     )
     assert coordinator.state.hvac_current_episode_by_stream == {}
     assert coordinator.state.hvac_efficiency_by_circuit == {}
+    assert coordinator.state.hvac_association_revision_by_circuit == {"heat_pump": 1}
 
 
 @pytest.mark.asyncio

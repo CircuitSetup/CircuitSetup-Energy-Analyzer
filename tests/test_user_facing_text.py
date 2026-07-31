@@ -43,6 +43,34 @@ def _frontend_source() -> str:
     return "\n".join(path.read_text(encoding="utf-8") for path in FRONTEND_ASSETS)
 
 
+def test_frontend_inherits_home_assistant_typography() -> None:
+    panel_shell = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
+    dashboard = DASHBOARD_GRAPHS_ASSET.read_text(encoding="utf-8")
+    combined = f"{panel_shell}\n{dashboard}"
+
+    assert "font-family: Roboto, Noto, sans-serif" not in combined
+    assert "font-family: var(--paper-font-body1_-_font-family" not in combined
+    assert ":host {" in panel_shell
+    assert "font-family: inherit;" in panel_shell
+    assert "font-family: inherit;" in dashboard
+
+
+def test_home_summary_metrics_fit_the_number_rendered() -> None:
+    dashboard = DASHBOARD_GRAPHS_ASSET.read_text(encoding="utf-8")
+
+    assert "grid-template-columns: repeat(auto-fit, minmax(128px, 1fr))" in dashboard
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr))" not in dashboard
+
+
+def test_panel_uses_content_header_and_home_assistant_card_tokens() -> None:
+    asset = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
+
+    assert '<header class="page-header">' in asset
+    assert 'class="panel page-header"' not in asset
+    assert "var(--ha-card-border-radius" in asset
+    assert "var(--ha-card-box-shadow" in asset
+
+
 def _run_panel_node_script(body: str) -> None:
     translation_path = INTEGRATION_DIR / "translations" / "en.json"
     panel_text_statement = (
@@ -173,6 +201,41 @@ def _translations() -> dict:
     return json.loads(
         (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
     )
+
+
+def test_hvac_associations_card_text_has_required_labels_and_placeholders() -> None:
+    live_cards = _translations()["config_panel"]["dashboard"]["live_cards"]
+    expected = {
+        "hvac_associations_title",
+        "heating",
+        "cooling",
+        "learned_baseline",
+        "efficiency_percent",
+        "recent_response",
+        "learning",
+        "tracking",
+        "needs_attention",
+        "stable",
+        "faster",
+        "slower",
+        "supporting_blower",
+        "mapped_temperature",
+        "minutes_per_degree",
+        "not_available",
+        "retry",
+        "load_error",
+        "open_detail",
+        "no_hvac_associations",
+    }
+
+    assert expected <= live_cards.keys()
+    assert all(live_cards[key] for key in expected)
+    assert re.findall(r"{(.*?)}", live_cards["mapped_temperature"]) == ["name"]
+    assert re.findall(r"{(.*?)}", live_cards["minutes_per_degree"]) == [
+        "value",
+        "unit",
+    ]
+    assert re.findall(r"{(.*?)}", live_cards["no_hvac_associations"]) == []
 
 
 def _iter_translation_strings(value, path: tuple[str, ...] = ()):
@@ -1449,7 +1512,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "detail.recent_timeline",
         "_renderApplianceTimeline",
         '_panelText("appliance_detail.behavior_expectations")',
-        '_panelText("common.confidence")',
+        "data-appliance-behavior-health",
         "NILM_WORKSPACE_CALL_API_PATH",
         "nilm_workspace",
         "NILM_WORKSPACE_QUERY_PARAM",
@@ -1732,7 +1795,8 @@ if (html.includes("$")) {
 }
 assert.equal((html.match(/>Cost Today</g) || []).length, 1);
 assert.equal((html.match(/class="chart"/g) || []).length, 1);
-assert.equal((html.match(/class="panel summary appliance-detail-facts"/g) || []).length, 1);
+assert.equal((html.match(/class="panel summary appliance-detail-facts"/g) || []).length, 0);
+assert.ok(html.includes("data-appliance-now"));
 const dailyMetricOrder = [
   ">kWh Today<",
   ">Average kWh per Day<",
@@ -1742,7 +1806,6 @@ const dailyMetricOrder = [
 assert.ok(dailyMetricOrder.every((index) => index >= 0));
 assert.deepEqual(dailyMetricOrder, [...dailyMetricOrder].sort((left, right) => left - right));
 for (const removed of [
-  ">Learning<",
   ">Source<",
   ">Mains Source<",
   ">Data Quality<",
@@ -1815,16 +1878,46 @@ const html = panel._renderApplianceComparisons([{
 }]);
 for (const expected of [
   "Energy so far",
-  "Projected end of day",
+  "Projected",
   "1.9 kWh",
   "Projected range 1.7 kWh - 2.1 kWh",
   "Completed-day normal range 1.4 kWh - 1.8 kWh",
-  "Projected status Higher",
-  "58%",
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);
   }
+}
+assert.equal((html.match(/>Projected</g) || []).length, 1);
+assert.ok(!html.includes("Projection confidence"));
+assert.ok(!html.includes("Projected status"));
+"""
+    )
+
+
+def test_appliance_detail_comparison_formats_runtime_as_duration() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderApplianceComparisons([{
+  metric_id: "runtime_today_seconds",
+  label: "Runtime so far",
+  unit: "s",
+  current_value: 10349.897,
+  normal_low: 2610.09,
+  normal_high: 12518.361,
+  status: "normal",
+  projection_value: 17801.167,
+  projection_low: 9164.483,
+  projection_high: 22217.996,
+  full_period_normal_low: 8530.127,
+  full_period_normal_high: 20680.089,
+}]);
+for (const expected of ["2h 52m 30s", "43m 30s - 3h 28m 38s", "4h 56m 41s"]) {
+  assert.ok(html.includes(expected), `missing ${expected}: ${html}`);
+}
+assert.ok(html.includes('icon="mdi:timer-outline"'));
+for (const raw of ["10349.897 s", "2610.09 s", "12518.361 s", "17801.167 s"]) {
+  assert.ok(!html.includes(raw), `raw seconds remain: ${html}`);
 }
 """
     )
@@ -2000,12 +2093,11 @@ for (const expected of [
   'icon="mdi:flash-outline"',
   'icon="mdi:heart-pulse"',
   'icon="mdi:chart-line"',
+  'icon="mdi:clock-outline"',
   'icon="mdi:calendar-today"',
-  'icon="mdi:timer-outline"',
-  'icon="mdi:counter"',
   'icon="mdi:cash"',
   'class="appliance-timeline"',
-  'class="appliance-comparison-grid"',
+  'data-appliance-comparison-table',
 ]) {
   if (!html.includes(expected)) throw new Error(`missing ${expected}: ${html}`);
 }
@@ -2033,27 +2125,42 @@ def test_appliance_detail_renders_predictive_health_evidence() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
-const learning = panel._renderApplianceHealth({
-  status: "learning",
-  reason: "insufficient_history",
-  confidence: 0,
+const learning = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: {
+    status: "learning",
+    reason: "insufficient_history",
+    confidence: 0,
+  },
 });
-assert.ok(learning.includes('data-appliance-health'));
+assert.ok(learning.includes('data-appliance-behavior-health'));
 assert.ok(learning.includes("Predictive Health"));
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("More completed appliance history is needed"));
 
-const possibleIssue = panel._renderApplianceHealth({
-  status: "possible_degradation",
-  reason: "sustained_change",
-  confidence: 0.91,
-  feature: "efficiency_degradation",
-  metric: "energy_per_runtime_hour",
-  change_percent: 30,
-  reference_count: 14,
-  recent_count: 3,
-  context: { season: "summer", weather_mode: "cooling" },
-  last_eligible_date_or_session: "2026-07-27",
+const withoutHealth = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: null,
+  recent_timeline: { items: [] },
+});
+assert.ok(withoutHealth.includes("Predictive Health"));
+assert.ok(!withoutHealth.includes("<strong>Learning</strong>"));
+
+const possibleIssue = panel._renderApplianceBehaviorHealth({
+  expectations: [],
+  appliance_health: {
+    status: "possible_degradation",
+    reason: "sustained_change",
+    confidence: 0.91,
+    feature: "efficiency_degradation",
+    metric: "energy_per_runtime_hour",
+    change_percent: 30,
+    reference_count: 14,
+    recent_count: 3,
+    context: { season: "summer", weather_mode: "cooling" },
+    last_eligible_date_or_session: "2026-07-27",
+  },
+  recent_timeline: { items: [] },
 });
 for (const expected of [
   "Possible degradation",
@@ -2075,9 +2182,10 @@ def test_appliance_detail_renders_hvac_thermostat_efficiency() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
+panel._hass = { config: { unit_system: { temperature: "°F" } } };
 const ready = panel._renderHvacEfficiency({
   status: "ready",
-  summary_score: 80,
+  summary_score: 110,
   trend: "slower",
   threshold_pct: 25,
   learning: {
@@ -2124,9 +2232,10 @@ const ready = panel._renderHvacEfficiency({
 for (const expected of [
   'data-hvac-efficiency',
   "HVAC Thermostat Efficiency",
-  "80 / 100",
+  "110 / 100",
+  'style="--hvac-score:27.5%"',
   "100 is the learned baseline",
-  "25% response-change threshold",
+  "Alert threshold: 25% response change",
   "Heating",
   "Cooling",
   "Upstairs",
@@ -2135,10 +2244,20 @@ for (const expected of [
   "12.5 min/°F",
   "9 of 9 reference episodes",
   "3 of 3 recent episodes",
-  "Outdoor: 95°F",
-  "season: summer",
+  "Outdoor temperature",
+  "95°F",
+  "Season",
+  "summer",
+  "Weather context",
+  "cooling",
   "Gas-furnace blower proxy",
   "Cooling blower supports air handling",
+  'icon="mdi:thermostat"',
+  'icon="mdi:weather-sunny"',
+  'icon="mdi:calendar-season"',
+  'icon="mdi:cloud-outline"',
+  'icon="mdi:account-check-outline"',
+  'icon="mdi:counter"',
 ]) {
   assert.ok(ready.includes(expected), `missing ${expected}: ${ready}`);
 }
@@ -2160,6 +2279,10 @@ const learning = panel._renderHvacEfficiency({
 assert.ok(learning.includes("Learning"));
 assert.ok(learning.includes("waiting for completed thermostat episodes"));
 assert.ok(!learning.toLowerCase().includes("fault"));
+assert.ok(learning.includes("hvac-efficiency-layout"));
+assert.ok(learning.includes('data-hvac-learning="true"'));
+assert.ok(learning.includes('icon="mdi:database-clock-outline"'));
+assert.ok(learning.includes('icon="mdi:history"'));
 """
     )
 
@@ -2194,7 +2317,7 @@ panel._applianceDetail = {
   },
 };
 const html = panel._renderApplianceDetailBody();
-assert.ok(html.includes('class="appliance-detail-overview"'));
+assert.ok(html.includes("data-appliance-now"));
 assert.ok(html.includes("Appliance Activity History"));
 assert.ok(!html.includes("Why Energy Changed"));
 assert.ok(!html.includes("What To Check First"));
@@ -2292,6 +2415,8 @@ panel._applianceDetail = {
     ],
     entity_series: [
       { entity_id: "sensor.fridge_power", unit: "W" },
+      { entity_id: "sensor.fridge_va", unit: "VA" },
+      { entity_id: "sensor.fridge_var", unit: "VAR" },
       { entity_id: "sensor.fridge_power_factor", unit: "PF" },
       { entity_id: "sensor.fridge_current", unit: "A" },
       { entity_id: "sensor.fridge_energy", unit: "kWh" },
@@ -2323,6 +2448,12 @@ panel._applianceDetailHistorySeries = [[
   { entity_id: "sensor.fridge_power", state: "128", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power", state: "84", last_changed: "2026-07-10T13:00:00Z" },
 ], [
+  { entity_id: "sensor.fridge_va", state: "132", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_va", state: "90", last_changed: "2026-07-10T13:00:00Z" },
+], [
+  { entity_id: "sensor.fridge_var", state: "14", last_changed: "2026-07-10T12:00:00Z" },
+  { entity_id: "sensor.fridge_var", state: "11", last_changed: "2026-07-10T13:00:00Z" },
+], [
   { entity_id: "sensor.fridge_power_factor", state: "0.92", last_changed: "2026-07-10T12:00:00Z" },
   { entity_id: "sensor.fridge_power_factor", state: "0.88", last_changed: "2026-07-10T13:00:00Z" },
 ], [
@@ -2338,15 +2469,17 @@ panel._applianceDetailHistoryBounds = {
 };
 const html = panel._renderApplianceDetailBody();
 const graph = html.indexOf('class="chart"');
-const summary = html.indexOf('class="panel summary appliance-detail-facts"');
+const summary = html.indexOf("data-appliance-behavior-health");
 if (graph < 0 || graph > summary) {
   throw new Error(`expected appliance history graph before summaries: ${html}`);
 }
 for (const expected of [
-  "Energy History",
+  ">Graphs<",
   'data-appliance-history-period',
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
+  ">Zoom In<",
+  ">Pan Earlier<",
   'data-chart-point="1"',
   'data-chart-tooltip',
 ]) {
@@ -2354,8 +2487,10 @@ for (const expected of [
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
-if ((html.match(/class="chart"/g) || []).length !== 4) {
-  throw new Error(`expected separate power, amps, power factor, and energy charts: ${html}`);
+assert.ok(!html.includes(">VA<"));
+assert.ok(!html.includes(">VAR<"));
+if ((html.match(/class="chart"/g) || []).length !== 3) {
+  throw new Error(`expected combined power and amps plus power factor and energy charts: ${html}`);
 }
 const axisLabels = [...html.matchAll(/class="axis-label"[^>]*>([^<]+)<\\/text>/g)]
   .map((match) => match[1]);
@@ -4495,6 +4630,16 @@ def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
     assert null_guard in formatter
     assert formatter.index(null_guard) < formatter.index(coercion)
 
+    _run_panel_node_script(
+        '''
+const panel = new context.Panel();
+assert.equal(panel._formatDuration(0), "0s");
+assert.equal(panel._formatDuration(61), "1m 1s");
+assert.equal(panel._formatDuration(3661), "1h 1m 1s");
+assert.equal(panel._formatDuration(null), "Unknown");
+'''
+    )
+
 
 def test_appliance_detail_percent_comparisons_format_without_extra_space() -> None:
     _run_panel_node_script(
@@ -4573,21 +4718,6 @@ def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks()
         "data-appliance-insights-source-path",
         'querySelectorAll("[data-appliance-insights-detail-path]")',
         'querySelectorAll("[data-appliance-insights-source-path]")',
-    ):
-        assert expected in asset
-
-
-def test_appliance_detail_panel_renders_why_energy_changed() -> None:
-    asset = _frontend_source()
-
-    for expected in (
-        "_renderWhyEnergyChanged",
-        'this._panelText("appliance_detail.why_energy_changed")',
-        "energy_change_explanation",
-        "runtime_contribution_percent",
-        "running_power_contribution_percent",
-        "cycle_count_contribution_percent",
-        "unexplained_percent",
     ):
         assert expected in asset
 
@@ -6355,7 +6485,22 @@ def test_alert_evidence_technical_details_has_minimum_touch_target() -> None:
         assert declaration in summary_style
 
 
-def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
+def test_non_nilm_panel_routes_use_the_shared_surface_contract() -> None:
+    evidence_views = EVIDENCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    appliance_views = APPLIANCE_VIEWS_ASSET.read_text(encoding="utf-8")
+    panel_shell = PANEL_SHELL_ASSET.read_text(encoding="utf-8")
+
+    assert "data-evidence-comparison" in evidence_views
+    assert "recommendation-layout" in evidence_views
+    assert "appliance-insights-table" in appliance_views
+    assert "setup-health-status" in appliance_views
+    assert '<header class="page-header">' in panel_shell
+    assert 'class="panel page-header"' not in panel_shell
+    assert "font-family:" not in evidence_views
+    assert "font-family:" not in appliance_views
+
+
+def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:
     asset = _frontend_source()
     surface_rule = re.search(
         r"\.section-surface\s*\{(?P<body>.*?)\}",
@@ -6365,12 +6510,14 @@ def test_alert_and_nilm_sections_share_outlined_white_surfaces() -> None:
 
     assert surface_rule is not None
     for declaration in (
-        "background: var(--card-background-color, #fff);",
-        "border: 1px solid var(--divider-color, #d8dde6);",
-        "border-radius: 8px;",
-        "padding: 16px;",
+        "background: var(--ha-card-background, var(--card-background-color));",
+        "border: var(--ha-card-border-width, 1px) solid",
+        "var(--ha-card-border-color, var(--divider-color));",
+        "border-radius: var(--ha-card-border-radius, 12px);",
+        "box-shadow: var(--ha-card-box-shadow);",
     ):
         assert declaration in surface_rule.group("body")
+    assert ".section-surface {\n          padding: 16px;" in asset
     for marker in (
         'class="evidence-section evidence-meta summary section-surface"',
         'class="evidence-section comparison section-surface"',
@@ -6498,10 +6645,10 @@ def test_alert_evidence_render_contracts() -> None:
         querySelectorAll() { return []; },
       };
       panel._render();
-      const start = panel.shadowRoot.innerHTML.indexOf('<section class="panel page-header">');
+      const start = panel.shadowRoot.innerHTML.indexOf('<header class="page-header">');
       const header = panel.shadowRoot.innerHTML.slice(
         start,
-        panel.shadowRoot.innerHTML.indexOf("</section>", start),
+        panel.shadowRoot.innerHTML.indexOf("</header>", start),
       );
       assert.ok(header.includes("Last Seen"));
       assert.ok(header.includes("2026-07-09"));
@@ -7024,6 +7171,22 @@ def test_readme_describes_appliance_drilldown_pattern() -> None:
         assert phrase in readme_text
 
 
+def test_readme_describes_native_dashboard_and_detail_ui() -> None:
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for text in (
+        "Home Assistant's stock header and icon tabs",
+        "Home energy summary on the left and Appliances on the right",
+        "Line voltage",
+        "floating date",
+        "VA and VAR are omitted from Appliance Detail graphs",
+    ):
+        assert text in readme_text
+
+    assert "House power flow is shown" not in readme_text
+    assert "a restore icon resets an individual graph" not in readme_text
+
+
 def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
     translations = _translations()
     issues = translations["issues"]
@@ -7212,7 +7375,7 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "previous, next, now, compare, and CSV download actions" in readme_text
     assert "without repeating a separate Active Now list" in readme_text
     assert "segmented Running intervals against the selected range" in readme_text
-    assert "restore icon resets an individual graph" in readme_text
+    assert "no visible chart-level zoom, pan, or reset controls" in readme_text
     assert "Detail links open appliance detail pages directly" in readme_text
     assert "Billing Cycle card lives on the final Insights tab" in readme_text
     assert "recorded, estimated, or unavailable cost status" in readme_text

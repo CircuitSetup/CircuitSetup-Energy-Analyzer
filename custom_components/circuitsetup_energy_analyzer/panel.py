@@ -21,7 +21,12 @@ from .appliance_insights import (
 )
 from .appliance_notifications import preferences_from_dict
 from .attention import attention_items_for_coordinators
-from .const import DOMAIN
+from .const import (
+    CONF_ADVANCED_SETTINGS,
+    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+    DOMAIN,
+)
+from .context_sources import thermostat_mappings_for_settings
 from .entities.setup_health import (
     setup_health_attributes,
     setup_health_panel_text,
@@ -32,6 +37,7 @@ from .local_time import local_date
 from .localized_text import translation_section
 from .models import (
     AlertEvidence,
+    ApplianceProfile,
     CircuitConfig,
     SensorRole,
 )
@@ -63,6 +69,7 @@ from .panel_views import (
     AlertEvidenceView,
     ApplianceDetailView,
     ApplianceInsightsView,
+    HvacAssociationsView,
     NilmWorkspaceHistoryView,
     NilmWorkspaceView,
     SetupHealthView,
@@ -1041,6 +1048,15 @@ def _source_history_series(config: Any) -> list[dict[str, str]]:
         except (TypeError, ValueError):
             role = None
         unit = str(getattr(sensor, "unit", "") or _HISTORY_UNIT_BY_ROLE.get(role, ""))
+        if role in {
+            SensorRole.APPARENT_POWER,
+            SensorRole.REACTIVE_POWER,
+        } or unit.lower().endswith(("va", "var")) or re.search(
+            r"(?:^|_)(?:apparent_power|reactive_power)(?:_|$)"
+            r"|(?:^|_)(?:[km]?va|[km]?var)$",
+            entity_id.split(".", 1)[-1].lower(),
+        ):
+            continue
         series.append({"entity_id": entity_id, "unit": unit})
     return series
 
@@ -1331,11 +1347,204 @@ def _advanced_circuit_settings_action(
     return action
 
 
-def _circuit_appliance_detail_panel_path(circuit_id: str) -> str:
+def _circuit_appliance_detail_panel_path(
+    circuit_id: str, *, entry_id: str | None = None
+) -> str:
+    query = {ATTR_CIRCUIT_ID: circuit_id, "appliance_detail": "1"}
+    if entry_id:
+        query["entry_id"] = entry_id
     return (
         f"/{PANEL_URL_PATH}?"
-        f"{urlencode({ATTR_CIRCUIT_ID: circuit_id, 'appliance_detail': '1'})}"
+        f"{urlencode(query)}"
     )
+
+
+def hvac_associations_payload(
+    coordinators: Iterable[Any], *, entry_id: str | None = None
+) -> dict[str, Any]:
+    """Return configured HVAC thermostat mappings with bounded evaluation state."""
+    items: list[dict[str, Any]] = []
+    for coordinator in coordinators:
+        coordinator_entry_id = _coordinator_entry_id(coordinator)
+        if entry_id and coordinator_entry_id != entry_id:
+            continue
+        entry_data = getattr(coordinator, "entry_data", {})
+        options = getattr(coordinator, "options", {})
+        if not isinstance(entry_data, Mapping) or not isinstance(options, Mapping):
+            continue
+        entry_settings = entry_data.get(CONF_ADVANCED_SETTINGS, {})
+        option_settings = options.get(CONF_ADVANCED_SETTINGS, {})
+        state = getattr(coordinator, "state", None)
+        efficiency = getattr(state, "hvac_efficiency_by_circuit", {})
+        issues = getattr(state, "hvac_thermostat_setup_issues_by_circuit", {})
+        for config in getattr(coordinator, "circuit_configs", ()):
+            if config.appliance_profile not in _HVAC_ASSOCIATION_PROFILES:
+                continue
+            settings = (
+                dict(entry_settings.get(config.circuit_id, {}))
+                if isinstance(entry_settings, Mapping)
+                else {}
+            )
+            if isinstance(option_settings, Mapping):
+                override = option_settings.get(config.circuit_id, {})
+                if isinstance(override, Mapping):
+                    settings.update(override)
+            mappings = thermostat_mappings_for_settings(entry_data, options, settings)
+            retained = (
+                efficiency.get(config.circuit_id, {})
+                if isinstance(efficiency, Mapping)
+                else {}
+            )
+            streams = (
+                retained.get("streams", {}) if isinstance(retained, Mapping) else {}
+            )
+            circuit_issues = (
+                issues.get(config.circuit_id, ()) if isinstance(issues, Mapping) else ()
+            )
+            for thermostat_entity_id, temperature_entity_id in mappings.items():
+                modes = {
+                    mode: _hvac_association_mode(
+                        streams, config, thermostat_entity_id, mode
+                    )
+                    for mode in _hvac_association_modes(config, settings)
+                }
+                status = (
+                    "needs_attention"
+                    if _association_has_setup_issue(
+                        circuit_issues,
+                        thermostat_entity_id,
+                        temperature_entity_id,
+                    )
+                    else (
+                        "ready"
+                        if any(mode["status"] == "ready" for mode in modes.values())
+                        else "learning"
+                    )
+                )
+                items.append(
+                    {
+                        "entry_id": coordinator_entry_id,
+                        "circuit_id": config.circuit_id,
+                        "appliance_name": config.name,
+                        "appliance_profile": config.appliance_profile.value,
+                        "detail_path": _circuit_appliance_detail_panel_path(
+                            config.circuit_id, entry_id=coordinator_entry_id
+                        ),
+                        "thermostat_entity_id": thermostat_entity_id,
+                        "thermostat_name": _entity_id_name(thermostat_entity_id),
+                        "temperature_entity_id": temperature_entity_id,
+                        "temperature_name": _entity_id_name(temperature_entity_id)
+                        if temperature_entity_id
+                        else None,
+                        "status": status,
+                        "modes": modes,
+                    }
+                )
+    items.sort(
+        key=lambda item: (
+            item["appliance_name"],
+            item["circuit_id"],
+            item["thermostat_entity_id"],
+        )
+    )
+    return {"status": "ok", "count": len(items), "items": items}
+
+
+def _association_has_setup_issue(
+    issues: Any,
+    thermostat_entity_id: str,
+    temperature_entity_id: str | None,
+) -> bool:
+    association_sources = {thermostat_entity_id, temperature_entity_id} - {None}
+    for issue in issues:
+        source_entities = (
+            issue.get("source_entities") if isinstance(issue, Mapping) else None
+        )
+        if not source_entities or association_sources.intersection(source_entities):
+            return True
+    return False
+
+
+_HVAC_ASSOCIATION_PROFILES = frozenset(
+    {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HVAC_BLOWER,
+        ApplianceProfile.HEAT_PUMP,
+        ApplianceProfile.MINI_SPLIT,
+        ApplianceProfile.ELECTRIC_HEAT,
+    }
+)
+
+
+def _hvac_association_modes(
+    config: CircuitConfig, settings: Mapping[str, Any]
+) -> tuple[str, ...]:
+    profile = config.appliance_profile
+    modes: list[str] = []
+    if profile in {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HEAT_PUMP,
+        ApplianceProfile.MINI_SPLIT,
+        ApplianceProfile.ELECTRIC_HEAT,
+    } or (
+        profile is ApplianceProfile.HVAC_BLOWER
+        and settings.get(CONF_BLOWER_REPRESENTS_GAS_HEAT)
+    ):
+        modes.append("heating")
+    if profile in {
+        ApplianceProfile.HVAC,
+        ApplianceProfile.HVAC_COMPRESSOR,
+        ApplianceProfile.HEAT_PUMP,
+        ApplianceProfile.MINI_SPLIT,
+    }:
+        modes.append("cooling")
+    return tuple(modes)
+
+
+def _hvac_association_mode(
+    streams: Any, config: CircuitConfig, thermostat_entity_id: str, mode: str
+) -> dict[str, Any]:
+    raw = (
+        streams.get(f"{config.circuit_id}|{thermostat_entity_id}|{mode}", {})
+        if isinstance(streams, Mapping)
+        else {}
+    )
+    raw = raw if isinstance(raw, Mapping) else {}
+    change_percent = raw.get("change_percent")
+    if "change_percent" not in raw and isinstance(
+        raw.get("change_ratio"), (int, float)
+    ):
+        change_percent = raw["change_ratio"] * 100.0
+    context = raw.get("context")
+    context = context if isinstance(context, Mapping) else {}
+    return {
+        "applicable": True,
+        "status": str(raw.get("status") or "learning"),
+        "score": raw.get("score"),
+        "trend": str(raw.get("finding") or "") or None,
+        "change_percent": change_percent,
+        "baseline_minutes_per_degree_f": raw.get("baseline_minutes_per_degree"),
+        "recent_minutes_per_degree_f": raw.get("recent_minutes_per_degree"),
+        "reference_count": int(raw.get("reference_count") or 0),
+        "recent_count": int(raw.get("recent_count") or 0),
+        "supporting_blower_ids": sorted(
+            {
+                str(item)
+                for item in context.get("supporting_blower_ids", ())
+                if str(item)
+            }
+        )[:8],
+        "attribution": "gas_furnace_proxy"
+        if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+        else "direct",
+    }
+
+
+def _entity_id_name(entity_id: str | None) -> str | None:
+    if not entity_id:
+        return None
+    return entity_id.rsplit(".", 1)[-1].replace("_", " ").title()
 
 
 def _advanced_circuit_settings_path(
@@ -1416,10 +1625,17 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
 
     recommendation_id = payload.get(ATTR_RECOMMENDATION_ID)
     circuit_id = str(payload.get("circuit_id") or "").strip()
+    config = _config_for_circuit(coordinator, circuit_id) if circuit_id else None
     if circuit_id and not str(payload.get("circuit_name") or "").strip():
-        config = _config_for_circuit(coordinator, circuit_id)
         if config is not None:
             payload["circuit_name"] = config.name
+    graph_entity_series = _source_history_series(config)
+    if graph_entity_series:
+        payload.setdefault(
+            "graph_entities",
+            [item["entity_id"] for item in graph_entity_series],
+        )
+        payload.setdefault("graph_entity_series", graph_entity_series)
     payload["display_label"] = _recommendation_display_label(payload)
     _add_setting_impact_preview(payload, coordinator)
     _add_recommendation_guidance(payload)
@@ -1880,6 +2096,7 @@ def _register_view(hass: Any) -> None:
     register_view = getattr(http, "register_view", None)
     if register_view is not None:
         register_view(AlertEvidenceView())
+        register_view(HvacAssociationsView())
         register_view(ApplianceDetailView())
         register_view(ApplianceInsightsView())
         register_view(SetupHealthView())

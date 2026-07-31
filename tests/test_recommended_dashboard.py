@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     DATE_RANGE_CARD,
     ENERGY_COST_CARD,
     HOUSE_FLOW_CARD,
+    HVAC_ASSOCIATIONS_CARD,
     NILM_DASHBOARD_GRAPHS_CARD,
     SUMMARY_CARD,
     build_recommended_dashboard,
@@ -348,7 +349,7 @@ def _summary_only_registry_entries() -> dict[str, SimpleNamespace]:
     [
         (
             DASHBOARD_LAYOUT_SIMPLE,
-            ["overview"],
+            ["overview", "energy-costs"],
         ),
         (
             DASHBOARD_LAYOUT_STANDARD,
@@ -505,7 +506,7 @@ def test_appliance_power_graph_groups_dual_phase_entities() -> None:
     assert {row["name"] for row in dryer_rows} == {"Dryer"}
 
 
-def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power(
+def test_home_cards_order_graphs_before_appliances_and_configured_voltage(
 ) -> None:
     mains = CircuitConfig(
         circuit_id="mains",
@@ -539,6 +540,11 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
         (_circuits()[0], mains),
         DASHBOARD_LAYOUT_STANDARD,
         hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l2_voltage",
+            " sensor.mains_l1_voltage ",
+            "sensor.mains_l1_voltage",
+        ),
     )
     home = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "overview"
@@ -548,9 +554,24 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
     assert [card.get("title") for card in cards[:5]] == [
         "Mains total power and amps",
         "All appliance power",
-        "Home energy summary",
+        None,
         "Appliances",
         "Energy and costs",
+    ]
+    assert cards[3]["columns"] == 2
+    summary_stack = cards[2]
+    assert summary_stack["type"] == "grid"
+    assert summary_stack["columns"] == 1
+    assert summary_stack["square"] is False
+    assert [card.get("title") for card in summary_stack["cards"]] == [
+        "Home energy summary",
+        "Line voltage",
+    ]
+    voltage = _card_with_title(home, "Line voltage")
+    assert voltage["type"] == "grid"
+    assert [gauge["entity"] for gauge in voltage["cards"]] == [
+        "sensor.mains_l1_voltage",
+        "sensor.mains_l2_voltage",
     ]
     graph = cards[0]
     assert graph["entities"] == [
@@ -585,7 +606,7 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
             "axis": "right",
         },
     ]
-    summary = cards[2]
+    summary = _card_with_title(home, "Home energy summary")
     assert summary["primary_mains"]["power_entities"] == [
         "sensor.mains_watts",
         "sensor.mains_active_power",
@@ -604,6 +625,7 @@ def test_home_mains_graph_filters_non_power_sources_and_precedes_appliance_power
     assert summary["primary_mains"]["power_factor_entities"] == [
         "sensor.mains_power_factor",
     ]
+    assert [card["grid_options"]["columns"] for card in cards[:5]] == [24] * 5
 
 
 def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() -> None:
@@ -651,6 +673,57 @@ def test_home_mains_graph_adds_hidden_calculation_sources_without_chart_power() 
             "hidden": True,
         },
     ]
+
+
+def test_home_voltage_card_uses_native_gauges_with_adaptive_ranges() -> None:
+    states = {
+        "sensor.mains_l1_voltage": SimpleNamespace(state="118"),
+        "sensor.mains_l2_voltage": SimpleNamespace(state="230"),
+    }
+    dashboard = build_recommended_dashboard(
+        _circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+        mains_voltage_entities=(
+            "sensor.mains_l1_voltage",
+            "sensor.mains_l2_voltage",
+        ),
+    )
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    card = _card_with_title(home, "Line voltage")
+    assert card["type"] == "grid"
+    assert card["columns"] == 2
+    assert card["square"] is False
+    assert card["cards"] == [
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l1_voltage",
+            "needle": True,
+            "min": 90,
+            "max": 145,
+        },
+        {
+            "type": "gauge",
+            "entity": "sensor.mains_l2_voltage",
+            "needle": True,
+            "min": 180,
+            "max": 280,
+        },
+    ]
+
+
+def test_home_omits_voltage_card_without_configured_voltage_entities() -> None:
+    dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
+    home = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "overview"
+    )
+
+    assert not any(
+        card.get("title") == "Line voltage" for card in home["sections"][0]["cards"]
+    )
 
 
 def test_home_mains_graph_uses_friendly_names_for_opaque_power_sources() -> None:
@@ -800,7 +873,7 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
         "custom:circuitsetup-energy-analyzer-house-flow",
     )
     assert energy_card in home_view["sections"][0]["cards"]
-    assert "energy-costs" not in {
+    assert "energy-costs" in {
         view["path"] for view in _dashboard_views(dashboard)
     }
     assert energy_card["grid_options"]["columns"] == 24
@@ -837,6 +910,120 @@ def test_dashboard_separates_daily_and_billing_cost_entities() -> None:
     assert "sensor.mains_cost_cycle" in billing_entities
     assert "sensor.mains_cost_cycle_forecast" in billing_entities
     assert all("cost_today" not in entity_id for entity_id in billing_entities)
+
+
+def test_hvac_associations_card_is_on_energy_costs_only() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert HVAC_ASSOCIATIONS_CARD not in cards_by_view["overview"]
+    assert HVAC_ASSOCIATIONS_CARD not in cards_by_view.get("insights", set())
+    card = _card_of_type(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "energy-costs"
+        ),
+        HVAC_ASSOCIATIONS_CARD,
+    )
+    assert card["title"] == "HVAC & Thermostats"
+    assert card["entry_id"] is None
+    assert card["api_path"] == "circuitsetup_energy_analyzer/hvac_associations"
+    assert card["labels"]["hvac_associations_title"] == "HVAC & Thermostats"
+
+
+def test_hvac_associations_card_is_omitted_without_hvac() -> None:
+    dashboard = build_recommended_dashboard(_circuits(), DASHBOARD_LAYOUT_STANDARD)
+
+    assert HVAC_ASSOCIATIONS_CARD not in {
+        str(card["type"])
+        for card in _dashboard_cards(dashboard)
+        if isinstance(card.get("type"), str)
+    }
+
+
+def test_hvac_associations_card_uses_resolved_health_sensors_for_revisions() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(),
+        DASHBOARD_LAYOUT_STANDARD,
+        hass=SimpleNamespace(
+            entity_registry=SimpleNamespace(
+                entities={
+                    "sensor.renamed_hvac_health": _registry_entry(
+                        "sensor.renamed_hvac_health",
+                        "entry-1_hvac_health_summary",
+                    )
+                }
+            )
+        ),
+        entry_id="entry-1",
+    )
+
+    card = _card_of_type(
+        next(
+            view
+            for view in _dashboard_views(dashboard)
+            if view["path"] == "energy-costs"
+        ),
+        HVAC_ASSOCIATIONS_CARD,
+    )
+
+    assert card["revision_entities"] == ["sensor.renamed_hvac_health"]
+
+
+def test_heat_pump_dashboard_keeps_hvac_cards_and_weather_graphs() -> None:
+    heat_pump = CircuitConfig(
+        circuit_id="heat_pump",
+        name="Heat Pump",
+        appliance_profile=ApplianceProfile.HEAT_PUMP,
+        mode=CircuitMode.DUAL_PHASE,
+        sensors=(SensorRef("sensor.heat_pump_power", SensorRole.REAL_POWER),),
+    )
+    dashboard = build_recommended_dashboard(
+        (heat_pump,),
+        DASHBOARD_LAYOUT_STANDARD,
+        outdoor_temperature_entity="sensor.outdoor_temperature",
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert "energy-costs" in cards_by_view
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert CONTEXT_GRAPH_CARD in cards_by_view["energy-costs"]
+
+
+def test_hvac_associations_card_is_shown_in_simple_layout() -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(), DASHBOARD_LAYOUT_SIMPLE
+    )
+    cards_by_view = {
+        str(view["path"]): {
+            str(card["type"])
+            for card in _dashboard_cards(view)
+            if isinstance(card.get("type"), str)
+        }
+        for view in _dashboard_views(dashboard)
+    }
+
+    assert HVAC_ASSOCIATIONS_CARD in cards_by_view["energy-costs"]
+    assert "insights" not in cards_by_view
 
 
 def test_appliance_timeline_uses_activity_summary_entities() -> None:
@@ -990,6 +1177,7 @@ def test_generated_dashboard_uses_dashboard_example_sections() -> None:
 
     assert [view["path"] for view in _dashboard_views(dashboard)] == [
         "overview",
+        "energy-costs",
         "insights",
     ]
     assert dashboard["views"][0]["type"] == "sections"
@@ -1137,10 +1325,14 @@ def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
             if len(content_cards) == 1 and content_cards[0]["type"] == DATE_RANGE_CARD:
                 assert content_cards[0]["grid_options"]["columns"] == "full"
                 continue
+            if view["path"] == "overview":
+                assert {
+                    card["grid_options"]["columns"] for card in content_cards
+                } == {24}
+                continue
             expected_columns = (
                 24
                 if view["path"] == "energy-costs"
-                or (view["path"] == "overview" and len(content_cards) > 1)
                 else 48 // min(4, len(content_cards))
             )
             assert {
@@ -1222,6 +1414,7 @@ def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
     assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
     assert preflight["will_include"] == [
         "Home",
+        "Energy & Costs",
         "Insights",
     ]
     assert preflight["nilm_enabled"] is True
@@ -1611,7 +1804,10 @@ def test_hvac_graph_omits_apparent_and_reactive_power_sources() -> None:
     refs = _entity_refs(history_graph)
 
     assert history_graph["type"] == CONTEXT_GRAPH_CARD
-    assert graph_cards == [history_graph]
+    assert {card["type"] for card in graph_cards} == {
+        HVAC_ASSOCIATIONS_CARD,
+        CONTEXT_GRAPH_CARD,
+    }
     assert "sensor.compressor_w" in refs
     assert "sensor.compressor_va" not in refs
     assert "sensor.compressor_var" not in refs

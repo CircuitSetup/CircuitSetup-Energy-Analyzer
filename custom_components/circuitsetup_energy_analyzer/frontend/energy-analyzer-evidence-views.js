@@ -7,6 +7,16 @@ export function createEvidenceViewMethods({
     || `hsl(${(210 + index * 137.508) % 360} ${62 + index % 3 * 8}% ${42 + Math.floor(index / 3) % 3 * 8}%)`;
 
   return class EvidenceViewMethods {
+  _evidenceHistorySource() {
+    const alert = this._payload && this._payload.alert;
+    const recommendation = this._payload && this._payload.selected_recommendation;
+    return alert && alert.graph_entities && alert.graph_entities.length
+      ? alert
+      : recommendation && recommendation.graph_entities && recommendation.graph_entities.length
+        ? recommendation
+        : null;
+  }
+
   async _loadHistory(alert, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     this._historyLoading = true;
     this._historyError = "";
@@ -339,7 +349,7 @@ export function createEvidenceViewMethods({
                   ${this._recommendationValueRows(recommendation)}
                 </div>
                 <div class="recommendation-support">
-                  ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+                  ${recommendation.expected_effect ? `<div class="recommendation-support-row" data-recommendation-support="expected-effect"><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong><span class="recommendation-support-copy">${this._escape(recommendation.expected_effect)}</span></div>` : ""}
                   ${this._renderRecommendationEvidence(recommendation.evidence_preview)}
                   ${this._renderSettingImpactPreview(recommendation)}
                 </div>
@@ -376,10 +386,15 @@ export function createEvidenceViewMethods({
       : "";
     const originalIndex = this._selectedRecommendationIndex(recommendation);
     const alert = this._payload && this._payload.alert;
-    const graph = alert && Array.isArray(alert.graph_entities) && alert.graph_entities.length
+    const graphSource = alert && Array.isArray(alert.graph_entities) && alert.graph_entities.length
+      ? alert
+      : Array.isArray(recommendation.graph_entities) && recommendation.graph_entities.length
+        ? recommendation
+        : null;
+    const graph = graphSource
       ? `<div class="recommendation-evidence-graph" data-recommendation-evidence-graph>
           <h2>${this._escape(this._panelText("evidence.sections.graph"))}</h2>
-          ${this._renderChart(alert)}
+          ${this._renderChart(graphSource)}
         </div>`
       : "";
     return `
@@ -390,7 +405,7 @@ export function createEvidenceViewMethods({
             ${this._recommendationValueRows(recommendation)}
           </div>
           <div class="recommendation-support">
-            ${recommendation.expected_effect ? `<p><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong> ${this._escape(recommendation.expected_effect)}</p>` : ""}
+            ${recommendation.expected_effect ? `<div class="recommendation-support-row" data-recommendation-support="expected-effect"><strong>${this._escape(this._panelText("recommendations.expected_effect_label"))}:</strong><span class="recommendation-support-copy">${this._escape(recommendation.expected_effect)}</span></div>` : ""}
             ${evidenceSummary}
             ${countSummary}
             ${this._renderSettingImpactPreview(recommendation)}
@@ -424,9 +439,9 @@ export function createEvidenceViewMethods({
     if (!lines.length) {
       return "";
     }
-    return `<div class="recommendation-evidence">
+    return `<div class="recommendation-evidence recommendation-support-row" data-recommendation-support="evidence">
       <strong>${this._escape(this._panelText("recommendations.evidence_label"))}:</strong>
-      ${lines.map((line) => `<span class="recommendation-evidence-line">${this._escape(line)}</span>`).join("")}
+      <span class="recommendation-support-copy">${lines.map((line) => `<span class="recommendation-evidence-line">${this._escape(line)}</span>`).join("")}</span>
     </div>`;
   }
 
@@ -470,11 +485,24 @@ export function createEvidenceViewMethods({
     if (this._historyError) {
       return `<div data-alert-history-error><p class="muted">${this._escape(this._historyError)}</p><button type="button" class="secondary" data-retry-alert-history>${this._escape(this._panelText("common.retry"))}</button></div>`;
     }
-    const series = this._chartSeries();
-    if (!series.length) {
+    const series = this._chartSeries(this._historySeries, alert.graph_entity_series);
+    const groups = Array.isArray(alert.graph_entity_series)
+      ? this._applianceDetailHistoryChartGroups(series)
+      : series.length
+        ? [{
+            unit: alert.y_axis_label || "",
+            rightUnit: alert.right_y_axis_label || "",
+            series,
+          }]
+        : [];
+    if (!groups.length) {
       return `<p class="muted">${this._escape(this._panelText("chart.no_history"))}</p>`;
     }
-    return this._chartSvg(series, alert);
+    return groups.map((group) => this._chartSvg(group.series, {
+      ...alert,
+      y_axis_label: group.unit || alert.y_axis_label || "",
+      right_y_axis_label: group.rightUnit || "",
+    })).join("");
   }
 
   _chartSvg(series, alert) {
@@ -647,7 +675,7 @@ export function createEvidenceViewMethods({
     return `
       <div class="chart-frame" data-chart-frame>
         ${this._historyLink(historyEntities, new Date(minTime).toISOString(), new Date(maxTime).toISOString(), true)}
-        ${zoomWindow ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
+        ${zoomWindow && !this._hideChartResetControl ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
         <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
           <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
           <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
@@ -819,7 +847,7 @@ export function createEvidenceViewMethods({
     }
   }
 
-  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false) {
+  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false, labeled = false) {
     if (!window) {
       return "";
     }
@@ -835,11 +863,11 @@ export function createEvidenceViewMethods({
     const panEarlierLabel = this._panelText("actions.labels.pan_earlier");
     const panLaterLabel = this._panelText("actions.labels.pan_later");
     return `<div ${containerAttribute}>
-      <div class="actions nilm-graph-controls">
-        <button type="button" class="secondary icon-button" data-${prefix}-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-${prefix}-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-${prefix}-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-        <button type="button" class="secondary icon-button" data-${prefix}-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+      <div class="actions nilm-graph-controls${labeled ? " labeled-graph-controls" : ""}">
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon>${labeled ? `<span>${this._escape(zoomInLabel)}</span>` : ""}</button>
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon>${labeled ? `<span>${this._escape(zoomOutLabel)}</span>` : ""}</button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon>${labeled ? `<span>${this._escape(panEarlierLabel)}</span>` : ""}</button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon>${labeled ? `<span>${this._escape(panLaterLabel)}</span>` : ""}</button>
       </div>
       <p class="muted" data-${prefix}-window>${this._escape(windowText)}</p>
     </div>`;

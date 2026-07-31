@@ -232,6 +232,11 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
             )
         ),
         "appliance_health_evidence": appliance_health_evidence,
+        "hvac_association_revision": getattr(
+            state,
+            "hvac_association_revision_by_circuit",
+            {},
+        ).get(circuit_id, 0),
         "electrical_summary": electrical["summary"],
         "metric_consistency_status": electrical["metric_consistency_status"],
         "metric_consistency_score": electrical["metric_consistency_score"],
