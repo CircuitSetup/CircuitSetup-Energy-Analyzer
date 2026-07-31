@@ -24,6 +24,7 @@ from .attention import attention_items_for_coordinators
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_BLOWER_REPRESENTS_GAS_HEAT,
+    DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
     DOMAIN,
 )
 from .context_sources import thermostat_mappings_for_settings
@@ -32,6 +33,7 @@ from .entities.setup_health import (
     setup_health_panel_text,
     setup_health_value,
 )
+from .entity import _entity_registry_for_hass
 from .expected_schedule import schedule_settings_from_dict
 from .local_time import local_date
 from .localized_text import translation_section
@@ -750,6 +752,9 @@ def _appliance_detail_payload(
     detail_payload["energy_change_explanation"] = (
         explanation.as_dict() if explanation is not None else None
     )
+    sump_driver_context = _sump_driver_context_payload(coordinator, detail)
+    if sump_driver_context is not None:
+        detail_payload["sump_driver_context"] = sump_driver_context
     return {
         "status": "ok",
         "requested_circuit_id": requested_circuit_id,
@@ -776,6 +781,79 @@ def _appliance_detail_payload(
         },
         "actions": _appliance_detail_actions(coordinator, detail),
     }
+
+
+def _sump_driver_context_payload(
+    coordinator: Any,
+    detail: ApplianceDetail,
+) -> dict[str, Any] | None:
+    if (
+        detail.appliance_profile != ApplianceProfile.SUMP_PUMP.value
+        or detail.source_type == "nilm_estimate"
+    ):
+        return None
+    contexts = getattr(coordinator.state, "rain_pump_context_by_circuit", {})
+    context = (
+        contexts.get(detail.circuit_id, {})
+        if isinstance(contexts, Mapping)
+        else {}
+    )
+    context = context if isinstance(context, Mapping) else {}
+    compressor_ids = tuple(
+        str(item)
+        for item in context.get("hvac_compressor_circuits", ())
+        if str(item)
+    )
+    blower_ids = tuple(
+        config.circuit_id
+        for config in getattr(coordinator, "circuit_configs", ()) or ()
+        if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+    )
+    try:
+        response_minutes = max(
+            int(context.get("rain_response_window_minutes")),
+            0,
+        )
+    except (TypeError, ValueError):
+        response_minutes = DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES
+    return {
+        "default_hours": 720,
+        "period_hours": list(APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS),
+        "rain_response_window_minutes": response_minutes,
+        "pump_activity_entity_id": _activity_summary_entity_id(
+            coordinator,
+            detail.circuit_id,
+        ),
+        "compressor_activity_entity_ids": [
+            entity_id
+            for circuit_id in compressor_ids
+            if (entity_id := _activity_summary_entity_id(coordinator, circuit_id))
+        ],
+        "blower_activity_entity_ids": [
+            entity_id
+            for circuit_id in blower_ids
+            if (entity_id := _activity_summary_entity_id(coordinator, circuit_id))
+        ],
+        "rain_intensity_entity_id": str(
+            context.get("rain_intensity_entity") or ""
+        ),
+        "rain_entity_id": str(context.get("rain_sensor_entity") or ""),
+        "humidity_entity_id": str(
+            context.get("outdoor_humidity_source_entity") or ""
+        ),
+    }
+
+
+def _activity_summary_entity_id(coordinator: Any, circuit_id: str) -> str:
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    registry = _entity_registry_for_hass(getattr(coordinator, "hass", None))
+    entries = getattr(registry, "entities", {})
+    values = entries.values() if hasattr(entries, "values") else entries or ()
+    unique_id = f"{entry_id}_{circuit_id}_activity_summary"
+    for entry in values:
+        if str(getattr(entry, "unique_id", "") or "") == unique_id:
+            return str(getattr(entry, "entity_id", "") or "")
+    return ""
 
 
 def _appliance_daily_totals(

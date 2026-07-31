@@ -514,13 +514,19 @@ export function createEvidenceViewMethods({
     const padTop = 18;
     const padBottom = 42;
     const allPoints = [];
+    const chartTime = (value) => typeof value === "number" ? value : Date.parse(value);
     for (const item of series) {
       for (const point of item.points) {
         allPoints.push(point);
       }
     }
-    const sampleMinTime = Math.min(...allPoints.map((point) => point.time));
-    const sampleMaxTime = Math.max(...allPoints.map((point) => point.time));
+    const contextTimes = [
+      ...(Array.isArray(alert.context_bands) ? alert.context_bands.flatMap((item) => [chartTime(item.start), chartTime(item.end)]) : []),
+      ...(Array.isArray(alert.event_markers) ? alert.event_markers.map((item) => Number(item.time)) : []),
+    ].filter(Number.isFinite);
+    const sampleTimes = [...allPoints.map((point) => point.time), ...contextTimes];
+    const sampleMinTime = Math.min(...sampleTimes);
+    const sampleMaxTime = Math.max(...sampleTimes);
     const graphStart = Date.parse(alert.graph_window_start);
     const graphEnd = Date.parse(alert.graph_window_end);
     const baseMinTime = Number.isFinite(graphStart) ? graphStart : sampleMinTime;
@@ -543,8 +549,10 @@ export function createEvidenceViewMethods({
       && rightSeries.every((item) => item.unit === "currency");
     const leftHasBars = series.some((item) => item.kind === "bar" && (!rightAxis || item.axis !== "right"));
     const rightHasBars = rightAxis && series.some((item) => item.kind === "bar" && item.axis === "right");
-    const minValue = Math.min(...leftPoints.map((point) => point.value), leftHasBars ? 0 : Infinity);
-    const maxValue = Math.max(...leftPoints.map((point) => point.value), leftHasBars ? 0 : -Infinity);
+    const rawMinValue = Math.min(...leftPoints.map((point) => point.value), leftHasBars ? 0 : Infinity);
+    const rawMaxValue = Math.max(...leftPoints.map((point) => point.value), leftHasBars ? 0 : -Infinity);
+    const minValue = Number.isFinite(rawMinValue) ? rawMinValue : 0;
+    const maxValue = Number.isFinite(rawMaxValue) ? rawMaxValue : 1;
     const rightMinValue = rightPoints.length ? Math.min(...rightPoints.map((point) => point.value), rightHasBars ? 0 : Infinity) : minValue;
     const rightMaxValue = rightPoints.length ? Math.max(...rightPoints.map((point) => point.value), rightHasBars ? 0 : -Infinity) : maxValue;
     const timeRange = Math.max(maxTime - minTime, 1);
@@ -564,7 +572,7 @@ export function createEvidenceViewMethods({
     const maxPointCount = Math.max(...series.map((item) => item.points.length), 1);
     const barWidth = Math.max(4, Math.min(36, ((width - padLeft - padRight) / maxPointCount) * 0.6));
     const lines = series.map((item, index) => {
-      const color = chartColor(index);
+      const color = item.color || chartColor(index);
       const axis = rightAxis && item.axis === "right" ? "right" : "left";
       const itemUnit = rightAxis
         ? (item.unit || unitLabel)
@@ -578,22 +586,23 @@ export function createEvidenceViewMethods({
           const heightValue = Math.max(Math.abs(baselineY - pointY), 1);
           const pointValue = itemUnit === "currency" ? this._formatCost(point.value) : this._formatNumber(point.value);
           const pointUnit = itemUnit === "currency" ? "" : itemUnit;
-          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${color}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"></rect>`;
+          const sumpLayer = item.sump_layer === "rain" ? ' data-sump-rain-bar="1"' : "";
+          return `<rect x="${(pointX - barWidth / 2).toFixed(1)}" y="${barY.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${heightValue.toFixed(1)}" fill="${this._escape(color)}" tabindex="0" data-energy-bar="1" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}" cx="${pointX.toFixed(1)}" cy="${pointY.toFixed(1)}"${sumpLayer}></rect>`;
         }).join("");
       }
       const points = item.points.map((point) => `${x(point.time).toFixed(1)},${y(point.value, axis).toFixed(1)}`).join(" ");
       const circles = item.points.map((point) => {
         const pointValue = itemUnit === "currency" ? this._formatCost(point.value) : this._formatNumber(point.value);
         const pointUnit = itemUnit === "currency" ? "" : itemUnit;
-        return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${color}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`;
+        return `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value, axis).toFixed(1)}" r="2" fill="${this._escape(color)}" tabindex="0" data-chart-point="1" data-chart-time="${point.time}" data-chart-name="${this._escape(item.name)}" data-chart-value="${this._escape(pointValue)}" data-chart-unit="${this._escape(pointUnit)}"${point.cost_source ? ` data-cost-source="${this._escape(point.cost_source)}"` : ""}></circle>`;
       }).join("");
       const dash = item.line_style === "dashed" || axis === "right"
         ? ' stroke-dasharray="6 4"'
         : "";
-      return `<polyline fill="none" stroke="${color}" stroke-width="2"${dash} points="${points}"></polyline>${circles}`;
+      return `<polyline fill="none" stroke="${this._escape(color)}" stroke-width="2"${dash} points="${points}"></polyline>${circles}`;
     }).join("");
     const legend = series.map((item, index) => {
-      const color = chartColor(index);
+      const color = item.color || chartColor(index);
       return `<div class="legend-item"><ha-icon class="legend-marker" icon="mdi:check-circle" style="color:${color}"></ha-icon><span>${this._escape(item.name)}</span></div>`;
     }).join("");
     const minLabel = leftAxisCurrency ? this._formatCost(minValue) : this._formatNumber(minValue);
@@ -648,6 +657,22 @@ export function createEvidenceViewMethods({
       const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
       return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${selectedAttr}${kindAttr}${draftAttr}${labelIntervalAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
     }).join("");
+    const contextBands = (Array.isArray(alert.context_bands) ? alert.context_bands : []).map((band) => {
+      const start = chartTime(band?.start);
+      const end = chartTime(band?.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) return "";
+      const left = x(Math.max(start, minTime));
+      const right = x(Math.min(end, maxTime));
+      const label = String(band.label || band.kind || "");
+      return `<rect class="sump-driver-band" x="${left.toFixed(1)}" y="${padTop}" width="${Math.max(right - left, 1).toFixed(1)}" height="${height - padTop - padBottom}" fill="${this._escape(band.color || "#f97316")}" opacity="${Number.isFinite(Number(band.opacity)) ? Math.max(0, Math.min(1, Number(band.opacity))) : 0.12}" data-sump-driver-band="${this._escape(band.kind || "context")}"><title>${this._escape(label)}</title></rect>`;
+    }).join("");
+    const eventMarkers = (Array.isArray(alert.event_markers) ? alert.event_markers : []).map((marker) => {
+      const time = Number(marker?.time);
+      if (!Number.isFinite(time) || time < minTime || time > maxTime) return "";
+      const markerX = x(time).toFixed(1);
+      const color = marker.color || "#64748b";
+      return `<g data-sump-cycle-category="${this._escape(marker.category || "unclassified")}" tabindex="0" role="img" aria-label="${this._escape(marker.detail || marker.label || "")}"><line class="sump-cycle-marker" x1="${markerX}" y1="${padTop}" x2="${markerX}" y2="${height - padBottom}" stroke="${this._escape(color)}"></line><circle class="sump-cycle-dot" cx="${markerX}" cy="${height - padBottom - 8}" r="6" fill="${this._escape(color)}"></circle><title>${this._escape(marker.detail || marker.label || "")}</title></g>`;
+    }).join("");
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
       : "";
@@ -684,6 +709,7 @@ export function createEvidenceViewMethods({
           ${timeGridLines}
           ${yAxisLabel}
           ${rightAxisLabel}
+          ${contextBands}
           ${sessionBands}
           <text x="8" y="${padTop + 4}">${this._escape(maxLabel)}</text>
           <text x="8" y="${height - padBottom + 4}">${this._escape(minLabel)}</text>
@@ -691,11 +717,12 @@ export function createEvidenceViewMethods({
           ${timeTickLabels}
           ${edgeMarkers}
           ${lines}
+          ${eventMarkers}
           <line class="chart-crosshair" data-chart-crosshair x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
         </svg>
         <div class="chart-tooltip" data-chart-tooltip role="status" aria-live="polite" aria-hidden="true"></div>
       </div>
-      <div class="legend">${legend}</div>
+      ${alert.hide_legend ? "" : `<div class="legend">${legend}</div>`}
       <p class="muted">${this._escape(this._panelTextFormat("chart.graph_times", { time_zone: timeZoneLabel }))}</p>
     `;
   }
@@ -991,14 +1018,19 @@ export function createEvidenceViewMethods({
     );
   }
 
-  _historyApiPathForEntities(entities, start, end) {
+  _historyApiPathForEntities(entities, start, end, { includeAttributes = false, significantChangesOnly } = {}) {
     const params = new URLSearchParams();
     params.set("filter_entity_id", entities.join(","));
     if (end) {
       params.set("end_time", end);
     }
-    params.set("minimal_response", "1");
-    params.set("no_attributes", "1");
+    if (!includeAttributes) {
+      params.set("minimal_response", "1");
+      params.set("no_attributes", "1");
+    }
+    if (typeof significantChangesOnly === "boolean") {
+      params.set("significant_changes_only", significantChangesOnly ? "1" : "0");
+    }
     return `${HISTORY_CALL_API_PREFIX}/${encodeURIComponent(start)}?${params.toString()}`;
   }
 
