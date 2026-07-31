@@ -218,7 +218,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const normalized = unit.includes("%") || value > 1 && value <= 100
         ? value / 100
         : value;
-      return normalized >= 0 && normalized <= 1 ? normalized : null;
+      return Math.abs(normalized) <= 1 ? normalized : null;
     }
 
     _completeEntityValues(entityIds, converter) {
@@ -1635,7 +1635,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           }
           power += current * voltage * factor;
         }
-        if (Number.isFinite(power)) points.push({ time, value: power });
+        points.push({ time, value: Number.isFinite(power) ? power : null });
       }
       return points.length
         ? {
@@ -1903,6 +1903,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._historicalAmpsKey = "";
       this._historicalAmpsSeries = null;
       this._historicalAmpsLoading = false;
+      this._historicalAmpsRetryTimer = 0;
       this._handleDashboardData = () => this._render();
     }
 
@@ -1913,6 +1914,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
+      clearTimeout(this._historicalAmpsRetryTimer);
       window.removeEventListener(DATA_EVENT, this._handleDashboardData);
       super.disconnectedCallback();
     }
@@ -2240,6 +2242,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const entityIds = [...new Set(configs.map((config) => config.entity))];
       const key = `${range.start}|${range.end}|${entityIds.join(",")}`;
       if (key === this._historicalAmpsKey) return;
+      clearTimeout(this._historicalAmpsRetryTimer);
+      this._historicalAmpsRetryTimer = 0;
       this._historicalAmpsKey = key;
       this._historicalAmpsSeries = null;
       if (!entityIds.length) return;
@@ -2261,7 +2265,16 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           ? mainsSeries
           : fallback;
       }).catch(() => {
-        if (this._historicalAmpsKey === key) this._historicalAmpsSeries = null;
+        if (this._historicalAmpsKey === key) {
+          this._historicalAmpsSeries = null;
+          this._historicalAmpsRetryTimer = setTimeout(() => {
+            this._historicalAmpsRetryTimer = 0;
+            if (this._historicalAmpsKey === key) {
+              this._historicalAmpsKey = "";
+              if (this.isConnected) this._render();
+            }
+          }, 5_000);
+        }
       }).finally(() => {
         this._historicalAmpsLoading = false;
         if (this.isConnected) this._render();

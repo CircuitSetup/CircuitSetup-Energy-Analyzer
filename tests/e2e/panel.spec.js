@@ -1023,6 +1023,54 @@ test("mains graph calculates power across the selected range from amps, volts, a
     .filter({ hasText: "Power Now" })).toContainText("1,080 W");
 });
 
+test("mains graph keeps a gap when calculated power inputs are unavailable", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      await route.fulfill({
+        json: [
+          [
+            { entity_id: "sensor.mains_current", state: "10", last_changed: "2026-07-31T00:00:00.000Z" },
+            { state: "unavailable", last_changed: "2026-07-31T06:00:00.000Z" },
+            { state: "5", last_changed: "2026-07-31T12:00:00.000Z" },
+          ],
+          [{ entity_id: "sensor.mains_voltage", state: "120", last_changed: "2026-07-31T00:00:00.000Z" }],
+          [{ entity_id: "sensor.mains_power_factor", state: "0.9", last_changed: "2026-07-31T00:00:00.000Z" }],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-context-graph",
+    {
+      title: "Mains total power and amps",
+      entities: [
+        { entity: "sensor.mains_current", name: "Total Amps", series_id: "mains:current", axis: "right" },
+        { entity: "sensor.mains_voltage", name: "Mains voltage", series_id: "mains:voltage", axis: "left", hidden: true },
+        { entity: "sensor.mains_power_factor", name: "Mains power factor", series_id: "mains:power_factor", axis: "left", hidden: true },
+      ],
+    },
+    {
+      "sensor.mains_current": { state: "5", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_voltage": { state: "120", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "0.9", attributes: {} },
+    },
+  );
+
+  await expect.poll(() => page.evaluate(() => {
+    const card = window.__dashboardCard;
+    const entities = card._resolvedEntities(card._dashboardConfig);
+    const power = card._mainsAwareSeries(card._history, entities, Date.parse("2026-07-31T00:00:00.000Z"), "")
+      .find((item) => item.series_id === "mains:power");
+    return (power?.points || []).map((point) => Number.isFinite(point.value) ? point.value : null);
+  })).toEqual([1080, null, 540]);
+});
+
 test("mains graph does not calculate power from incomplete configured histories", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
@@ -1185,6 +1233,31 @@ test("home summary derives zero power when live PF is zero", async ({ page }) =>
   );
 
   await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("0 W");
+});
+
+test("home summary derives signed power from a negative power factor", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-31T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: {
+        current_entities: ["sensor.mains_current"],
+        voltage_entities: ["sensor.mains_voltage"],
+        power_factor_entities: ["sensor.mains_power_factor"],
+      },
+    },
+    {
+      "sensor.mains_current": { state: "10", attributes: { unit_of_measurement: "A" } },
+      "sensor.mains_voltage": { state: "120", attributes: { unit_of_measurement: "V" } },
+      "sensor.mains_power_factor": { state: "-50", attributes: { unit_of_measurement: "%" } },
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Power Now" })).toContainText("-600 W");
 });
 
 test("mains graph pairs calculated history by leg", async ({ page }) => {
@@ -1447,6 +1520,58 @@ test("completed day reloads fallback amps when the range changes", async ({ page
   await setRange("2026-07-30");
   await expect.poll(() => historyDates.filter((date) => date === "2026-07-30").length).toBeGreaterThan(jul30CallsBefore);
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 30)" })).toContainText("4 A");
+});
+
+test("completed day retries fallback amps after a Recorder failure", async ({ page }) => {
+  test.info().annotations.push(
+    { type: "allow-browser-error", description: "503 http://127.0.0.1:4173/api/history/period/" },
+    { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 503" },
+    { type: "allow-browser-error", description: "history/period/" },
+  );
+  await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
+  let historyCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.includes("/history/period")) {
+      if (!url.searchParams.get("filter_entity_id")?.includes("sensor.fridge_current")) return false;
+      historyCalls += 1;
+      if (historyCalls === 1) {
+        await route.fulfill({ status: 503, body: "" });
+        return true;
+      }
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.fridge_current", state: "2", last_changed: "2026-07-31T00:00:00.000Z" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      appliances: [{ circuit_id: "fridge", name: "Fridge", current_entities: ["sensor.fridge_current"] }],
+    },
+    {
+      "sensor.fridge_current": { state: "2", attributes: { unit_of_measurement: "A" } },
+    },
+    {},
+    {
+      start: "2026-07-31T00:00:00.000Z",
+      end: "2026-07-31T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect.poll(() => page.evaluate(() => Boolean(window.__dashboardCard._historicalAmpsRetryTimer))).toBe(true);
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => historyCalls).toBeGreaterThan(1);
+  await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("2 A");
 });
 
 test("completed day does not carry amps through unavailable history", async ({ page }) => {
