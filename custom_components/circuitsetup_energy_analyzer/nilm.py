@@ -455,13 +455,33 @@ def nilm_signature_fingerprint(signature: NilmSignature) -> str:
 class NilmEdgeDetector:
     """Detect significant mains real-power transitions."""
 
-    def __init__(self, min_delta_w: float = 100.0) -> None:
+    def __init__(
+        self,
+        min_delta_w: float = 100.0,
+        *,
+        confirmation_samples: int = 1,
+        confirmation_tolerance_ratio: float = 0.15,
+        confirmation_max_interval: timedelta | None = None,
+    ) -> None:
         self.min_delta_w = min_delta_w
+        self.confirmation_samples = max(int(confirmation_samples), 1)
+        self.confirmation_tolerance_ratio = max(
+            float(confirmation_tolerance_ratio),
+            0.0,
+        )
+        self.confirmation_max_interval = confirmation_max_interval
         self._previous: CircuitSample | None = None
+        self._pending: tuple[CircuitSample, CircuitSample, int] | None = None
+
+    @property
+    def has_pending_transition(self) -> bool:
+        """Return whether a transition still needs confirmation."""
+        return self._pending is not None
 
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
             self._previous = None
+            self._pending = None
             return []
 
         if self._previous is None or self._previous.real_power is None:
@@ -471,9 +491,74 @@ class NilmEdgeDetector:
         previous = self._previous
         self._previous = sample
 
-        delta_w = sample.real_power - previous.real_power
+        if self.confirmation_samples > 1:
+            return self._process_confirmed(previous, sample)
+
+        edge = self._edge_between(previous, sample)
+        return [edge] if edge is not None else []
+
+    def _process_confirmed(
+        self,
+        previous: CircuitSample,
+        sample: CircuitSample,
+    ) -> list[NilmEdge]:
+        pending = self._pending
+        if (
+            self.confirmation_max_interval is not None
+            and sample.timestamp - previous.timestamp > self.confirmation_max_interval
+        ):
+            self._pending = None
+            if pending is not None:
+                baseline, candidate, _count = pending
+                if self._same_level(sample, candidate, baseline):
+                    edge = self._edge_between(baseline, candidate)
+                    return [edge] if edge is not None else []
+                if self._same_level(sample, baseline, baseline):
+                    return []
+            edge = self._edge_between(previous, sample)
+            return [edge] if edge is not None else []
+        if pending is not None:
+            baseline, candidate, count = pending
+            if self._same_level(sample, candidate, baseline):
+                count += 1
+                if count >= self.confirmation_samples:
+                    self._pending = None
+                    edge = self._edge_between(baseline, candidate)
+                    return [edge] if edge is not None else []
+                self._pending = (baseline, candidate, count)
+                return []
+            if self._same_level(sample, baseline, baseline):
+                self._pending = None
+                return []
+            previous = baseline
+
+        if (
+            abs(float(sample.real_power) - float(previous.real_power))
+            >= self.min_delta_w
+        ):
+            self._pending = (previous, sample, 1)
+        else:
+            self._pending = None
+        return []
+
+    def _same_level(
+        self,
+        sample: CircuitSample,
+        reference: CircuitSample,
+        baseline: CircuitSample,
+    ) -> bool:
+        transition = abs(float(reference.real_power) - float(baseline.real_power))
+        tolerance = transition * self.confirmation_tolerance_ratio
+        return abs(float(sample.real_power) - float(reference.real_power)) <= tolerance
+
+    def _edge_between(
+        self,
+        previous: CircuitSample,
+        sample: CircuitSample,
+    ) -> NilmEdge | None:
+        delta_w = float(sample.real_power) - float(previous.real_power)
         if abs(delta_w) < self.min_delta_w:
-            return []
+            return None
 
         leg_a_delta = _optional_delta(
             getattr(sample, "leg_a_real_power", None),
@@ -485,21 +570,19 @@ class NilmEdgeDetector:
         )
         topology = _split_phase_topology(leg_a_delta, leg_b_delta)
 
-        return [
-            NilmEdge(
-                timestamp=sample.timestamp,
-                delta_w=delta_w,
-                delta_var=_delta(sample.reactive_power, previous.reactive_power),
-                delta_va=_delta(sample.apparent_power, previous.apparent_power),
-                delta_pf=_delta(sample.power_factor, previous.power_factor),
-                direction="on" if delta_w > 0 else "off",
-                leg_a_delta_w=_round_optional(leg_a_delta),
-                leg_b_delta_w=_round_optional(leg_b_delta),
-                leg_balance_ratio=topology["leg_balance_ratio"],
-                dominant_leg=topology["dominant_leg"],
-                split_phase_type=topology["split_phase_type"],
-            )
-        ]
+        return NilmEdge(
+            timestamp=sample.timestamp,
+            delta_w=delta_w,
+            delta_var=_delta(sample.reactive_power, previous.reactive_power),
+            delta_va=_delta(sample.apparent_power, previous.apparent_power),
+            delta_pf=_delta(sample.power_factor, previous.power_factor),
+            direction="on" if delta_w > 0 else "off",
+            leg_a_delta_w=_round_optional(leg_a_delta),
+            leg_b_delta_w=_round_optional(leg_b_delta),
+            leg_balance_ratio=topology["leg_balance_ratio"],
+            dominant_leg=topology["dominant_leg"],
+            split_phase_type=topology["split_phase_type"],
+        )
 
     def process_many(self, samples: Iterable[CircuitSample]) -> list[NilmEdge]:
         edges: list[NilmEdge] = []
@@ -773,6 +856,385 @@ def pair_nilm_sessions(
     return [_with_nilm_session_overlap(session, sessions) for session in sessions]
 
 
+@dataclass(frozen=True, slots=True)
+class _NilmSessionCandidate:
+    on_index: int
+    off_index: int
+    on_edge: NilmEdge
+    off_edge: NilmEdge
+    signature_fingerprint: str
+    assignment_id: str | None
+    score: float
+
+
+def pair_nilm_sessions_for_signatures(
+    edges: Iterable[NilmEdge],
+    *,
+    mains_circuit_id: str,
+    signature_specs: Iterable[Mapping[str, Any]],
+    min_duration: timedelta = timedelta(seconds=30),
+    max_duration: timedelta = timedelta(hours=12),
+    min_confidence: float = 0.5,
+    ambiguity_margin: float = 0.08,
+) -> list[NilmSession]:
+    """Pair NILM sessions once across all competing signatures."""
+
+    specs = [
+        spec
+        for spec in signature_specs
+        if _nilm_session_spec_fingerprint(spec)
+        and (
+            _nilm_session_spec_assignment_id(spec)
+            or (
+                str(spec.get("direction") or "").lower() != "off"
+                and (
+                    _nilm_number(spec.get("median_delta_w")) is None
+                    or float(spec["median_delta_w"]) >= 0
+                )
+            )
+        )
+    ]
+    if not specs:
+        return []
+
+    ordered_edges = sorted(edges, key=lambda edge: edge.timestamp)
+    on_edges = [edge for edge in ordered_edges if edge.direction == "on"]
+    off_edges = [edge for edge in ordered_edges if edge.direction == "off"]
+    candidates: list[_NilmSessionCandidate] = []
+    for on_index, on_edge in enumerate(on_edges):
+        for off_index, off_edge in enumerate(off_edges):
+            for spec in specs:
+                spec_min_duration = _nilm_session_spec_duration(
+                    spec,
+                    "min_duration_seconds",
+                    min_duration,
+                )
+                spec_max_duration = _nilm_session_spec_duration(
+                    spec,
+                    "max_duration_seconds",
+                    max_duration,
+                )
+                pair_score = _nilm_session_pair_score(
+                    on_edge,
+                    off_edge,
+                    min_duration=spec_min_duration,
+                    max_duration=spec_max_duration,
+                )
+                signature_score = _nilm_signature_pair_score(on_edge, off_edge, spec)
+                if pair_score is None or signature_score is None:
+                    continue
+                score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+                if score <= min_confidence:
+                    continue
+                candidates.append(
+                    _NilmSessionCandidate(
+                        on_index=on_index,
+                        off_index=off_index,
+                        on_edge=on_edge,
+                        off_edge=off_edge,
+                        signature_fingerprint=_nilm_session_spec_fingerprint(spec),
+                        assignment_id=_nilm_session_spec_assignment_id(spec),
+                        score=score,
+                    )
+                )
+
+    ambiguous_pairs: set[tuple[int, int]] = set()
+    preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
+    by_pair: dict[tuple[int, int], list[_NilmSessionCandidate]] = {}
+    for candidate in candidates:
+        by_pair.setdefault((candidate.on_index, candidate.off_index), []).append(
+            candidate
+        )
+    for pair, pair_candidates in by_pair.items():
+        ranked = sorted(pair_candidates, key=lambda item: -item.score)
+        assigned: dict[str, _NilmSessionCandidate] = {}
+        for candidate in ranked:
+            if (
+                candidate.assignment_id
+                and ranked[0].score - candidate.score <= ambiguity_margin
+            ):
+                assigned.setdefault(candidate.assignment_id, candidate)
+        if len(assigned) == 1 and ranked[0].assignment_id:
+            preferred_candidates[pair] = next(iter(assigned.values()))
+            continue
+        if len(assigned) > 1:
+            ambiguous_pairs.add(pair)
+            preferred_candidates[pair] = ranked[0]
+            continue
+        if (
+            len(ranked) > 1
+            and ranked[0].signature_fingerprint != ranked[1].signature_fingerprint
+            and ranked[0].score - ranked[1].score <= ambiguity_margin
+        ):
+            ambiguous_pairs.add(pair)
+        preferred_candidates.setdefault(pair, ranked[0])
+
+    used_on_indices: set[int] = set()
+    used_off_indices: set[int] = set()
+    force_open_on_indices: set[int] = set()
+    sessions: list[NilmSession] = []
+    eligible_candidates = list(preferred_candidates.values())
+    # ponytail: greedy global assignment is intentionally bounded; replace it with
+    # maximum-weight matching only if labelled replay data shows a measurable gap.
+    for candidate in sorted(
+        eligible_candidates,
+        key=lambda item: (
+            -item.score,
+            item.off_edge.timestamp,
+            item.on_edge.timestamp,
+            item.signature_fingerprint,
+        ),
+    ):
+        if candidate.on_index in force_open_on_indices:
+            continue
+        if (
+            candidate.on_index in used_on_indices
+            or candidate.off_index in used_off_indices
+        ):
+            continue
+        close_alternates = [
+            alternate
+            for alternate in eligible_candidates
+            if alternate.on_index == candidate.on_index
+            and alternate.off_index != candidate.off_index
+            and alternate.off_index not in used_off_indices
+            and candidate.score - alternate.score <= ambiguity_margin
+        ]
+        alternate_off_indices = {
+            alternate.off_index for alternate in close_alternates
+        }
+        pair = (candidate.on_index, candidate.off_index)
+        pair_ambiguous = pair in ambiguous_pairs
+        alternate_match_count = len(alternate_off_indices) + (
+            len(by_pair[pair]) - 1 if pair_ambiguous else 0
+        )
+        assignment_ids = {None if pair_ambiguous else candidate.assignment_id}
+        assignment_ids.update(
+            None
+            if (alternate.on_index, alternate.off_index) in ambiguous_pairs
+            else alternate.assignment_id
+            for alternate in close_alternates
+        )
+        assignment_id = next(iter(assignment_ids)) if len(assignment_ids) == 1 else None
+        confidence = candidate.score * (0.85 ** len(alternate_off_indices))
+        if confidence <= min_confidence:
+            force_open_on_indices.add(candidate.on_index)
+            continue
+        used_on_indices.add(candidate.on_index)
+        used_off_indices.add(candidate.off_index)
+        sessions.append(
+            _closed_nilm_session(
+                candidate.on_edge,
+                candidate.off_edge,
+                mains_circuit_id=mains_circuit_id,
+                signature_fingerprint=candidate.signature_fingerprint,
+                confidence=confidence,
+                assignment_id=assignment_id,
+                ambiguous=pair_ambiguous or bool(alternate_off_indices),
+                alternate_match_count=alternate_match_count,
+                known_load_masked=False,
+                known_load_confidence=None,
+            )
+        )
+
+    for on_index, on_edge in enumerate(on_edges):
+        if on_index in used_on_indices:
+            continue
+        ranked_specs = sorted(
+            (
+                (score, spec)
+                for spec in specs
+                if (score := _nilm_signature_edge_score(on_edge, spec)) is not None
+                and score > min_confidence
+            ),
+            key=lambda item: (
+                -item[0],
+                _nilm_session_spec_fingerprint(item[1]),
+            ),
+        )
+        if not ranked_specs:
+            continue
+        assigned_specs: dict[str, tuple[float, Mapping[str, Any]]] = {}
+        for match in ranked_specs:
+            assignment_id = _nilm_session_spec_assignment_id(match[1])
+            if assignment_id and ranked_specs[0][0] - match[0] <= ambiguity_margin:
+                assigned_specs.setdefault(assignment_id, match)
+        if len(assigned_specs) == 1 and _nilm_session_spec_assignment_id(
+            ranked_specs[0][1]
+        ):
+            ranked_specs = [next(iter(assigned_specs.values()))]
+        if (
+            len(ranked_specs) > 1
+            and ranked_specs[0][0] - ranked_specs[1][0] <= ambiguity_margin
+        ):
+            sessions.append(
+                _open_nilm_session(
+                    on_edge,
+                    mains_circuit_id=mains_circuit_id,
+                    signature_fingerprint=_nilm_session_spec_fingerprint(
+                        ranked_specs[0][1]
+                    ),
+                    assignment_id=None,
+                    known_load_masked=False,
+                    known_load_confidence=None,
+                    ambiguous=True,
+                    alternate_match_count=sum(
+                        1
+                        for score, _spec in ranked_specs[1:]
+                        if ranked_specs[0][0] - score <= ambiguity_margin
+                    ),
+                )
+            )
+            continue
+        spec = ranked_specs[0][1]
+        assignment_id = _nilm_session_spec_assignment_id(spec)
+        fingerprint = _nilm_session_spec_fingerprint(spec)
+        candidate_eligible_off = any(
+            candidate.on_index == on_index
+            and candidate.off_index not in used_off_indices
+            and (
+                candidate.assignment_id == assignment_id
+                if assignment_id
+                else candidate.signature_fingerprint == fingerprint
+            )
+            for candidate in candidates
+        )
+        spec_min_duration = _nilm_session_spec_duration(
+            spec,
+            "min_duration_seconds",
+            min_duration,
+        )
+        too_early_off = any(
+            off_index not in used_off_indices
+            and _nilm_session_pair_score(
+                on_edge,
+                off_edge,
+                min_duration=timedelta(seconds=1),
+                max_duration=spec_min_duration,
+            )
+            is not None
+            and _nilm_signature_pair_score(on_edge, off_edge, spec) is not None
+            for off_index, off_edge in enumerate(off_edges)
+        )
+        if on_index not in force_open_on_indices and (
+            candidate_eligible_off or too_early_off
+        ):
+            continue
+        sessions.append(
+            _open_nilm_session(
+                on_edge,
+                mains_circuit_id=mains_circuit_id,
+                signature_fingerprint=fingerprint,
+                assignment_id=assignment_id,
+                known_load_masked=False,
+                known_load_confidence=None,
+            )
+        )
+
+    ordered_sessions = sorted(sessions, key=lambda session: session.start)
+    return [
+        _with_nilm_session_overlap(session, ordered_sessions)
+        for session in ordered_sessions
+    ]
+
+
+def _nilm_session_spec_fingerprint(spec: Mapping[str, Any]) -> str:
+    return str(
+        spec.get("signature_fingerprint")
+        or spec.get("feedback_fingerprint")
+        or spec.get("signature_id")
+        or ""
+    ).strip()
+
+
+def _nilm_session_spec_assignment_id(spec: Mapping[str, Any]) -> str | None:
+    return str(spec.get("assignment_id") or "").strip() or None
+
+
+def _nilm_session_spec_duration(
+    spec: Mapping[str, Any],
+    key: str,
+    default: timedelta,
+) -> timedelta:
+    seconds = _nilm_number(spec.get(key))
+    if seconds is None or seconds <= 0:
+        return default
+    return timedelta(seconds=seconds)
+
+
+def _nilm_signature_pair_score(
+    on_edge: NilmEdge,
+    off_edge: NilmEdge,
+    spec: Mapping[str, Any],
+) -> float | None:
+    on_score = _nilm_signature_edge_score(on_edge, spec)
+    off_score = _nilm_signature_edge_score(off_edge, spec)
+    if on_score is None or off_score is None:
+        return None
+    return (on_score + off_score) / 2.0
+
+
+def _nilm_signature_edge_score(
+    edge: NilmEdge,
+    spec: Mapping[str, Any],
+) -> float | None:
+    scores: list[float] = []
+    expected_watts = _nilm_number(
+        spec.get("typical_watts")
+        if spec.get("typical_watts") is not None
+        else spec.get("median_delta_w")
+    )
+    if expected_watts is not None and abs(expected_watts) > 0:
+        score = _nilm_magnitude_score(
+            edge.delta_w,
+            expected_watts,
+            tolerance_ratio=0.25,
+            floor=50.0,
+        )
+        if score is None:
+            return None
+        scores.append(score)
+
+    for field, edge_value, tolerance_ratio, floor in (
+        ("median_delta_var", edge.delta_var, 0.5, 75.0),
+        ("median_delta_va", edge.delta_va, 0.35, 75.0),
+        ("median_delta_pf", edge.delta_pf, 0.5, 0.1),
+    ):
+        expected = _nilm_number(spec.get(field))
+        if expected is None:
+            continue
+        score = _nilm_optional_magnitude_score(
+            edge_value,
+            expected,
+            tolerance_ratio=tolerance_ratio,
+            floor=floor,
+        )
+        if score is None and (
+            abs(float(edge_value)) >= floor or abs(expected) >= floor
+        ):
+            return None
+        if score is not None:
+            scores.append(score)
+
+    expected_type = str(spec.get("split_phase_type") or "").strip()
+    if expected_type not in {"", "unknown", "mixed", "missing_leg_data"}:
+        edge_type = str(edge.split_phase_type or "").strip()
+        if edge_type not in {"", "unknown", "mixed", "missing_leg_data"}:
+            if expected_type != edge_type:
+                return None
+            scores.append(1.0)
+
+    expected_leg = str(spec.get("dominant_leg") or "").strip()
+    if expected_leg not in {"", "unknown", "mixed"}:
+        edge_leg = str(edge.dominant_leg or "").strip()
+        if edge_leg not in {"", "unknown", "mixed"}:
+            if expected_leg != edge_leg:
+                return None
+            scores.append(1.0)
+
+    return sum(scores) / len(scores) if scores else 1.0
+
+
 def unmatched_load_percentage(total_events: int, unmatched_events: int) -> float:
     """Return the share of events that remain unmatched."""
 
@@ -987,6 +1449,8 @@ def _open_nilm_session(
     assignment_id: str | None,
     known_load_masked: bool,
     known_load_confidence: float | None,
+    ambiguous: bool = False,
+    alternate_match_count: int = 0,
 ) -> NilmSession:
     on_edge_id = _nilm_edge_id(on_edge)
     confidence = 0.35
@@ -1009,6 +1473,8 @@ def _open_nilm_session(
         median_power_w=round(abs(float(on_edge.delta_w)), 3),
         estimated_energy_kwh=0.0,
         confidence=round(confidence, 3),
+        ambiguous=ambiguous,
+        alternate_match_count=alternate_match_count,
         known_load_masked=known_load_masked,
         known_load_confidence=_nilm_known_load_confidence(
             known_load_masked,

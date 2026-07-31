@@ -4078,6 +4078,121 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
     assert states["assignment-washer"].is_running is True
 
 
+@pytest.mark.parametrize("hidden_state", ["ignored", "expected"])
+def test_nilm_virtual_states_assign_overlapping_signatures_once(
+    hidden_state: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "120-w", "typical_watts": 120.0},
+                    {"signature_id": "187-w", "typical_watts": 187.0},
+                    {"signature_id": "hidden-120-w", "typical_watts": 120.0},
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-120",
+                        "display_name": "120 W appliance",
+                        "signature_fingerprints": ["120-w"],
+                    },
+                    {
+                        "assignment_id": "assignment-187",
+                        "display_name": "187 W appliance",
+                        "signature_fingerprints": ["187-w"],
+                    },
+                    {
+                        "assignment_id": "hidden-120",
+                        "display_name": "Hidden 120 W appliance",
+                        "signature_fingerprints": ["hidden-120-w"],
+                        "lifecycle_state": hidden_state,
+                    },
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+                    140.0,
+                    0.0,
+                    140.0,
+                    0.0,
+                    "on",
+                )
+            ]
+        },
+    )
+
+    states = nilm_virtual_appliance_states(coordinator)
+
+    assert sum(state.is_running for state in states) == 1
+    assert next(state for state in states if state.is_running).assignment_id == (
+        "assignment-120"
+    )
+
+
+def test_published_nilm_virtual_state_ignores_retired_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        published_nilm_virtual_appliance_states,
+    )
+
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "published-500", "typical_watts": 500.0},
+                    {"signature_id": "retired-500", "typical_watts": 500.0},
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "published",
+                        "signature_fingerprints": ["published-500"],
+                        "publish_entities": True,
+                        "lifecycle_state": "published",
+                    },
+                    {
+                        "assignment_id": "retired",
+                        "signature_fingerprints": ["retired-500"],
+                        "publish_entities": True,
+                        "lifecycle_state": "retired",
+                    },
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+                    500.0,
+                    0.0,
+                    500.0,
+                    0.0,
+                    "on",
+                )
+            ]
+        },
+    )
+
+    states = published_nilm_virtual_appliance_states(coordinator)
+
+    assert len(states) == 1
+    assert states[0].assignment_id == "published"
+    assert states[0].is_running is True
+
+
 @pytest.mark.asyncio
 async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor

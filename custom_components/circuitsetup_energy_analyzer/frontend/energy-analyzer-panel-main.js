@@ -10,6 +10,7 @@ export const SETUP_HEALTH_API_PATH = "/api/circuitsetup_energy_analyzer/setup_he
 export const SETUP_HEALTH_CALL_API_PATH = "circuitsetup_energy_analyzer/setup_health";
 export const HISTORY_CALL_API_PREFIX = "history/period";
 export const MAX_CHART_POINTS_PER_SERIES = 240;
+export const MAX_NILM_CHART_POINTS_PER_SERIES = 2160;
 export const NILM_LOW_CONFIDENCE_THRESHOLD = 0.8;
 export const EXPAND_NILM_QUERY_PARAM = "include_all_nilm";
 export const NILM_WORKSPACE_QUERY_PARAM = "nilm_workspace";
@@ -49,6 +50,7 @@ export const PANEL_METHOD_DEPENDENCIES = {
   NILM_WORKSPACE_CALL_API_PATH,
   HISTORY_CALL_API_PREFIX,
   MAX_CHART_POINTS_PER_SERIES,
+  MAX_NILM_CHART_POINTS_PER_SERIES,
   NILM_LOW_CONFIDENCE_THRESHOLD,
   EXPAND_NILM_QUERY_PARAM,
   NILM_WORKSPACE_QUERY_PARAM,
@@ -202,7 +204,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmDecisionDrafts = new Map();
     this._nilmSessionLabelDrafts = new Map();
     this._nilmAssignmentDrafts = new Map();
-    this._nilmOverlayVisibility = { known_load: true, solar: true };
     this._nilmFocusedSignature = "";
     this._nilmActiveLane = "needs_review";
     this._nilmSelectedReviewKey = "";

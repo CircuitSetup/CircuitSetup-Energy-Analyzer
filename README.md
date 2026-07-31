@@ -881,7 +881,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 ### Experimental NILM
 
-Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges, show known-load overlays, and turn graph interval selections directly into appliance assignments for review.
+Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges. It plots mains real power in watts, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. Confirmed sessions also teach conservative duration bounds for later matching. Graph interval selections can be turned directly into appliance assignments for review.
 
 On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 

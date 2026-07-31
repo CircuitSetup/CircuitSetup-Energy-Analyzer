@@ -824,6 +824,7 @@ class NilmController:
         assignment["confidence"] = confidence
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -941,6 +942,7 @@ class NilmController:
             assignment["last_rejected_at"] = now
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -967,6 +969,78 @@ class NilmController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
+
+    def _update_assignment_duration_bounds(
+        self,
+        circuit_id: str,
+        assignment: dict[str, Any],
+    ) -> None:
+        confirmed = set(
+            self._clean_string_list(assignment.get("confirmed_session_ids"))
+        )
+        confirmed_aliases: dict[str, str] = {}
+        durations: list[float] = []
+        for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if not isinstance(session, Mapping):
+                continue
+            preserved_close = session.get("_duration_bound_close")
+            preserved_close = (
+                preserved_close if isinstance(preserved_close, Mapping) else None
+            )
+            session_ids = {str(session.get("session_id") or "").strip()}
+            if preserved_close is not None:
+                preserved_session_id = str(
+                    preserved_close.get("session_id") or ""
+                ).strip()
+                session_ids.add(preserved_session_id)
+                session_id = str(session.get("session_id") or "").strip()
+                if session_id in confirmed and preserved_session_id:
+                    confirmed_aliases[session_id] = preserved_session_id
+            if confirmed.isdisjoint(session_ids):
+                continue
+            if preserved_close is not None:
+                preserved_duration = self._nonnegative_float_value(
+                    preserved_close.get("duration_seconds"),
+                    default=0.0,
+                )
+                if preserved_duration > 0.0:
+                    durations.append(preserved_duration)
+                    continue
+            start = self._datetime_or_none(session.get("start"))
+            end = self._datetime_or_none(session.get("end"))
+            if start is not None and end is not None and end > start:
+                durations.append((end - start).total_seconds())
+        if not durations:
+            for key in (
+                "typical_duration_seconds",
+                "min_duration_seconds",
+                "max_duration_seconds",
+            ):
+                assignment.pop(key, None)
+        else:
+            typical = float(median(durations))
+            # ponytail: half/double the median until labelled volume supports
+            # percentiles.
+            assignment["typical_duration_seconds"] = round(typical, 3)
+            minimum = max(30.0, min(min(durations), typical * 0.5))
+            assignment["min_duration_seconds"] = round(minimum, 3)
+            assignment["max_duration_seconds"] = round(
+                max(minimum, max(durations), typical * 2.0),
+                3,
+            )
+        if self._sample_processor is not None:
+            self._sample_processor.refresh_session_history(
+                circuit_id,
+                self._coordinator.store_data,
+            )
+        if confirmed_aliases:
+            assignment["confirmed_session_ids"] = self._clean_string_list(
+                confirmed_aliases.get(session_id, session_id)
+                for session_id in assignment.get("confirmed_session_ids", ())
+            )
 
     def apply_alert_feedback(
         self,
@@ -1013,6 +1087,7 @@ class NilmController:
             return
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(alert.circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -1456,6 +1531,7 @@ class NilmController:
         ):
             if interval.get("assignment_id") == source_id:
                 interval["assignment_id"] = target_id
+        self._update_assignment_duration_bounds(circuit_id, target)
         await self.async_save_assignment_change()
         return dict(target)
 

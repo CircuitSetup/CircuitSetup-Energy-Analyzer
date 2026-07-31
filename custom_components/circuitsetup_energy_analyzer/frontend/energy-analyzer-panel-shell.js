@@ -1624,9 +1624,6 @@ export class PanelShellMethods {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
     }
-    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-overlay-toggle]")) {
-      input.addEventListener("change", () => this._toggleNilmOverlaySeries(input));
-    }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
     }

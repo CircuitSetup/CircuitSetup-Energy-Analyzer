@@ -6795,6 +6795,16 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
             "keep_assignment_for_masking": False,
         },
         {
+            "assignment_id": "ignored",
+            "signature_fingerprints": ["ignored-signature"],
+            "lifecycle_state": "ignored",
+        },
+        {
+            "assignment_id": "expected",
+            "signature_fingerprints": ["expected-signature"],
+            "lifecycle_state": "expected",
+        },
+        {
             "assignment_id": "masking",
             "signature_fingerprints": ["masking-signature"],
             "conversion_state": "direct_meter",
@@ -6802,9 +6812,264 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
         },
     ]
 
-    assert _nilm_session_specs([], assignments) == [
+    assert _nilm_session_specs(
+        [
+            {"signature_id": "ignored-signature"},
+            {"signature_id": "expected-signature"},
+        ],
+        assignments,
+    ) == [
         ("masking-signature", "masking")
     ]
+
+
+def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    sessions = _nilm_session_history_payloads(
+        "mains",
+        [
+            NilmEdge(start, 150.0, 0.0, 150.0, 0.0, "on"),
+            NilmEdge(
+                start + timedelta(minutes=5),
+                -150.0,
+                0.0,
+                -150.0,
+                0.0,
+                "off",
+            ),
+        ],
+        [
+            {"signature_id": "120-w", "typical_watts": 120.0},
+            {"signature_id": "187-w", "typical_watts": 187.0},
+        ],
+        [],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0]["signature_fingerprint"] == "120-w"
+
+
+def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    on_edge = NilmEdge(start, 125.0, 0.0, 125.0, 0.0, "on")
+    existing = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [{"signature_id": "120-w", "typical_watts": 120.0}],
+        [],
+    )
+    updates = _nilm_session_history_payloads(
+        "mains",
+        [
+            on_edge,
+            NilmEdge(
+                start + timedelta(minutes=5),
+                -125.0,
+                0.0,
+                -125.0,
+                0.0,
+                "off",
+            ),
+        ],
+        [
+            {"signature_id": "120-w", "typical_watts": 120.0},
+            {"signature_id": "130-w", "typical_watts": 130.0},
+        ],
+        [],
+    )
+
+    merged = _merge_nilm_session_history(existing, updates)
+
+    assert len(merged) == 1
+    assert merged[0]["end"] == "2026-07-31T12:05:00+00:00"
+    assert merged[0]["ambiguous"] is True
+    assert merged[0]["assignment_id"] is None
+
+
+def test_nilm_history_invalidates_open_owner_when_ambiguous() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+        _nilm_session_history_payloads,
+    )
+
+    on_edge = NilmEdge(
+        datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        125.0,
+        0.0,
+        125.0,
+        0.0,
+        "on",
+    )
+    existing = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [{"signature_id": "120-w", "typical_watts": 125.0}],
+        [{"assignment_id": "load-a", "signature_fingerprints": ["120-w"]}],
+    )
+    updates = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [
+            {"signature_id": "120-w", "typical_watts": 125.0},
+            {"signature_id": "130-w", "typical_watts": 125.0},
+        ],
+        [
+            {"assignment_id": "load-a", "signature_fingerprints": ["120-w"]},
+            {"assignment_id": "load-b", "signature_fingerprints": ["130-w"]},
+        ],
+    )
+
+    merged = _merge_nilm_session_history(existing, updates)
+
+    assert len(merged) == 1
+    assert merged[0]["end"] is None
+    assert merged[0]["ambiguous"] is True
+    assert merged[0]["assignment_id"] is None
+
+
+def test_nilm_session_history_closes_open_session_across_owner_fingerprints() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "open",
+                "signature_fingerprint": "off-500",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+        [
+            {
+                "session_id": "closed",
+                "signature_fingerprint": "on-500",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["closed"]
+
+
+def test_nilm_session_history_preserves_close_across_open_fingerprints() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    assignment = {
+        "assignment_id": "dryer",
+        "rejected_session_ids": ["open-old"],
+    }
+    preserved_close = {
+        "session_id": "closed",
+        "off_edge_id": "off-1",
+        "end": "2026-07-31T12:05:00+00:00",
+        "duration_seconds": 300.0,
+    }
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "open-old",
+                "signature_fingerprint": "signature-old",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+                "_duration_bound_close": preserved_close,
+            }
+        ],
+        [
+            {
+                "session_id": "open-new",
+                "signature_fingerprint": "signature-new",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+        assignments=[assignment],
+    )
+
+    assert merged[0]["_duration_bound_close"] == preserved_close
+    assert assignment["rejected_session_ids"] == ["open-new"]
+
+
+@pytest.mark.parametrize("existing_off_edge_id", ["off-1", "off-old"])
+def test_nilm_session_history_replaces_stale_closed_edge_pair(
+    existing_off_edge_id: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "stale",
+                "signature_fingerprint": "signature-a",
+                "assignment_id": "appliance-a",
+                "on_edge_id": "on-1",
+                "off_edge_id": existing_off_edge_id,
+            }
+        ],
+        [
+            {
+                "session_id": "current",
+                "signature_fingerprint": "signature-b",
+                "assignment_id": None,
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+                "ambiguous": True,
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["current"]
+
+
+def test_nilm_session_history_replaces_stale_close_with_reopened_session() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    merged = _merge_nilm_session_history(
+        [
+            {
+                "session_id": "closed",
+                "signature_fingerprint": "dryer",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": "off-1",
+            }
+        ],
+        [
+            {
+                "session_id": "reopened",
+                "signature_fingerprint": "dryer",
+                "assignment_id": "dryer",
+                "on_edge_id": "on-1",
+                "off_edge_id": None,
+            }
+        ],
+    )
+
+    assert [session["session_id"] for session in merged] == ["reopened"]
 
 
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
@@ -6853,7 +7118,7 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
 
     def sample(index: int, watts: float) -> NormalizedCircuitSample:
         return NormalizedCircuitSample(
-            timestamp=now + timedelta(seconds=index * 30),
+            timestamp=now + timedelta(seconds=index * 10),
             circuit_id="mains",
             real_power=watts,
             current=None,
@@ -6872,7 +7137,24 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
             context,
             events=(),
         )
-        for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1)
+        for index, watts in enumerate(
+            (
+                100,
+                1_000,
+                100,
+                420,
+                410,
+                110,
+                120,
+                430,
+                420,
+                115,
+                120,
+                425,
+                415,
+            ),
+            start=1,
+        )
     ]
 
     assert any(result.store_dirty for result in results)
@@ -6991,7 +7273,14 @@ def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> N
     assert merged[0]["off_edge_id"] == "edge-off"
 
 
-def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
+@pytest.mark.parametrize(
+    ("event_sample", "noisy_confirmation", "older_unmatched"),
+    [(1, False, False), (2, False, False), (1, True, False), (1, False, True)],
+)
+def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
+    event_sample: int,
+    noisy_confirmation: bool,
+    older_unmatched: bool,
 ) -> None:
     from collections import defaultdict
 
@@ -7003,6 +7292,7 @@ def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
         CircuitEvent,
         EventType,
     )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -7039,10 +7329,14 @@ def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
         observe_topology=lambda _config, match, _context: observed_matches.append(match)
         or [],
     )
+    if older_unmatched:
+        processor.unmatched_edges_by_circuit["mains"] = [
+            NilmEdge(now, 320.0, 0.0, 320.0, 0.0, "on")
+        ]
 
     def sample(index: int, watts: float) -> NormalizedCircuitSample:
         return NormalizedCircuitSample(
-            timestamp=now + timedelta(seconds=index * 30),
+            timestamp=now + timedelta(seconds=index * 5),
             circuit_id="mains",
             real_power=watts,
             current=None,
@@ -7055,28 +7349,40 @@ def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
         )
 
     processor.process(sample(0, 100.0), config, context, events=())
-    processor.process(sample(1, 420.0), config, context, events=())
-    result = processor.process(
-        sample(2, 420.0),
+    known_event = CircuitEvent(
+        timestamp=now + timedelta(seconds=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 390.0 if noisy_confirmation else 320.0},
+    )
+    processor.process(
+        sample(1, 420.0),
         config,
         context,
-        events=(
-            CircuitEvent(
-                timestamp=now + timedelta(seconds=30),
-                circuit_id="fridge",
-                event_type=EventType.START,
-                features={"startup_power_w": 320.0},
-            ),
-        ),
+        events=(known_event,) if event_sample == 1 else (),
     )
+    result = processor.process(
+        sample(2, 490.0 if noisy_confirmation else 420.0),
+        config,
+        context,
+        events=(known_event,) if event_sample == 2 else (),
+    )
+    if noisy_confirmation:
+        result = processor.process(sample(3, 490.0), config, context, events=())
 
     assert len(observed_matches) == 1
     assert observed_matches[0].known_circuit_id == "fridge"
-    assert observed_matches[0].edge.timestamp == now + timedelta(seconds=30)
+    assert observed_matches[0].edge.timestamp == now + timedelta(
+        seconds=10 if noisy_confirmation else 5
+    )
     assert processor.total_events_by_circuit["mains"] == 1
-    assert processor.unmatched_edges_by_circuit["mains"] == []
+    assert [
+        edge.timestamp for edge in processor.unmatched_edges_by_circuit["mains"]
+    ] == ([now] if older_unmatched else [])
     updates = {update.path: update.value for update in result.state_updates}
-    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == 0.0
+    assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == (
+        100.0 if older_unmatched else 0.0
+    )
 
 
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
