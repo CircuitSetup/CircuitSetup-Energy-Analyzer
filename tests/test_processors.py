@@ -6968,7 +6968,10 @@ def test_nilm_session_history_closes_open_session_across_owner_fingerprints() ->
     assert [session["session_id"] for session in merged] == ["closed"]
 
 
-def test_nilm_session_history_replaces_stale_closed_edge_pair() -> None:
+@pytest.mark.parametrize("existing_off_edge_id", ["off-1", "off-old"])
+def test_nilm_session_history_replaces_stale_closed_edge_pair(
+    existing_off_edge_id: str,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         _merge_nilm_session_history,
     )
@@ -6980,7 +6983,7 @@ def test_nilm_session_history_replaces_stale_closed_edge_pair() -> None:
                 "signature_fingerprint": "signature-a",
                 "assignment_id": "appliance-a",
                 "on_edge_id": "on-1",
-                "off_edge_id": "off-1",
+                "off_edge_id": existing_off_edge_id,
             }
         ],
         [

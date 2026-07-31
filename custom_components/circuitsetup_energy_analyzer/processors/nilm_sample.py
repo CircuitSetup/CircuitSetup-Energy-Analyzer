@@ -500,7 +500,7 @@ def _remove_replaced_nilm_sessions(
         if (
             str(session.get("on_edge_id") or "").strip() == on_edge_id
             and (
-                (off_edge_id and existing_off_edge_id == off_edge_id)
+                (off_edge_id and existing_off_edge_id)
                 or (
                     not existing_off_edge_id
                     and (
