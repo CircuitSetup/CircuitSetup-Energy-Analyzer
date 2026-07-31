@@ -1109,9 +1109,36 @@ def test_global_session_pairing_opens_on_edge_after_off_edge_is_consumed() -> No
 
     assert len(sessions) == 2
     assert sessions[0].start == BASE_TIME
-    assert sessions[0].end is None
+    assert sessions[0].end == BASE_TIME + timedelta(seconds=600)
     assert sessions[1].start == BASE_TIME + timedelta(seconds=300)
-    assert sessions[1].end == BASE_TIME + timedelta(seconds=600)
+    assert sessions[1].end is None
+
+
+def test_global_session_pairing_closes_overlapping_runs() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 500.0),
+            edge(300, 500.0),
+            edge(600, -500.0),
+            edge(900, -500.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert [(session.start, session.end) for session in sessions] == [
+        (BASE_TIME, BASE_TIME + timedelta(seconds=600)),
+        (
+            BASE_TIME + timedelta(seconds=300),
+            BASE_TIME + timedelta(seconds=900),
+        ),
+    ]
 
 
 def test_global_session_pairing_opens_session_beyond_learned_duration() -> None:

@@ -7199,7 +7199,9 @@ def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> N
     assert merged[0]["off_edge_id"] == "edge-off"
 
 
-def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
+@pytest.mark.parametrize("event_sample", [1, 2])
+def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
+    event_sample: int,
 ) -> None:
     from collections import defaultdict
 
@@ -7250,7 +7252,7 @@ def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
 
     def sample(index: int, watts: float) -> NormalizedCircuitSample:
         return NormalizedCircuitSample(
-            timestamp=now + timedelta(seconds=index * 30),
+            timestamp=now + timedelta(seconds=index * 5),
             circuit_id="mains",
             real_power=watts,
             current=None,
@@ -7263,24 +7265,28 @@ def test_nilm_sample_processor_matches_buffered_edge_after_delayed_known_event(
         )
 
     processor.process(sample(0, 100.0), config, context, events=())
-    processor.process(sample(1, 420.0), config, context, events=())
+    known_event = CircuitEvent(
+        timestamp=now + timedelta(seconds=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 320.0},
+    )
+    processor.process(
+        sample(1, 420.0),
+        config,
+        context,
+        events=(known_event,) if event_sample == 1 else (),
+    )
     result = processor.process(
         sample(2, 420.0),
         config,
         context,
-        events=(
-            CircuitEvent(
-                timestamp=now + timedelta(seconds=30),
-                circuit_id="fridge",
-                event_type=EventType.START,
-                features={"startup_power_w": 320.0},
-            ),
-        ),
+        events=(known_event,) if event_sample == 2 else (),
     )
 
     assert len(observed_matches) == 1
     assert observed_matches[0].known_circuit_id == "fridge"
-    assert observed_matches[0].edge.timestamp == now + timedelta(seconds=30)
+    assert observed_matches[0].edge.timestamp == now + timedelta(seconds=5)
     assert processor.total_events_by_circuit["mains"] == 1
     assert processor.unmatched_edges_by_circuit["mains"] == []
     updates = {update.path: update.value for update in result.state_updates}

@@ -900,23 +900,7 @@ def pair_nilm_sessions_for_signatures(
     off_edges = [edge for edge in ordered_edges if edge.direction == "off"]
     candidates: list[_NilmSessionCandidate] = []
     for on_index, on_edge in enumerate(on_edges):
-        next_on = next(
-            (
-                later_on.timestamp
-                for later_on in on_edges[on_index + 1 :]
-                if _nilm_magnitude_score(
-                    later_on.delta_w,
-                    on_edge.delta_w,
-                    tolerance_ratio=0.25,
-                    floor=50.0,
-                )
-                is not None
-            ),
-            None,
-        )
         for off_index, off_edge in enumerate(off_edges):
-            if next_on is not None and off_edge.timestamp > next_on:
-                continue
             for spec in specs:
                 spec_min_duration = _nilm_session_spec_duration(
                     spec,

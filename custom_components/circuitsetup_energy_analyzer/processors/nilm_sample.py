@@ -65,6 +65,7 @@ class NilmSampleProcessor:
         self.unmatched_edges_by_circuit = unmatched_edges_by_circuit
         self.ignored_signatures = ignored_signatures
         self._known_load_events = known_load_events
+        self._pending_known_load_events: dict[str, tuple[CircuitEvent, ...]] = {}
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
 
@@ -94,7 +95,11 @@ class NilmSampleProcessor:
         )
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
-        known_events = tuple(self._known_load_events(circuit_id, events))
+        current_known_events = tuple(self._known_load_events(circuit_id, events))
+        known_events = (
+            *self._pending_known_load_events.pop(circuit_id, ()),
+            *current_known_events,
+        )
         alerts: list[AlertEvidence] = []
         store_dirty = False
         existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
@@ -106,6 +111,8 @@ class NilmSampleProcessor:
             next_unmatched = list(mask.unmatched_edges)
         else:
             next_unmatched = candidate_edges
+        if not edges and not matched_edges and current_known_events:
+            self._pending_known_load_events[circuit_id] = current_known_events
 
         next_unmatched = _newest_nilm_edges(
             next_unmatched,
