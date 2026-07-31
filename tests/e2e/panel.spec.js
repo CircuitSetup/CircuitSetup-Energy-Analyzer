@@ -1568,7 +1568,7 @@ test("completed day retries fallback amps after a Recorder failure", async ({ pa
     },
   );
 
-  await expect.poll(() => page.evaluate(() => Boolean(window.__dashboardCard._historicalAmpsRetryTimer))).toBe(true);
+  await expect.poll(() => page.evaluate(() => Boolean(window.__dashboardCard._historicalAmpsRefreshTimer))).toBe(true);
   await page.clock.fastForward(5_000);
   await expect.poll(() => historyCalls).toBeGreaterThan(1);
   await expect(card.locator(".metric").filter({ hasText: "Average Amps (Jul 31)" })).toContainText("2 A");

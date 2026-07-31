@@ -1903,7 +1903,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._historicalAmpsKey = "";
       this._historicalAmpsSeries = null;
       this._historicalAmpsLoading = false;
-      this._historicalAmpsRetryTimer = 0;
+      this._historicalAmpsRefreshTimer = 0;
       this._handleDashboardData = () => this._render();
     }
 
@@ -1914,7 +1914,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     disconnectedCallback() {
       clearTimeout(this._rangeTotalsReloadTimer);
-      clearTimeout(this._historicalAmpsRetryTimer);
+      clearTimeout(this._historicalAmpsRefreshTimer);
       window.removeEventListener(DATA_EVENT, this._handleDashboardData);
       super.disconnectedCallback();
     }
@@ -2242,8 +2242,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const entityIds = [...new Set(configs.map((config) => config.entity))];
       const key = `${range.start}|${range.end}|${entityIds.join(",")}`;
       if (key === this._historicalAmpsKey) return;
-      clearTimeout(this._historicalAmpsRetryTimer);
-      this._historicalAmpsRetryTimer = 0;
+      clearTimeout(this._historicalAmpsRefreshTimer);
+      this._historicalAmpsRefreshTimer = 0;
       this._historicalAmpsKey = key;
       this._historicalAmpsSeries = null;
       if (!entityIds.length) return;
@@ -2267,8 +2267,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       }).catch(() => {
         if (this._historicalAmpsKey === key) {
           this._historicalAmpsSeries = null;
-          this._historicalAmpsRetryTimer = setTimeout(() => {
-            this._historicalAmpsRetryTimer = 0;
+          this._historicalAmpsRefreshTimer = setTimeout(() => {
+            this._historicalAmpsRefreshTimer = 0;
             if (this._historicalAmpsKey === key) {
               this._historicalAmpsKey = "";
               if (this.isConnected) this._render();
