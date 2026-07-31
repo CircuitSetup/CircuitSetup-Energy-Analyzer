@@ -6897,6 +6897,48 @@ def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() 
     assert merged[0]["assignment_id"] is None
 
 
+def test_nilm_history_invalidates_open_owner_when_ambiguous() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+        _nilm_session_history_payloads,
+    )
+
+    on_edge = NilmEdge(
+        datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        125.0,
+        0.0,
+        125.0,
+        0.0,
+        "on",
+    )
+    existing = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [{"signature_id": "120-w", "typical_watts": 125.0}],
+        [{"assignment_id": "load-a", "signature_fingerprints": ["120-w"]}],
+    )
+    updates = _nilm_session_history_payloads(
+        "mains",
+        [on_edge],
+        [
+            {"signature_id": "120-w", "typical_watts": 125.0},
+            {"signature_id": "130-w", "typical_watts": 125.0},
+        ],
+        [
+            {"assignment_id": "load-a", "signature_fingerprints": ["120-w"]},
+            {"assignment_id": "load-b", "signature_fingerprints": ["130-w"]},
+        ],
+    )
+
+    merged = _merge_nilm_session_history(existing, updates)
+
+    assert len(merged) == 1
+    assert merged[0]["end"] is None
+    assert merged[0]["ambiguous"] is True
+    assert merged[0]["assignment_id"] is None
+
+
 def test_nilm_session_history_closes_open_session_across_owner_fingerprints() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         _merge_nilm_session_history,

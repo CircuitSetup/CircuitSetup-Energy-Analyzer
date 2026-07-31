@@ -460,7 +460,7 @@ def _merge_nilm_session_history(
         session_id = str(update.get("session_id") or "").strip()
         if not session_id:
             continue
-        if update.get("off_edge_id"):
+        if update.get("off_edge_id") or update.get("ambiguous"):
             _remove_replaced_nilm_sessions(
                 merged,
                 signature_fingerprint=str(

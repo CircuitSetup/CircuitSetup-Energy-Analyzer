@@ -1100,6 +1100,24 @@ def pair_nilm_sessions_for_signatures(
             len(ranked_specs) > 1
             and ranked_specs[0][0] - ranked_specs[1][0] <= ambiguity_margin
         ):
+            sessions.append(
+                _open_nilm_session(
+                    on_edge,
+                    mains_circuit_id=mains_circuit_id,
+                    signature_fingerprint=_nilm_session_spec_fingerprint(
+                        ranked_specs[0][1]
+                    ),
+                    assignment_id=None,
+                    known_load_masked=False,
+                    known_load_confidence=None,
+                    ambiguous=True,
+                    alternate_match_count=sum(
+                        1
+                        for score, _spec in ranked_specs[1:]
+                        if ranked_specs[0][0] - score <= ambiguity_margin
+                    ),
+                )
+            )
             continue
         spec = ranked_specs[0][1]
         assignment_id = _nilm_session_spec_assignment_id(spec)
@@ -1464,6 +1482,8 @@ def _open_nilm_session(
     assignment_id: str | None,
     known_load_masked: bool,
     known_load_confidence: float | None,
+    ambiguous: bool = False,
+    alternate_match_count: int = 0,
 ) -> NilmSession:
     on_edge_id = _nilm_edge_id(on_edge)
     confidence = 0.35
@@ -1486,6 +1506,8 @@ def _open_nilm_session(
         median_power_w=round(abs(float(on_edge.delta_w)), 3),
         estimated_energy_kwh=0.0,
         confidence=round(confidence, 3),
+        ambiguous=ambiguous,
+        alternate_match_count=alternate_match_count,
         known_load_masked=known_load_masked,
         known_load_confidence=_nilm_known_load_confidence(
             known_load_masked,
