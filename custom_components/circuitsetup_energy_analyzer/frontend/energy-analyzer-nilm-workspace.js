@@ -5,6 +5,7 @@ export function createNilmWorkspaceMethods({
   EXPAND_NILM_QUERY_PARAM,
   NILM_WORKSPACE_QUERY_PARAM,
   NILM_EDGE_SNAP_MS,
+  MAX_NILM_CHART_POINTS_PER_SERIES,
 }) {
   return class NilmWorkspaceMethods {
   async _loadNilmWorkspace(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
@@ -1063,11 +1064,6 @@ export function createNilmWorkspaceMethods({
     if (button.classList) button.classList.toggle("secondary", !dirty);
   }
 
-  _toggleNilmOverlaySeries(input) {
-    this._nilmOverlayVisibility[input.dataset.nilmOverlayToggle] = input.checked;
-    this._render();
-  }
-
   _startNilmChartSelection(event, chart) {
     if (event.target && event.target.dataset && (
       event.target.dataset.nilmDraftIndex !== undefined
@@ -1559,11 +1555,10 @@ export function createNilmWorkspaceMethods({
       : this._nilmWorkspaceHistoryError
         ? `<div data-nilm-history-error><p class="muted">${this._escape(this._nilmWorkspaceHistoryError)}</p><button type="button" class="secondary" data-retry-nilm-history>${this._escape(this._panelText("common.retry"))}</button></div>`
         : graphWindow && series.length
-          ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: workspace.edges, nilm_sessions: graphBands })
+          ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), y_axis_label: "W", nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: workspace.edges, nilm_sessions: graphBands })
           : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
-      ${this._renderNilmOverlayToggles(workspace)}
       ${this._renderNilmGraphControls(graphWindow)}
       ${graph}
       ${!this._nilmIntervalEditorOpen ? `<div class="actions">
@@ -2232,18 +2227,6 @@ export function createNilmWorkspaceMethods({
     return `${text.slice(0, Math.max(1, maxLength - 3))}...`;
   }
 
-  _renderNilmOverlayToggles(workspace) {
-    const hasKnown = (workspace.known_load_overlays || []).some((item) => (item.entity_ids || []).length);
-    const hasSolar = (workspace.solar_overlays || []).some((item) => (item.entity_ids || []).length);
-    if (!hasKnown && !hasSolar) {
-      return "";
-    }
-    return `<div class="actions">
-      ${hasKnown ? `<label><input type="checkbox" data-nilm-overlay-toggle="known_load" ${this._nilmOverlayVisibility.known_load ? "checked" : ""}> ${this._escape(this._panelText("nilm_workspace.show_known_load_overlays"))}</label>` : ""}
-      ${hasSolar ? `<label><input type="checkbox" data-nilm-overlay-toggle="solar" ${this._nilmOverlayVisibility.solar ? "checked" : ""}> ${this._escape(this._panelText("nilm_workspace.show_solar_net_overlays"))}</label>` : ""}
-    </div>`;
-  }
-
   _renderNilmGraphControls(window) {
     if (!window) {
       return "";
@@ -2264,18 +2247,12 @@ export function createNilmWorkspaceMethods({
     }, this._nilmGraphWindow);
   }
 
-  _visibleNilmWorkspaceSeries(workspace, graphWindow) {
-    const knownIds = new Set((workspace.known_load_overlays || []).flatMap((item) => item.entity_ids || []));
-    const solarIds = new Set((workspace.solar_overlays || []).flatMap((item) => item.entity_ids || []));
-    return this._visibleChartSeries(this._nilmWorkspaceHistorySeries, graphWindow).filter((item) => {
-      if (!this._nilmOverlayVisibility.known_load && knownIds.has(item.entity_id)) {
-        return false;
-      }
-      if (!this._nilmOverlayVisibility.solar && solarIds.has(item.entity_id)) {
-        return false;
-      }
-      return true;
-    });
+  _visibleNilmWorkspaceSeries(_workspace, graphWindow) {
+    return this._visibleChartSeries(
+      this._nilmWorkspaceHistorySeries,
+      graphWindow,
+      MAX_NILM_CHART_POINTS_PER_SERIES,
+    );
   }
 
   _isLowNilmConfidence(value) {

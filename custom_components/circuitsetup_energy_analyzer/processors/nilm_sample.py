@@ -5,20 +5,20 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
+from datetime import timedelta
 from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
     NilmEdge,
     NilmEdgeDetector,
-    NilmSession,
     NilmSignature,
     classify_signature,
     cluster_recurring_signatures,
     mask_known_loads,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
-    pair_nilm_sessions,
+    pair_nilm_sessions_for_signatures,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -86,7 +86,11 @@ class NilmSampleProcessor:
         min_delta_w = self._min_delta_w_for_circuit(circuit_id)
         detector = self.detectors.setdefault(
             circuit_id,
-            NilmEdgeDetector(min_delta_w=min_delta_w),
+            NilmEdgeDetector(
+                min_delta_w=min_delta_w,
+                confirmation_samples=2,
+                confirmation_max_interval=timedelta(seconds=15),
+            ),
         )
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
@@ -348,24 +352,35 @@ def _nilm_session_history_payloads(
     edge_list = list(edges)
     if not edge_list:
         return []
+    assignment_list = [
+        assignment for assignment in assignments if isinstance(assignment, Mapping)
+    ]
     signatures_by_key = _nilm_signatures_by_key(signatures)
-    payloads: list[dict[str, Any]] = []
+    assignment_by_id = {
+        str(assignment.get("assignment_id") or "").strip(): assignment
+        for assignment in assignment_list
+    }
+    matcher_specs: list[dict[str, Any]] = []
     for signature_fingerprint, assignment_id in _nilm_session_specs(
         signatures,
-        assignments,
+        assignment_list,
     ):
-        signature = signatures_by_key.get(signature_fingerprint)
-        payloads.extend(
-            nilm_session_to_dict(session)
-            for session in pair_nilm_sessions(
-                edge_list,
-                mains_circuit_id=circuit_id,
-                signature_fingerprint=signature_fingerprint,
-                assignment_id=assignment_id,
-            )
-            if signature is None or _nilm_session_matches_signature(session, signature)
+        spec = dict(signatures_by_key.get(signature_fingerprint) or {})
+        spec["signature_fingerprint"] = signature_fingerprint
+        spec["assignment_id"] = assignment_id
+        assignment = assignment_by_id.get(assignment_id or "", {})
+        for key in ("min_duration_seconds", "max_duration_seconds"):
+            if key in assignment:
+                spec[key] = assignment[key]
+        matcher_specs.append(spec)
+    return [
+        nilm_session_to_dict(session)
+        for session in pair_nilm_sessions_for_signatures(
+            edge_list,
+            mains_circuit_id=circuit_id,
+            signature_specs=matcher_specs,
         )
-    return payloads
+    ]
 
 
 def _nilm_signatures_by_key(
@@ -421,22 +436,6 @@ def _nilm_signature_session_fingerprint(signature: Mapping[str, Any]) -> str:
         or signature.get("signature_id")
         or ""
     ).strip()
-
-
-def _nilm_session_matches_signature(
-    session: NilmSession,
-    signature: Mapping[str, Any],
-) -> bool:
-    typical_watts = _optional_float(
-        signature.get("typical_watts"),
-        signature.get("median_delta_w"),
-    )
-    if typical_watts is None:
-        return True
-    return abs(session.median_power_w - abs(typical_watts)) <= max(
-        abs(typical_watts) * 0.25,
-        50.0,
-    )
 
 
 def _merge_nilm_session_history(

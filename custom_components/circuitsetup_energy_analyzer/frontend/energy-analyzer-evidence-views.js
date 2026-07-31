@@ -714,6 +714,12 @@ export function createEvidenceViewMethods({
       });
     }
     for (const svg of this.shadowRoot.querySelectorAll("svg.chart")) {
+      if (svg.dataset.nilmChartSelect === "1") {
+        const frame = svg.closest("[data-chart-frame]");
+        const tooltip = frame && frame.querySelector("[data-chart-tooltip]");
+        tooltip && tooltip.setAttribute("aria-hidden", "true");
+        continue;
+      }
       svg.addEventListener("dblclick", (event) => {
         event.preventDefault();
         this._zoomChartAt(event, svg);
@@ -884,7 +890,11 @@ export function createEvidenceViewMethods({
     return { start, end, min, max };
   }
 
-  _chartSeries(historySeries = this._historySeries, entitySeries = []) {
+  _chartSeries(
+    historySeries = this._historySeries,
+    entitySeries = [],
+    maxPoints = MAX_CHART_POINTS_PER_SERIES,
+  ) {
     const units = new Map((Array.isArray(entitySeries) ? entitySeries : []).map((item) => [
       item.entity_id,
       String(item.unit || ""),
@@ -908,15 +918,22 @@ export function createEvidenceViewMethods({
           entity_id: entityId,
           name: this._friendlyEntityName(entityId),
           unit: units.get(entityId) || this._friendlyEntityUnit(entityId),
-          points: this._boundedChartPoints(points),
+          points: this._boundedChartPoints(points, maxPoints),
         });
       }
     }
     return parsed;
   }
 
-  _visibleChartSeries(historySeries, graphWindow) {
-    return this._visibleParsedChartSeries(this._chartSeries(historySeries), graphWindow);
+  _visibleChartSeries(
+    historySeries,
+    graphWindow,
+    maxPoints = MAX_CHART_POINTS_PER_SERIES,
+  ) {
+    return this._visibleParsedChartSeries(
+      this._chartSeries(historySeries, [], maxPoints),
+      graphWindow,
+    );
   }
 
   _visibleParsedChartSeries(parsedSeries, graphWindow) {
@@ -940,11 +957,11 @@ export function createEvidenceViewMethods({
     return Array.from(groups, ([unit, unitSeries]) => ({ unit, series: unitSeries }));
   }
 
-  _boundedChartPoints(points) {
-    if (!points.length || points.length <= MAX_CHART_POINTS_PER_SERIES) {
+  _boundedChartPoints(points, maxPoints = MAX_CHART_POINTS_PER_SERIES) {
+    if (!points.length || points.length <= maxPoints) {
       return points;
     }
-    const step = Math.ceil(points.length / MAX_CHART_POINTS_PER_SERIES);
+    const step = Math.ceil(points.length / maxPoints);
     return points.filter((point, index) => index % step === 0);
   }
 

@@ -20,6 +20,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     cluster_recurring_signatures,
     mask_known_loads,
     pair_nilm_sessions,
+    pair_nilm_sessions_for_signatures,
     unmatched_load_percentage,
 )
 from custom_components.circuitsetup_energy_analyzer.normalize import (
@@ -265,6 +266,49 @@ def test_edge_detector_invalidates_previous_sample_across_missing_real_power() -
     )
 
     assert edges == []
+
+
+def test_edge_detector_rejects_one_sample_excursion_with_confirmation() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 1_000.0),
+            sample(20, 0.0),
+        ]
+    )
+
+    assert edges == []
+
+
+def test_edge_detector_keeps_original_timestamp_for_confirmed_level() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 1_000.0),
+            sample(20, 980.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 1_000.0
+
+
+def test_edge_detector_does_not_debounce_sparse_samples() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([sample(0, 0.0), sample(30, 1_000.0)])
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=30)
 
 
 def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> None:
@@ -891,6 +935,73 @@ def test_pair_nilm_sessions_uses_stable_ids_for_same_edges() -> None:
     assert reordered.session_id == original.session_id
     assert reordered.on_edge_id == original.on_edge_id
     assert reordered.off_edge_id == original.off_edge_id
+
+
+def test_global_session_pairing_assigns_each_edge_pair_once() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 150.0), edge(300, -150.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "120-w", "typical_watts": 120.0},
+            {"signature_fingerprint": "187-w", "typical_watts": 187.0},
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "120-w"
+    assert sessions[0].off_edge_id is not None
+
+
+def test_global_session_pairing_leaves_close_signature_match_unresolved() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 125.0), edge(300, -125.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "120-w", "typical_watts": 120.0},
+            {"signature_fingerprint": "130-w", "typical_watts": 130.0},
+        ],
+    )
+
+    assert sessions == []
+
+
+def test_global_session_pairing_rejects_short_closed_transition() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(20, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "heater", "typical_watts": 500.0},
+        ],
+    )
+
+    assert sessions == []
+
+
+def test_global_session_pairing_uses_reactive_signature_to_choose_owner() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 500.0, delta_var=300.0, delta_va=600.0),
+            edge(300, -500.0, delta_var=-300.0, delta_va=-600.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "resistive",
+                "typical_watts": 500.0,
+                "median_delta_var": 0.0,
+                "median_delta_va": 500.0,
+            },
+            {
+                "signature_fingerprint": "motor",
+                "typical_watts": 500.0,
+                "median_delta_var": 300.0,
+                "median_delta_va": 600.0,
+            },
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].signature_fingerprint == "motor"
 
 
 def _required_nilm_api(name: str):

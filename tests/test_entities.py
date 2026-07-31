@@ -4078,6 +4078,58 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
     assert states["assignment-washer"].is_running is True
 
 
+def test_nilm_virtual_states_assign_overlapping_signatures_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "120-w", "typical_watts": 120.0},
+                    {"signature_id": "187-w", "typical_watts": 187.0},
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-120",
+                        "display_name": "120 W appliance",
+                        "signature_fingerprints": ["120-w"],
+                    },
+                    {
+                        "assignment_id": "assignment-187",
+                        "display_name": "187 W appliance",
+                        "signature_fingerprints": ["187-w"],
+                    },
+                ]
+            },
+        ),
+        _nilm_unmatched_edges={
+            "mains": [
+                NilmEdge(
+                    datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+                    140.0,
+                    0.0,
+                    140.0,
+                    0.0,
+                    "on",
+                )
+            ]
+        },
+    )
+
+    states = nilm_virtual_appliance_states(coordinator)
+
+    assert sum(state.is_running for state in states) == 1
+    assert next(state for state in states if state.is_running).assignment_id == (
+        "assignment-120"
+    )
+
+
 @pytest.mark.asyncio
 async def test_nilm_virtual_entities_skip_unpublished_and_retired_assignments() -> None:
     from custom_components.circuitsetup_energy_analyzer import binary_sensor, sensor

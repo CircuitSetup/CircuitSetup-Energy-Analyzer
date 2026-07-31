@@ -6363,6 +6363,37 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
     ]
 
 
+def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    sessions = _nilm_session_history_payloads(
+        "mains",
+        [
+            NilmEdge(start, 150.0, 0.0, 150.0, 0.0, "on"),
+            NilmEdge(
+                start + timedelta(minutes=5),
+                -150.0,
+                0.0,
+                -150.0,
+                0.0,
+                "off",
+            ),
+        ],
+        [
+            {"signature_id": "120-w", "typical_watts": 120.0},
+            {"signature_id": "187-w", "typical_watts": 187.0},
+        ],
+        [],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0]["signature_fingerprint"] == "120-w"
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 
@@ -6409,7 +6440,7 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
 
     def sample(index: int, watts: float) -> NormalizedCircuitSample:
         return NormalizedCircuitSample(
-            timestamp=now + timedelta(seconds=index * 30),
+            timestamp=now + timedelta(seconds=index * 10),
             circuit_id="mains",
             real_power=watts,
             current=None,
@@ -6428,7 +6459,24 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
             context,
             events=(),
         )
-        for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1)
+        for index, watts in enumerate(
+            (
+                100,
+                1_000,
+                100,
+                420,
+                410,
+                110,
+                120,
+                430,
+                420,
+                115,
+                120,
+                425,
+                415,
+            ),
+            start=1,
+        )
     ]
 
     assert any(result.store_dirty for result in results)

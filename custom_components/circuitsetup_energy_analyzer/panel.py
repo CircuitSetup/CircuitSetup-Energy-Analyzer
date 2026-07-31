@@ -1935,8 +1935,11 @@ def _bounded_history_series(
             items.append(payload)
     if len(items) <= MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY:
         return items
-    step = max(len(items) // MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY, 1)
-    return items[::step][:MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY]
+    limit = MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY
+    last_index = len(items) - 1
+    return [
+        items[round(index * last_index / (limit - 1))] for index in range(limit)
+    ]
 
 
 def _history_state_payload(

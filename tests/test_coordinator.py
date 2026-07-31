@@ -7307,6 +7307,16 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     coordinator = EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
         store_data=FeatureStoreData(
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session_1",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:45:00+00:00",
+                    }
+                ]
+            },
             nilm_appliance_assignments_by_circuit={
                 "mains": [
                     {
@@ -7346,6 +7356,9 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     assert validated["energy_estimate_error"] is None
     assert validated["last_validation"] == "correct"
     assert validated["last_validated_at"] == "2026-06-02T14:00:00+00:00"
+    assert validated["typical_duration_seconds"] == pytest.approx(2700.0)
+    assert validated["min_duration_seconds"] == pytest.approx(1350.0)
+    assert validated["max_duration_seconds"] == pytest.approx(5400.0)
 
     duplicate_validated = await coordinator.async_validate_nilm_session(
         "mains",
@@ -7371,6 +7384,9 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
     assert rejected["energy_estimate_error"] is None
     assert rejected["last_validation"] == "wrong_appliance"
     assert rejected["last_rejected_at"] == "2026-06-02T14:05:00+00:00"
+    assert "typical_duration_seconds" not in rejected
+    assert "min_duration_seconds" not in rejected
+    assert "max_duration_seconds" not in rejected
 
     duplicate_rejected = await coordinator.async_reject_nilm_session(
         "mains",

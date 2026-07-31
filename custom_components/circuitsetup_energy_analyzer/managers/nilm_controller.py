@@ -824,6 +824,7 @@ class NilmController:
         assignment["confidence"] = confidence
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -941,6 +942,7 @@ class NilmController:
             assignment["last_rejected_at"] = now
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        self._update_assignment_duration_bounds(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -967,6 +969,48 @@ class NilmController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
+
+    def _update_assignment_duration_bounds(
+        self,
+        circuit_id: str,
+        assignment: dict[str, Any],
+    ) -> None:
+        confirmed = set(
+            self._clean_string_list(assignment.get("confirmed_session_ids"))
+        )
+        durations: list[float] = []
+        for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if (
+                not isinstance(session, Mapping)
+                or str(session.get("session_id") or "").strip() not in confirmed
+            ):
+                continue
+            start = self._datetime_or_none(session.get("start"))
+            end = self._datetime_or_none(session.get("end"))
+            if start is not None and end is not None and end > start:
+                durations.append((end - start).total_seconds())
+        if not durations:
+            for key in (
+                "typical_duration_seconds",
+                "min_duration_seconds",
+                "max_duration_seconds",
+            ):
+                assignment.pop(key, None)
+            return
+        typical = float(median(durations))
+        # ponytail: half/double the median until labelled volume supports percentiles.
+        assignment["typical_duration_seconds"] = round(typical, 3)
+        assignment["min_duration_seconds"] = round(
+            max(30.0, min(min(durations), typical * 0.5)),
+            3,
+        )
+        assignment["max_duration_seconds"] = round(
+            max(max(durations), typical * 2.0),
+            3,
+        )
 
     def apply_alert_feedback(
         self,
