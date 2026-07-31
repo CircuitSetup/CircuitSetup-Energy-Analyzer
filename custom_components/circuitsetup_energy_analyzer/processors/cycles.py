@@ -274,6 +274,11 @@ class RunCycleProcessor:
             feature_result.notifications.append(alert)
         return feature_result
 
+    def reset_cold_storage_state(self, circuit_id: str) -> None:
+        """Reset runtime cold-storage state for one circuit."""
+        self._cold_storage_windows.pop(circuit_id, None)
+        self._cold_storage_recovery_windows.pop(circuit_id, None)
+
     def _process_cold_storage_signature(
         self,
         sample: NormalizedCircuitSample,
@@ -298,6 +303,15 @@ class RunCycleProcessor:
         )
         summary = accumulator.observe(sample)
         if summary is None:
+            if active_alert is not None:
+                result.preserved_alerts.append(active_alert)
+            return result
+        learning_started_at = _learning_started_at(
+            context.store_data,
+            config.circuit_id,
+            context.now,
+        )
+        if learning_started_at is not None and summary.started_at < learning_started_at:
             if active_alert is not None:
                 result.preserved_alerts.append(active_alert)
             return result
@@ -347,6 +361,10 @@ class RunCycleProcessor:
                     cache=context.contextual_samples_cache,
                 )
                 if item.source == "cold_storage_signature"
+                and (
+                    learning_started_at is None
+                    or item.timestamp >= learning_started_at
+                )
             ]
             values_by_feature = {
                 feature: [
@@ -416,8 +434,6 @@ class RunCycleProcessor:
             return result
         alert = policy.observe(observation)
         if alert is None:
-            if active_alert is not None:
-                result.preserved_alerts.append(active_alert)
             return result
         result.alerts.append(alert)
         result.notifications.append(alert)
@@ -465,6 +481,23 @@ class RunCycleProcessor:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _learning_started_at(
+    store_data: FeatureStoreData,
+    circuit_id: str,
+    now: datetime,
+) -> datetime | None:
+    raw = store_data.learning_started_at_by_circuit.get(circuit_id)
+    if not raw:
+        return None
+    try:
+        started_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=now.tzinfo)
+    return started_at
 
 
 def _matching_active_signature_alert(

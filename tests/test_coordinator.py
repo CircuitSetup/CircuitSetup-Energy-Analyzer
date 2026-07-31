@@ -275,6 +275,106 @@ async def test_relearn_clears_appliance_health_state_and_policy() -> None:
     assert coordinator.state.appliance_health_evidence_by_circuit == {}
 
 
+@pytest.mark.asyncio
+async def test_relearn_starts_fresh_cold_storage_learning_epoch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cold_storage import (
+        COLD_STORAGE_BASELINE_FEATURES,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+
+    window_start = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    relearned_at = window_start + timedelta(minutes=5)
+    pending = [
+        {
+            "timestamp": (window_start - timedelta(minutes=30 * offset)).isoformat(),
+            "feature": feature,
+            "value": value,
+            "context": {"cold_storage_window": "prior"},
+            "source": "cold_storage_signature",
+        }
+        for offset in range(1, 96)
+        for feature, value in zip(
+            COLD_STORAGE_BASELINE_FEATURES,
+            (0.26, 100.0, 1.2),
+            strict=True,
+        )
+    ]
+    store_data = FeatureStoreData(
+        contextual_baseline_samples_by_circuit={"fridge": pending}
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=store_data,
+        now_fn=lambda: relearned_at,
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator.refresh_ux_state_for_circuit = lambda circuit_id, refreshed_at: None
+    coordinator.async_set_updated_data = lambda state: None
+    coordinator._async_save_store = AsyncMock()
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    def process(timestamp: datetime) -> None:
+        minute = timestamp.minute
+        coordinator._run_cycle_processor.process(
+            NormalizedCircuitSample(
+                timestamp=timestamp,
+                circuit_id="fridge",
+                real_power=160.0 if minute % 20 == 0 else 100.0,
+                current=1.9 if minute % 20 == 0 else 1.2,
+                power_factor=0.86 if minute % 20 == 0 else 0.60,
+            ),
+            config,
+            coordinator.context_builder.build(timestamp),
+        )
+
+    process(window_start)
+    await coordinator.async_relearn_baseline("fridge")
+    for minute in (5, 10, 15, 20, 25, 29, 30):
+        process(window_start + timedelta(minutes=minute))
+
+    assert not any(
+        key.startswith("fridge:cold_storage_") for key in store_data.baselines
+    )
+    assert not any(
+        row.get("source") == "cold_storage_signature"
+        for row in store_data.contextual_baseline_samples_by_circuit.get("fridge", [])
+    )
+
+    for minute in range(35, 30 + 95 * 30 + 1, 5):
+        process(window_start + timedelta(minutes=minute))
+
+    assert not any(
+        key.startswith("fridge:cold_storage_") for key in store_data.baselines
+    )
+    assert (
+        sum(
+            row.get("source") == "cold_storage_signature"
+            for row in store_data.contextual_baseline_samples_by_circuit["fridge"]
+        )
+        == 95 * len(COLD_STORAGE_BASELINE_FEATURES)
+    )
+
+    for minute in range(30 + 95 * 30 + 5, 30 + 96 * 30 + 1, 5):
+        process(window_start + timedelta(minutes=minute))
+
+    assert all(
+        store_data.baselines[f"fridge:{feature}"].sample_count == 96
+        for feature in COLD_STORAGE_BASELINE_FEATURES
+    )
+
+
 def test_apply_state_update_rejects_unknown_root_path() -> None:
     state = AnalyzerState()
 
