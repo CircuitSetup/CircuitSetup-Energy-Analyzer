@@ -127,7 +127,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
     assert detail["source_entities_count"] == 3
     assert detail["source_entities_has_more"] is False
     assert detail["source_entities_omitted_count"] == 0
-    assert detail["graph_window_start"] == "2026-06-02T08:00:00+00:00"
+    assert detail["graph_window_start"] == "2026-06-02T10:00:00+00:00"
     assert detail["graph_window_end"] == "2026-06-02T12:30:00+00:00"
     assert detail == {
         "alert_id": notification_id_for_alert(alert),
@@ -174,7 +174,7 @@ def test_alert_evidence_detail_is_json_safe_and_explains_change() -> None:
         "source_entities_count": 3,
         "source_entities_has_more": False,
         "source_entities_omitted_count": 0,
-        "graph_window_start": "2026-06-02T08:00:00+00:00",
+        "graph_window_start": "2026-06-02T10:00:00+00:00",
         "graph_window_end": "2026-06-02T12:30:00+00:00",
     }
 
