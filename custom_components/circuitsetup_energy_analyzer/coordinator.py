@@ -11,6 +11,7 @@ from typing import Any, Self
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
+from .appliance_notifications import mixed_circuit_allows_alert
 from .config_parsing import (
     circuit_configs_from_entry_data as _circuit_configs_from_entry_data,
 )
@@ -32,6 +33,7 @@ from .managers.utility_energy_sources import (
 )
 from .models import (
     AlertEvidence,
+    ApplianceProfile,
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
@@ -1550,23 +1552,42 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
         self.state_reducer.apply_updates(self.state, result.state_updates)
+
+        def allows(alert: AlertEvidence) -> bool:
+            config = next(
+                (
+                    config
+                    for config in self.circuit_configs
+                    if config.circuit_id == alert.circuit_id
+                ),
+                None,
+            )
+            is_mixed = config is not None and (
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            )
+            return not is_mixed or mixed_circuit_allows_alert(alert.feature)
+
         result = replace(
             result,
             state_updates=[],
             alerts=[
                 alert
                 for alert in result.alerts
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
             preserved_alerts=[
                 alert
                 for alert in result.preserved_alerts
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
             notifications=[
                 alert
                 for alert in result.notifications
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
         )
         applied = self.state_reducer.apply_feature_result(

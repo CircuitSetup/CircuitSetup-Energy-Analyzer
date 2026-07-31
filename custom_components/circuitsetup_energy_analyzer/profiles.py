@@ -3,7 +3,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .const import MIN_LEARNING_DAYS
-from .models import ApplianceProfile, CircuitMode, SensorRole
+from .models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    PowerFlowMode,
+    SensorRole,
+)
+
+
+def supports_direct_appliance_analysis(config: CircuitConfig) -> bool:
+    """Return whether aggregate measurements represent one direct appliance."""
+    if isinstance(config, dict):
+        mode = config.get("mode", CircuitMode.SINGLE_PHASE)
+        profile = config.get("appliance_profile", ApplianceProfile.MIXED)
+        power_flow = config.get("power_flow", PowerFlowMode.LOAD)
+    else:
+        mode = getattr(config, "mode", CircuitMode.SINGLE_PHASE)
+        profile = config.appliance_profile
+        power_flow = getattr(config, "power_flow", PowerFlowMode.LOAD)
+    return (
+        mode not in {CircuitMode.MIXED, CircuitMode.MAINS_NILM}
+        and profile not in {ApplianceProfile.MIXED, ApplianceProfile.MAINS_NILM}
+        and power_flow == PowerFlowMode.LOAD
+    )
 
 
 @dataclass(frozen=True, slots=True)

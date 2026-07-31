@@ -18,6 +18,7 @@ from ..power_quality import (
     score_power_quality_features,
     select_power_quality_evidence,
 )
+from ..profiles import supports_direct_appliance_analysis
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type PowerQualityAlertPolicyProvider = Callable[[str], AlertPolicy]
@@ -66,6 +67,8 @@ class PowerQualityProcessor:
     ) -> PowerQualityResult:
         """Record power quality state and return repeated anomaly alerts."""
         circuit_id = circuit_config.circuit_id
+        if not supports_direct_appliance_analysis(circuit_config):
+            return PowerQualityResult(clear_power_quality_state=circuit_id)
         policy = self._alert_policy_for_circuit(circuit_id)
         features = extract_power_quality_features(sample)
         if not features:

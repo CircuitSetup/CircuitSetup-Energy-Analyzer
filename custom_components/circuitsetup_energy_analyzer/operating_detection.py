@@ -15,6 +15,7 @@ from .models import (
     EventType,
 )
 from .normalize import NormalizedCircuitSample
+from .profiles import supports_direct_appliance_analysis
 
 OPERATING_ON_THRESHOLD_W = "operating_on_threshold_w"
 OPERATING_OFF_THRESHOLD_W = "operating_off_threshold_w"
@@ -316,7 +317,11 @@ def resolve_operating_detection(
     recommendation: dict[str, Any] | None = None,
     source_hint: OperatingThresholdSource | str | None = None,
 ) -> ResolvedOperatingDetection:
-    defaults = dict(_PROFILE_DEFAULTS.get(config.appliance_profile, _GENERIC_PROFILE))
+    defaults = dict(
+        _PROFILE_DEFAULTS.get(config.appliance_profile, _GENERIC_PROFILE)
+        if supports_direct_appliance_analysis(config)
+        else _GENERIC_PROFILE
+    )
     source = OperatingThresholdSource.PROFILE_DEFAULT
     raw = recommendation or {}
     if raw:

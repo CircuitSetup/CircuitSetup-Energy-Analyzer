@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .cycles import build_normalized_run_sessions
 from .models import AlertEvidence, EventType, Severity
+from .profiles import supports_direct_appliance_analysis
 from .ux import data_quality_checklist
 
 DEFAULT_REQUIRED_REPEATS = 3
@@ -449,10 +450,18 @@ def expected_schedule_circuit_ids(coordinator: Any) -> set[str]:
     raw_settings = getattr(store_data, "appliance_schedule_settings", {})
     if not isinstance(raw_settings, Mapping):
         return set()
+    configs = {
+        config.circuit_id: config
+        for config in getattr(coordinator, "circuit_configs", ())
+    }
     return {
         target.circuit_id
         for appliance_key in raw_settings
         if (target := _schedule_target(store_data, str(appliance_key or "").strip()))
+        and (
+            (config := configs.get(target.circuit_id)) is None
+            or supports_direct_appliance_analysis(config)
+        )
     }
 
 

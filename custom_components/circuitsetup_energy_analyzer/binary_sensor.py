@@ -35,6 +35,7 @@ from .nilm_virtual import (
     nilm_virtual_unique_id,
     published_nilm_virtual_appliance_states,
 )
+from .profiles import supports_direct_appliance_analysis
 from .state import circuit_is_learning
 
 try:
@@ -368,7 +369,8 @@ def binary_sensor_description_applies(
     """Return whether a binary sensor is useful for this circuit."""
     if description.key == "water_flow_mismatch":
         return (
-            _appliance_profile(getattr(circuit, "appliance_profile", None))
+            supports_direct_appliance_analysis(circuit)
+            and _appliance_profile(getattr(circuit, "appliance_profile", None))
             in {
                 ApplianceProfile.WATER_PUMP,
                 ApplianceProfile.WELL_PUMP,

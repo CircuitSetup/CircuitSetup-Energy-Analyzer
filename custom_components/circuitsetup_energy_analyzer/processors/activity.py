@@ -70,7 +70,10 @@ class ActivityAlertProcessor:
                 circuit_config,
                 circuit_config.circuit_id,
             ),
-            suppress_active_duration_alert=_is_mains_nilm(circuit_config),
+            suppress_active_duration_alert=(
+                _is_mains_nilm(circuit_config)
+                or circuit_config.mode is CircuitMode.MIXED
+            ),
         )
         if evidence is None:
             return FeatureResult()

@@ -89,6 +89,26 @@ def test_resolve_operating_detection_profiles_are_valid() -> None:
         assert resolved.profile.max_sample_gap_seconds > 0.0
 
 
+def test_mixed_mode_uses_generic_thresholds_without_losing_metadata() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        resolve_operating_detection,
+    )
+
+    resolved = resolve_operating_detection(
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.MIXED,
+        )
+    )
+
+    assert resolved.profile.on_threshold_w == 80.0
+    assert resolved.profile.off_threshold_w == 30.0
+    assert resolved.appliance_profile is ApplianceProfile.REFRIGERATOR
+    assert resolved.circuit_mode is CircuitMode.MIXED
+
+
 @pytest.mark.parametrize(
     ("profile", "expected"),
     [

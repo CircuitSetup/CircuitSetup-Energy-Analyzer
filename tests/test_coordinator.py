@@ -65,6 +65,63 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
+@pytest.mark.asyncio
+async def test_mixed_result_boundary_keeps_only_aggregate_alerts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import FeatureResult
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+
+    def alert(feature: str) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=now,
+            circuit_id="mixed",
+            severity=Severity.WARNING,
+            message=feature,
+            feature=feature,
+        )
+
+    direct_cycle = alert("cycle_duration_change")
+    aggregate_energy = alert("daily_energy_usage_spike")
+    direct_standby = alert("always_on_power")
+    aggregate_capacity = alert("circuit_capacity")
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mixed",
+                    "name": "Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    coordinator.state.learning_by_circuit["mixed"] = False
+    coordinator._notify_alert = AsyncMock()
+
+    _events, active = await coordinator.async_apply_feature_result(
+        FeatureResult(
+            alerts=[direct_cycle, aggregate_energy],
+            preserved_alerts=[direct_standby, aggregate_capacity],
+            notifications=[direct_cycle, aggregate_energy],
+        )
+    )
+
+    assert {item.feature for item in active} == {
+        "daily_energy_usage_spike",
+        "circuit_capacity",
+    }
+    notified = [
+        call.args[0].feature for call in coordinator._notify_alert.await_args_list
+    ]
+    assert notified == ["daily_energy_usage_spike"]
+
+
 def test_coordinator_fires_hvac_association_revision_event_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4946,8 +5003,8 @@ async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
                 )
             }
         ),
-        now_fn=lambda: holder["time"],
-    )
+            now_fn=lambda: holder["time"],
+        )
 
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
@@ -5438,7 +5495,7 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
                     ],
                 }
             },
-            demand_by_circuit={
+                demand_by_circuit={
                 "fridge": {
                     "daily_peaks": [
                         {"date": "2026-05-26", "peak_demand_w": 1000.0},
@@ -6212,8 +6269,8 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
             baselines=_learned_real_power_baselines("hvac", 3600.0),
             energy_usage_by_circuit=_completed_energy_learning_history("hvac", now),
         ),
-        now_fn=lambda: holder["time"],
-    )
+            now_fn=lambda: holder["time"],
+        )
 
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
@@ -10947,7 +11004,7 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
     assert usage["baseline_day_count"] >= 7
     assert usage["status"] != "learning"
-    assert coordinator.state.learning_by_circuit[circuit_id] is False
+    assert circuit_id not in coordinator.state.learning_by_circuit
     assert coordinator.state.nilm_signature_count_by_circuit[circuit_id] > 0
     unknown_loads = coordinator.state.nilm_unknown_loads_by_circuit[circuit_id]
     assert unknown_loads["unknown_load_count"] > 0
@@ -14263,8 +14320,8 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
         await coordinator.async_process_update()
 
     assert notifications == []
-    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
-    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
+    assert "mixed" not in coordinator.state.power_quality_score_by_circuit
+    assert "mixed" not in coordinator.state.power_quality_evidence_by_circuit
 
 
 @pytest.mark.asyncio
@@ -14332,11 +14389,12 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
                         {"date": "2026-06-02", "usage_kwh": 8.0, "complete": True},
                     ],
                 }
-            }
-        ),
-        now_fn=lambda: holder["time"],
-    )
+                }
+            ),
+            now_fn=lambda: holder["time"],
+        )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         holder["energy"] += 0.1
@@ -16412,7 +16470,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
                     "circuit_id": "mains",
                     "name": "Mains",
                     "mode": "mains_nilm",
-                    "appliance_profile": "mixed",
+                    "appliance_profile": "mains_nilm",
                     "sensors": [
                         {"entity_id": "sensor.mains_power", "role": "real_power"},
                     ],
@@ -16450,6 +16508,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
         now_fn=lambda: holder["time"],
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         await coordinator.async_process_update()
@@ -16916,7 +16975,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
                     "circuit_id": "office",
                     "name": "Office",
                     "mode": "single_phase",
-                    "appliance_profile": "mixed",
+                    "appliance_profile": "motor_load",
                     "standby_threshold_w": 8.0,
                     "always_on_alert_w": 25.0,
                     "standby_min_samples": 6,
@@ -17113,17 +17172,18 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
             events=_completed_learning_events("mains", now),
             baselines=_learned_real_power_baselines("mains", 1000.0),
             energy_usage_by_circuit=_completed_energy_learning_history("mains", now),
-            utility_comparison_settings_by_circuit={
+                utility_comparison_settings_by_circuit={
                 "mains": {
                     "utility_energy_entity": "sensor.opower_current_bill_usage",
                     "measured_energy_entities": ["sensor.panel_import_energy"],
                     "tolerance_percent": 10.0,
                 }
-            }
-        ),
-        now_fn=lambda: holder["time"],
-    )
+                }
+            ),
+            now_fn=lambda: holder["time"],
+        )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         await coordinator.async_process_update()
@@ -18479,5 +18539,5 @@ async def test_runtime_mixed_circuit_suppresses_power_quality_notification(
 
     assert notifications == []
     assert coordinator.state.active_alerts_by_circuit.get("mixed", []) == []
-    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
-    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
+    assert "mixed" not in coordinator.state.power_quality_score_by_circuit
+    assert "mixed" not in coordinator.state.power_quality_evidence_by_circuit

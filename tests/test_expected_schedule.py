@@ -6,16 +6,39 @@ from zoneinfo import ZoneInfo
 
 from custom_components.circuitsetup_energy_analyzer.expected_schedule import (
     evaluate_expected_schedule,
+    expected_schedule_circuit_ids,
     refresh_expected_schedule_contexts,
     schedule_settings_from_dict,
     schedule_window_state,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     EventType,
 )
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 TIME_ZONE = ZoneInfo("America/New_York")
+
+
+def test_mixed_circuit_is_not_scheduled_for_direct_evaluation() -> None:
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={"circuit:fridge": {"enabled": True}}
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.MIXED,
+            ),
+        ),
+    )
+
+    assert expected_schedule_circuit_ids(coordinator) == set()
 
 
 def _settings(**overrides: object):

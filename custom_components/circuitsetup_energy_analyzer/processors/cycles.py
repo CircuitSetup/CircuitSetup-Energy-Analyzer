@@ -56,6 +56,7 @@ from ..operating_detection import (
     operating_state_is_running,
     resolve_operating_detection_from_settings,
 )
+from ..profiles import supports_direct_appliance_analysis
 from ..storage import FeatureStoreData
 from .base import AlertPolicy, FeatureResult, ProcessingContext
 
@@ -86,6 +87,8 @@ class RunCycleProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return run-cycle alerts for the current retained event history."""
+        if not supports_direct_appliance_analysis(circuit_config):
+            return FeatureResult()
         feature_result = self._process_cold_storage_signature(
             sample,
             circuit_config,

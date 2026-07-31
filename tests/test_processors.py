@@ -7600,7 +7600,7 @@ def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
     config = CircuitConfig(
         circuit_id="office",
         name="Office",
-        appliance_profile=ApplianceProfile.MIXED,
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.SINGLE_PHASE,
     )
     policy = _CaptureAlertPolicy()
@@ -7783,7 +7783,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     config = CircuitConfig(
         circuit_id="office",
         name="Office",
-        appliance_profile=ApplianceProfile.MIXED,
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.SINGLE_PHASE,
     )
     seeded: list[str] = []

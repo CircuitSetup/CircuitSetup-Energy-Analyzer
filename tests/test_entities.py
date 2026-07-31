@@ -3280,6 +3280,53 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     )
 
 
+def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+        binary_sensor_description_applies,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    sensors = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    binary = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    circuit = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef("sensor.power", SensorRole.REAL_POWER),
+            SensorRef("sensor.current", SensorRole.CURRENT),
+            SensorRef("sensor.voltage", SensorRole.VOLTAGE),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water"]},
+        entry_data={},
+        store_data=FeatureStoreData(),
+    )
+
+    for key in (
+        "run_cycle_count",
+        "power_quality_score",
+        "always_on_power",
+        "water_flow_correlation",
+    ):
+        assert not sensor_description_applies(sensors[key], circuit, coordinator)
+    assert sensor_description_applies(
+        sensors["energy_usage_status"], circuit, coordinator
+    )
+    assert not binary_sensor_description_applies(
+        binary["water_flow_mismatch"], circuit, coordinator
+    )
+
+
 def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,

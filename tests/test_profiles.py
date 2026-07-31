@@ -5,6 +5,7 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
+    CircuitConfig,
     CircuitEvent,
     CircuitMode,
     EventType,
@@ -13,7 +14,27 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import (
     get_profile_definition,
+    supports_direct_appliance_analysis,
 )
+
+
+def test_direct_appliance_analysis_requires_dedicated_mode() -> None:
+    mixed = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.MIXED,
+    )
+
+    assert not supports_direct_appliance_analysis(mixed)
+    assert supports_direct_appliance_analysis(
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
 
 
 def test_domain_is_stable() -> None:

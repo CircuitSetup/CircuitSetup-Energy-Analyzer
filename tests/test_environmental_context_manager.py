@@ -6,9 +6,48 @@ from types import SimpleNamespace
 from custom_components.circuitsetup_energy_analyzer.managers import (
     environmental_context,
 )
-from custom_components.circuitsetup_energy_analyzer.models import ApplianceProfile
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+)
 
 EnvironmentalContextManager = environmental_context.EnvironmentalContextManager
+
+
+def test_mixed_water_context_clears_stale_direct_state() -> None:
+    cleared: list[str] = []
+
+    def clear(name):
+        return lambda _state, _store, circuit_id: cleared.append(
+            f"{name}:{circuit_id}"
+        ) or True
+
+    coordinator = SimpleNamespace(
+        state=SimpleNamespace(),
+        store_data=SimpleNamespace(),
+        settings_controller=SimpleNamespace(
+            advanced_settings_for_circuit=lambda _circuit_id: {}
+        ),
+        state_reducer=SimpleNamespace(
+            clear_rain_pump_context_state=clear("rain"),
+            clear_water_flow_context_state=clear("flow"),
+            clear_water_context_history=clear("history"),
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None),
+    )
+
+    EnvironmentalContextManager(coordinator).refresh_water_context_state(
+        CircuitConfig(
+            circuit_id="pump",
+            name="Pump",
+            appliance_profile=ApplianceProfile.WATER_PUMP,
+            mode=CircuitMode.MIXED,
+        ),
+        datetime(2026, 7, 31, tzinfo=UTC),
+    )
+
+    assert cleared == ["rain:pump", "flow:pump", "history:pump"]
 
 
 def test_environmental_context_profile_boundaries_are_explicit() -> None:

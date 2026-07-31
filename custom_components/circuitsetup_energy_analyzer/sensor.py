@@ -90,6 +90,7 @@ from .nilm_virtual import (
 )
 from .notifications import POWER_QUALITY_ALERT_FEATURES
 from .operating_detection import operating_state_is_running
+from .profiles import supports_direct_appliance_analysis
 from .safety import with_electrical_safety_notice
 from .state import circuit_is_learning
 from .tariff import configured_electricity_rate, global_cost_settings
@@ -2262,6 +2263,7 @@ def sensor_description_applies(
     profile = _appliance_profile(circuit)
     mode = _circuit_mode(circuit)
     is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
+    supports_direct = supports_direct_appliance_analysis(circuit)
     has_real_power = SensorRole.REAL_POWER in roles
     has_energy = SensorRole.ENERGY in roles
     has_energy_data = has_energy or has_real_power
@@ -2278,7 +2280,7 @@ def sensor_description_applies(
             or _stored_settings(coordinator, "energy_goal_settings_by_circuit", circuit)
         )
     if key in _POWER_QUALITY_SENSOR_KEYS:
-        return bool(roles & _POWER_QUALITY_ROLES)
+        return supports_direct and bool(roles & _POWER_QUALITY_ROLES)
     if key == "reactive_power_drift":
         return SensorRole.REACTIVE_POWER in roles
     if key == "apparent_power_drift":
@@ -2289,7 +2291,8 @@ def sensor_description_applies(
         return is_mains
     if key in _RUN_CYCLE_SENSOR_KEYS:
         return (
-            profile in _CYCLIC_APPLIANCE_PROFILES
+            supports_direct
+            and profile in _CYCLIC_APPLIANCE_PROFILES
             and not is_mains
             and (has_real_power or has_current)
         )
@@ -2343,7 +2346,7 @@ def sensor_description_applies(
         )
     if key in _STANDBY_SENSOR_KEYS:
         return (
-            not is_mains
+            supports_direct
             and has_real_power
             and (
                 profile in _CYCLIC_APPLIANCE_PROFILES
@@ -2351,17 +2354,22 @@ def sensor_description_applies(
             )
         )
     if key in _WEATHER_CONTEXT_SENSOR_KEYS:
-        return profile in _WEATHER_CONTEXT_PROFILES and _has_temperature_source(
-            coordinator,
+        return (
+            supports_direct
+            and profile in _WEATHER_CONTEXT_PROFILES
+            and _has_temperature_source(coordinator)
         )
     if key in _RAIN_PUMP_CONTEXT_SENSOR_KEYS:
-        return profile in _RAIN_PUMP_CONTEXT_PROFILES and _has_rain_context_source(
-            coordinator,
+        return (
+            supports_direct
+            and profile in _RAIN_PUMP_CONTEXT_PROFILES
+            and _has_rain_context_source(coordinator)
         )
     if key in _WATER_FLOW_CONTEXT_SENSOR_KEYS:
-        return profile in _WATER_FLOW_CONTEXT_PROFILES and _has_water_flow_source(
-            coordinator,
-            circuit,
+        return (
+            supports_direct
+            and profile in _WATER_FLOW_CONTEXT_PROFILES
+            and _has_water_flow_source(coordinator, circuit)
         )
     return False
 

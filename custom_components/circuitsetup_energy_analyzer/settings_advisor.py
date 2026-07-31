@@ -304,7 +304,7 @@ def build_settings_recommendations(
 ) -> list[SettingRecommendation]:
     """Build current settings recommendations from observed circuit evidence."""
     candidates: list[SettingRecommendation] = []
-    for rule in (
+    rules = (
         _energy_usage_recommendations,
         _cycle_recommendations,
         _capacity_recommendations,
@@ -316,7 +316,17 @@ def build_settings_recommendations(
         _solar_flow_recommendations,
         _hvac_efficiency_recommendations,
         _retention_recommendations,
+    )
+    if (
+        inputs.context.circuit_mode == CircuitMode.MIXED
+        or inputs.context.appliance_profile == ApplianceProfile.MIXED
     ):
+        rules = (
+            _energy_usage_recommendations,
+            _capacity_recommendations,
+            _retention_recommendations,
+        )
+    for rule in rules:
         candidates.extend(rule(inputs))
 
     decisions = inputs.decisions or {}
