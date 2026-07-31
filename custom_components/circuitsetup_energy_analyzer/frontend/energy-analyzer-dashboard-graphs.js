@@ -2403,14 +2403,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         cost: retainedMainsTotals.cost ?? retainedApplianceTotal("cost"),
       };
       const completedDayKey = this._shiftDateKey(todayKey, -1);
+      const retainedAppliances = appliances.map((appliance) => retainedItems.find((item) => (
+        item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
+      )));
       const retainedSources = [
-        retainedMains,
-        ...appliances.map((appliance) => retainedItems.find((item) => (
-          item.circuit_id === appliance.circuit_id || item.appliance_key === appliance.circuit_id
-        ))),
-      ].filter(Boolean);
+        ...(retainedMains ? [retainedMains] : []),
+        ...(Number.isFinite(retainedMainsTotals.energy) && Number.isFinite(retainedMainsTotals.cost)
+          ? retainedAppliances.filter(Boolean)
+          : retainedAppliances),
+      ];
       const completedDayReady = retainedSources.length > 0 && retainedSources.every((item) => (
-        (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
+        item && (item.daily_totals || []).some((row) => String(row.date) === completedDayKey)
       ));
       const rolloverWindowOpen = Date.now() <= this._zonedTimestamp(todayKey) + 15 * 60_000;
       if (

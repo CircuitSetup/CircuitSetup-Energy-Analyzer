@@ -2461,6 +2461,65 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 10-12)" })).toContainText("14 kWh");
 });
 
+test("home totals retry when a configured appliance is missing after rollover", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-07-13T00:01:00.000Z") });
+  let insightCalls = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    insightCalls += 1;
+    await route.fulfill({
+      json: {
+        status: "ok",
+        items: [
+          {
+            entry_id: "entry-1",
+            circuit_id: "fridge",
+            daily_totals: [{ date: "2026-07-12", energy_kwh: 2, cost: 0.4 }],
+          },
+          ...(insightCalls > 1 ? [{
+            entry_id: "entry-1",
+            circuit_id: "hvac",
+            daily_totals: [{ date: "2026-07-12", energy_kwh: 3, cost: 0.6 }],
+          }] : []),
+        ],
+        whole_house: [],
+      },
+    });
+    return true;
+  });
+  const card = await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-house-flow",
+    {
+      title: "Home energy summary",
+      entry_id: "entry-1",
+      api_path: "circuitsetup_energy_analyzer/appliance_insights",
+      primary_mains: { circuit_id: "mains" },
+      appliances: [
+        { circuit_id: "fridge", name: "Fridge" },
+        { circuit_id: "hvac", name: "HVAC" },
+      ],
+    },
+    {},
+    {},
+    {
+      start: "2026-07-12T00:00:00.000Z",
+      end: "2026-07-12T23:59:59.999Z",
+      compare: false,
+    },
+  );
+
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 12)" }))
+    .toContainText("Unavailable");
+  await expect.poll(() => page.evaluate(() => (
+    Boolean(window.__dashboardCard._rangeTotalsReloadTimer)
+  ))).toBe(true);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => insightCalls).toBe(2);
+  await expect(card.locator(".metric").filter({ hasText: "Energy (Jul 12)" }))
+    .toContainText("5 kWh");
+});
+
 test("appliance grid filters live state and loads Activity Summary history", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
