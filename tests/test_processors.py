@@ -1662,6 +1662,9 @@ class _CaptureAlertPolicy:
             baseline_value=observation.baseline_value,
         )
 
+    def reset_episode(self, circuit_id: str, feature: str) -> None:
+        del circuit_id, feature
+
 
 class _CaptureObservationOnlyPolicy:
     min_average_score = 1.5
@@ -1671,6 +1674,42 @@ class _CaptureObservationOnlyPolicy:
 
     def observe(self, observation: Observation) -> None:
         self.observations.append(observation)
+
+    def reset_episode(self, circuit_id: str, feature: str) -> None:
+        del circuit_id, feature
+
+
+def _cold_storage_sample(
+    timestamp: datetime,
+    *,
+    pulse: bool,
+    abnormal: bool,
+) -> NormalizedCircuitSample:
+    return NormalizedCircuitSample(
+        timestamp=timestamp,
+        circuit_id="fridge",
+        real_power=(
+            (125.0 if pulse else 150.0)
+            if abnormal
+            else (160.0 if pulse else 100.0)
+        ),
+        current=(1.45 if pulse else 1.8) if abnormal else (1.9 if pulse else 1.2),
+        power_factor=0.60 if abnormal else (0.86 if pulse else 0.60),
+    )
+
+
+def _cold_storage_baselines() -> dict[str, BaselineStats]:
+    return {
+        "fridge:cold_storage_pf_peak_delta": BaselineStats(
+            "cold_storage_pf_peak_delta", 96, 0.26, 0.01, 0.24, 0.27, 1.0
+        ),
+        "fridge:cold_storage_median_power_w": BaselineStats(
+            "cold_storage_median_power_w", 96, 100.0, 3.0, 95.0, 105.0, 1.0
+        ),
+        "fridge:cold_storage_median_current_a": BaselineStats(
+            "cold_storage_median_current_a", 96, 1.2, 0.04, 1.1, 1.3, 1.0
+        ),
+    }
 
 
 def test_feature_result_defaults_are_independent() -> None:
@@ -3339,6 +3378,277 @@ def test_energy_goal_processor_uses_ha_local_usage_date() -> None:
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("energy_goal_status_by_circuit", "fridge")] == "over_goal"
     assert result.alerts
+
+
+def test_cold_storage_signature_alerts_after_three_windows_during_shared_learning(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    start = datetime(2026, 7, 29, 20, 30, tzinfo=UTC)
+    state = AnalyzerState(learning_by_circuit={"fridge": True})
+    store_data = FeatureStoreData(baselines=_cold_storage_baselines())
+    policy = ConservativeAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: False,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    alerts = []
+    for minute in range(0, 91, 5):
+        now = start + timedelta(minutes=minute)
+        context = ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=state,
+            store_data=store_data,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        pulse = minute % 20 == 0
+        result = processor.process(
+            _cold_storage_sample(now, pulse=pulse, abnormal=True),
+            config,
+            context,
+        )
+        alerts.extend(result.alerts)
+        if result.alerts:
+            state.active_alerts_by_circuit["fridge"] = list(result.alerts)
+
+    assert len(alerts) == 1
+    assert alerts[0].feature == "cold_storage_cycle_signature_change"
+    assert alerts[0].first_seen == start + timedelta(minutes=30)
+    assert alerts[0].last_seen == start + timedelta(minutes=90)
+
+
+def test_cold_storage_signature_preserves_then_recovers_after_two_normal_windows(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    start = datetime(2026, 7, 29, 20, 30, tzinfo=UTC)
+    state = AnalyzerState(learning_by_circuit={"fridge": True})
+    store_data = FeatureStoreData(baselines=_cold_storage_baselines())
+    policy = ConservativeAlertPolicy()
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: False,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    def run(minute: int, *, abnormal: bool):
+        now = start + timedelta(minutes=minute)
+        result = processor.process(
+            _cold_storage_sample(
+                now,
+                pulse=minute % 20 == 0,
+                abnormal=abnormal,
+            ),
+            config,
+            ProcessingContext(
+                now=now,
+                hass=SimpleNamespace(data={DOMAIN: {}}),
+                state=state,
+                store_data=store_data,
+                options={},
+                entry_data={},
+                known_load_circuit_ids=frozenset(),
+                sensitivity="standard",
+            ),
+        )
+        if result.alerts:
+            state.active_alerts_by_circuit["fridge"] = list(result.alerts)
+        return result
+
+    for minute in range(0, 91, 5):
+        alert_result = run(minute, abnormal=True)
+    active_alert = alert_result.alerts[0]
+
+    for minute in range(95, 121, 5):
+        first_recovery = run(minute, abnormal=False)
+    assert first_recovery.preserved_alerts == [active_alert]
+
+    for minute in range(125, 151, 5):
+        second_recovery = run(minute, abnormal=False)
+    assert second_recovery.preserved_alerts == []
+    state.active_alerts_by_circuit.pop("fridge")
+
+    for minute in range(155, 181, 5):
+        one_later_anomaly = run(minute, abnormal=True)
+    assert one_later_anomaly.alerts == []
+
+
+def test_cold_storage_signature_missing_metrics_do_not_clear_active_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 7, 29, 22, 5, tzinfo=UTC)
+    active_alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="fridge",
+        severity=Severity.WARNING,
+        message="Compressor signature changed.",
+        feature="cold_storage_cycle_signature_change",
+        features={
+            "signature_ready": True,
+            "signature_baseline_windows": 96.0,
+            "signature_baseline_confidence": 1.0,
+        },
+    )
+    state = AnalyzerState(
+        active_alerts_by_circuit={"fridge": [active_alert]},
+        learning_by_circuit={"fridge": True},
+    )
+    store_data = FeatureStoreData(baselines=_cold_storage_baselines())
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(),
+        learning_mature=lambda _config, _now: False,
+    )
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    result = processor.process(
+        replace(
+            _cold_storage_sample(now, pulse=False, abnormal=True),
+            power_factor=None,
+        ),
+        config,
+        ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=state,
+            store_data=store_data,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        ),
+    )
+
+    assert result.alerts == []
+    assert result.preserved_alerts == [active_alert]
+
+
+def test_cold_storage_signature_persists_96_window_baseline_across_restart() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    start = datetime(2026, 7, 1, tzinfo=UTC)
+    state = AnalyzerState(learning_by_circuit={"fridge": True})
+    store_data = FeatureStoreData()
+    policy = ConservativeAlertPolicy()
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Basement Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+
+    def feed(
+        processor: RunCycleProcessor,
+        first_minute: int,
+        last_minute: int,
+        *,
+        abnormal: bool,
+    ) -> None:
+        for minute in range(first_minute, last_minute + 1, 5):
+            now = start + timedelta(minutes=minute)
+            processor.process(
+                _cold_storage_sample(
+                    now,
+                    pulse=minute % 20 == 0,
+                    abnormal=abnormal,
+                ),
+                config,
+                ProcessingContext(
+                    now=now,
+                    hass=SimpleNamespace(data={DOMAIN: {}}),
+                    state=state,
+                    store_data=store_data,
+                    options={},
+                    entry_data={},
+                    known_load_circuit_ids=frozenset(),
+                    sensitivity="standard",
+                ),
+            )
+
+    first_processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: False,
+    )
+    feed(first_processor, 0, 48 * 30, abnormal=False)
+
+    restarted_processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: False,
+    )
+    feed(restarted_processor, 48 * 30, 96 * 30, abnormal=False)
+
+    assert store_data.baselines["fridge:cold_storage_pf_peak_delta"].sample_count == 96
+    assert store_data.baselines["fridge:cold_storage_pf_peak_delta"].median == 0.26
+    assert store_data.baselines["fridge:cold_storage_median_power_w"].median == 100.0
+    assert store_data.baselines["fridge:cold_storage_median_current_a"].median == 1.2
+    assert not any(
+        row.get("source") == "cold_storage_signature"
+        for row in store_data.contextual_baseline_samples_by_circuit.get("fridge", [])
+    )
+    learned_baselines = dict(store_data.baselines)
+
+    anomaly_processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: False,
+    )
+    feed(anomaly_processor, 96 * 30, 97 * 30, abnormal=True)
+
+    assert store_data.baselines == learned_baselines
 
 
 def test_run_cycle_processor_builds_baseline_and_returns_long_cycle_alert() -> None:
