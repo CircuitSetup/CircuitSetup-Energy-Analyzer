@@ -10,7 +10,6 @@ DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
     "/circuitsetup-energy-analyzer/alert-evidence"
 )
 MAX_GRAPH_ENTITIES = 8
-MAX_GRAPH_CONTEXT_PADDING = timedelta(hours=24)
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
@@ -142,17 +141,16 @@ def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
     return tuple(entities)
 
 
-def alert_graph_window(
-    alert: AlertEvidence, *, padding: timedelta = timedelta(hours=2)
-) -> tuple[datetime, datetime]:
-    """Return the graph window ending at the alert evidence."""
+def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
+    """Return the graph window containing only the alert evidence."""
     raw_start = alert.first_seen or alert.timestamp
     raw_end = alert.last_seen or alert.timestamp
     start = min(raw_start, raw_end)
     end = max(raw_start, raw_end)
-    span_padding = min((end - start) / 2, MAX_GRAPH_CONTEXT_PADDING)
-    context_padding = max(padding, span_padding)
-    return (start - context_padding, end)
+    if start == end:
+        point_padding = timedelta(minutes=15)
+        return (start - point_padding, end + point_padding)
+    return (start, end)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
