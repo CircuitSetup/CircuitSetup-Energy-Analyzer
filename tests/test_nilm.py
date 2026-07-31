@@ -1039,6 +1039,48 @@ def test_global_session_pairing_deduplicates_same_assignment_signatures() -> Non
     assert open_sessions[0].assignment_id == "dryer"
 
 
+def test_global_session_pairing_marks_alternate_off_edge_ambiguity() -> None:
+    spec = {
+        "signature_fingerprint": "dryer",
+        "typical_watts": 500.0,
+        "assignment_id": "dryer",
+    }
+    simple = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[spec],
+    )[0]
+    ambiguous = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[spec],
+    )[0]
+
+    assert ambiguous.ambiguous is True
+    assert ambiguous.alternate_match_count == 1
+    assert ambiguous.confidence < simple.confidence
+
+
+def test_global_session_pairing_opens_on_edge_after_off_edge_is_consumed() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, 500.0), edge(600, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert len(sessions) == 2
+    assert sessions[0].start == BASE_TIME
+    assert sessions[0].end is None
+    assert sessions[1].start == BASE_TIME + timedelta(seconds=300)
+    assert sessions[1].end == BASE_TIME + timedelta(seconds=600)
+
+
 def test_global_session_pairing_rejects_short_closed_transition() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(20, -500.0)],

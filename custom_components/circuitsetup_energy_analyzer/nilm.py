@@ -982,10 +982,20 @@ def pair_nilm_sessions_for_signatures(
     used_on_indices: set[int] = set()
     used_off_indices: set[int] = set()
     sessions: list[NilmSession] = []
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if (candidate.on_index, candidate.off_index) not in ambiguous_pairs
+        and (
+            (candidate.on_index, candidate.off_index) not in preferred_candidates
+            or preferred_candidates[(candidate.on_index, candidate.off_index)]
+            == candidate
+        )
+    ]
     # ponytail: greedy global assignment is intentionally bounded; replace it with
     # maximum-weight matching only if labelled replay data shows a measurable gap.
     for candidate in sorted(
-        candidates,
+        eligible_candidates,
         key=lambda item: (
             -item.score,
             item.off_edge.timestamp,
@@ -993,16 +1003,20 @@ def pair_nilm_sessions_for_signatures(
             item.signature_fingerprint,
         ),
     ):
-        pair = (candidate.on_index, candidate.off_index)
-        if pair in ambiguous_pairs or (
-            pair in preferred_candidates and preferred_candidates[pair] != candidate
-        ):
-            continue
         if (
             candidate.on_index in used_on_indices
             or candidate.off_index in used_off_indices
         ):
             continue
+        alternate_off_indices = {
+            alternate.off_index
+            for alternate in eligible_candidates
+            if alternate.on_index == candidate.on_index
+            and alternate.off_index != candidate.off_index
+            and alternate.off_index not in used_off_indices
+            and candidate.score - alternate.score <= ambiguity_margin
+        }
+        alternate_match_count = len(alternate_off_indices)
         used_on_indices.add(candidate.on_index)
         used_off_indices.add(candidate.off_index)
         sessions.append(
@@ -1011,10 +1025,10 @@ def pair_nilm_sessions_for_signatures(
                 candidate.off_edge,
                 mains_circuit_id=mains_circuit_id,
                 signature_fingerprint=candidate.signature_fingerprint,
-                confidence=candidate.score,
+                confidence=candidate.score * (0.85**alternate_match_count),
                 assignment_id=candidate.assignment_id,
-                ambiguous=False,
-                alternate_match_count=0,
+                ambiguous=alternate_match_count > 0,
+                alternate_match_count=alternate_match_count,
                 known_load_masked=False,
                 known_load_confidence=None,
             )
@@ -1048,7 +1062,11 @@ def pair_nilm_sessions_for_signatures(
     for on_index, on_edge in enumerate(on_edges):
         if on_index in used_on_indices or _nilm_on_edge_has_compatible_off(
             on_edge,
-            off_edges,
+            (
+                off_edge
+                for off_index, off_edge in enumerate(off_edges)
+                if off_index not in used_off_indices
+            ),
             max_duration=max_duration,
         ):
             continue
