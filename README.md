@@ -609,6 +609,16 @@ For appliance-style circuits, the analyzer tracks today's:
 
 This is useful for refrigerators, freezers, pumps, HVAC, washers, dryers, and other loads where cycling behavior matters.
 
+For directly metered `refrigerator` and `freezer` circuits that provide real
+power, current, and power factor, the analyzer also learns the appliance's
+repeating correlated compressor signature. After 96 valid 30-minute windows
+(about 48 hours), three consecutive windows with the learned PF pulse missing
+while median watts and amps remain elevated can raise an **Unusual Runtime**
+inspection prompt. This can identify continuous or changed compressor operation
+even when fixed on/off thresholds do not produce useful cycles. It suggests
+checking doors, seals, vents, and temperature; it does not diagnose an open door
+or failed component.
+
 ### Predictive appliance health
 
 For directly metered appliance circuits, the analyzer can flag a sustained rise
@@ -914,7 +924,12 @@ The analyzer uses two different Home Assistant surfaces:
 | **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
 | **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
 
-Routine alert evidence, alert notifications, blueprint follow-up actions, suggested settings, and stale-source repair issues wait until that appliance or mains circuit finishes both its shared baseline and any active rolling energy-use baseline. Configuration and missing-source repairs remain immediate.
+Routine alert evidence, alert notifications, blueprint follow-up actions,
+suggested settings, and stale-source repair issues normally wait until that
+appliance or mains circuit finishes both its shared baseline and any active
+rolling energy-use baseline. A refrigerator/freezer compressor-signature alert
+may appear earlier only after its own 96-window PF/power/current baseline is
+ready. Configuration and missing-source repairs remain immediate.
 
 Daily summaries describe alert evidence observed on the completed local day,
 even when it has since cleared. Weekly digests label currently active evidence

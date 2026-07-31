@@ -28,6 +28,12 @@ def test_refrigerator_profile_requires_single_phase_power_roles() -> None:
     assert SensorRole.REAL_POWER in definition.required_roles
     assert SensorRole.CURRENT in definition.required_roles
     assert SensorRole.REACTIVE_POWER in definition.recommended_roles
+    assert SensorRole.POWER_FACTOR in definition.recommended_roles
+    assert "cold_storage_cycle_signature_change" in definition.features
+    assert (
+        "cold_storage_cycle_signature_change"
+        in get_profile_definition(ApplianceProfile.FREEZER).features
+    )
     assert definition.minimum_cycles >= 20
 
 

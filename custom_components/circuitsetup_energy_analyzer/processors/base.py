@@ -77,3 +77,6 @@ class AlertPolicy(Protocol):
     def observe(self, observation: Observation) -> AlertEvidence | None:
         """Fold an observation into the alert policy."""
 
+    def reset_episode(self, circuit_id: str, feature: str) -> None:
+        """Discard incomplete repeated evidence for one circuit feature."""
+

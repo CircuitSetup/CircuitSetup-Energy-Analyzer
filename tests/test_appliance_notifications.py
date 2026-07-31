@@ -151,6 +151,13 @@ def test_nilm_alert_categories_remain_independent() -> None:
     )
 
 
+def test_cold_storage_signature_uses_unusual_runtime_preference() -> None:
+    assert (
+        alert_notification_category("cold_storage_cycle_signature_change")
+        == "unusual_runtime"
+    )
+
+
 @pytest.mark.parametrize(
     ("feature", "category"),
     [

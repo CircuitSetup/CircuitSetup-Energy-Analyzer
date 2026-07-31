@@ -39,6 +39,9 @@ from custom_components.circuitsetup_energy_analyzer.processors.base import (
     FeatureResult,
     ProcessingContext,
 )
+from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+    RunCycleProcessor,
+)
 from custom_components.circuitsetup_energy_analyzer.processors.energy_usage import (
     EnergyUsageProcessor,
 )
@@ -47,6 +50,9 @@ from custom_components.circuitsetup_energy_analyzer.processors.events import (
 )
 from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
     NilmSampleProcessor,
+)
+from custom_components.circuitsetup_energy_analyzer.state import (
+    process_events_into_state,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 from custom_components.circuitsetup_energy_analyzer.usage import EnergyUsageSettings
@@ -239,6 +245,19 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
         observe_topology=lambda _config, _match, _context: [],
     )
     alert_policies: dict[str, ConservativeAlertPolicy] = {}
+    cycle_alert_policies: dict[str, ConservativeAlertPolicy] = {}
+    run_cycle_processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda circuit_id: cycle_alert_policies.setdefault(
+            circuit_id,
+            ConservativeAlertPolicy(
+                min_repeated=3,
+                min_total_score=4.5,
+                min_average_score=1.5,
+                min_baseline_confidence=0.6,
+            ),
+        ),
+        learning_mature=lambda _config, _now: False,
+    )
     energy_usage_processor = EnergyUsageProcessor(
         settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
             window_days=config.energy_usage_window_days if config else 7,
@@ -313,12 +332,18 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                     circuit_config,
                     context,
                 ),
+                run_cycle_processor.process(
+                    normalized_sample,
+                    circuit_config,
+                    context,
+                ),
                 energy_usage_processor.process(
                     normalized_sample,
                     circuit_config,
                     context,
                 ),
             ]
+            active_alerts: list[AlertEvidence] = []
             if circuit_config.mode is CircuitMode.MAINS_NILM:
                 results.append(
                     nilm_processor.process(
@@ -335,7 +360,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                     store_data,
                 )
                 events.extend(new_events)
-                alerts.extend(new_alerts)
+                alerts.extend(result.alerts)
+                active_alerts.extend(new_alerts)
+            process_events_into_state(
+                state,
+                (),
+                active_alerts,
+                evaluated_circuit_ids=(circuit_config.circuit_id,),
+            )
         snapshots.append(_snapshot_state(state))
 
     result = ReplayResult(
@@ -562,6 +594,8 @@ def _expand_segment(
         msg = "segment entries must be mappings"
         raise CalibrationFixtureError(msg)
     pattern = str(raw.get("pattern", ""))
+    if pattern == "cold_storage_signature":
+        return _expand_cold_storage_signature_segment(raw, start_time, circuits)
     if pattern != "daily_energy_deltas":
         msg = f"unsupported calibration segment pattern: {pattern}"
         raise CalibrationFixtureError(msg)
@@ -587,6 +621,54 @@ def _expand_segment(
                 t=t,
                 states=states,
                 completes_prior_energy_days=True,
+            )
+        )
+    return samples
+
+
+def _expand_cold_storage_signature_segment(
+    raw: Mapping[str, Any],
+    start_time: datetime,
+    circuits: tuple[CircuitConfig, ...],
+) -> list[CalibrationSample]:
+    circuit = _segment_circuit(raw, circuits)
+    sources = {sensor.role: sensor.entity_id for sensor in circuit.sensors}
+    start_t = int(raw["start_t"])
+    duration = int(raw["duration_seconds"])
+    sample_interval = int(raw["sample_interval_seconds"])
+    excursion_interval = int(raw["excursion_interval_seconds"])
+    samples: list[CalibrationSample] = []
+    for offset in range(0, duration, sample_interval):
+        excursion = offset % excursion_interval == 0
+        states: dict[str, Any] = {}
+        values = {
+            SensorRole.REAL_POWER: float(
+                raw["excursion_power_w"] if excursion else raw["base_power_w"]
+            ),
+            SensorRole.CURRENT: float(
+                raw["excursion_current_a"]
+                if excursion
+                else raw["base_current_a"]
+            ),
+            SensorRole.POWER_FACTOR: float(
+                raw["excursion_power_factor"]
+                if excursion
+                else raw["base_power_factor"]
+            ),
+        }
+        for role, value in values.items():
+            entity_id = sources.get(role)
+            if entity_id is None:
+                raise CalibrationFixtureError(
+                    f"{circuit.circuit_id} cold_storage_signature requires {role.value}"
+                )
+            states[entity_id] = value
+        t = start_t + offset
+        samples.append(
+            CalibrationSample(
+                timestamp=start_time + timedelta(seconds=t),
+                t=t,
+                states=states,
             )
         )
     return samples
@@ -707,7 +789,12 @@ def _apply_feature_result(
         store_data.alerts.extend(result.alerts)
     for update in result.state_updates:
         _apply_state_update(state, update.path, update.value)
-    return list(result.events), list(result.alerts)
+    active_alerts = [
+        alert
+        for alert in (*result.alerts, *result.preserved_alerts)
+        if alert.feedback_status != "expected"
+    ]
+    return list(result.events), active_alerts
 
 
 def _snapshot_state(state: AnalyzerState) -> dict[str, Any]:
