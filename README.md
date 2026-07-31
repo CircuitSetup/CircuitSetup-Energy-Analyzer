@@ -148,7 +148,10 @@ questions instead of raw diagnostic entity lists:
   table, and the merged behavior/health evidence for one appliance or circuit.
   The graph offers 24 hours, 7 days, and 30 days, point-inspection tooltips,
   explicit zoom/pan controls, and a History arrow. VA and VAR are omitted from Appliance Detail graphs. HVAC efficiency is kept in its own organized card
-  when that evidence is available.
+  when that evidence is available. Eligible direct-circuit pages also show
+  **Water Flow Context** when retained water-flow correlation evidence exists,
+  including flow state, appliance and mapped-appliance runtime, mismatch
+  duration, confidence, learning progress, and configured flow sources.
 - **Appliance Status** keeps activity, health, energy state, and
   daily usage together for each appliance without duplicate watchlist cards.
 - **Today vs Normal** keeps partial-day observations separate from completed

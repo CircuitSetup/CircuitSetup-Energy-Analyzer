@@ -125,6 +125,7 @@ class ApplianceDetail:
     evidence_path: str | None
     appliance_health: dict[str, Any] | None = None
     hvac_efficiency: dict[str, Any] | None = None
+    water_flow_context: dict[str, Any] | None = None
     source_quality: dict[str, Any] | None = None
     learning_readiness: dict[str, Any] | None = None
     assignment_id: str | None = None
@@ -142,6 +143,8 @@ class ApplianceDetail:
         payload = _jsonable(asdict(self))
         if self.hvac_efficiency is None:
             payload.pop("hvac_efficiency", None)
+        if self.water_flow_context is None:
+            payload.pop("water_flow_context", None)
         return payload
 
 

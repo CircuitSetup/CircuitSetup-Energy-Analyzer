@@ -4115,6 +4115,117 @@ test("Appliance Detail omits session timeline and page-level controls", async ({
   await expect(panel.getByText("Expected Schedule")).toHaveCount(0);
   await expect(panel.locator("[data-expected-schedule]")).toHaveCount(0);
   await expect(panel.locator("[data-appliance-detail-action]")).toHaveCount(0);
+  await expect(panel.locator("[data-water-flow-context]")).toHaveCount(0);
+});
+
+test("Appliance Detail shows water flow context", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_detail")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.detail.water_flow_context = {
+      status: "possible_flow_without_load",
+      friendly_summary: "Water flow has no mapped running appliance.",
+      confidence: 0.75,
+      flow_sensor_active: true,
+      flow_active_minutes: 18.5,
+      appliance_runtime_minutes: 12,
+      mapped_appliance_count: 1,
+      mapped_appliance_runtime_minutes: 6,
+      recent_related_runtime_minutes: 0,
+      recent_flow_explains_activity: true,
+      mismatch_minutes: 6.5,
+      flow_mismatch_threshold_minutes: 10,
+      flow_sensors: [
+        {
+          entity_id: "binary_sensor.washer_flow",
+          name: "<b>Washer Flow</b>",
+        },
+        { entity_id: "sensor.house_flow", name: "House Flow" },
+      ],
+      learning: {
+        comparable_window_count: 4,
+        required_comparable_windows: 10,
+      },
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(
+    page,
+    "?appliance_detail=1&circuit_id=kitchen",
+  );
+  const context = panel.locator("[data-water-flow-context]");
+
+  await expect(context).toBeVisible();
+  await expect(
+    context.locator(".appliance-section-heading .status"),
+  ).toHaveText("Possible Flow Without Load");
+  await expect(context).toContainText(
+    "Water flow has no mapped running appliance.",
+  );
+  await expect(context).toContainText("Active");
+  await expect(context).toContainText("18.5 min");
+  await expect(context).toContainText("12 min");
+  await expect(context).toContainText("6.5 min");
+  await expect(context).toContainText("10 min");
+  await expect(context).toContainText("75%");
+  await expect(context).toContainText("4 of 10 comparable windows");
+  await expect(context).toContainText("Mapped appliances: 1");
+  await expect(context).toContainText("Mapped runtime: 6 min");
+  await expect(context).toContainText(
+    "Recent flow explains appliance activity",
+  );
+  await expect(context).toContainText("<b>Washer Flow</b>");
+  await expect(context).toContainText("House Flow");
+  await expect(context.locator("b")).toHaveCount(0);
+  await toHaveNoViolations(page);
+});
+
+test("Appliance Detail omits unavailable water flow context metrics", async ({
+  page,
+}) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/appliance_detail")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.detail.water_flow_context = {
+      status: "future_status",
+      friendly_summary: null,
+      confidence: null,
+      flow_sensor_active: false,
+      flow_active_minutes: null,
+      appliance_runtime_minutes: null,
+      mapped_appliance_count: null,
+      mapped_appliance_runtime_minutes: null,
+      recent_related_runtime_minutes: null,
+      recent_flow_explains_activity: false,
+      mismatch_minutes: 0,
+      flow_mismatch_threshold_minutes: null,
+      flow_sensors: [
+        { entity_id: "sensor.flow", name: "" },
+      ],
+      learning: {
+        comparable_window_count: 0,
+        required_comparable_windows: 10,
+      },
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(
+    page,
+    "?appliance_detail=1&circuit_id=kitchen",
+  );
+  const context = panel.locator("[data-water-flow-context]");
+
+  await expect(context).toContainText("Future Status");
+  await expect(context).toContainText("Inactive");
+  await expect(context).toContainText("0 min");
+  await expect(context).toContainText("0 of 10 comparable windows");
+  await expect(context).toContainText("sensor.flow");
+  await expect(context.locator(".metric-heading")).toHaveText([
+    "Water flow",
+    "Mismatch",
+  ]);
 });
 
 test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page }) => {

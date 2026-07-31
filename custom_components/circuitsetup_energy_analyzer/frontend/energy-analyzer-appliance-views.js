@@ -582,6 +582,7 @@ export function createApplianceViewMethods({
         ${this._renderApplianceComparisons(detail.today_vs_normal, detail.learning_readiness)}
       </section>
       ${this._renderApplianceBehaviorHealth(detail)}
+      ${this._renderWaterFlowContext(detail.water_flow_context)}
       ${this._renderHvacEfficiency(detail.hvac_efficiency)}
     `;
   }
@@ -649,6 +650,111 @@ export function createApplianceViewMethods({
           ${this._renderApplianceTimeline(timeline)}
         </div>
       </div>
+    </section>`;
+  }
+
+  _renderWaterFlowContext(context) {
+    if (!context || typeof context !== "object") return "";
+    const number = (key) => this._finiteMetricValue(context[key]);
+    const minutes = (key) => {
+      const value = number(key);
+      return value === null ? "" : `${this._formatNumber(value)} min`;
+    };
+    const status = String(context.status || "unconfigured");
+    const statusLabel = this._panelText(
+      `appliance_detail.water_flow_status.${status}`,
+    ) || this._friendlyFeature(status);
+    const flowState = context.flow_sensor_active === true
+      ? this._panelText("appliance_detail.water_flow_active")
+      : context.flow_sensor_active === false
+        ? this._panelText("appliance_detail.water_flow_inactive")
+        : "";
+    const confidence = number("confidence");
+    const facts = [
+      flowState
+        ? this._metric(
+          this._panelText("appliance_detail.water_flow_state"),
+          flowState,
+          "mdi:water",
+        )
+        : "",
+      minutes("flow_active_minutes")
+        ? this._metric(
+          this._panelText("appliance_detail.water_flow_active_minutes"),
+          minutes("flow_active_minutes"),
+          "mdi:timer-outline",
+        )
+        : "",
+      minutes("appliance_runtime_minutes")
+        ? this._metric(
+          this._panelText("appliance_detail.water_flow_appliance_runtime"),
+          minutes("appliance_runtime_minutes"),
+          "mdi:washing-machine",
+        )
+        : "",
+      minutes("mismatch_minutes")
+        ? this._metric(
+          this._panelText("appliance_detail.water_flow_mismatch_minutes"),
+          minutes("mismatch_minutes"),
+          "mdi:pipe-leak",
+        )
+        : "",
+      minutes("flow_mismatch_threshold_minutes")
+        ? this._metric(
+          this._panelText("appliance_detail.water_flow_mismatch_threshold"),
+          minutes("flow_mismatch_threshold_minutes"),
+          "mdi:tune",
+        )
+        : "",
+      confidence !== null
+        ? this._metric(
+          this._panelText("common.confidence"),
+          this._formatConfidence(confidence),
+          "mdi:chart-bell-curve-cumulative",
+        )
+        : "",
+    ].filter(Boolean);
+    const learning = context.learning && typeof context.learning === "object"
+      ? context.learning
+      : {};
+    const observed = this._finiteMetricValue(
+      learning.comparable_window_count,
+    ) ?? 0;
+    const required = this._finiteMetricValue(
+      learning.required_comparable_windows,
+    ) ?? 0;
+    const mapped = [
+      number("mapped_appliance_count") !== null
+        ? `${this._panelText("appliance_detail.water_flow_mapped_appliances")}: ${this._formatNumber(number("mapped_appliance_count"))}`
+        : "",
+      minutes("mapped_appliance_runtime_minutes")
+        ? `${this._panelText("appliance_detail.water_flow_mapped_runtime")}: ${minutes("mapped_appliance_runtime_minutes")}`
+        : "",
+      minutes("recent_related_runtime_minutes")
+        ? `${this._panelText("appliance_detail.water_flow_recent_related_runtime")}: ${minutes("recent_related_runtime_minutes")}`
+        : "",
+      context.recent_flow_explains_activity === true
+        ? this._panelText(
+          "appliance_detail.water_flow_recent_explains_activity",
+        )
+        : "",
+    ].filter(Boolean);
+    const sources = Array.isArray(context.flow_sensors)
+      ? context.flow_sensors.map((source) => (
+        source && typeof source === "object"
+          ? String(source.name || source.entity_id || "")
+          : ""
+      )).filter(Boolean)
+      : [];
+    const friendlySummary = String(context.friendly_summary || "");
+
+    return `<section class="panel" data-water-flow-context>
+      <div class="appliance-section-heading"><h2>${this._escape(this._panelText("appliance_detail.water_flow_context"))}</h2><span class="status">${this._escape(statusLabel)}</span></div>
+      ${friendlySummary ? `<p class="muted">${this._escape(friendlySummary)}</p>` : ""}
+      ${facts.length ? `<div class="summary appliance-health-metrics">${facts.join("")}</div>` : ""}
+      <p class="muted">${this._escape(`${this._formatNumber(observed)} of ${this._formatNumber(required)} ${this._panelText("appliance_detail.water_flow_comparable_windows")}`)}</p>
+      ${mapped.length ? `<p class="muted">${this._escape(mapped.join(" · "))}</p>` : ""}
+      ${sources.length ? `<p class="muted">${this._escape(this._panelText("appliance_detail.water_flow_sources"))}: ${this._escape(sources.join(", "))}</p>` : ""}
     </section>`;
   }
 

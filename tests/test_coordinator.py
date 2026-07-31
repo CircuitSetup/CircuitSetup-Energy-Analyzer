@@ -17,6 +17,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
     CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_ENTITY_DETAIL_LEVEL,
+    CONF_EXPECTS_WATER_FLOW,
     CONF_FLOW_MISMATCH_THRESHOLD_MINUTES,
     CONF_KNOWN_LOAD_CIRCUITS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -1275,6 +1276,60 @@ def test_coordinator_does_not_learn_flow_from_unconfigured_history() -> None:
     assert evidence["status"] == "learning"
 
 
+def test_coordinator_does_not_learn_flow_from_unavailable_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    states: dict[str, Any] = {
+        "binary_sensor.water_flow": ("unavailable", 14)
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(states, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water_flow"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True}
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "flow_status": (
+                            "normal" if index < 9 else "sensor_unavailable"
+                        ),
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+    states["binary_sensor.water_flow"] = ("on", 14)
+
+    evidence = coordinator.environment_context.water_flow_context_evidence(
+        coordinator.circuit_configs[0],
+        {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+        now,
+    )
+
+    assert (
+        evidence["status"],
+        evidence["comparable_window_count"],
+    ) == ("learning", 9)
+
+
 def test_coordinator_treats_positive_numeric_flow_sensor_as_active() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -1376,6 +1431,150 @@ def test_coordinator_treats_zero_numeric_flow_sensor_as_inactive() -> None:
     evidence = coordinator.state.water_flow_context_by_circuit["washer"]
     assert evidence["flow_active_minutes"] == 0.0
     assert evidence["status"] == "normal"
+
+
+def test_coordinator_keeps_water_flow_unconfigured_without_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states({}, now=now),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {CONF_WATER_FLOW_CORRELATION_ENABLED: True}
+            },
+        },
+        now_fn=lambda: now,
+    )
+
+    evidence = coordinator.environment_context.water_flow_context_evidence(
+        coordinator.circuit_configs[0],
+        {CONF_WATER_FLOW_CORRELATION_ENABLED: True},
+        now,
+    )
+
+    assert evidence["status"] == "unconfigured"
+    assert evidence["flow_sensor_active"] is None
+
+
+def test_coordinator_preserves_unavailable_flow_sensor_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {"sensor.water_flow_rate": ("unavailable", 9)},
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_WATER_FLOW_CORRELATION_ENABLED: True,
+                    CONF_LINKED_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+                }
+            },
+        },
+        store_data=FeatureStoreData(
+            water_context_history_by_circuit={
+                "washer": [
+                    {
+                        "timestamp": (now - timedelta(days=index + 1)).isoformat(),
+                        "flow_status": "normal",
+                    }
+                    for index in range(12)
+                ]
+            }
+        ),
+        now_fn=lambda: now,
+    )
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.water_flow_context_by_circuit["washer"]
+    assert evidence["flow_sensor_active"] is None
+    assert (
+        evidence["status"],
+        evidence["friendly_summary"],
+    ) == (
+        "sensor_unavailable",
+        "Configured water-flow sensors are currently unavailable.",
+    )
+    assert {
+        "baseline_context",
+        "baseline_fallback_level",
+        "confidence",
+        "contextual_baseline_confidence",
+        "contextual_status",
+        "flow_active_minutes",
+        "mismatch_minutes",
+        "recent_flow_explains_activity",
+        "recent_related_runtime_minutes",
+    }.isdisjoint(evidence)
+
+
+def test_coordinator_keeps_disabled_flow_relationship_unconfigured() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        _hass_with_states(
+            {"sensor.water_flow_rate": ("unavailable", 9)},
+            now=now,
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "washer",
+                    "name": "Washer",
+                    "appliance_profile": "washer",
+                    "mode": "single_phase",
+                }
+            ],
+            CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            CONF_ADVANCED_SETTINGS: {
+                "washer": {
+                    CONF_WATER_FLOW_CORRELATION_ENABLED: True,
+                    CONF_EXPECTS_WATER_FLOW: False,
+                }
+            },
+        },
+        now_fn=lambda: now,
+    )
+
+    coordinator.environment_context.refresh_water_context_state(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+    evidence = coordinator.state.water_flow_context_by_circuit["washer"]
+    assert evidence["flow_sensor_active"] is None
+    assert evidence["status"] == "unconfigured"
 
 
 def test_coordinator_uses_active_cycle_not_daily_runtime_for_water_flow() -> None:
