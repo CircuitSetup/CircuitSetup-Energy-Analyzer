@@ -13,4 +13,12 @@ anonymized data for public tests.
 Each fixture has `schema_version: 1`, one or more circuit definitions, replay
 samples or deterministic segments, ground-truth labels, and calibration
 expectations. The first harness supports explicit samples plus
-`daily_energy_deltas` segments for cumulative kWh replay.
+`daily_energy_deltas` segments for cumulative kWh replay and
+`cold_storage_signature` segments for fixed-interval refrigerator/freezer
+PF, real-power, and current pulses.
+
+A `cold_storage_signature` segment requires `start_t`, `duration_seconds`,
+`sample_interval_seconds`, `excursion_interval_seconds`, `base_power_w`,
+`base_current_a`, `base_power_factor`, `excursion_power_w`,
+`excursion_current_a`, and `excursion_power_factor`. The circuit must provide
+`power`, `current`, and `power_factor` sources.

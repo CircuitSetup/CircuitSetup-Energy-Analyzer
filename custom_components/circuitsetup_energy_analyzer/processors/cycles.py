@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
 from ..alerting import Observation
 from ..baseline import build_baseline
+from ..cold_storage import (
+    COLD_STORAGE_BASELINE_FEATURES,
+    COLD_STORAGE_MIN_BASELINE_WINDOWS,
+    COLD_STORAGE_SIGNATURE_FEATURE,
+    ColdStorageWindowAccumulator,
+    cold_storage_window_values,
+    select_cold_storage_signature_evidence,
+)
 from ..contextual_baseline import (
     ContextKey,
     ContextualBaselineSample,
     build_context_for_sample,
     context_allows_baseline_learning,
+    contextual_sample_from_dict,
     contextual_stats_storage_key,
     contextual_stats_to_dict,
     daily_energy_fallback_contexts,
@@ -33,7 +43,14 @@ from ..cycles import (
     summarize_circuit_cycles,
 )
 from ..local_time import local_date
-from ..models import BaselineStats, CircuitConfig
+from ..models import (
+    AlertEvidence,
+    ApplianceProfile,
+    BaselineStats,
+    CircuitConfig,
+    CircuitMode,
+    PowerFlowMode,
+)
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_state_is_running,
@@ -59,6 +76,8 @@ class RunCycleProcessor:
     ) -> None:
         self._alert_policy_for_circuit = alert_policy_for_circuit
         self._learning_mature = learning_mature
+        self._cold_storage_windows: dict[str, ColdStorageWindowAccumulator] = {}
+        self._cold_storage_recovery_windows: defaultdict[str, int] = defaultdict(int)
 
     def process(
         self,
@@ -67,6 +86,11 @@ class RunCycleProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return run-cycle alerts for the current retained event history."""
+        feature_result = self._process_cold_storage_signature(
+            sample,
+            circuit_config,
+            context,
+        )
         merge_gap_seconds = resolve_operating_detection_from_settings(
             circuit_config,
             getattr(
@@ -152,15 +176,20 @@ class RunCycleProcessor:
                 time_zone=context.time_zone,
                 baseline_eligible=contextual_baseline_eligible,
             )
-            return FeatureResult(
-                store_dirty=(
-                    baseline_dirty or contextual_samples_removed or contextual_dirty
-                )
+            feature_result.store_dirty = (
+                feature_result.store_dirty
+                or baseline_dirty
+                or contextual_samples_removed
+                or contextual_dirty
             )
+            return feature_result
         if _operating_state_is_unavailable(context, circuit_config.circuit_id):
-            return FeatureResult(
-                store_dirty=baseline_dirty or contextual_samples_removed
+            feature_result.store_dirty = (
+                feature_result.store_dirty
+                or baseline_dirty
+                or contextual_samples_removed
             )
+            return feature_result
 
         policy = self._alert_policy_for_circuit(circuit_config.circuit_id)
         evidence = select_cycle_anomaly_evidence(
@@ -169,8 +198,8 @@ class RunCycleProcessor:
             baselines,
             min_score=policy.min_average_score,
         )
-        feature_result = FeatureResult(
-            store_dirty=baseline_dirty or contextual_samples_removed
+        feature_result.store_dirty = (
+            feature_result.store_dirty or baseline_dirty or contextual_samples_removed
         )
         if evidence is None:
             feature_result.store_dirty = (
@@ -245,6 +274,171 @@ class RunCycleProcessor:
             feature_result.notifications.append(alert)
         return feature_result
 
+    def reset_cold_storage_state(self, circuit_id: str) -> None:
+        """Reset runtime cold-storage state for one circuit."""
+        self._cold_storage_windows.pop(circuit_id, None)
+        self._cold_storage_recovery_windows.pop(circuit_id, None)
+
+    def _process_cold_storage_signature(
+        self,
+        sample: NormalizedCircuitSample,
+        config: CircuitConfig,
+        context: ProcessingContext,
+    ) -> FeatureResult:
+        result = FeatureResult()
+        if (
+            config.appliance_profile
+            not in {ApplianceProfile.REFRIGERATOR, ApplianceProfile.FREEZER}
+            or config.mode is not CircuitMode.SINGLE_PHASE
+            or config.power_flow is not PowerFlowMode.LOAD
+        ):
+            return result
+        active_alert = _matching_active_signature_alert(
+            context.state,
+            config.circuit_id,
+        )
+        accumulator = self._cold_storage_windows.setdefault(
+            config.circuit_id,
+            ColdStorageWindowAccumulator(),
+        )
+        summary = accumulator.observe(sample)
+        if summary is None:
+            if active_alert is not None:
+                result.preserved_alerts.append(active_alert)
+            return result
+        learning_started_at = _learning_started_at(
+            context.store_data,
+            config.circuit_id,
+            context.now,
+        )
+        if learning_started_at is not None and summary.started_at < learning_started_at:
+            if active_alert is not None:
+                result.preserved_alerts.append(active_alert)
+            return result
+        policy = self._alert_policy_for_circuit(config.circuit_id)
+        if not summary.valid:
+            policy.reset_episode(config.circuit_id, COLD_STORAGE_SIGNATURE_FEATURE)
+            self._cold_storage_recovery_windows[config.circuit_id] = 0
+            if active_alert is not None:
+                result.preserved_alerts.append(active_alert)
+            return result
+
+        baselines = {
+            feature: context.store_data.baselines.get(
+                _baseline_key(config.circuit_id, feature)
+            )
+            for feature in COLD_STORAGE_BASELINE_FEATURES
+        }
+        if any(baseline is None for baseline in baselines.values()):
+            raw_samples = (
+                context.store_data.contextual_baseline_samples_by_circuit.setdefault(
+                    config.circuit_id,
+                    [],
+                )
+            )
+            window_context = ContextKey.from_mapping(
+                {"cold_storage_window": summary.started_at.isoformat()}
+            )
+            for feature, value in cold_storage_window_values(summary).items():
+                upsert_contextual_sample(
+                    raw_samples,
+                    ContextualBaselineSample(
+                        timestamp=summary.ended_at,
+                        circuit_id=config.circuit_id,
+                        feature=feature,
+                        value=value,
+                        context=window_context,
+                        source="cold_storage_signature",
+                    ),
+                    time_zone=context.time_zone,
+                    cache=context.contextual_samples_cache,
+                )
+            pending = [
+                item
+                for item in stored_contextual_samples(
+                    config.circuit_id,
+                    raw_samples,
+                    cache=context.contextual_samples_cache,
+                )
+                if item.source == "cold_storage_signature"
+                and (
+                    learning_started_at is None
+                    or item.timestamp >= learning_started_at
+                )
+            ]
+            values_by_feature = {
+                feature: [
+                    item.value for item in pending if item.feature == feature
+                ][-COLD_STORAGE_MIN_BASELINE_WINDOWS:]
+                for feature in COLD_STORAGE_BASELINE_FEATURES
+            }
+            if all(
+                len(values) == COLD_STORAGE_MIN_BASELINE_WINDOWS
+                for values in values_by_feature.values()
+            ):
+                for feature, values in values_by_feature.items():
+                    context.store_data.baselines[
+                        _baseline_key(config.circuit_id, feature)
+                    ] = build_baseline(feature, values)
+                raw_samples[:] = [
+                    raw
+                    for raw in raw_samples
+                    if (
+                        (stored := contextual_sample_from_dict(config.circuit_id, raw))
+                        is None
+                        or stored.source != "cold_storage_signature"
+                    )
+                ]
+                context.contextual_samples_cache.clear()
+            result.store_dirty = True
+            if active_alert is not None:
+                result.preserved_alerts.append(active_alert)
+            return result
+
+        evidence = select_cold_storage_signature_evidence(
+            config,
+            summary,
+            {
+                feature: baseline
+                for feature, baseline in baselines.items()
+                if baseline
+            },
+        )
+        if evidence is None:
+            policy.reset_episode(config.circuit_id, COLD_STORAGE_SIGNATURE_FEATURE)
+            self._cold_storage_recovery_windows[config.circuit_id] += 1
+            if (
+                active_alert is not None
+                and self._cold_storage_recovery_windows[config.circuit_id] < 2
+            ):
+                result.preserved_alerts.append(active_alert)
+            return result
+
+        self._cold_storage_recovery_windows[config.circuit_id] = 0
+        observation = Observation(
+            circuit_id=config.circuit_id,
+            feature=evidence.feature,
+            score=evidence.score,
+            baseline_confidence=evidence.baseline_confidence,
+            observed_at=summary.ended_at,
+            observed_value=evidence.observed_value,
+            baseline_value=evidence.baseline_value,
+            value_metric="power_factor_peak_delta",
+            message=evidence.message,
+            observation_key=f"{evidence.feature}:{summary.started_at.isoformat()}",
+            features=evidence.features,
+        )
+        result.observations.append(observation)
+        if active_alert is not None:
+            result.preserved_alerts.append(active_alert)
+            return result
+        alert = policy.observe(observation)
+        if alert is None:
+            return result
+        result.alerts.append(alert)
+        result.notifications.append(alert)
+        return result
+
     def _cycle_baselines_for_config(
         self,
         store_data: FeatureStoreData,
@@ -287,6 +481,39 @@ class RunCycleProcessor:
 
 def _baseline_key(circuit_id: str, feature: str) -> str:
     return f"{circuit_id}:{feature}"
+
+
+def _learning_started_at(
+    store_data: FeatureStoreData,
+    circuit_id: str,
+    now: datetime,
+) -> datetime | None:
+    raw = store_data.learning_started_at_by_circuit.get(circuit_id)
+    if not raw:
+        return None
+    try:
+        started_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=now.tzinfo)
+    return started_at
+
+
+def _matching_active_signature_alert(
+    state: Any,
+    circuit_id: str,
+) -> AlertEvidence | None:
+    return next(
+        (
+            alert
+            for alert in getattr(state, "active_alerts_by_circuit", {}).get(
+                circuit_id, ()
+            )
+            if alert.feature == COLD_STORAGE_SIGNATURE_FEATURE
+        ),
+        None,
+    )
 
 
 def _observation_key(feature: str, summary: Any) -> str:

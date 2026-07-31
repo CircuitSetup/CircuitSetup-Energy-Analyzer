@@ -151,6 +151,10 @@ class ConservativeAlertPolicy:
         while observations and observations[0].observed_at < oldest_allowed:
             observations.popleft()
 
+    def reset_episode(self, circuit_id: str, feature: str) -> None:
+        """Discard incomplete repeated evidence for one circuit feature."""
+        self._observations.pop((circuit_id, feature), None)
+
 
 def alert_feedback_fingerprint_for_observation(
     observation: Observation,

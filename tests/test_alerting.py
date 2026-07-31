@@ -46,6 +46,33 @@ def test_policy_waits_for_repeated_observations() -> None:
     assert "evidence of a learned-baseline change" in alert.message
 
 
+def test_policy_reset_episode_discards_nonconsecutive_observations() -> None:
+    policy = ConservativeAlertPolicy(min_repeated=3)
+    now = datetime(2026, 7, 29, 20, 0, tzinfo=UTC)
+    for offset in range(2):
+        assert policy.observe(
+            Observation(
+                "fridge",
+                "cold_storage_cycle_signature_change",
+                2.0,
+                1.0,
+                now + timedelta(minutes=30 * offset),
+            )
+        ) is None
+
+    policy.reset_episode("fridge", "cold_storage_cycle_signature_change")
+
+    assert policy.observe(
+        Observation(
+            "fridge",
+            "cold_storage_cycle_signature_change",
+            2.0,
+            1.0,
+            now + timedelta(minutes=60),
+        )
+    ) is None
+
+
 def test_policy_blocks_low_confidence_baseline() -> None:
     policy = ConservativeAlertPolicy(min_repeated=2, min_baseline_confidence=0.6)
     now = datetime(2026, 6, 2, tzinfo=UTC)

@@ -10,6 +10,11 @@ from ..appliance_notifications import (
     decide_notification_delivery,
     preferences_from_dict,
 )
+from ..cold_storage import (
+    COLD_STORAGE_MIN_BASELINE_CONFIDENCE,
+    COLD_STORAGE_MIN_BASELINE_WINDOWS,
+    COLD_STORAGE_SIGNATURE_FEATURE,
+)
 from ..models import AlertEvidence, CircuitEvent, EventType, Severity
 from ..nilm_virtual import nilm_virtual_appliance_alerts
 from ..state import circuit_is_learning
@@ -26,6 +31,21 @@ _LIFECYCLE_MESSAGES = {
     "learning_completed": "{appliance} finished learning its normal behavior.",
     "alert_recovered": "{appliance} returned to its expected behavior.",
 }
+
+
+def _is_self_mature_cold_storage_alert(alert: AlertEvidence) -> bool:
+    features = alert.features
+    try:
+        window_count = int(features.get("signature_baseline_windows") or 0)
+        confidence = float(features.get("signature_baseline_confidence") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return (
+        alert.feature == COLD_STORAGE_SIGNATURE_FEATURE
+        and features.get("signature_ready") is True
+        and window_count >= COLD_STORAGE_MIN_BASELINE_WINDOWS
+        and confidence >= COLD_STORAGE_MIN_BASELINE_CONFIDENCE
+    )
 
 
 class NotificationController:
@@ -91,8 +111,10 @@ class NotificationController:
 
     def learning_allows_alert(self, alert: AlertEvidence) -> bool:
         """Return whether learned evidence is ready for this alert."""
-        return self._is_lifecycle_alert(alert) or not self._circuit_is_learning(
-            alert.circuit_id
+        return (
+            self._is_lifecycle_alert(alert)
+            or _is_self_mature_cold_storage_alert(alert)
+            or not self._circuit_is_learning(alert.circuit_id)
         )
 
     def _circuit_is_learning(self, circuit_id: str) -> bool:
@@ -169,7 +191,7 @@ class NotificationController:
                 and not self._coordinator.evidence_actions.alerts_paused(
                     recovered_alert.circuit_id
                 )
-                and not self._circuit_is_learning(recovered_alert.circuit_id)
+                and self.learning_allows_alert(recovered_alert)
                 and self._is_actionable_alert(recovered_alert)
                 and not any(
                     self._is_actionable_alert(active_alert)

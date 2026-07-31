@@ -53,7 +53,12 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
         }),
-        features=frozenset({"compressor_cycle", "defrost_cycle", "door_open_hint"}),
+        features=frozenset({
+            "compressor_cycle",
+            "cold_storage_cycle_signature_change",
+            "defrost_cycle",
+            "door_open_hint",
+        }),
         minimum_cycles=20,
     ),
     ApplianceProfile.FREEZER: ProfileDefinition(
@@ -66,9 +71,12 @@ _PROFILE_DEFINITIONS: dict[ApplianceProfile, ProfileDefinition] = {
             SensorRole.POWER_FACTOR,
             SensorRole.ENERGY,
         }),
-        features=frozenset(
-            {"compressor_cycle", "defrost_cycle", "temperature_drift_hint"}
-        ),
+        features=frozenset({
+            "compressor_cycle",
+            "cold_storage_cycle_signature_change",
+            "defrost_cycle",
+            "temperature_drift_hint",
+        }),
         minimum_cycles=20,
     ),
     ApplianceProfile.HVAC: ProfileDefinition(

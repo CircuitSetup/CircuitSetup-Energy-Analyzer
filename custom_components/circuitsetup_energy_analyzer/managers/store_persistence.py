@@ -114,6 +114,17 @@ class StorePersistenceManager:
             for key, value in store_data.hvac_baseline_era_by_stream.items()
             if not key.startswith(hvac_prefix)
         }
+        pending_samples = store_data.contextual_baseline_samples_by_circuit.get(
+            circuit_id
+        )
+        if pending_samples is not None:
+            pending_samples[:] = [
+                sample
+                for sample in pending_samples
+                if sample.get("source") != "cold_storage_signature"
+            ]
+            if not pending_samples:
+                store_data.contextual_baseline_samples_by_circuit.pop(circuit_id)
         store_data.learning_started_at_by_circuit[circuit_id] = now.isoformat()
         self.mark_dirty()
 
