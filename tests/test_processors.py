@@ -4311,6 +4311,68 @@ def test_activity_alert_processor_skips_left_on_for_mains_nilm_config() -> None:
     assert policy.observations == []
 
 
+def test_mixed_activity_suppresses_duration_but_retains_generic_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(minutes=45),
+                    circuit_id="washer",
+                    event_type=EventType.START,
+                )
+            ]
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.MIXED,
+    )
+    policy = _CaptureAlertPolicy()
+    activity = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_active_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    activity_result = activity.process(_energy_sample(1.0), config, context)
+    assert activity_result.observations == []
+    assert activity_result.alerts == []
+    assert activity_result.notifications == []
+    assert policy.observations == []
+
+    events = CircuitEventProcessor()
+    events.process(_sample(0, 5.0), config, context)
+    events.process(_sample(10, 100.0), config, context)
+    started = events.process(_sample(21, 100.0), config, context)
+    events.process(_sample(30, 5.0), config, context)
+    stopped = events.process(_sample(61, 5.0), config, context)
+
+    assert [event.event_type for event in started.events] == [EventType.START]
+    assert [event.event_type for event in stopped.events] == [EventType.STOP]
+
+
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState

@@ -2282,11 +2282,11 @@ def sensor_description_applies(
     if key in _POWER_QUALITY_SENSOR_KEYS:
         return supports_direct and bool(roles & _POWER_QUALITY_ROLES)
     if key == "reactive_power_drift":
-        return SensorRole.REACTIVE_POWER in roles
+        return supports_direct and SensorRole.REACTIVE_POWER in roles
     if key == "apparent_power_drift":
-        return SensorRole.APPARENT_POWER in roles
+        return supports_direct and SensorRole.APPARENT_POWER in roles
     if key == "power_factor_drift":
-        return SensorRole.POWER_FACTOR in roles
+        return supports_direct and SensorRole.POWER_FACTOR in roles
     if key in _MAINS_NILM_SENSOR_KEYS:
         return is_mains
     if key in _RUN_CYCLE_SENSOR_KEYS:
@@ -2315,13 +2315,7 @@ def sensor_description_applies(
             or SensorRole.POWER_FACTOR in roles
             or (has_voltage and has_current)
         )
-        is_dedicated_appliance = (
-            mode is not CircuitMode.MIXED
-            and profile is not ApplianceProfile.MIXED
-        )
-        return has_real_power and has_consistency_context and (
-            is_mains or is_dedicated_appliance
-        )
+        return has_real_power and has_consistency_context
     if key in _BALANCE_SENSOR_KEYS:
         return is_mains
     if key in _SOLAR_FLOW_SENSOR_KEYS:

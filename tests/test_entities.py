@@ -3303,6 +3303,9 @@ def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
             SensorRef("sensor.power", SensorRole.REAL_POWER),
             SensorRef("sensor.current", SensorRole.CURRENT),
             SensorRef("sensor.voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.var", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.va", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.pf", SensorRole.POWER_FACTOR),
         ),
     )
     coordinator = SimpleNamespace(
@@ -3315,12 +3318,18 @@ def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
     for key in (
         "run_cycle_count",
         "power_quality_score",
+        "reactive_power_drift",
+        "apparent_power_drift",
+        "power_factor_drift",
         "always_on_power",
         "water_flow_correlation",
     ):
         assert not sensor_description_applies(sensors[key], circuit, coordinator)
     assert sensor_description_applies(
         sensors["energy_usage_status"], circuit, coordinator
+    )
+    assert sensor_description_applies(
+        sensors["metric_consistency_score"], circuit, coordinator
     )
     assert not binary_sensor_description_applies(
         binary["water_flow_mismatch"], circuit, coordinator
