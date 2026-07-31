@@ -157,31 +157,8 @@ class NilmSampleProcessor:
                     inventory
                 )
                 store_dirty = True
-            session_payloads = _nilm_session_history_payloads(
-                circuit_id,
-                self.unmatched_edges_by_circuit[circuit_id],
-                payloads,
-                context.store_data.nilm_appliance_assignments_by_circuit.get(
-                    circuit_id,
-                    [],
-                ),
-            )
-            if session_payloads:
-                existing_sessions = (
-                    context.store_data.nilm_session_history_by_circuit.get(
-                        circuit_id,
-                        [],
-                    )
-                )
-                next_sessions = _merge_nilm_session_history(
-                    existing_sessions,
-                    session_payloads,
-                )
-                if next_sessions != existing_sessions:
-                    context.store_data.nilm_session_history_by_circuit[circuit_id] = (
-                        next_sessions
-                    )
-                    store_dirty = True
+            if self.refresh_session_history(circuit_id, context.store_data):
+                store_dirty = True
 
         return FeatureResult(
             alerts=alerts,
@@ -194,6 +171,29 @@ class NilmSampleProcessor:
             ),
             store_dirty=store_dirty,
         )
+
+    def refresh_session_history(self, circuit_id: str, store_data: Any) -> bool:
+        """Recompute persisted sessions from current edges and assignments."""
+        session_payloads = _nilm_session_history_payloads(
+            circuit_id,
+            self.unmatched_edges_by_circuit[circuit_id],
+            store_data.nilm_signatures.get(circuit_id, []),
+            store_data.nilm_appliance_assignments_by_circuit.get(circuit_id, []),
+        )
+        if not session_payloads:
+            return False
+        existing_sessions = store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            [],
+        )
+        next_sessions = _merge_nilm_session_history(
+            existing_sessions,
+            session_payloads,
+        )
+        if next_sessions == existing_sessions:
+            return False
+        store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
+        return True
 
     def refresh_state(
         self,

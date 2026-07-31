@@ -7584,6 +7584,78 @@ async def test_nilm_session_validation_keeps_duration_bounds_ordered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_validation_refreshes_history_for_new_duration_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        nilm_session_to_dict,
+        pair_nilm_sessions_for_signatures,
+    )
+
+    start = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    edges = [
+        NilmEdge(start, 650.0, 0.0, 650.0, 0.0, "on"),
+        NilmEdge(start + timedelta(hours=1), -650.0, 0.0, -650.0, 0.0, "off"),
+    ]
+    stale_session = nilm_session_to_dict(
+        pair_nilm_sessions_for_signatures(
+            edges,
+            mains_circuit_id="mains",
+            signature_specs=[
+                {
+                    "signature_fingerprint": "signature_1",
+                    "assignment_id": "assignment-load",
+                    "typical_watts": 650.0,
+                }
+            ],
+        )[0]
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [{"signature_id": "signature_1", "typical_watts": 650.0}]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "confirmed-short",
+                        "assignment_id": "assignment-load",
+                        "start": "2026-06-02T13:45:00+00:00",
+                        "end": "2026-06-02T13:50:00+00:00",
+                    },
+                    stale_session,
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-load",
+                        "signature_fingerprints": ["signature_1"],
+                        "session_ids": ["confirmed-short"],
+                        "confidence": 0.8,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 14, 0, tzinfo=UTC),
+    )
+    coordinator._nilm_unmatched_edges["mains"] = edges
+
+    await coordinator.async_validate_nilm_session("mains", "confirmed-short")
+
+    revised = next(
+        session
+        for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
+        if session.get("on_edge_id") == stale_session["on_edge_id"]
+    )
+    assert revised["end"] is None
+    assert revised["assignment_id"] == "assignment-load"
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_history_validation_confirms_matches() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

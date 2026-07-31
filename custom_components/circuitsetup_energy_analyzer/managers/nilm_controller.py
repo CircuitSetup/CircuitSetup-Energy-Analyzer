@@ -999,16 +999,22 @@ class NilmController:
                 "max_duration_seconds",
             ):
                 assignment.pop(key, None)
-            return
-        typical = float(median(durations))
-        # ponytail: half/double the median until labelled volume supports percentiles.
-        assignment["typical_duration_seconds"] = round(typical, 3)
-        minimum = max(30.0, min(min(durations), typical * 0.5))
-        assignment["min_duration_seconds"] = round(minimum, 3)
-        assignment["max_duration_seconds"] = round(
-            max(minimum, max(durations), typical * 2.0),
-            3,
-        )
+        else:
+            typical = float(median(durations))
+            # ponytail: half/double the median until labelled volume supports
+            # percentiles.
+            assignment["typical_duration_seconds"] = round(typical, 3)
+            minimum = max(30.0, min(min(durations), typical * 0.5))
+            assignment["min_duration_seconds"] = round(minimum, 3)
+            assignment["max_duration_seconds"] = round(
+                max(minimum, max(durations), typical * 2.0),
+                3,
+            )
+        if self._sample_processor is not None:
+            self._sample_processor.refresh_session_history(
+                circuit_id,
+                self._coordinator.store_data,
+            )
 
     def apply_alert_feedback(
         self,
