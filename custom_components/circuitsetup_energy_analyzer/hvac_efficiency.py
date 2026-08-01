@@ -25,6 +25,8 @@ _MIN_REFERENCE_SPAN_DAYS = 42
 _MIN_OUTDOOR_TEMPERATURE_BINS = 3
 _OUTDOOR_TEMPERATURE_BIN_F = 5.0
 _MODEL_VERSION = 2
+_LIGHTWEIGHT_RETENTION_DAYS = 18
+_LIGHTWEIGHT_REFERENCE_CORE_DAY_COUNT = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +79,8 @@ class HvacEfficiencyEvaluation:
     recent_runtime_minutes: float | None
     reference_count: int
     recent_count: int
+    required_reference_count: int
+    required_recent_count: int
     finding: str | None
     context: Mapping[str, Any]
 
@@ -284,27 +288,47 @@ def evaluate_efficiency(
     threshold_pct: float,
     time_zone: TimeZone = None,
     excluded_dates: Set[date] = frozenset(),
+    current_date: date | None = None,
+    retention_days: int | None = None,
 ) -> HvacEfficiencyEvaluation:
+    reference_required = _reference_core_day_count(retention_days)
+    reference_span_required = min(
+        _MIN_REFERENCE_SPAN_DAYS,
+        reference_required - 1,
+    )
     current_model = [
         episode
         for episode in episodes
         if episode.model_version >= _MODEL_VERSION
         and _is_valid_completed_episode(episode)
+        and not episode.excluded_from_baseline
+        and (
+            current_date is None
+            or local_date(episode.started_at, time_zone) < current_date
+        )
     ]
     if not current_model:
-        return _empty_evaluation("no_data")
+        return _empty_evaluation(
+            "no_data",
+            required_reference_count=reference_required,
+        )
     weather_ready = [
         episode
         for episode in current_model
         if episode.outdoor_temperature_f is not None
-        and episode.outdoor_temperature_minutes
-        >= episode.active_minutes * 0.95
+        and _meets_minimum(
+            episode.outdoor_temperature_minutes,
+            episode.active_minutes,
+        )
     ]
     if not weather_ready:
-        return _empty_evaluation("no_weather_data")
+        return _empty_evaluation(
+            "no_weather_data",
+            required_reference_count=reference_required,
+        )
 
     groups: dict[tuple[Any, ...], list[HvacResponseEpisode]] = defaultdict(list)
-    for episode in weather_ready:
+    for episode in current_model:
         if local_date(episode.started_at, time_zone) not in excluded_dates:
             groups[_comparison_key(episode)].append(episode)
     core_by_key = {
@@ -313,7 +337,10 @@ def evaluate_efficiency(
         if (days := _core_days(group, time_zone=time_zone))
     }
     if not core_by_key:
-        return _empty_evaluation("learning")
+        return _empty_evaluation(
+            "learning",
+            required_reference_count=reference_required,
+        )
     comparison_key = max(
         core_by_key,
         key=lambda key: (len(core_by_key[key]), core_by_key[key][-1].day),
@@ -321,23 +348,27 @@ def evaluate_efficiency(
     comparable = core_by_key[comparison_key]
     latest_episode = max(groups[comparison_key], key=_episode_sort_time)
     context = _evaluation_context(latest_episode)
-    if len(comparable) < _REFERENCE_CORE_DAY_COUNT:
+    if len(comparable) < reference_required:
         return _empty_evaluation(
             "provisional"
-            if len(comparable) >= _PROVISIONAL_CORE_DAY_COUNT
+            if len(comparable) >= min(
+                _PROVISIONAL_CORE_DAY_COUNT,
+                reference_required,
+            )
             else "learning",
             context=context,
             reference_count=len(comparable),
+            required_reference_count=reference_required,
         )
 
-    reference = comparable[:_REFERENCE_CORE_DAY_COUNT]
+    reference = comparable[:reference_required]
     reference_span = (reference[-1].day - reference[0].day).days
     outdoor_bins = {
         math.floor(day.outdoor_temperature_f / _OUTDOOR_TEMPERATURE_BIN_F)
         for day in reference
     }
     if (
-        reference_span < _MIN_REFERENCE_SPAN_DAYS
+        reference_span < reference_span_required
         or len(outdoor_bins) < _MIN_OUTDOOR_TEMPERATURE_BINS
     ):
         context.update(
@@ -350,13 +381,15 @@ def evaluate_efficiency(
             "provisional",
             context=context,
             reference_count=len(reference),
+            required_reference_count=reference_required,
         )
-    if len(comparable) < _REFERENCE_CORE_DAY_COUNT + _RECENT_CORE_DAY_COUNT:
+    if len(comparable) < reference_required + _RECENT_CORE_DAY_COUNT:
         return _empty_evaluation(
             "provisional",
             context=context,
             reference_count=len(reference),
             recent_count=len(comparable) - len(reference),
+            required_reference_count=reference_required,
         )
 
     recent = comparable[-_RECENT_CORE_DAY_COUNT:]
@@ -368,6 +401,7 @@ def evaluate_efficiency(
             context=context,
             reference_count=len(reference),
             recent_count=len(recent),
+            required_reference_count=reference_required,
         )
     slope, intercept = linear_regression(reference_load, reference_runtime)
     if slope <= 0.0:
@@ -376,6 +410,7 @@ def evaluate_efficiency(
             context=context,
             reference_count=len(reference),
             recent_count=len(recent),
+            required_reference_count=reference_required,
         )
     recent_load = [_thermal_demand(day, latest_episode.mode) for day in recent]
     predicted = [max(1.0, intercept + slope * load) for load in recent_load]
@@ -454,6 +489,8 @@ def evaluate_efficiency(
         recent_runtime_minutes=observed_runtime,
         reference_count=len(reference),
         recent_count=len(recent),
+        required_reference_count=reference_required,
+        required_recent_count=_RECENT_CORE_DAY_COUNT,
         finding=finding,
         context=context,
     )
@@ -611,6 +648,52 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
     )
 
 
+def compact_completed_core_days(
+    episodes: Sequence[HvacResponseEpisode],
+    *,
+    time_zone: TimeZone,
+    current_date: date,
+    retention_days: int | None = None,
+) -> list[HvacResponseEpisode]:
+    """Replace closed raw calls with bounded daily model evidence."""
+    pending: list[HvacResponseEpisode] = []
+    by_day: dict[tuple[tuple[Any, ...], date], list[HvacResponseEpisode]] = (
+        defaultdict(list)
+    )
+    for episode in episodes:
+        day = local_date(episode.started_at, time_zone)
+        if day >= current_date:
+            pending.append(episode)
+        elif (
+            episode.model_version >= _MODEL_VERSION
+            and _is_valid_completed_episode(episode)
+            and not episode.excluded_from_baseline
+        ):
+            by_day[(_comparison_key(episode), day)].append(episode)
+
+    summaries = [
+        summary
+        for group in by_day.values()
+        if (summary := _compact_core_day(group, time_zone=time_zone)) is not None
+    ]
+    reference_required = _reference_core_day_count(retention_days)
+    bounded: list[HvacResponseEpisode] = []
+    by_comparison: dict[tuple[Any, ...], list[HvacResponseEpisode]] = defaultdict(
+        list
+    )
+    for summary in summaries:
+        by_comparison[_comparison_key(summary)].append(summary)
+    for group in by_comparison.values():
+        ordered = sorted(group, key=_episode_sort_time)
+        if len(ordered) > reference_required + _RECENT_CORE_DAY_COUNT:
+            ordered = [
+                *ordered[:reference_required],
+                *ordered[-_RECENT_CORE_DAY_COUNT:],
+            ]
+        bounded.extend(ordered)
+    return sorted([*bounded, *pending], key=_episode_sort_time)
+
+
 def _core_days(
     episodes: Sequence[HvacResponseEpisode],
     *,
@@ -633,7 +716,7 @@ def _core_days(
         )
         if (
             runtime < _MIN_CORE_DAY_RUNTIME_MINUTES
-            or weather_minutes < runtime * 0.95
+            or not _meets_minimum(weather_minutes, runtime)
         ):
             continue
         outdoor = sum(
@@ -664,6 +747,45 @@ def _core_days(
             )
         )
     return sorted(days, key=lambda item: item.day)
+
+
+def _compact_core_day(
+    episodes: Sequence[HvacResponseEpisode],
+    *,
+    time_zone: TimeZone,
+) -> HvacResponseEpisode | None:
+    days = _core_days(episodes, time_zone=time_zone)
+    if len(days) != 1:
+        return None
+    day = days[0]
+    representative = max(episodes, key=_episode_sort_time)
+    first = min(episodes, key=lambda item: item.started_at)
+    last = max(episodes, key=_episode_sort_time)
+    indoor = day.indoor_temperature_f
+    if representative.mode == "cooling":
+        start_temperature, target_temperature = indoor + 1.0, indoor - 1.0
+    else:
+        start_temperature, target_temperature = indoor - 1.0, indoor + 1.0
+    return replace(
+        representative,
+        started_at=first.started_at,
+        ended_at=last.ended_at,
+        start_temperature_f=start_temperature,
+        target_temperature_f=target_temperature,
+        latest_temperature_f=target_temperature,
+        elapsed_minutes=max(
+            day.runtime_minutes,
+            _elapsed_minutes(first.started_at, last.ended_at or last.started_at),
+        ),
+        active_minutes=day.runtime_minutes,
+        outdoor_temperature_f=day.outdoor_temperature_f,
+        outdoor_temperature_minutes=day.runtime_minutes,
+        gap_bin="daily",
+        complete=True,
+        excluded_from_baseline=False,
+        inactive_since=None,
+        episode_kind="core_day",
+    )
 
 
 def _thermal_demand(day: _CoreDay, mode: str) -> float:
@@ -725,6 +847,8 @@ def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
         return False
     if episode.elapsed_minutes <= 0.0 or episode.active_minutes <= 0.0:
         return False
+    if episode.episode_kind == "core_day":
+        return True
     target_gap = _directional_gap(
         episode.mode,
         actual=episode.start_temperature_f,
@@ -747,7 +871,8 @@ def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
         or not episode.circuit_id
         or not episode.thermostat_entity_id
         or episode.mode not in {"heating", "cooling"}
-        or episode.episode_kind not in {"setpoint_response", "thermostat_call"}
+        or episode.episode_kind
+        not in {"setpoint_response", "thermostat_call", "core_day"}
         or not episode.participant_signature
     ):
         return False
@@ -835,6 +960,8 @@ def _empty_evaluation(
     context: Mapping[str, Any] | None = None,
     reference_count: int = 0,
     recent_count: int = 0,
+    required_reference_count: int = _REFERENCE_CORE_DAY_COUNT,
+    required_recent_count: int = _RECENT_CORE_DAY_COUNT,
     recent_runtime_minutes: float | None = None,
 ) -> HvacEfficiencyEvaluation:
     return HvacEfficiencyEvaluation(
@@ -845,8 +972,19 @@ def _empty_evaluation(
         recent_runtime_minutes=recent_runtime_minutes,
         reference_count=reference_count,
         recent_count=recent_count,
+        required_reference_count=required_reference_count,
+        required_recent_count=required_recent_count,
         finding=None,
         context=dict(context or {}),
+    )
+
+
+def _reference_core_day_count(retention_days: int | None) -> int:
+    return (
+        _LIGHTWEIGHT_REFERENCE_CORE_DAY_COUNT
+        if retention_days is not None
+        and retention_days <= _LIGHTWEIGHT_RETENTION_DAYS
+        else _REFERENCE_CORE_DAY_COUNT
     )
 
 

@@ -281,7 +281,8 @@ def is_hidden_recommendation_evidence_key(key: str) -> bool:
     normalized = key.lower()
     return (
         "entity" in normalized
-        or normalized in {"source_entities", "entity_ids", "entities"}
+        or normalized
+        in {"source_entities", "entity_ids", "entities", "weather_context"}
     )
 
 

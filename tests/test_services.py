@@ -274,6 +274,28 @@ def test_alert_notification_message_explains_appliance_health_evidence() -> None
     assert ELECTRICAL_SAFETY_NOTICE not in message
 
 
+def test_hvac_runtime_notification_uses_minutes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.notifications import (
+        alert_notification_message,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 7, 28, 12, 30, tzinfo=UTC),
+        circuit_id="heat_pump",
+        severity=Severity.WARNING,
+        message="HVAC response is slower than normal.",
+        feature="hvac_response_slower",
+        value_metric="weather_normalized_runtime_minutes",
+        observed_value=55.0,
+        baseline_value=40.0,
+    )
+
+    message = alert_notification_message(alert)
+
+    assert "Recent value (Weather-normalized runtime): 55 min" in message
+    assert "Reference value (Weather-normalized runtime): 40 min" in message
+
+
 def test_power_quality_notification_labels_values_and_limits_interpretation() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         alert_notification_message,

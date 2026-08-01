@@ -23,6 +23,7 @@ from ..hvac_efficiency import (
     HvacResponseEpisode,
     ThermostatObservation,
     advance_episode,
+    compact_completed_core_days,
     episode_from_dict,
     episode_to_dict,
     evaluate_efficiency,
@@ -50,12 +51,13 @@ _HEATING_DRIVER_PROFILES = frozenset(
         ApplianceProfile.ELECTRIC_HEAT,
     }
 )
-_HISTORY_LIMIT = 256
+_CORRELATION_HISTORY_LIMIT = 256
 _SETUP_ISSUE_LIMIT = 8
 HVAC_EFFICIENCY_FEATURE = "hvac_thermostat_efficiency"
 _INITIAL_BASELINE_ERA = "initial"
 
 type HvacAlertPolicyProvider = Callable[[str], Any]
+type RetentionDaysProvider = Callable[[str], int]
 
 
 class HvacEfficiencyProcessor:
@@ -65,8 +67,12 @@ class HvacEfficiencyProcessor:
         self,
         *,
         alert_policy_for_circuit: HvacAlertPolicyProvider | None = None,
+        retention_days_for_circuit: RetentionDaysProvider | None = None,
     ) -> None:
         self._alert_policy_for_circuit = alert_policy_for_circuit
+        self._retention_days_for_circuit = retention_days_for_circuit or (
+            lambda _circuit_id: 180
+        )
 
     def process(
         self,
@@ -263,16 +269,6 @@ class HvacEfficiencyProcessor:
                         )
                     )
                     history.append(stored_episode)
-                    matching_indexes = [
-                        index
-                        for index, raw in enumerate(history)
-                        if str(
-                            raw.get("episode_kind", "setpoint_response")
-                        )
-                        == finalized.episode_kind
-                    ]
-                    if len(matching_indexes) > _HISTORY_LIMIT:
-                        del history[matching_indexes[0]]
                     result.store_dirty = True
 
         for stream_id, raw in getattr(
@@ -293,11 +289,19 @@ class HvacEfficiencyProcessor:
                 )
 
         for circuit_id in configs:
+            retention_days = self._retention_days_for_circuit(circuit_id)
+            if _compact_circuit_response_history(
+                context,
+                circuit_id,
+                retention_days=retention_days,
+            ):
+                result.store_dirty = True
             payload = _circuit_efficiency_payload(
                 context,
                 configs[circuit_id],
                 circuit_streams.get(circuit_id, {}),
                 advanced_by_circuit.get(circuit_id, {}),
+                retention_days=retention_days,
             )
             result.state_updates.append(
                 StateUpdate(
@@ -544,7 +548,7 @@ def _finalize_hvac_correlation(
             "temperature_bin": current.get("temperature_bin"),
         }
     )
-    del history[:-_HISTORY_LIMIT]
+    del history[:-_CORRELATION_HISTORY_LIMIT]
     result.store_dirty = True
 
 
@@ -814,11 +818,47 @@ def _environmental_context(
     }
 
 
+def _compact_circuit_response_history(
+    context: ProcessingContext,
+    circuit_id: str,
+    *,
+    retention_days: int,
+) -> bool:
+    history_by_stream = context.store_data.hvac_response_history_by_stream
+    changed = False
+    for stream_id, raw_history in tuple(history_by_stream.items()):
+        if not stream_id.startswith(f"{circuit_id}|"):
+            continue
+        episodes_by_era: dict[str, list[HvacResponseEpisode]] = {}
+        for raw in raw_history:
+            episode = episode_from_dict(raw)
+            if episode is not None:
+                era = str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
+                episodes_by_era.setdefault(era, []).append(episode)
+        compacted = []
+        for era, episodes in episodes_by_era.items():
+            for episode in compact_completed_core_days(
+                episodes,
+                time_zone=context.time_zone,
+                current_date=local_date(context.now, context.time_zone),
+                retention_days=retention_days,
+            ):
+                raw = episode_to_dict(episode)
+                raw["baseline_era"] = era
+                compacted.append(raw)
+        if compacted != raw_history:
+            history_by_stream[stream_id] = compacted
+            changed = True
+    return changed
+
+
 def _circuit_efficiency_payload(
     context: ProcessingContext,
     config: Any,
     current_streams: Mapping[str, dict[str, Any]],
     settings: Mapping[str, Any],
+    *,
+    retention_days: int,
 ) -> dict[str, Any]:
     circuit_id = config.circuit_id
     threshold = _response_change_threshold(settings)
@@ -884,6 +924,8 @@ def _circuit_efficiency_payload(
                     threshold_pct=threshold,
                     time_zone=context.time_zone,
                     excluded_dates=dates_by_mode[opposing_mode],
+                    current_date=local_date(context.now, context.time_zone),
+                    retention_days=retention_days,
                 )
             ),
             "baseline_era": baseline_eras[stream_id],
@@ -901,11 +943,23 @@ def _circuit_efficiency_payload(
     finding = "slower" if "slower" in findings else (
         "faster" if "faster" in findings else None
     )
+    stream_statuses = {
+        str(evaluation.get("status") or "learning")
+        for evaluation in evaluations.values()
+    }
+    learning_status = next(
+        (
+            status
+            for status in ("provisional", "no_weather_data", "no_data")
+            if status in stream_statuses
+        ),
+        "tracking" if current_streams else "learning",
+    )
     return {
         "status": (
             "ready"
             if ready_scores
-            else ("tracking" if current_streams else "learning")
+            else learning_status
         ),
         "score": median(ready_scores) if ready_scores else None,
         "finding": finding,
@@ -975,7 +1029,10 @@ def _append_evaluation_alerts(
                     int(evaluation["reference_count"])
                     + int(evaluation["recent_count"])
                 )
-                / 55.0,
+                / (
+                    int(evaluation["required_reference_count"])
+                    + int(evaluation["required_recent_count"])
+                ),
             ),
             observed_at=context.now,
             observed_value=float(evaluation["recent_runtime_minutes"]),
@@ -1027,10 +1084,17 @@ def _finding_features(
                 int(evaluation["reference_count"])
                 + int(evaluation["recent_count"])
             )
-            / 55.0,
+            / (
+                int(evaluation["required_reference_count"])
+                + int(evaluation["required_recent_count"])
+            ),
         ),
         "reference_core_day_count": evaluation["reference_count"],
         "recent_core_day_count": evaluation["recent_count"],
+        "required_reference_core_day_count": evaluation[
+            "required_reference_count"
+        ],
+        "required_recent_core_day_count": evaluation["required_recent_count"],
         "baseline_context": (
             f"{context.get('mode', 'HVAC')}, "
             f"{context.get('thermostat_entity_id', 'thermostat')}, "
@@ -1103,6 +1167,8 @@ def _evaluation_to_dict(
         "recent_runtime_minutes": evaluation.recent_runtime_minutes,
         "reference_count": evaluation.reference_count,
         "recent_count": evaluation.recent_count,
+        "required_reference_count": evaluation.required_reference_count,
+        "required_recent_count": evaluation.required_recent_count,
         "finding": evaluation.finding,
         "context": dict(evaluation.context),
     }

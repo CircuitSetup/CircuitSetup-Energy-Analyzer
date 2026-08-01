@@ -9,6 +9,7 @@ from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
     HvacResponseEpisode,
     ThermostatObservation,
     advance_episode,
+    compact_completed_core_days,
     episode_from_dict,
     episode_to_dict,
     evaluate_efficiency,
@@ -582,6 +583,20 @@ def test_efficiency_requires_complete_outdoor_temperature_coverage() -> None:
     assert evaluation.finding is None
 
 
+def test_efficiency_rejects_partially_covered_weather_days() -> None:
+    episodes = _weather_normalized_history()
+    episodes[0] = replace(
+        episodes[0],
+        outdoor_temperature_minutes=episodes[0].active_minutes - 1.0,
+    )
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "provisional"
+    assert evaluation.reference_count == 50
+    assert evaluation.recent_count == 4
+
+
 def test_efficiency_ignores_legacy_episode_model_records() -> None:
     episodes = [
         _core_day_episode(
@@ -656,3 +671,78 @@ def test_efficiency_requires_three_abnormal_days_in_recent_five() -> None:
     assert three_slow.finding == "slower"
     assert three_slow.context["abnormal_recent_days"] == 3
     assert three_slow.context["normal_streak"] == 2
+
+
+def test_lightweight_retention_uses_twelve_reference_core_days() -> None:
+    episodes = _weather_normalized_history()[:17]
+
+    evaluation = evaluate_efficiency(
+        episodes,
+        threshold_pct=25.0,
+        retention_days=18,
+    )
+
+    assert evaluation.status == "ready"
+    assert evaluation.reference_count == 12
+    assert evaluation.recent_count == 5
+    assert evaluation.required_reference_count == 12
+    assert evaluation.finding is None
+
+
+def test_efficiency_excludes_the_current_local_day() -> None:
+    episodes = _weather_normalized_history()
+
+    evaluation = evaluate_efficiency(
+        episodes,
+        threshold_pct=25.0,
+        current_date=episodes[-1].started_at.date(),
+    )
+
+    assert evaluation.status == "provisional"
+    assert evaluation.reference_count == 50
+    assert evaluation.recent_count == 4
+
+
+def test_completed_calls_compact_to_one_record_per_core_day() -> None:
+    calls = [
+        replace(
+            _core_day_episode(
+                day,
+                outdoor_temperature_f=75.0 + 5.0 * (day % 5),
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(days=day, hours=hour),
+            ended_at=START + timedelta(days=day, hours=hour, minutes=10),
+        )
+        for day in range(56)
+        for hour in (0, 2, 4, 6, 8)
+    ]
+
+    compacted = compact_completed_core_days(
+        calls,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 55
+    assert all(episode.episode_kind == "core_day" for episode in compacted)
+    assert compacted[:50] == sorted(compacted, key=lambda item: item.started_at)[:50]
+    assert compacted[-1].started_at == calls[-5].started_at
+    assert compact_completed_core_days(
+        compacted,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    ) == compacted
+
+    lightweight = compact_completed_core_days(
+        calls,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=18,
+    )
+    assert len(lightweight) == 17
+    assert lightweight[:12] == compacted[:12]
+    assert lightweight[-5:] == compacted[-5:]

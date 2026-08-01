@@ -198,14 +198,14 @@ test("HVAC associations render ready and learning thermostat gauges", async ({ p
   await expect(card.locator("[data-hvac-association]")).toHaveCount(3);
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"]')).toContainText("92%");
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="cooling"]')).toContainText("108%");
-  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("9 min/°C");
+  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("25 min");
   await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"] .gauge-value')).toHaveCount(0);
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"] .trend')).toHaveText("Slower");
   await expect(card.locator('[data-thermostat="climate.bedroom"] [data-mode="cooling"]')).toHaveCount(0);
   for (const mode of ["heating", "cooling"]) {
     await expect(card.locator(`[data-thermostat="climate.downstairs"] [data-mode="${mode}"] svg`)).toHaveAttribute(
       "aria-label",
-      new RegExp(`Heat Pump.*Downstairs.*${mode}.*(?:92|108)%.*(?:9|11) min/°F`, "i"),
+      new RegExp(`Heat Pump.*Downstairs.*${mode}.*(?:92|108)%.*(?:45|55) min`, "i"),
     );
   }
 });
@@ -223,7 +223,7 @@ test("HVAC associations show learning, attribution, native detail links, and fit
     },
   );
   const upstairs = card.locator('[data-thermostat="climate.upstairs"]');
-  await expect(upstairs.locator('[data-mode="heating"]')).toContainText("Learning");
+  await expect(upstairs.locator('[data-mode="heating"]')).toContainText("Building weather baseline");
   await expect(upstairs.locator('[data-mode="cooling"]')).toContainText("—");
   await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Needs attention");
   await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Gas heat: supporting blower attribution.");

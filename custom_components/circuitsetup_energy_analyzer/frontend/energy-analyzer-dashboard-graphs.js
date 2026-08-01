@@ -2606,6 +2606,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     _responseText(value) {
+      if (value === null || value === undefined || value === "") return this._label("not_available", "—");
       const displayed = Number(value);
       if (!Number.isFinite(displayed)) return this._label("not_available", "—");
       return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(displayed)} min`;
@@ -2615,13 +2616,20 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const score = Number(mode.score);
       const ready = mode.status === "ready" && Number.isFinite(score);
       const clampedScore = Math.max(0, Math.min(200, score));
-      const scoreText = ready ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(score)}%` : this._label("learning", "Learning");
+      const status = String(mode.status || "learning");
+      const statusText = this._label(status, {
+        provisional: "Building weather baseline",
+        no_weather_data: "Waiting for outdoor temperature",
+        no_data: "Waiting for HVAC runtime",
+        tracking: "Tracking thermostat response",
+      }[status] || "Learning");
+      const scoreText = ready ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(score)}%` : statusText;
       const recent = this._responseText(mode.recent_runtime_minutes);
       const baseline = this._responseText(mode.baseline_runtime_minutes);
       const modeLabel = this._label(modeName, modeName[0].toUpperCase() + modeName.slice(1));
       const ariaLabel = `${item.appliance_name}, ${item.thermostat_name || item.thermostat_entity_id}, ${modeLabel}, ${scoreText}, ${recent}`;
       const trend = String(mode.trend || "");
-      const trendText = trend ? this._label(trend, trend) : this._label(ready ? "stable" : "learning", ready ? "Stable" : "Learning");
+      const trendText = trend ? this._label(trend, trend) : this._label(ready ? "stable" : status, ready ? "Stable" : statusText);
       const attribution = mode.attribution === "gas_furnace_proxy"
         ? "Gas heat: supporting blower attribution."
         : mode.supporting_blower_ids?.length || item.appliance_profile === "hvac_blower" && modeName === "cooling"

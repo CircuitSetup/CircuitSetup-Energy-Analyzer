@@ -478,7 +478,7 @@ bound:
 | Settings suggestions | 200 recommendations or 180 days, pending suggestions kept first |
 | Settings suggestion decisions | 500 decisions or 365 days |
 | Settings suggestion notification history | 100 notification episode keys |
-| HVAC thermostat response history | 256 completed episodes per circuit, thermostat, and heating/cooling stream |
+| HVAC thermostat response history | One compact record per completed core day and comparable equipment context: 17 in Lightweight or 55 in Standard/Diagnostic, plus the open local day |
 
 ## Optional features
 
@@ -694,9 +694,14 @@ An eligible core day has at least 30 minutes of one HVAC mode, complete outdoor
 temperature coverage, and a consistent thermostat, temperature source, and
 equipment-participant signature. Days containing both heating and cooling are
 excluded. Individual sub-1°F thermostat calls remain useful diagnostics but do
-not independently mature or alert. The model becomes provisional after 30 core
-days. Notifications wait for 50 reference core days spanning at least six weeks
+not independently mature or alert. The Standard/Diagnostic model becomes
+provisional after 30 core days. Notifications wait for 50 reference core days
+spanning at least six weeks
 and three 5°F outdoor-temperature bins, plus five recent core days.
+Lightweight retention instead uses 12 reference core days spanning at least 11
+days plus five recent core days, so the complete model fits its 18-day window.
+Completed calls are compacted when the local day closes; the current partial day
+is never evaluated.
 
 The standard-library regression predicts runtime from thermal demand and uses
 the learned prediction interval as an additional noise guard. The default

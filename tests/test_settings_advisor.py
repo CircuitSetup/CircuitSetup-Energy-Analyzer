@@ -566,6 +566,10 @@ def test_hvac_efficiency_threshold_is_not_auto_recommended() -> None:
 
 
 def test_legacy_hvac_threshold_evidence_hides_internal_context_key() -> None:
+    from custom_components.circuitsetup_energy_analyzer.recommendation_guidance import (
+        recommendation_evidence_preview,
+    )
+
     advisor = _advisor()
     recommendation = _recommendation(
         advisor,
@@ -594,6 +598,7 @@ def test_legacy_hvac_threshold_evidence_hides_internal_context_key() -> None:
 
     assert fingerprint == "legacy_hvac_efficiency_threshold"
     assert "ac2|hvac_compressor" not in fingerprint
+    assert recommendation_evidence_preview(recommendation.evidence) == ""
 
 
 def test_operating_detection_recommendations_use_idle_and_start_separation() -> None:

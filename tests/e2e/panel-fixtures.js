@@ -514,7 +514,7 @@ export const hvacAssociations = {
       temperature_name: "Upstairs Temperature",
       status: "learning",
       modes: {
-        heating: { applicable: true, status: "learning", score: null, trend: null, baseline_runtime_minutes: 30, recent_runtime_minutes: 25, attribution: "direct" },
+        heating: { applicable: true, status: "provisional", score: null, trend: null, baseline_runtime_minutes: 30, recent_runtime_minutes: 25, attribution: "direct" },
         cooling: { applicable: true, status: "learning", score: null, trend: null, baseline_runtime_minutes: null, recent_runtime_minutes: null, attribution: "direct" },
       },
     },
