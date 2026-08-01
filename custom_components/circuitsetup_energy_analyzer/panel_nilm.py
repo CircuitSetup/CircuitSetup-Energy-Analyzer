@@ -526,9 +526,11 @@ def _is_explicit_nilm_config(config: Any) -> bool:
 
 
 def _is_sensor_backed_mains_config(config: Any) -> bool:
-    return str(getattr(config, "circuit_id", "") or "").strip() == "mains" and bool(
-        _sensor_entity_ids(config)
-    )
+    return (
+        str(getattr(config, "circuit_id", "") or "").strip() == "mains"
+        or getattr(config, "mode", None) is CircuitMode.MIXED
+        or getattr(config, "appliance_profile", None) is ApplianceProfile.MIXED
+    ) and bool(_sensor_entity_ids(config))
 
 
 def _nilm_workspace_signatures(

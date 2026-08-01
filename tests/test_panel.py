@@ -2297,6 +2297,66 @@ async def test_nilm_workspace_history_view_forwards_requested_entry_id(
     assert payload == [[{"entity_id": "sensor.second_mains_power"}]]
 
 
+def test_nilm_workspace_payload_accepts_sensor_backed_mixed_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=fridge, configs=(fridge,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "fridge": [{"assignment_id": "assignment-fridge", "appliance_id": "fridge"}]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "fridge": {"unknown_loads": [{"signature_id": "signature-fridge"}]}
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="fridge")
+
+    assert payload["status"] == "ok"
+    assert payload["assignments"][0]["assignment_id"] == "assignment-fridge"
+    assert payload["signatures"][0]["signature_id"] == "signature-fridge"
+    assert payload["history"]["entities"] == ["sensor.fridge_power"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_view_queries_mixed_source_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=fridge, configs=(fridge,))
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: hass}, query={"circuit_id": "fridge"}
+    )
+    queried: list[str] = []
+
+    async def history_rows(_hass, _start, _end, entity_ids):
+        queried.extend(entity_ids)
+        return []
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    await panel.NilmWorkspaceHistoryView().get(request)
+
+    assert queried == ["sensor.fridge_power"]
+
+
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
