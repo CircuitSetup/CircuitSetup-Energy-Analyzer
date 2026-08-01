@@ -234,6 +234,7 @@ def mains_context_config_from_sources(
                 leg=_entity_id_leg_hint(entity_id),
             )
             for entity_id in mains_entities
+            if not _harmonic_source_entity(entity_id)
         ),
         retention_mode=retention_mode_from_sources(entry_data, options),
         power_flow=PowerFlowMode.MAINS_NET,
@@ -536,9 +537,6 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
 def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
-    inferred_role = infer_sensor_role(entity_id, None)
-    if inferred_role is not None:
-        return inferred_role
     object_id = _entity_object_id(entity_id)
     if _has_metric_suffix(
         object_id,
@@ -559,7 +557,12 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         return SensorRole.VOLTAGE
     if _has_metric_suffix(object_id, ("energy", "kwh", "wh", "mwh")):
         return SensorRole.ENERGY
-    return SensorRole.REAL_POWER
+    if _has_metric_suffix(
+        object_id,
+        ("active_power", "real_power", "power", "watts", "w"),
+    ):
+        return SensorRole.REAL_POWER
+    return infer_sensor_role(entity_id, None) or SensorRole.REAL_POWER
 
 
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:

@@ -67,6 +67,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.energy_meter_frequency_1"},
                         {"entity_id": "sensor.energy_meter_voltage_1"},
                         {"entity_id": "sensor.energy_meter_house_total_power"},
+                        {"entity_id": "sensor.high_voltage_panel_active_power"},
+                        {"entity_id": "sensor.current_pump_active_power"},
                     ],
                 }
             ]
@@ -78,6 +80,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.energy_meter_frequency_1", SensorRole.FREQUENCY),
         ("sensor.energy_meter_voltage_1", SensorRole.VOLTAGE),
         ("sensor.energy_meter_house_total_power", SensorRole.REAL_POWER),
+        ("sensor.high_voltage_panel_active_power", SensorRole.REAL_POWER),
+        ("sensor.current_pump_active_power", SensorRole.REAL_POWER),
     ]
 
 
@@ -157,13 +161,21 @@ def test_config_parser_creates_mains_config_without_experimental_nilm() -> None:
     )
 
     configs = circuit_configs_from_entry_data(
-        {CONF_MAINS_SOURCE_ENTITIES: ["sensor.mains_power"]}
+        {
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.mains_power",
+                "sensor.mains_l1_harmonic_power",
+            ]
+        }
     )
 
     assert len(configs) == 1
     assert configs[0].circuit_id == "mains"
     assert configs[0].mode is CircuitMode.MAINS_NILM
     assert configs[0].appliance_profile is ApplianceProfile.MAINS_NILM
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.mains_power"
+    ]
 
 
 def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:
