@@ -7454,6 +7454,9 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
     )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller,
+    )
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -7475,16 +7478,28 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
         appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.MIXED,
     )
+    controller = nilm_controller.NilmController(
+        SimpleNamespace(
+            options={"enable_experimental_nilm": True},
+            entry_data={},
+            circuit_registry=SimpleNamespace(
+                config_for_circuit=lambda _circuit_id: config,
+                known_load_circuit_ids=frozenset({"fridge"}),
+            ),
+        ),
+        label_interval_max_items=1,
+        assignment_max_items=1,
+    )
     observed_matches = []
     processor = processors.NilmSampleProcessor(
-        nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
+        nilm_enabled=controller.enabled_for_config,
+        seed_demo_nilm_state=controller.seed_demo_state,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
         unmatched_edges_by_circuit=defaultdict(list),
         ignored_signatures=set(),
-        known_load_events=lambda _circuit_id, _events: (),
+        known_load_events=controller.known_load_events,
         observe_topology=lambda _config, match, _context: observed_matches.append(match)
         or [],
     )
