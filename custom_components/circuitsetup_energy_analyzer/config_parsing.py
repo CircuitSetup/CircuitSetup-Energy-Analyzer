@@ -15,7 +15,7 @@ from .const import (
 from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
-from .discovery import friendly_source_name, infer_sensor_role
+from .discovery import friendly_source_name
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
 )
@@ -115,7 +115,7 @@ def _configs_with_merged_source_entity_refs(
         if (
             entity_id in mains_entities
             or entity_id in existing_source_entities
-            or _untyped_source_entity_excluded(entity_id)
+            or untyped_source_entity_excluded(entity_id)
         ):
             continue
         config_index_value = config_index.get(
@@ -176,7 +176,7 @@ def _source_entity_configs_from_sources(
         if (
             entity_id in mains_entities
             or _automatic_source_entity_excluded(entity_id)
-            or _untyped_source_entity_excluded(entity_id)
+            or untyped_source_entity_excluded(entity_id)
         ):
             continue
         circuit_id = _source_circuit_id_from_entity_id(entity_id)
@@ -211,7 +211,7 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
     return bool(tokens & {"harmonic", "total"})
 
 
-def _untyped_source_entity_excluded(entity_id: str) -> bool:
+def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = _entity_object_id(entity_id)
     harmonic_object_id = re.sub(
         r"_\d+$", "", _strip_trailing_leg_token(object_id)
@@ -254,7 +254,7 @@ def mains_context_config_from_sources(
                 leg=_entity_id_leg_hint(entity_id),
             )
             for entity_id in mains_entities
-            if not _untyped_source_entity_excluded(entity_id)
+            if not untyped_source_entity_excluded(entity_id)
         ),
         retention_mode=retention_mode_from_sources(entry_data, options),
         power_flow=PowerFlowMode.MAINS_NET,
@@ -468,7 +468,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
         return raw_sensor
     if isinstance(raw_sensor, str):
-        if _untyped_source_entity_excluded(raw_sensor):
+        if untyped_source_entity_excluded(raw_sensor):
             return None
         return SensorRef(
             entity_id=raw_sensor,
@@ -483,7 +483,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         return None
     raw_role = raw_sensor.get("role")
     if raw_role is None:
-        if _untyped_source_entity_excluded(str(entity_id)):
+        if untyped_source_entity_excluded(str(entity_id)):
             return None
         role = sensor_role_from_entity_id(str(entity_id))
     else:
@@ -616,7 +616,7 @@ def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         _REAL_POWER_METRIC_SUFFIXES,
     ):
         return SensorRole.REAL_POWER
-    return infer_sensor_role(entity_id, None) or SensorRole.REAL_POWER
+    return SensorRole.REAL_POWER
 
 
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:

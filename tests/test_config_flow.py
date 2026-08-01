@@ -3742,6 +3742,23 @@ def test_assignment_groups_share_scaled_metric_suffixes() -> None:
     )
 
 
+def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        [
+            "sensor.pump_power",
+            "sensor.pump_reactive_energy",
+            "sensor.pump_kvarh",
+        ]
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["entity_ids"] == ("sensor.pump_power",)
+
+
 def test_guided_assignment_uses_terminal_metric_role() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 

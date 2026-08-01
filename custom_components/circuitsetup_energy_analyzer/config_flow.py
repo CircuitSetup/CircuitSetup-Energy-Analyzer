@@ -126,6 +126,7 @@ from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .config_parsing import (
     sensor_role_from_entity_id,
     strip_trailing_source_detail_tokens,
+    untyped_source_entity_excluded,
 )
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -2706,7 +2707,7 @@ def _automatic_assignment_sensor_excluded(
     source_name: str = "",
 ) -> bool:
     tokens = set(_slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_"))
-    return bool(tokens & {"harmonic", "total"})
+    return "total" in tokens or untyped_source_entity_excluded(entity_id)
 
 
 def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ...]:
