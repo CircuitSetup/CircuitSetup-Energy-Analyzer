@@ -12,7 +12,7 @@ retention_mode: standard
 circuits:
   - circuit_id: dishwasher
     name: Dishwasher
-    appliance_profile: mixed
+    appliance_profile: dishwasher
     circuit_mode: single_phase
     power_flow: load
     energy_usage_window_days: 7
@@ -67,6 +67,12 @@ samples:
       sensor.dishwasher_current: 0.0
       sensor.dishwasher_voltage: 120.1
   - t: 3660
+    states:
+      sensor.dishwasher_power: 0
+      sensor.dishwasher_energy: 81.15
+      sensor.dishwasher_current: 0.0
+      sensor.dishwasher_voltage: 120.0
+  - t: 3690
     states:
       sensor.dishwasher_power: 0
       sensor.dishwasher_energy: 81.15

@@ -4358,6 +4358,50 @@ def test_event_processor_skips_mixed_circuits(
     assert processor.detectors == {}
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.SOLAR_INVERTER, CircuitMode.SINGLE_PHASE),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM),
+    ),
+)
+def test_event_processor_retains_generic_events_for_non_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="source",
+        name="Source",
+        appliance_profile=profile,
+        mode=mode,
+    )
+    processor = CircuitEventProcessor()
+
+    processor.process(_sample(0, 5.0), config, context)
+    processor.process(_sample(10, 100.0), config, context)
+    result = processor.process(_sample(30, 100.0), config, context)
+
+    assert [event.event_type for event in result.events] == [EventType.START]
+    assert "source" in processor.detectors
+
+
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState

@@ -9,13 +9,18 @@ from typing import Any
 
 from ..alert_feedback import mapping_datetime
 from ..events import CircuitEventDetector
-from ..models import CircuitConfig, CircuitEvent, EventType
+from ..models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitEvent,
+    CircuitMode,
+    EventType,
+)
 from ..normalize import NormalizedCircuitSample
 from ..operating_detection import (
     operating_snapshot_to_dict,
     resolve_operating_detection_from_settings,
 )
-from ..profiles import supports_direct_appliance_analysis
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 
@@ -38,7 +43,10 @@ class CircuitEventProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return newly detected events for a circuit sample."""
-        if not supports_direct_appliance_analysis(circuit_config):
+        if (
+            circuit_config.mode is CircuitMode.MIXED
+            or circuit_config.appliance_profile is ApplianceProfile.MIXED
+        ):
             return FeatureResult()
         overrides = getattr(
             context.store_data,
