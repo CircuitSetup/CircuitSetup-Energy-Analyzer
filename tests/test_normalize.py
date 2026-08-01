@@ -19,8 +19,14 @@ from custom_components.circuitsetup_energy_analyzer.normalize import (
 )
 
 
-@pytest.mark.parametrize("unit", ("kW", "KW", "Kw"))
-def test_build_circuit_sample_converts_kw_to_watts(unit: str) -> None:
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    (("kW", 180.0), ("KW", 180.0), ("Kw", 180.0), ("mW", 0.00018)),
+)
+def test_build_circuit_sample_normalizes_real_power_units(
+    unit: str,
+    expected: float,
+) -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(
         circuit_id="fridge",
@@ -49,7 +55,7 @@ def test_build_circuit_sample_converts_kw_to_watts(unit: str) -> None:
 
     sample = build_circuit_sample(config, states, now)
 
-    assert sample.real_power_w == 180.0
+    assert sample.real_power_w == pytest.approx(expected)
     assert sample.current == 1.7
     assert sample.quality_issues == ()
 

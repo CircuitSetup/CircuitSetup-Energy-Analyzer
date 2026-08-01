@@ -12,7 +12,7 @@ UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
 _UNIT_SCALE_BY_ROLE = {
-    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 1_000_000.0},
+    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 1_000_000.0, "mW": 0.001},
     SensorRole.REACTIVE_POWER: {"kvar": 1_000.0, "mvar": 1_000_000.0},
     SensorRole.APPARENT_POWER: {"kva": 1_000.0, "mva": 1_000_000.0},
     SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001},
@@ -113,10 +113,9 @@ def build_circuit_sample(
         if sensor.role is SensorRole.ENERGY:
             value = _normalize_energy_kwh(value, source.unit)
         elif source.unit is not None:
-            value *= _UNIT_SCALE_BY_ROLE.get(sensor.role, {}).get(
-                source.unit.strip().lower(),
-                1.0,
-            )
+            unit = source.unit.strip()
+            scales = _UNIT_SCALE_BY_ROLE.get(sensor.role, {})
+            value *= scales.get(unit, scales.get(unit.lower(), 1.0))
         if not math.isfinite(value):
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} non_finite")
