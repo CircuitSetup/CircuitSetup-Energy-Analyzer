@@ -3809,6 +3809,13 @@ def test_options_source_merge_excludes_reactive_energy() -> None:
         ("sensor.panel_voltage_rms", "voltage"),
         ("sensor.panel_current_rms", "current"),
         ("sensor.panel_reactive_power_average", "reactive_power"),
+        ("sensor.energy_meter_voltage_a", "voltage"),
+        ("sensor.energy_meter_reactive_power_a", "reactive_power"),
+        ("sensor.energy_meter_apparent_power_a", "apparent_power"),
+        ("sensor.energy_meter_frequency_a", "frequency"),
+        ("sensor.voltage_a", "voltage"),
+        ("sensor.frequency_a", "frequency"),
+        ("sensor.power_factor_a", "power_factor"),
     ),
 )
 def test_guided_assignment_uses_terminal_metric_role(

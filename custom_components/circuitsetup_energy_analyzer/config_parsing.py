@@ -215,7 +215,7 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
     harmonic_object_id = _strip_trailing_source_qualifiers(object_id)
     harmonic_measurement = re.search(
-        r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w|[km]?(?:var|va)))?$",
+        r"(?:^|_)(?:total_)?harmonic(?:_(?:(?:active|reactive|apparent|real)_power|distortion|power|watts?|[km]?w|[km]?(?:var|va)))?$",
         harmonic_object_id,
     )
     reactive_energy_measurement = (
@@ -590,6 +590,9 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
     object_id = _entity_object_id(entity_id)
+    without_phase = re.sub(r"_[ab]$", "", object_id)
+    if _source_metric_suffix_exposed(without_phase):
+        object_id = without_phase
     if _has_metric_suffix(
         object_id,
         ("peak_current", "peak_amps", "peak_amp", "peak_a"),
@@ -699,7 +702,10 @@ def _source_metric_suffix_exposed(object_id: str) -> bool:
         if normalized == probe:
             normalized = _strip_trailing_value_qualifier(probe)
         if normalized == probe:
-            return any(probe.endswith(suffix) for suffix in _SOURCE_METRIC_SUFFIXES)
+            return any(
+                probe == suffix.removeprefix("_") or probe.endswith(suffix)
+                for suffix in _SOURCE_METRIC_SUFFIXES
+            )
         probe = normalized
 
 
