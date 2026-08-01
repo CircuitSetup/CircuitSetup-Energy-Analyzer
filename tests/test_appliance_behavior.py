@@ -402,6 +402,18 @@ def test_mixed_circuit_suppresses_appliance_running_power_comparison() -> None:
     assert "current_power_w" not in metric_ids
 
 
+def test_legacy_mixed_profile_uses_shared_measurement_guidance() -> None:
+    detail = _detail(_config("kitchen", ApplianceProfile.MIXED), AnalyzerState())
+
+    assert detail["source_type"] == "mixed"
+    assert detail["expectations"][0]["expected"] == (
+        "Reviewed Experimental NILM is required for appliance-specific evidence."
+    )
+    assert "current_power_w" not in {
+        item["metric_id"] for item in detail["today_vs_normal"]
+    }
+
+
 def test_today_vs_normal_includes_demand_capacity_and_solar_metrics() -> None:
     state = AnalyzerState()
     state.current_demand_w_by_circuit["ev"] = 3100.0
@@ -641,7 +653,6 @@ def test_profile_specific_expectations_cover_remaining_named_appliances() -> Non
         ApplianceProfile.POOL_PUMP: "scheduled pump",
         ApplianceProfile.EV_CHARGER: "circuit capacity",
         ApplianceProfile.SOLAR_INVERTER: "daylight",
-        ApplianceProfile.MIXED: "mixed circuit",
         ApplianceProfile.MAINS_NILM: "whole-home",
     }
 

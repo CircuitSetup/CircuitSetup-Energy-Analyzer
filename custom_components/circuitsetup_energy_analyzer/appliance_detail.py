@@ -728,7 +728,10 @@ def metric_comparisons_for_circuit(
         ):
             continue
         if metric_id == "current_power_w":
-            if config.mode is CircuitMode.MIXED:
+            if (
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            ):
                 continue
             operating_status = _mapping_status(
                 state,
@@ -1102,7 +1105,10 @@ def _primary_appliance_expectations_for_circuit(
             ),
         )
 
-    if config.mode is CircuitMode.MIXED:
+    if (
+        config.mode is CircuitMode.MIXED
+        or config.appliance_profile is ApplianceProfile.MIXED
+    ):
         return (
             _expectation(
                 config,
