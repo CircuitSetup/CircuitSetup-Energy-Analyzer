@@ -4311,11 +4311,17 @@ def test_activity_alert_processor_skips_left_on_for_mains_nilm_config() -> None:
     assert policy.observations == []
 
 
-def test_mixed_activity_suppresses_duration_but_retains_generic_events() -> None:
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.WASHER, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ),
+)
+def test_event_processor_skips_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
-    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
-        ActivityAlertProcessor,
-    )
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -4328,15 +4334,7 @@ def test_mixed_activity_suppresses_duration_but_retains_generic_events() -> None
         now=now,
         hass=SimpleNamespace(data={DOMAIN: {}}),
         state=AnalyzerState(),
-        store_data=FeatureStoreData(
-            events=[
-                CircuitEvent(
-                    timestamp=now - timedelta(minutes=45),
-                    circuit_id="washer",
-                    event_type=EventType.START,
-                )
-            ]
-        ),
+        store_data=FeatureStoreData(),
         options={},
         entry_data={},
         known_load_circuit_ids=frozenset(),
@@ -4345,32 +4343,19 @@ def test_mixed_activity_suppresses_duration_but_retains_generic_events() -> None
     config = CircuitConfig(
         circuit_id="washer",
         name="Washer",
-        appliance_profile=ApplianceProfile.WASHER,
-        mode=CircuitMode.MIXED,
-    )
-    policy = _CaptureAlertPolicy()
-    activity = ActivityAlertProcessor(
-        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
-            max_active_minutes=30.0,
-        ),
-        alert_policy_for_circuit=lambda _circuit_id: policy,
+        appliance_profile=profile,
+        mode=mode,
     )
 
-    activity_result = activity.process(_energy_sample(1.0), config, context)
-    assert activity_result.observations == []
-    assert activity_result.alerts == []
-    assert activity_result.notifications == []
-    assert policy.observations == []
+    processor = CircuitEventProcessor()
+    results = [
+        processor.process(_sample(seconds, power), config, context)
+        for seconds, power in ((0, 5.0), (10, 100.0), (21, 100.0))
+    ]
 
-    events = CircuitEventProcessor()
-    events.process(_sample(0, 5.0), config, context)
-    events.process(_sample(10, 100.0), config, context)
-    started = events.process(_sample(21, 100.0), config, context)
-    events.process(_sample(30, 5.0), config, context)
-    stopped = events.process(_sample(61, 5.0), config, context)
-
-    assert [event.event_type for event in started.events] == [EventType.START]
-    assert [event.event_type for event in stopped.events] == [EventType.STOP]
+    assert all(result.events == [] for result in results)
+    assert all(result.state_updates == [] for result in results)
+    assert processor.detectors == {}
 
 
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(

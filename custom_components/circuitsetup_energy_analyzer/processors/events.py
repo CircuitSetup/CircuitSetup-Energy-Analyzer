@@ -15,6 +15,7 @@ from ..operating_detection import (
     operating_snapshot_to_dict,
     resolve_operating_detection_from_settings,
 )
+from ..profiles import supports_direct_appliance_analysis
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 
@@ -37,6 +38,8 @@ class CircuitEventProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return newly detected events for a circuit sample."""
+        if not supports_direct_appliance_analysis(circuit_config):
+            return FeatureResult()
         overrides = getattr(
             context.store_data,
             "operating_detection_settings_by_circuit",
