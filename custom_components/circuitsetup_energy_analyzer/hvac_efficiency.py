@@ -685,13 +685,14 @@ def compact_completed_core_days(
     time_zone: TimeZone,
     current_date: date,
     retention_days: int | None = None,
+    disqualified_dates: Set[date] = frozenset(),
 ) -> list[HvacResponseEpisode]:
     """Replace closed raw calls with bounded daily model evidence."""
     pending: list[HvacResponseEpisode] = []
     by_day: dict[tuple[tuple[Any, ...], date], list[HvacResponseEpisode]] = (
         defaultdict(list)
     )
-    excluded_dates: set[date] = set()
+    excluded_dates = set(disqualified_dates)
     for episode in episodes:
         day = local_date(episode.started_at, time_zone)
         end_day = local_date(episode.ended_at or episode.started_at, time_zone)

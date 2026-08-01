@@ -836,13 +836,14 @@ def _compact_circuit_response_history(
         list[tuple[Mapping[str, Any], HvacResponseEpisode]],
     ] = {}
     dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
+    target_thermostats = {
+        parts[1]
+        for stream_id in history_by_stream
+        if len(parts := stream_id.split("|")) == 3 and parts[0] == circuit_id
+    }
     for stream_id, raw_history in history_by_stream.items():
         parts = stream_id.split("|")
-        if (
-            len(parts) != 3
-            or parts[0] != circuit_id
-            or parts[-1] not in dates_by_mode
-        ):
+        if len(parts) != 3 or parts[-1] not in dates_by_mode:
             continue
         decoded = [
             (raw, episode)
@@ -851,7 +852,10 @@ def _compact_circuit_response_history(
                 episode := episode_from_dict(raw, allow_incomplete=True)
             ) is not None
         ]
-        decoded_by_stream[stream_id] = decoded
+        if parts[0] == circuit_id:
+            decoded_by_stream[stream_id] = decoded
+        if parts[1] not in target_thermostats:
+            continue
         for _raw, episode in decoded:
             started = local_date(episode.started_at, context.time_zone)
             ended = local_date(
@@ -865,6 +869,28 @@ def _compact_circuit_response_history(
 
     changed = False
     current_date = local_date(context.now, context.time_zone)
+    active_dates: set[Any] = set()
+    for stream_id, raw in getattr(
+        context.state,
+        "hvac_current_episode_by_stream",
+        {},
+    ).items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[1] not in target_thermostats
+            or parts[-1] not in dates_by_mode
+            or not isinstance(raw, Mapping)
+            or (episode := episode_from_dict(raw, allow_incomplete=True)) is None
+        ):
+            continue
+        started = local_date(episode.started_at, context.time_zone)
+        touched = {
+            started + timedelta(days=offset)
+            for offset in range(max(0, (current_date - started).days) + 1)
+        }
+        dates_by_mode[parts[-1]].update(touched)
+        active_dates.update(touched)
     for stream_id, decoded in decoded_by_stream.items():
         mode = stream_id.rsplit("|", 1)[-1]
         opposing_mode = "heating" if mode == "cooling" else "cooling"
@@ -983,6 +1009,7 @@ def _compact_circuit_response_history(
             time_zone=context.time_zone,
             current_date=current_date,
             retention_days=retention_days,
+            disqualified_dates={day for day in active_dates if day < current_date},
         ):
             raw = episode_to_dict(episode, allow_incomplete=True)
             raw["baseline_era"] = current_era

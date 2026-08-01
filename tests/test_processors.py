@@ -1474,6 +1474,118 @@ def test_hvac_incomplete_opposing_call_excludes_mixed_mode_day() -> None:
     assert cooling["recent_count"] == 4
 
 
+def test_hvac_linked_circuits_share_mixed_mode_dates() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    compressor = _hvac_config("compressor", ApplianceProfile.HVAC_COMPRESSOR)
+    electric_heat = _hvac_config("electric_heat", ApplianceProfile.ELECTRIC_HEAT)
+    linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+    context = _hvac_context(
+        configs=(compressor, electric_heat),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "heat_cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={"compressor": linked, "electric_heat": linked},
+        running_circuit_ids=set(),
+    )
+    cooling_stream = f"compressor|{thermostat}|cooling"
+    heating_stream = f"electric_heat|{thermostat}|heating"
+    context.store_data.hvac_response_history_by_stream[cooling_stream] = (
+        _hvac_response_history(
+            cooling_stream,
+            appliance_profile="hvac_compressor",
+        )
+    )
+    context.store_data.hvac_response_history_by_stream[heating_stream] = (
+        _hvac_response_history(
+            heating_stream,
+            count=1,
+            appliance_profile="electric_heat",
+        )
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(compressor, SimpleNamespace()), (electric_heat, SimpleNamespace())],
+        context,
+    )
+    cooling = _state_update_values(result, "hvac_efficiency_by_circuit")[
+        "compressor"
+    ]["streams"][cooling_stream]
+
+    assert cooling["status"] == "provisional"
+    assert cooling["recent_count"] == 4
+
+
+def test_hvac_active_cross_midnight_call_disqualifies_closed_date() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    observation = ThermostatObservation(
+        thermostat,
+        None,
+        76.0,
+        72.0,
+        "cool",
+        "cooling",
+        ("current_temperature", "temperature", "hvac_action"),
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=observation,
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+    context = replace(
+        context,
+        now=datetime(2026, 7, 29, 0, 10, tzinfo=UTC),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    base = _hvac_response_history(stream_id, count=1)[0]
+    calls = []
+    for hour in (14, 16, 18, 20):
+        started = datetime(2026, 7, 28, hour, tzinfo=UTC)
+        calls.append(
+            {
+                **base,
+                "started_at": started.isoformat(),
+                "ended_at": (started + timedelta(minutes=10)).isoformat(),
+                "elapsed_minutes": 10.0,
+                "active_minutes": 10.0,
+                "outdoor_temperature_minutes": 10.0,
+            }
+        )
+    active = {
+        **base,
+        "started_at": datetime(2026, 7, 28, 23, 30, tzinfo=UTC).isoformat(),
+        "ended_at": None,
+        "elapsed_minutes": 40.0,
+        "active_minutes": 40.0,
+        "outdoor_temperature_minutes": 40.0,
+        "complete": False,
+        "excluded_from_baseline": False,
+    }
+    context.store_data.hvac_response_history_by_stream[stream_id] = calls
+    context.state.hvac_current_episode_by_stream[stream_id] = active
+
+    HvacEfficiencyProcessor().process([(heat_pump, SimpleNamespace())], context)
+
+    assert context.store_data.hvac_response_history_by_stream[stream_id] == []
+
+
 def test_hvac_nonselected_call_disqualifies_selected_context_day() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
