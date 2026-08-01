@@ -262,8 +262,15 @@ async def test_mark_mixed_rejects_ineligible_without_side_effects(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "profile"),
+    [("mixed", "refrigerator"), ("single_phase", "mixed")],
+    ids=("mode", "legacy_profile"),
+)
 async def test_start_reconciles_saved_mixed_notifications_before_saving(
     monkeypatch,
+    mode,
+    profile,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -308,8 +315,8 @@ async def test_start_reconciles_saved_mixed_notifications_before_saving(
         SimpleNamespace(data={}),
         entry_data={
             CONF_CIRCUITS: [{
-                "circuit_id": "fridge", "name": "Fridge", "mode": "mixed",
-                "appliance_profile": "refrigerator", "sensors": [],
+                "circuit_id": "fridge", "name": "Fridge", "mode": mode,
+                "appliance_profile": profile, "sensors": [],
             }]
         },
         store=store,
@@ -345,7 +352,14 @@ async def test_start_reconciles_saved_mixed_notifications_before_saving(
 
 
 @pytest.mark.asyncio
-async def test_start_dismissal_failure_keeps_alert_retriable(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("mode", "profile"),
+    [("mixed", "refrigerator"), ("single_phase", "mixed")],
+    ids=("mode", "legacy_profile"),
+)
+async def test_start_dismissal_failure_keeps_alert_retriable(
+    monkeypatch, mode, profile
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -374,8 +388,8 @@ async def test_start_dismissal_failure_keeps_alert_retriable(monkeypatch) -> Non
     store = SimpleNamespace(data=None, async_save=AsyncMock())
     entry_data = {
         CONF_CIRCUITS: [{
-            "circuit_id": "fridge", "name": "Fridge", "mode": "mixed",
-            "appliance_profile": "refrigerator", "sensors": [],
+            "circuit_id": "fridge", "name": "Fridge", "mode": mode,
+            "appliance_profile": profile, "sensors": [],
         }]
     }
     coordinator = EnergyAnalyzerCoordinator(

@@ -208,7 +208,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._mixed_startup_store_dirty = False
         self._mixed_startup_direct_alert_ids: set[str] = set()
         for config in self.circuit_configs:
-            if config.mode is CircuitMode.MIXED:
+            if (
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            ):
                 self._mixed_startup_direct_alert_ids.update(
                     notification_id_for_alert(alert)
                     for alert in self.store_data.alerts
