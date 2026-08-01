@@ -1111,7 +1111,8 @@ def _primary_appliance_expectations_for_circuit(
                 source_type=expectation_source,
                 observed="This measurement covers the whole shared circuit.",
                 expected=(
-                    "Reviewed Experimental NILM is required for appliance-specific evidence."
+                    "Reviewed Experimental NILM is required for "
+                    "appliance-specific evidence."
                 ),
                 why_it_matters=(
                     "Direct appliance classifications do not apply to shared loads."

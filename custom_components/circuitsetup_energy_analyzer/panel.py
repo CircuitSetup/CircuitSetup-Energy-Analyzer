@@ -77,6 +77,7 @@ from .panel_views import (
     NilmWorkspaceView,
     SetupHealthView,
 )
+from .profiles import supports_direct_appliance_analysis
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
@@ -84,7 +85,6 @@ from .recommendation_guidance import (
     recommendation_setting_default_value,
     recommendation_setting_expected_effect,
 )
-from .profiles import supports_direct_appliance_analysis
 from .services import (
     ATTR_ALERT_ID,
     ATTR_ASSIGNMENT_ID,
