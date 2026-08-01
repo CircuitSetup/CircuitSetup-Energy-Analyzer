@@ -1472,6 +1472,7 @@ def test_hvac_incomplete_opposing_call_excludes_mixed_mode_day() -> None:
 
     assert cooling["status"] == "provisional"
     assert cooling["recent_count"] == 4
+    assert context.store_data.hvac_response_history_by_stream[heating_stream] == []
 
 
 def test_hvac_linked_circuits_share_mixed_mode_dates() -> None:
@@ -1523,6 +1524,7 @@ def test_hvac_linked_circuits_share_mixed_mode_dates() -> None:
 
     assert cooling["status"] == "provisional"
     assert cooling["recent_count"] == 4
+    assert context.store_data.hvac_response_history_by_stream[heating_stream] == []
 
 
 def test_hvac_active_cross_midnight_call_disqualifies_closed_date() -> None:

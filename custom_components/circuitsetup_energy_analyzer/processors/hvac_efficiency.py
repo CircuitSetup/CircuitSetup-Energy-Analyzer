@@ -294,12 +294,19 @@ class HvacEfficiencyProcessor:
                     )
                 )
 
+        date_history_snapshot = {
+            stream_id: tuple(history)
+            for stream_id, history in (
+                context.store_data.hvac_response_history_by_stream.items()
+            )
+        }
         for circuit_id in configs:
             retention_days = self._retention_days_for_circuit(circuit_id)
             if _compact_circuit_response_history(
                 context,
                 circuit_id,
                 retention_days=retention_days,
+                date_history_by_stream=date_history_snapshot,
             ):
                 result.store_dirty = True
             payload = _circuit_efficiency_payload(
@@ -829,8 +836,10 @@ def _compact_circuit_response_history(
     circuit_id: str,
     *,
     retention_days: int,
+    date_history_by_stream: Mapping[str, Any] | None = None,
 ) -> bool:
     history_by_stream = context.store_data.hvac_response_history_by_stream
+    date_histories = date_history_by_stream or history_by_stream
     decoded_by_stream: dict[
         str,
         list[tuple[Mapping[str, Any], HvacResponseEpisode]],
@@ -838,12 +847,16 @@ def _compact_circuit_response_history(
     dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
     target_thermostats = {
         parts[1]
-        for stream_id in history_by_stream
+        for stream_id in date_histories
         if len(parts := stream_id.split("|")) == 3 and parts[0] == circuit_id
     }
     for stream_id, raw_history in history_by_stream.items():
         parts = stream_id.split("|")
-        if len(parts) != 3 or parts[-1] not in dates_by_mode:
+        if (
+            len(parts) != 3
+            or parts[0] != circuit_id
+            or parts[-1] not in dates_by_mode
+        ):
             continue
         decoded = [
             (raw, episode)
@@ -852,11 +865,20 @@ def _compact_circuit_response_history(
                 episode := episode_from_dict(raw, allow_incomplete=True)
             ) is not None
         ]
-        if parts[0] == circuit_id:
-            decoded_by_stream[stream_id] = decoded
-        if parts[1] not in target_thermostats:
+        decoded_by_stream[stream_id] = decoded
+
+    for stream_id, raw_history in date_histories.items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[1] not in target_thermostats
+            or parts[-1] not in dates_by_mode
+        ):
             continue
-        for _raw, episode in decoded:
+        for raw in raw_history:
+            episode = episode_from_dict(raw, allow_incomplete=True)
+            if episode is None:
+                continue
             started = local_date(episode.started_at, context.time_zone)
             ended = local_date(
                 episode.ended_at or episode.started_at,
