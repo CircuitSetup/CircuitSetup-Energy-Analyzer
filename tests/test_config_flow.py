@@ -3934,6 +3934,43 @@ def test_guided_assignment_preserves_saved_sensor_role() -> None:
     assert circuit["sensors"][0]["role"] == "energy"
 
 
+def test_guided_assignment_preserves_new_discovered_role_in_saved_group() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    saved_entity_id = "sensor.fridge_power"
+    new_entity_id = "sensor.fridge"
+    group = config_flow.assignment_groups_from_sources(
+        [saved_entity_id, new_entity_id],
+        source_names={new_entity_id: "Fridge Energy"},
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [
+                    {"entity_id": saved_entity_id, "role": "real_power"}
+                ],
+            }
+        ],
+    )[0]
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "included_sensors": [saved_entity_id, new_entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+        },
+    )
+
+    assert circuit is not None
+    assert {sensor["entity_id"]: sensor["role"] for sensor in circuit["sensors"]} == {
+        saved_entity_id: "real_power",
+        new_entity_id: "energy",
+    }
+
+
 def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
