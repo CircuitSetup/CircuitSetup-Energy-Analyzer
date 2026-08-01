@@ -230,6 +230,10 @@ def test_subtenth_active_call_creates_excluded_date_marker() -> None:
     assert marker.ended_at == START
     assert marker.complete is False
     assert marker.excluded_from_baseline is True
+    assert episode_from_dict(
+        episode_to_dict(marker, allow_incomplete=True),
+        allow_incomplete=True,
+    ) == marker
 
 
 def test_nominal_one_degree_gap_starts_setpoint_response() -> None:

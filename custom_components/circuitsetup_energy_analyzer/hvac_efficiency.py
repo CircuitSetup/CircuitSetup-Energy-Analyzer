@@ -991,13 +991,21 @@ def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
         and episode.active_minutes >= 0.0
         and episode.outdoor_temperature_minutes >= 0.0
         and episode.model_version >= 1
-        and _valid_start_gap(
-            episode,
-            _directional_gap(
-                episode.mode,
-                actual=episode.start_temperature_f,
-                target=episode.target_temperature_f,
-            ),
+        and (
+            _valid_start_gap(
+                episode,
+                _directional_gap(
+                    episode.mode,
+                    actual=episode.start_temperature_f,
+                    target=episode.target_temperature_f,
+                ),
+            )
+            or (
+                episode.episode_kind == "thermostat_call"
+                and episode.excluded_from_baseline
+                and not episode.complete
+                and episode.ended_at is not None
+            )
         )
     )
 
