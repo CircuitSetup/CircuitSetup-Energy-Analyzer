@@ -239,6 +239,8 @@ questions instead of raw diagnostic entity lists:
    - The circuit name.
    - The appliance type.
    - The selected source sensors.
+   - **This circuit also powers unrelated loads** when the selected appliance
+     is the primary load on a shared circuit.
    - The automatically derived circuit mode and power-flow mode shown in the review text.
 
 Each source sensor can belong to only one appliance. Removing a sensor or an
@@ -270,8 +272,15 @@ do not create analyzer appliances on their own.
 |---|---|---|
 | **Single Phase** | One CT/channel tracking one main 120 V load, such as a refrigerator, washer, sump pump, microwave, or water pump. | Best for dedicated appliance circuits. |
 | **Dual Phase** | Two CT/channels that are the two legs of one 240 V appliance, such as HVAC, electric heat, water heater, dryer, oven, pool pump, EV charger, or solar inverter. | Enables leg-balance and combined-appliance analysis. |
-| **Mixed** | A branch circuit with multiple unrelated loads, such as plugs and lights. | The analyzer stays conservative and avoids appliance-specific claims. |
+| **Mixed** | A branch circuit where the selected appliance is the primary context but unrelated loads share the measurement. | Choose **This circuit also powers unrelated loads** during setup or later **Appliance Circuit Assignments** editing. Mixed dual-phase circuits are not supported by the current model. |
 | **Mains NILM** | Whole-home mains or feed circuits. | Required for experimental whole-home load-signature discovery. |
+
+Mixed mode does not turn the aggregate signal into an isolated appliance
+measurement. Energy, billing, cost, demand, capacity, health, and data-quality
+analysis continue for the full circuit, while direct appliance alerts,
+baselines, and recommendations are suppressed. Appliance-specific evidence
+requires a reviewed Experimental NILM assignment; NILM remains opt-in and does
+not automatically detect or reclassify the primary appliance.
 
 ## Review the derived power-flow mode
 
@@ -881,7 +890,7 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 ### Experimental NILM
 
-Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. With a mains source, the NILM workspace can also pair compatible on/off edges. It plots mains real power in watts, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. Confirmed sessions also teach conservative duration bounds for later matching. Graph interval selections can be turned directly into appliance assignments for review.
+Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. A mixed circuit keeps its aggregate analysis and requires a reviewed NILM assignment before the analyzer uses appliance-specific evidence; it does not automatically reclassify the configured primary appliance. With a mains source, the NILM workspace can also pair compatible on/off edges. It plots mains real power in watts, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. Confirmed sessions also teach conservative duration bounds for later matching. Graph interval selections can be turned directly into appliance assignments for review.
 
 On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
