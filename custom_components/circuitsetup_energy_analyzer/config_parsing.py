@@ -216,14 +216,17 @@ def _untyped_source_entity_excluded(entity_id: str) -> bool:
     harmonic_object_id = re.sub(
         r"_\d+$", "", _strip_trailing_leg_token(object_id)
     )
-    return (
-        re.search(
-            r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w))?$",
-            harmonic_object_id,
-        )
-        is not None
-        or re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
+    harmonic_measurement = re.search(
+        r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w))?$",
+        harmonic_object_id,
+    )
+    reactive_energy_measurement = (
+        re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
         or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
+    )
+    return harmonic_measurement is not None or (
+        reactive_energy_measurement
+        and not _has_metric_suffix(object_id, _REAL_POWER_METRIC_SUFFIXES)
     )
 
 
@@ -496,6 +499,16 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     )
 
 
+_REAL_POWER_METRIC_SUFFIXES = (
+    "active_power",
+    "real_power",
+    "power",
+    "watts",
+    "watt",
+    "kw",
+    "mw",
+    "w",
+)
 _SOURCE_METRIC_SUFFIXES = (
     "_peak_current",
     "_peak_amps",
@@ -600,16 +613,7 @@ def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         return SensorRole.ENERGY
     if _has_metric_suffix(
         object_id,
-        (
-            "active_power",
-            "real_power",
-            "power",
-            "watts",
-            "watt",
-            "kw",
-            "mw",
-            "w",
-        ),
+        _REAL_POWER_METRIC_SUFFIXES,
     ):
         return SensorRole.REAL_POWER
     return infer_sensor_role(entity_id, None) or SensorRole.REAL_POWER
