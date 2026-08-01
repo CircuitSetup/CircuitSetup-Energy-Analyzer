@@ -142,6 +142,17 @@ class HvacEfficiencyProcessor:
                 for config in linked_configs
                 if _circuit_running(context, config.circuit_id)
             }
+            if mode is None:
+                _store_unresolved_active_call_markers(
+                    result,
+                    context,
+                    linked_configs,
+                    thermostat_id,
+                    observation,
+                    active_ids,
+                    advanced_by_circuit,
+                )
+                continue
             direct_profiles = (
                 _COOLING_DRIVER_PROFILES
                 if mode == "cooling"
@@ -259,47 +270,7 @@ class HvacEfficiencyProcessor:
                         )
                     )
                 if finalized is not None:
-                    history = (
-                        context.store_data.hvac_response_history_by_stream.setdefault(
-                            stream_id,
-                            [],
-                        )
-                    )
-                    stored_episode = episode_to_dict(
-                        finalized,
-                        allow_incomplete=True,
-                    )
-                    stored_episode["baseline_era"] = (
-                        context.store_data.hvac_baseline_era_by_stream.get(
-                            stream_id,
-                            _INITIAL_BASELINE_ERA,
-                        )
-                    )
-                    instant_excluded = (
-                        finalized.excluded_from_baseline
-                        and not finalized.complete
-                        and finalized.ended_at == finalized.started_at
-                    )
-                    already_marked = instant_excluded and any(
-                        episode.excluded_from_baseline
-                        and local_date(episode.started_at, context.time_zone)
-                        == local_date(finalized.started_at, context.time_zone)
-                        for raw in history
-                        if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
-                        == stored_episode["baseline_era"]
-                        if (
-                            episode := episode_from_dict(
-                                raw,
-                                allow_incomplete=True,
-                            )
-                        )
-                        is not None
-                        if response_comparison_token(episode)
-                        == response_comparison_token(finalized)
-                    )
-                    if not already_marked:
-                        history.append(stored_episode)
-                        result.store_dirty = True
+                    _store_finalized_episode(result, context, finalized)
 
         for stream_id, raw in getattr(
             context.state,
@@ -373,6 +344,105 @@ class HvacEfficiencyProcessor:
                 self._alert_policy_for_circuit,
             )
         return result
+
+
+def _store_unresolved_active_call_markers(
+    result: FeatureResult,
+    context: ProcessingContext,
+    linked_configs: list[Any],
+    thermostat_id: str,
+    observation: ThermostatObservation,
+    active_ids: set[str],
+    advanced_by_circuit: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if observation.action or "hvac_action" in observation.available_capabilities:
+        return
+    for config in linked_configs:
+        if config.circuit_id not in active_ids:
+            continue
+        if config.appliance_profile in _COOLING_DRIVER_PROFILES:
+            mode = "cooling"
+        elif config.appliance_profile in _HEATING_DRIVER_PROFILES or (
+            config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and bool(
+                advanced_by_circuit.get(config.circuit_id, {}).get(
+                    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+                    False,
+                )
+            )
+        ):
+            mode = "heating"
+        else:
+            continue
+        current_observation = _observation_for(
+            context,
+            config.circuit_id,
+            thermostat_id,
+        ) or observation
+        _current, marker = advance_episode(
+            None,
+            replace(
+                current_observation,
+                mode="cool" if mode == "cooling" else "heat",
+                action=None,
+            ),
+            now=context.now,
+            circuit_id=config.circuit_id,
+            appliance_profile=config.appliance_profile.value,
+            driver_active=True,
+            active_minutes_delta=0.0,
+            participant_signature=(config.circuit_id,),
+            supporting_blower_ids=(),
+            environmental_context=_environmental_context(
+                context,
+                config.circuit_id,
+            ),
+        )
+        if marker is not None:
+            _store_finalized_episode(result, context, marker)
+
+
+def _store_finalized_episode(
+    result: FeatureResult,
+    context: ProcessingContext,
+    finalized: HvacResponseEpisode,
+) -> None:
+    stream_id = finalized.stream_id
+    history = context.store_data.hvac_response_history_by_stream.setdefault(
+        stream_id,
+        [],
+    )
+    stored_episode = episode_to_dict(finalized, allow_incomplete=True)
+    stored_episode["baseline_era"] = (
+        context.store_data.hvac_baseline_era_by_stream.get(
+            stream_id,
+            _INITIAL_BASELINE_ERA,
+        )
+    )
+    instant_excluded = (
+        finalized.excluded_from_baseline
+        and not finalized.complete
+        and finalized.ended_at == finalized.started_at
+    )
+    already_marked = instant_excluded and any(
+        episode.excluded_from_baseline
+        and local_date(episode.started_at, context.time_zone)
+        == local_date(finalized.started_at, context.time_zone)
+        for raw in history
+        if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
+        == stored_episode["baseline_era"]
+        if (
+            episode := episode_from_dict(
+                raw,
+                allow_incomplete=True,
+            )
+        )
+        is not None
+        if response_comparison_token(episode) == response_comparison_token(finalized)
+    )
+    if not already_marked:
+        history.append(stored_episode)
+        result.store_dirty = True
 
 
 def _collect_hvac_correlation(
@@ -963,6 +1033,22 @@ def _compact_circuit_response_history(
             stream_id,
             _INITIAL_BASELINE_ERA,
         )
+        prior_era_disqualified_dates: set[Any] = set()
+        for raw, episode in decoded:
+            if (
+                str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era
+                or (episode.complete and not episode.excluded_from_baseline)
+            ):
+                continue
+            started = local_date(episode.started_at, context.time_zone)
+            ended = local_date(
+                episode.ended_at or episode.started_at,
+                context.time_zone,
+            )
+            prior_era_disqualified_dates.update(
+                started + timedelta(days=offset)
+                for offset in range(max(0, (ended - started).days) + 1)
+            )
         pending_old_era = [
             (raw, episode)
             for raw, episode in decoded
@@ -1111,7 +1197,8 @@ def _compact_circuit_response_history(
             time_zone=context.time_zone,
             current_date=current_date,
             retention_days=retention_days,
-            disqualified_dates={day for day in active_dates if day < current_date},
+            disqualified_dates=prior_era_disqualified_dates
+            | {day for day in active_dates if day < current_date},
         ):
             raw = episode_to_dict(episode, allow_incomplete=True)
             raw["baseline_era"] = current_era

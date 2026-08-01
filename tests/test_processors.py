@@ -645,6 +645,43 @@ def test_hvac_instant_marker_deduplication_is_scoped_to_response_context() -> No
     ]
 
 
+def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            None,
+            72.0,
+            "heat_cool",
+            None,
+            ("current_temperature", "temperature"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+
+    assert result.store_dirty is True
+    history = context.store_data.hvac_response_history_by_stream
+    assert len(history) == 1
+    marker = next(iter(history.values()))[0]
+    assert marker["complete"] is False
+    assert marker["excluded_from_baseline"] is True
+
+
 def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
@@ -2038,6 +2075,64 @@ def test_hvac_compaction_discards_obsolete_baseline_eras() -> None:
 
     assert len(retained) == 55
     assert {raw["baseline_era"] for raw in retained} == {"era-2"}
+
+
+def test_hvac_prior_era_same_mode_call_disqualifies_core_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    base = _hvac_response_history(stream_id, count=1)[0]
+    calls = []
+    for hour in (14, 16, 18, 20):
+        started = context.now - timedelta(days=1) + timedelta(hours=hour - 12)
+        calls.append(
+            {
+                **base,
+                "baseline_era": "era-2",
+                "started_at": started.isoformat(),
+                "ended_at": (started + timedelta(minutes=10)).isoformat(),
+                "elapsed_minutes": 10.0,
+                "active_minutes": 10.0,
+                "outdoor_temperature_minutes": 10.0,
+            }
+        )
+    prior_era = {
+        **calls[0],
+        "baseline_era": "initial",
+        "started_at": (context.now - timedelta(days=1, hours=1)).isoformat(),
+        "ended_at": (context.now - timedelta(days=1, minutes=50)).isoformat(),
+        "complete": False,
+        "excluded_from_baseline": True,
+    }
+    context.store_data.hvac_response_history_by_stream[stream_id] = [
+        prior_era,
+        *calls,
+    ]
+    context.store_data.hvac_baseline_era_by_stream[stream_id] = "era-2"
+
+    HvacEfficiencyProcessor().process([(heat_pump, SimpleNamespace())], context)
+
+    assert context.store_data.hvac_response_history_by_stream[stream_id] == []
 
 
 def test_hvac_alert_recovers_after_three_normal_core_days() -> None:
