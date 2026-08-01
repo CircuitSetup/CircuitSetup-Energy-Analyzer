@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta
 from statistics import median
 from typing import Any
@@ -965,9 +966,16 @@ def _compact_circuit_response_history(
                 context_by_stream[stream_id] = updated_context
                 changed = True
             episodes = [
-                episode
+                (
+                    episode
+                    if response_comparison_token(episode) == selected
+                    else replace(
+                        episode,
+                        complete=False,
+                        excluded_from_baseline=True,
+                    )
+                )
                 for episode in episodes
-                if response_comparison_token(episode) == selected
             ]
         compacted = pending_old_era
         for episode in compact_completed_core_days(
@@ -1148,8 +1156,23 @@ def _append_evaluation_alerts(
             normal_streak = int(
                 dict(evaluation.get("context", {})).get("normal_streak", 0)
             )
+            evaluation_context = dict(evaluation.get("context", {}))
+            context_changed = any(
+                key in evaluation_context
+                and active_alert is not None
+                and active_alert.features.get(key) != evaluation_context[key]
+                for key in (
+                    "appliance_profile",
+                    "temperature_entity_id",
+                    "participant_signature",
+                    "supporting_blower_ids",
+                )
+            )
             if active_alert is not None and (
-                evaluation.get("status") != "ready" or normal_streak < 3
+                not context_changed
+                and (
+                    evaluation.get("status") != "ready" or normal_streak < 3
+                )
             ):
                 result.preserved_alerts.append(active_alert)
             continue

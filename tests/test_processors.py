@@ -1241,6 +1241,15 @@ def test_hvac_response_change_emits_mature_slower_alert() -> None:
     assert duplicate.alerts == duplicate.notifications == []
     assert duplicate.preserved_alerts == result.alerts
 
+    changed_context = _hvac_response_history(stream_id, count=56)[-1]
+    changed_context["participant_signature"] = ["heat_pump", "auxiliary"]
+    context.store_data.hvac_response_history_by_stream[stream_id].append(
+        changed_context
+    )
+    handoff = processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert handoff.preserved_alerts == []
+
 
 def test_hvac_efficiency_matures_with_lightweight_retention() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
@@ -1463,6 +1472,66 @@ def test_hvac_incomplete_opposing_call_excludes_mixed_mode_day() -> None:
 
     assert cooling["status"] == "provisional"
     assert cooling["recent_count"] == 4
+
+
+def test_hvac_nonselected_call_disqualifies_selected_context_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    base = _hvac_response_history(stream_id, count=1)[0]
+    calls = []
+    for hour in (0, 2, 4, 6):
+        started = datetime.fromisoformat(str(base["started_at"])) + timedelta(
+            hours=hour
+        )
+        calls.append(
+            {
+                **base,
+                "started_at": started.isoformat(),
+                "ended_at": (started + timedelta(minutes=10)).isoformat(),
+                "elapsed_minutes": 10.0,
+                "active_minutes": 10.0,
+                "outdoor_temperature_minutes": 10.0,
+                "participant_signature": ["heat_pump", "selected"],
+            }
+        )
+    excluded = {
+        **calls[-1],
+        "started_at": (
+            datetime.fromisoformat(str(base["started_at"])) + timedelta(hours=8)
+        ).isoformat(),
+        "complete": False,
+        "excluded_from_baseline": True,
+        "participant_signature": ["heat_pump", "alternate"],
+    }
+    context.store_data.hvac_response_history_by_stream[stream_id] = [
+        *calls,
+        excluded,
+    ]
+
+    HvacEfficiencyProcessor().process([(heat_pump, SimpleNamespace())], context)
+
+    assert context.store_data.hvac_response_history_by_stream[stream_id] == []
 
 
 def test_hvac_mixed_mode_markers_survive_until_local_day_closes() -> None:
