@@ -12,6 +12,10 @@ from custom_components.circuitsetup_energy_analyzer.alerting import (
     alert_feedback_fingerprint_candidates,
     alert_feedback_fingerprint_for_observation,
 )
+from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
+    HvacResponseEpisode,
+    episode_to_dict,
+)
 from custom_components.circuitsetup_energy_analyzer.managers.evidence_actions import (
     EvidenceActionController,
 )
@@ -332,9 +336,34 @@ async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
     alert_id = notification_id_for_alert(alert)
     coordinator.store_data.alerts = [alert]
     coordinator.state.active_alerts_by_circuit = {"heat_pump": [alert]}
-    coordinator.state.hvac_current_episode_by_stream[stream_id] = {
-        "complete": False
-    }
+    started = coordinator.now - timedelta(minutes=20)
+    coordinator.state.hvac_current_episode_by_stream[stream_id] = episode_to_dict(
+        HvacResponseEpisode(
+            stream_id=stream_id,
+            circuit_id="heat_pump",
+            thermostat_entity_id="climate.downstairs",
+            mode="cooling",
+            started_at=started,
+            ended_at=None,
+            start_temperature_f=72.6,
+            target_temperature_f=72.0,
+            latest_temperature_f=72.4,
+            elapsed_minutes=20.0,
+            active_minutes=20.0,
+            outdoor_temperature_f=90.0,
+            season="summer",
+            weather_mode="cooling",
+            temperature_bin="very_hot",
+            gap_bin="4-6F",
+            participant_signature=("heat_pump",),
+            supporting_blower_ids=(),
+            complete=False,
+            appliance_profile="heat_pump",
+            episode_kind="thermostat_call",
+            outdoor_temperature_minutes=20.0,
+        ),
+        allow_incomplete=True,
+    )
     coordinator.state.hvac_efficiency_by_circuit["heat_pump"] = {
         "finding": "slower"
     }
@@ -348,6 +377,10 @@ async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
         coordinator.now.isoformat()
     )
     assert coordinator.state.hvac_current_episode_by_stream == {}
+    marker = coordinator.store_data.hvac_response_history_by_stream[stream_id][0]
+    assert marker["ended_at"] == coordinator.now.isoformat()
+    assert marker["excluded_from_baseline"] is True
+    assert marker["baseline_era"] == "initial"
     assert coordinator.state.hvac_efficiency_by_circuit == {}
     assert coordinator.state.hvac_association_revision_by_circuit == {"heat_pump": 1}
 
