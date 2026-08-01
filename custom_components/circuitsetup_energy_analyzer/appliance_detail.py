@@ -716,7 +716,17 @@ def metric_comparisons_for_circuit(
         ),
     )
     comparisons: list[MetricComparison] = []
+    is_mixed = (
+        config.mode is CircuitMode.MIXED
+        or config.appliance_profile is ApplianceProfile.MIXED
+    )
     for metric_id, label, unit, field, baseline_features in specs:
+        if is_mixed and metric_id in {
+            "runtime_today_seconds",
+            "run_count_today",
+            "current_power_w",
+        }:
+            continue
         if (
             metric_id == "capacity_usage_percent"
             and _mapping_status(
@@ -728,11 +738,6 @@ def metric_comparisons_for_circuit(
         ):
             continue
         if metric_id == "current_power_w":
-            if (
-                config.mode is CircuitMode.MIXED
-                or config.appliance_profile is ApplianceProfile.MIXED
-            ):
-                continue
             operating_status = _mapping_status(
                 state,
                 "run_cycle_status_by_circuit",

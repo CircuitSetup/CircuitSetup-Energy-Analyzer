@@ -1113,6 +1113,32 @@ def test_specific_profile_mixed_detail_explains_shared_measurement() -> None:
     assert "appliance-specific evidence" in expectation["expected"]
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.REFRIGERATOR, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ),
+)
+def test_mixed_detail_omits_direct_run_comparisons(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _direct_coordinator()
+    coordinator.circuit_configs = (_config(profile=profile, mode=mode),)
+
+    comparisons = appliance_detail_payload([coordinator], circuit_id="fridge")[
+        "detail"
+    ]["today_vs_normal"]
+
+    assert {
+        comparison["metric_id"] for comparison in comparisons
+    }.isdisjoint({"runtime_today_seconds", "run_count_today", "current_power_w"})
+
+
 def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

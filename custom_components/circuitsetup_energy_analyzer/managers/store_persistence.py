@@ -8,6 +8,7 @@ from typing import Any
 
 from ..alert_feedback import alert_feedback_is_expired
 from ..appliance_notifications import mixed_circuit_allows_alert
+from ..cycles import RUN_CYCLE_RUNTIME_TODAY_FEATURE
 from ..local_time import local_date
 from ..settings_advisor import RecommendationStatus
 from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
@@ -202,6 +203,7 @@ class StorePersistenceManager:
             "run_cycle_duration_s",
             "run_cycle_daily_start_count",
             "run_cycle_daily_duty_cycle_percent",
+            RUN_CYCLE_RUNTIME_TODAY_FEATURE,
             "standby_power_w",
         }
         for name in (

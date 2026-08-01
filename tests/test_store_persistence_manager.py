@@ -173,6 +173,7 @@ def test_store_persistence_clears_direct_state_idempotently() -> None:
         contextual_baseline_samples_by_circuit={
             "fridge": [
                 {"feature": "run_cycle_duration_s", "value": 10},
+                {"feature": "runtime_today_seconds", "value": 20},
                 {"feature": "daily_energy_kwh", "value": 2},
             ],
             "washer": [{"feature": "standby_power_w", "value": 3}],
@@ -180,6 +181,7 @@ def test_store_persistence_clears_direct_state_idempotently() -> None:
         contextual_baselines_by_circuit={
             "fridge": {
                 "cycle|x": {"feature": "run_cycle_daily_start_count"},
+                "runtime|x": {"feature": "runtime_today_seconds"},
                 "energy|x": {"feature": "daily_energy_kwh"},
             },
             "washer": {"standby|x": {"feature": "standby_power_w"}},
