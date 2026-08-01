@@ -869,6 +869,19 @@ def _compact_circuit_response_history(
             stream_id,
             _INITIAL_BASELINE_ERA,
         )
+        pending_old_era = [
+            (raw, episode)
+            for raw, episode in decoded
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) != current_era
+            and max(
+                local_date(episode.started_at, context.time_zone),
+                local_date(
+                    episode.ended_at or episode.started_at,
+                    context.time_zone,
+                ),
+            )
+            >= current_date
+        ]
         episodes = [
             episode
             for raw, episode in decoded
@@ -879,7 +892,7 @@ def _compact_circuit_response_history(
                 not in dates_by_mode[opposing_mode]
             )
         ]
-        compacted = []
+        compacted = pending_old_era
         for episode in compact_completed_core_days(
             episodes,
             time_zone=context.time_zone,
@@ -888,9 +901,16 @@ def _compact_circuit_response_history(
         ):
             raw = episode_to_dict(episode, allow_incomplete=True)
             raw["baseline_era"] = current_era
-            compacted.append(raw)
-        if compacted != history_by_stream[stream_id]:
-            history_by_stream[stream_id] = compacted
+            compacted.append((raw, episode))
+        retained = [
+            raw
+            for raw, _episode in sorted(
+                compacted,
+                key=lambda item: item[1].started_at,
+            )
+        ]
+        if retained != history_by_stream[stream_id]:
+            history_by_stream[stream_id] = retained
             changed = True
     return changed
 

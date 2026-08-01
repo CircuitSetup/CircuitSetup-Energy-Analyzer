@@ -1512,9 +1512,11 @@ def test_hvac_mixed_mode_markers_survive_until_local_day_closes() -> None:
     assert len(context.store_data.hvac_response_history_by_stream[cooling_stream]) == 1
     assert len(context.store_data.hvac_response_history_by_stream[heating_stream]) == 1
 
+    context.store_data.hvac_baseline_era_by_stream[cooling_stream] = "era-2"
     later_cooling = {**cooling}
     later_started = context.now + timedelta(hours=1)
     later_cooling.update(
+        baseline_era="era-2",
         started_at=later_started.isoformat(),
         ended_at=(later_started + timedelta(minutes=40)).isoformat(),
     )
