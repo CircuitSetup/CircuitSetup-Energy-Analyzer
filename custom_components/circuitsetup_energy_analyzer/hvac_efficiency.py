@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence, Set
 from dataclasses import asdict, dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from statistics import linear_regression, median
 from typing import Any
 
@@ -426,6 +426,18 @@ def evaluate_efficiency(
             required_reference_count=reference_required,
         )
     recent_load = [_thermal_demand(day, latest_episode.mode) for day in recent]
+    supported_load = (min(reference_load), max(reference_load))
+    if any(
+        load < supported_load[0] - 1e-6 or load > supported_load[1] + 1e-6
+        for load in recent_load
+    ):
+        return _empty_evaluation(
+            "provisional",
+            context=context,
+            reference_count=len(reference),
+            recent_count=len(recent),
+            required_reference_count=reference_required,
+        )
     predicted = [max(1.0, intercept + slope * load) for load in recent_load]
     ratios = [
         day.runtime_minutes / expected - 1.0
@@ -673,6 +685,7 @@ def compact_completed_core_days(
     by_day: dict[tuple[tuple[Any, ...], date], list[HvacResponseEpisode]] = (
         defaultdict(list)
     )
+    excluded_dates: set[date] = set()
     for episode in episodes:
         day = local_date(episode.started_at, time_zone)
         end_day = local_date(episode.ended_at or episode.started_at, time_zone)
@@ -684,10 +697,16 @@ def compact_completed_core_days(
             and not episode.excluded_from_baseline
         ):
             by_day[(_comparison_key(episode), day)].append(episode)
+        else:
+            excluded_dates.update(
+                day + timedelta(days=offset)
+                for offset in range(max(0, (end_day - day).days) + 1)
+            )
 
     summaries = [
         summary
-        for group in by_day.values()
+        for (_key, day), group in by_day.items()
+        if day not in excluded_dates
         if (summary := _compact_core_day(group, time_zone=time_zone)) is not None
     ]
     reference_required = _reference_core_day_count(retention_days)
@@ -717,6 +736,10 @@ def compact_completed_core_days(
                 *recent,
             ]
         bounded.extend(ordered)
+    if len(bounded) > reference_required + _RECENT_CORE_DAY_COUNT:
+        bounded = sorted(bounded, key=_episode_sort_time)[
+            -(reference_required + _RECENT_CORE_DAY_COUNT) :
+        ]
     return sorted([*bounded, *pending], key=_episode_sort_time)
 
 

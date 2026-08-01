@@ -657,6 +657,26 @@ def test_weather_normalization_does_not_flag_hotter_normal_days() -> None:
     assert evaluation.recent_runtime_minutes == pytest.approx(70.0)
 
 
+def test_efficiency_rejects_weather_extrapolation_beyond_reference_loads() -> None:
+    episodes = _weather_normalized_history()
+    episodes[-5:] = [
+        replace(
+            episode,
+            outdoor_temperature_f=70.0,
+            outdoor_temperature_minutes=30.0,
+            elapsed_minutes=30.0,
+            active_minutes=30.0,
+            ended_at=episode.started_at + timedelta(minutes=30),
+        )
+        for episode in episodes[-5:]
+    ]
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "provisional"
+    assert evaluation.finding is None
+
+
 def test_efficiency_requires_three_abnormal_days_in_recent_five() -> None:
     two_slow = evaluate_efficiency(
         _weather_normalized_history((1.3, 1.3, 1.0, 1.0, 1.0)),
@@ -774,3 +794,62 @@ def test_completed_calls_compact_to_one_record_per_core_day() -> None:
     )
     assert len(lightweight) == 17
     assert lightweight[-5:] == compacted[-5:]
+
+
+def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
+    calls = [
+        replace(
+            _core_day_episode(
+                0,
+                outdoor_temperature_f=90.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(hours=hour),
+            ended_at=START + timedelta(hours=hour, minutes=10),
+        )
+        for hour in (0, 2, 4, 6)
+    ]
+    incomplete = replace(
+        calls[-1],
+        started_at=START + timedelta(hours=8),
+        ended_at=START + timedelta(hours=8, minutes=10),
+        complete=False,
+        excluded_from_baseline=True,
+    )
+
+    compacted = compact_completed_core_days(
+        [*calls, incomplete],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=1)).date(),
+        retention_days=45,
+    )
+
+    assert compacted == []
+
+
+def test_compaction_bounds_multiple_equipment_contexts_per_stream() -> None:
+    episodes = [
+        replace(
+            _core_day_episode(
+                index + context_index * 60,
+                outdoor_temperature_f=75.0 + 5.0 * (index % 5),
+                runtime_minutes=40.0,
+            ),
+            participant_signature=("heat_pump", context),
+        )
+        for context_index, context in enumerate(("old", "new"))
+        for index in range(56)
+    ]
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=117)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 55
+    assert {episode.participant_signature for episode in compacted} == {
+        ("heat_pump", "new")
+    }
