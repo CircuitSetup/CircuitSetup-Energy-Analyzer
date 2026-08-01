@@ -651,9 +651,12 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
     )
 
     thermostat = "climate.downstairs"
-    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    compressor = _hvac_config("compressor", ApplianceProfile.HVAC_COMPRESSOR)
+    blower = _hvac_config("blower", ApplianceProfile.HVAC_BLOWER)
+    configs = (compressor, blower)
+    linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
     context = _hvac_context(
-        configs=(heat_pump,),
+        configs=configs,
         observation=ThermostatObservation(
             thermostat,
             None,
@@ -663,14 +666,12 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
             None,
             ("current_temperature", "temperature"),
         ),
-        advanced_settings={
-            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
-        },
-        running_circuit_ids={"heat_pump"},
+        advanced_settings={"compressor": linked, "blower": linked},
+        running_circuit_ids={"compressor", "blower"},
     )
 
     result = HvacEfficiencyProcessor().process(
-        [(heat_pump, SimpleNamespace())],
+        [(config, SimpleNamespace()) for config in configs],
         context,
     )
 
@@ -680,6 +681,8 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
     marker = next(iter(history.values()))[0]
     assert marker["complete"] is False
     assert marker["excluded_from_baseline"] is True
+    assert marker["participant_signature"] == ["compressor"]
+    assert marker["supporting_blower_ids"] == ["blower"]
 
 
 def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:

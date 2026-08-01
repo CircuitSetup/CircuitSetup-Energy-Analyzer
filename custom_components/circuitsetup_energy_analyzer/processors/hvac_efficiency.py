@@ -153,50 +153,18 @@ class HvacEfficiencyProcessor:
                     advanced_by_circuit,
                 )
                 continue
-            direct_profiles = (
-                _COOLING_DRIVER_PROFILES
-                if mode == "cooling"
-                else _HEATING_DRIVER_PROFILES
-            )
-            drivers = {
-                config.circuit_id
-                for config in linked_configs
-                if config.appliance_profile in direct_profiles
-                and config.circuit_id in active_ids
-            }
-            gas_blower_ids: set[str] = set()
-            if mode == "heating" and not drivers:
-                gas_blower_ids = {
-                    config.circuit_id
-                    for config in linked_configs
-                    if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
-                    and bool(
-                        advanced_by_circuit.get(config.circuit_id, {}).get(
-                            CONF_BLOWER_REPRESENTS_GAS_HEAT,
-                            False,
-                        )
-                    )
-                    and (
-                        config.circuit_id in active_ids
-                        or _current_episode(
-                            context,
-                            (
-                                f"{config.circuit_id}|{thermostat_id}|"
-                                "heating"
-                            ),
-                        )
-                        is not None
-                    )
-                }
-                drivers.update(gas_blower_ids & active_ids)
-            supporting_blower_ids = tuple(
-                sorted(
-                    config.circuit_id
-                    for config in linked_configs
-                    if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
-                    and config.circuit_id in active_ids
-                    and config.circuit_id not in gas_blower_ids
-                )
+            (
+                direct_profiles,
+                drivers,
+                gas_blower_ids,
+                supporting_blower_ids,
+            ) = _active_response_equipment(
+                context,
+                linked_configs,
+                thermostat_id,
+                mode,
+                active_ids,
+                advanced_by_circuit,
             )
             participant_signature = tuple(sorted(drivers))
 
@@ -346,6 +314,57 @@ class HvacEfficiencyProcessor:
         return result
 
 
+def _active_response_equipment(
+    context: ProcessingContext,
+    linked_configs: list[Any],
+    thermostat_id: str,
+    mode: str,
+    active_ids: set[str],
+    advanced_by_circuit: Mapping[str, Mapping[str, Any]],
+) -> tuple[frozenset[ApplianceProfile], set[str], set[str], tuple[str, ...]]:
+    direct_profiles = (
+        _COOLING_DRIVER_PROFILES if mode == "cooling" else _HEATING_DRIVER_PROFILES
+    )
+    drivers = {
+        config.circuit_id
+        for config in linked_configs
+        if config.appliance_profile in direct_profiles
+        and config.circuit_id in active_ids
+    }
+    gas_blower_ids: set[str] = set()
+    if mode == "heating" and not drivers:
+        gas_blower_ids = {
+            config.circuit_id
+            for config in linked_configs
+            if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and bool(
+                advanced_by_circuit.get(config.circuit_id, {}).get(
+                    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+                    False,
+                )
+            )
+            and (
+                config.circuit_id in active_ids
+                or _current_episode(
+                    context,
+                    f"{config.circuit_id}|{thermostat_id}|heating",
+                )
+                is not None
+            )
+        }
+        drivers.update(gas_blower_ids & active_ids)
+    supporting_blower_ids = tuple(
+        sorted(
+            config.circuit_id
+            for config in linked_configs
+            if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and config.circuit_id in active_ids
+            and config.circuit_id not in gas_blower_ids
+        )
+    )
+    return direct_profiles, drivers, gas_blower_ids, supporting_blower_ids
+
+
 def _store_unresolved_active_call_markers(
     result: FeatureResult,
     context: ProcessingContext,
@@ -374,6 +393,21 @@ def _store_unresolved_active_call_markers(
             mode = "heating"
         else:
             continue
+        direct_profiles, drivers, gas_blower_ids, supporting_blower_ids = (
+            _active_response_equipment(
+                context,
+                linked_configs,
+                thermostat_id,
+                mode,
+                active_ids,
+                advanced_by_circuit,
+            )
+        )
+        if (
+            config.appliance_profile not in direct_profiles
+            and config.circuit_id not in gas_blower_ids
+        ):
+            continue
         current_observation = _observation_for(
             context,
             config.circuit_id,
@@ -391,8 +425,8 @@ def _store_unresolved_active_call_markers(
             appliance_profile=config.appliance_profile.value,
             driver_active=True,
             active_minutes_delta=0.0,
-            participant_signature=(config.circuit_id,),
-            supporting_blower_ids=(),
+            participant_signature=tuple(sorted(drivers)),
+            supporting_blower_ids=supporting_blower_ids,
             environmental_context=_environmental_context(
                 context,
                 config.circuit_id,
