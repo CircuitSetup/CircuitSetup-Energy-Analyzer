@@ -262,15 +262,46 @@ async def test_mark_mixed_rejects_ineligible_without_side_effects(
 
 
 @pytest.mark.asyncio
-async def test_start_reconciles_saved_mixed_direct_state_and_saves_once() -> None:
+async def test_start_reconciles_saved_mixed_notifications_before_saving(
+    monkeypatch,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
 
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    aggregate = AlertEvidence(
+        now, "fridge", Severity.WARNING, "aggregate", feature="circuit_capacity"
+    )
+    unrelated = AlertEvidence(
+        now, "washer", Severity.WARNING, "unrelated", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+    aggregate_id = notifications_module.notification_id_for_alert(aggregate)
+    unrelated_id = notifications_module.notification_id_for_alert(unrelated)
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
     store_data = FeatureStoreData(
         baselines={"fridge:run_cycle": BaselineStats("run_cycle", 1, 1, 0, 1, 1, 1)},
+        alerts=[direct, aggregate, unrelated],
         standby_by_circuit={"fridge": {"samples": []}},
         energy_usage_by_circuit={"fridge": {"days": [{"date": "2026-07-31"}]}},
+        notification_delivery_state={
+            key: [
+                {"alert_id": direct_id}, {"alert_id": aggregate_id},
+                {"alert_id": unrelated_id},
+            ]
+            for key in ("deferred", "daily", "weekly")
+        } | {"summary_recovery_alert_ids": [direct_id, aggregate_id, unrelated_id]},
     )
     store = SimpleNamespace(data=None, async_save=AsyncMock())
     coordinator = EnergyAnalyzerCoordinator(
@@ -291,6 +322,156 @@ async def test_start_reconciles_saved_mixed_direct_state_and_saves_once() -> Non
     assert store_data.baselines == {}
     assert store_data.standby_by_circuit == {}
     assert "fridge" in store_data.energy_usage_by_circuit
+    assert dismissed == [direct_id]
+    assert [alert.feature for alert in store_data.alerts] == [
+        "circuit_capacity", "always_on_power"
+    ]
+    for key in ("deferred", "daily", "weekly"):
+        queued_ids = [
+            item["alert_id"]
+            for item in store_data.notification_delivery_state[key]
+        ]
+        assert queued_ids == [
+            aggregate_id, unrelated_id
+        ]
+    assert store_data.notification_delivery_state["summary_recovery_alert_ids"] == [
+        aggregate_id, unrelated_id
+    ]
+    store.async_save.assert_awaited_once()
+
+    await coordinator.async_start(())
+    assert dismissed == [direct_id]
+    store.async_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_start_dismissal_failure_keeps_alert_retriable(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+
+    def stored_data():
+        return FeatureStoreData(
+            alerts=[direct],
+            notification_delivery_state={
+                key: [{"alert_id": direct_id}]
+                for key in ("deferred", "daily", "weekly")
+            },
+        )
+
+    async def fail_dismiss(_hass, _alert_id):
+        raise RuntimeError("dismiss failed")
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", fail_dismiss
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    entry_data = {
+        CONF_CIRCUITS: [{
+            "circuit_id": "fridge", "name": "Fridge", "mode": "mixed",
+            "appliance_profile": "refrigerator", "sensors": [],
+        }]
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data=entry_data,
+        store=store, store_data=stored_data(),
+    )
+    coordinator.source_updates.async_start = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="dismiss failed"):
+        await coordinator.async_start(())
+    store.async_save.assert_not_awaited()
+
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
+    retry_store = SimpleNamespace(data=None, async_save=AsyncMock())
+    retry = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data=entry_data,
+        store=retry_store, store_data=stored_data(),
+    )
+    retry.source_updates.async_start = AsyncMock()
+
+    await retry.async_start(())
+
+    assert dismissed == [direct_id]
+    retry_store.async_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_dismissal_failure_retries_after_reconstruction(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+    circuits = [{
+        "circuit_id": "fridge", "name": "Fridge", "mode": "single_phase",
+        "appliance_profile": "refrigerator", "sensors": [],
+    }]
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits},
+        store_data=FeatureStoreData(alerts=[direct]),
+    )
+    persisted = {}
+    reloaded = []
+
+    async def persist(updates):
+        persisted.update(updates)
+
+    async def reload():
+        reloaded.append(True)
+
+    async def fail_dismiss(_hass, _alert_id):
+        raise RuntimeError("dismiss failed")
+
+    coordinator.config_entry_controller.async_update_options = persist
+    coordinator.config_entry_controller.async_reload = reload
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", fail_dismiss
+    )
+
+    with pytest.raises(RuntimeError, match="dismiss failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+    assert reloaded == [True]
+    assert persisted[CONF_CIRCUITS][0]["mode"] == "mixed"
+
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    retry = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits},
+        options=persisted, store=store,
+        store_data=FeatureStoreData(alerts=[direct]),
+    )
+    retry.source_updates.async_start = AsyncMock()
+
+    await retry.async_start(())
+
+    assert dismissed == [direct_id]
     store.async_save.assert_awaited_once()
 
 

@@ -388,9 +388,16 @@ class NotificationController:
             if alert.circuit_id == circuit_id
             and not mixed_circuit_allows_alert(alert.feature)
         }
+        await self.async_dismiss_alert_notification_ids(alert_ids)
+
+    async def async_dismiss_alert_notification_ids(
+        self,
+        alert_ids: set[str],
+    ) -> None:
+        """Dismiss exact alert IDs and prune their queued delivery state."""
         delivery = self._delivery_state()
         queue_changed = False
-        for queue_name in ("deferred", "daily"):
+        for queue_name in ("deferred", "daily", "weekly"):
             queue = delivery.get(queue_name)
             if not isinstance(queue, list):
                 continue
@@ -401,6 +408,14 @@ class NotificationController:
             ]
             if retained != queue:
                 delivery[queue_name] = retained
+                queue_changed = True
+        summary_ids = delivery.get("summary_recovery_alert_ids")
+        if isinstance(summary_ids, list):
+            retained_summary_ids = [
+                alert_id for alert_id in summary_ids if alert_id not in alert_ids
+            ]
+            if retained_summary_ids != summary_ids:
+                delivery["summary_recovery_alert_ids"] = retained_summary_ids
                 queue_changed = True
         if queue_changed:
             self._coordinator.store_persistence.mark_dirty()

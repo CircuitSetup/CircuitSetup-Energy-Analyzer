@@ -42,6 +42,7 @@ from .models import (
     SensorRole,
 )
 from .normalize import NormalizedCircuitSample, SourceState
+from .notifications import notification_id_for_alert
 from .operating_detection import resolve_operating_detection_from_settings
 from .processors import (
     FeatureResult,
@@ -205,8 +206,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
         self._mixed_startup_store_dirty = False
+        self._mixed_startup_direct_alert_ids: set[str] = set()
         for config in self.circuit_configs:
             if config.mode is CircuitMode.MIXED:
+                self._mixed_startup_direct_alert_ids.update(
+                    notification_id_for_alert(alert)
+                    for alert in self.store_data.alerts
+                    if alert.circuit_id == config.circuit_id
+                    and not mixed_circuit_allows_alert(alert.feature)
+                )
                 self._mixed_startup_store_dirty |= (
                     self.store_persistence.clear_direct_appliance_state_for_circuit(
                         config.circuit_id, self._baseline_values
@@ -234,6 +242,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.evidence_actions.async_expire_maintenance_if_due(
             self.current_time()
         )
+        if self._mixed_startup_direct_alert_ids:
+            await self.notification_controller.async_dismiss_alert_notification_ids(
+                self._mixed_startup_direct_alert_ids
+            )
+            self._mixed_startup_direct_alert_ids.clear()
         if self._mixed_startup_store_dirty:
             await self._async_save_store(self.current_time())
             self._mixed_startup_store_dirty = False

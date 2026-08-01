@@ -48,6 +48,8 @@ async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> Non
                     {"alert_id": other_id},
                 ],
                 "daily": [{"alert_id": target_id}, {"alert_id": aggregate_id}],
+                "weekly": [{"alert_id": target_id}, {"alert_id": aggregate_id}],
+                "summary_recovery_alert_ids": [target_id, aggregate_id],
             },
         ),
         state=SimpleNamespace(active_alerts_by_circuit={}),
@@ -61,6 +63,8 @@ async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> Non
     assert coordinator.store_data.notification_delivery_state == {
         "deferred": [{"alert_id": aggregate_id}, {"alert_id": other_id}],
         "daily": [{"alert_id": aggregate_id}],
+        "weekly": [{"alert_id": aggregate_id}],
+        "summary_recovery_alert_ids": [aggregate_id],
     }
     assert dirty == [True]
 
