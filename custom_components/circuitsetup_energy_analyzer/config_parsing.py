@@ -691,8 +691,11 @@ def _strip_trailing_source_qualifiers(object_id: str) -> str:
             stripped = without_value_qualifier
             continue
         without_index = re.sub(r"_\d+$", "", stripped)
-        if without_index != stripped and _source_metric_suffix_exposed(without_index):
-            stripped = without_index
+        normalized_index = _strip_terminal_phase_letter(without_index)
+        if without_index != stripped and _source_metric_suffix_exposed(
+            normalized_index
+        ):
+            stripped = normalized_index
             continue
         return stripped
 
