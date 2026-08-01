@@ -12,11 +12,19 @@ UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
 _UNIT_SCALE_BY_ROLE = {
-    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 1_000_000.0, "mW": 0.001},
-    SensorRole.REACTIVE_POWER: {"kvar": 1_000.0, "mvar": 1_000_000.0},
-    SensorRole.APPARENT_POWER: {"kva": 1_000.0, "mva": 1_000_000.0},
-    SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001},
-    SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001},
+    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 0.001, "Mw": 1_000_000.0},
+    SensorRole.REACTIVE_POWER: {
+        "kvar": 1_000.0,
+        "mvar": 0.001,
+        "Mvar": 1_000_000.0,
+    },
+    SensorRole.APPARENT_POWER: {
+        "kva": 1_000.0,
+        "mva": 0.001,
+        "Mva": 1_000_000.0,
+    },
+    SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
+    SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001, "Mv": 1_000_000.0},
 }
 
 
@@ -115,7 +123,8 @@ def build_circuit_sample(
         elif source.unit is not None:
             unit = source.unit.strip()
             scales = _UNIT_SCALE_BY_ROLE.get(sensor.role, {})
-            value *= scales.get(unit, scales.get(unit.lower(), 1.0))
+            normalized_unit = unit[:1].replace("K", "k") + unit[1:].lower()
+            value *= scales.get(normalized_unit, 1.0)
         if not math.isfinite(value):
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} non_finite")

@@ -61,15 +61,29 @@ def test_build_circuit_sample_normalizes_real_power_units(
 
 
 @pytest.mark.parametrize(
-    "units",
+    ("units", "expected"),
     (
-        ("MW", "mA", "kV", "kVA", "kVAR"),
-        ("mw", "ma", "kv", "kva", "kvar"),
-        ("MW", "mA", "KV", "KVA", "KVAR"),
+        (
+            ("MW", "mA", "kV", "kVA", "kVAR"),
+            (1000.0, 0.5, 240.0, 2000.0, 3000.0),
+        ),
+        (
+            ("mW", "ma", "mv", "mva", "mvar"),
+            (0.000001, 0.5, 0.00024, 0.002, 0.003),
+        ),
+        (
+            ("MW", "MA", "MV", "MVA", "MVAR"),
+            (1000.0, 500_000_000.0, 240_000.0, 2_000_000.0, 3_000_000.0),
+        ),
+        (
+            ("MW", "mA", "KV", "KVA", "KVAR"),
+            (1000.0, 0.5, 240.0, 2000.0, 3000.0),
+        ),
     ),
 )
 def test_build_circuit_sample_normalizes_scaled_measurements(
     units: tuple[str, ...],
+    expected: tuple[float, ...],
 ) -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     sensors = (
@@ -98,11 +112,11 @@ def test_build_circuit_sample_normalizes_scaled_measurements(
 
     sample = build_circuit_sample(config, states, now)
 
-    assert sample.real_power == 1000.0
-    assert sample.current == 0.5
-    assert sample.voltage == 240.0
-    assert sample.apparent_power == 2000.0
-    assert sample.reactive_power == 3000.0
+    assert sample.real_power == pytest.approx(expected[0])
+    assert sample.current == pytest.approx(expected[1])
+    assert sample.voltage == pytest.approx(expected[2])
+    assert sample.apparent_power == pytest.approx(expected[3])
+    assert sample.reactive_power == pytest.approx(expected[4])
 
 
 def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
