@@ -1422,6 +1422,38 @@ def test_setup_health_treats_optional_energy_and_metric_inputs_as_ready() -> Non
     assert setup_health_attributes(ready_coordinator)["blocking_issue_count"] == 1
 
 
+def test_setup_health_ignores_leg_imbalance_for_single_phase_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="hvac_1",
+        name="HVAC 1",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.hvac_1_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "hvac_1": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": True,
+                }
+            },
+            leg_imbalance_status_by_circuit={"hvac_1": "not_dual_phase"},
+        ),
+        circuit_configs=(circuit,),
+    )
+
+    assert setup_health_value(coordinator) == "Ready"
+    assert setup_health_attributes(coordinator)["issues"] == []
+
+
 def test_setup_health_reports_missing_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,
