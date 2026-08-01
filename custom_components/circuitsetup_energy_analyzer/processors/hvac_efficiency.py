@@ -379,9 +379,10 @@ def _store_unresolved_active_call_markers(
     for config in linked_configs:
         if config.circuit_id not in active_ids:
             continue
+        modes: list[str] = []
         if config.appliance_profile in _COOLING_DRIVER_PROFILES:
-            mode = "cooling"
-        elif config.appliance_profile in _HEATING_DRIVER_PROFILES or (
+            modes.append("cooling")
+        if config.appliance_profile in _HEATING_DRIVER_PROFILES or (
             config.appliance_profile is ApplianceProfile.HVAC_BLOWER
             and bool(
                 advanced_by_circuit.get(config.circuit_id, {}).get(
@@ -390,50 +391,49 @@ def _store_unresolved_active_call_markers(
                 )
             )
         ):
-            mode = "heating"
-        else:
-            continue
-        direct_profiles, drivers, gas_blower_ids, supporting_blower_ids = (
-            _active_response_equipment(
-                context,
-                linked_configs,
-                thermostat_id,
-                mode,
-                active_ids,
-                advanced_by_circuit,
+            modes.append("heating")
+        for mode in modes:
+            direct_profiles, drivers, gas_blower_ids, supporting_blower_ids = (
+                _active_response_equipment(
+                    context,
+                    linked_configs,
+                    thermostat_id,
+                    mode,
+                    active_ids,
+                    advanced_by_circuit,
+                )
             )
-        )
-        if (
-            config.appliance_profile not in direct_profiles
-            and config.circuit_id not in gas_blower_ids
-        ):
-            continue
-        current_observation = _observation_for(
-            context,
-            config.circuit_id,
-            thermostat_id,
-        ) or observation
-        _current, marker = advance_episode(
-            None,
-            replace(
-                current_observation,
-                mode="cool" if mode == "cooling" else "heat",
-                action=None,
-            ),
-            now=context.now,
-            circuit_id=config.circuit_id,
-            appliance_profile=config.appliance_profile.value,
-            driver_active=True,
-            active_minutes_delta=0.0,
-            participant_signature=tuple(sorted(drivers)),
-            supporting_blower_ids=supporting_blower_ids,
-            environmental_context=_environmental_context(
+            if (
+                config.appliance_profile not in direct_profiles
+                and config.circuit_id not in gas_blower_ids
+            ):
+                continue
+            current_observation = _observation_for(
                 context,
                 config.circuit_id,
-            ),
-        )
-        if marker is not None:
-            _store_finalized_episode(result, context, marker)
+                thermostat_id,
+            ) or observation
+            _current, marker = advance_episode(
+                None,
+                replace(
+                    current_observation,
+                    mode="cool" if mode == "cooling" else "heat",
+                    action=None,
+                ),
+                now=context.now,
+                circuit_id=config.circuit_id,
+                appliance_profile=config.appliance_profile.value,
+                driver_active=True,
+                active_minutes_delta=0.0,
+                participant_signature=tuple(sorted(drivers)),
+                supporting_blower_ids=supporting_blower_ids,
+                environmental_context=_environmental_context(
+                    context,
+                    config.circuit_id,
+                ),
+            )
+            if marker is not None:
+                _store_finalized_episode(result, context, marker)
 
 
 def _store_finalized_episode(

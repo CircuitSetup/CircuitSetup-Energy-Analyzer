@@ -645,15 +645,25 @@ def test_hvac_instant_marker_deduplication_is_scoped_to_response_context() -> No
     ]
 
 
-def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
+@pytest.mark.parametrize(
+    ("profile", "expected_modes"),
+    [
+        (ApplianceProfile.HVAC_COMPRESSOR, {"cooling"}),
+        (ApplianceProfile.HEAT_PUMP, {"cooling", "heating"}),
+    ],
+)
+def test_hvac_unresolved_auto_call_retains_excluded_date_marker(
+    profile: ApplianceProfile,
+    expected_modes: set[str],
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
     )
 
     thermostat = "climate.downstairs"
-    compressor = _hvac_config("compressor", ApplianceProfile.HVAC_COMPRESSOR)
+    driver = _hvac_config("driver", profile)
     blower = _hvac_config("blower", ApplianceProfile.HVAC_BLOWER)
-    configs = (compressor, blower)
+    configs = (driver, blower)
     linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
     context = _hvac_context(
         configs=configs,
@@ -666,8 +676,8 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
             None,
             ("current_temperature", "temperature"),
         ),
-        advanced_settings={"compressor": linked, "blower": linked},
-        running_circuit_ids={"compressor", "blower"},
+        advanced_settings={"driver": linked, "blower": linked},
+        running_circuit_ids={"driver", "blower"},
     )
 
     result = HvacEfficiencyProcessor().process(
@@ -677,12 +687,12 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker() -> None:
 
     assert result.store_dirty is True
     history = context.store_data.hvac_response_history_by_stream
-    assert len(history) == 1
-    marker = next(iter(history.values()))[0]
-    assert marker["complete"] is False
-    assert marker["excluded_from_baseline"] is True
-    assert marker["participant_signature"] == ["compressor"]
-    assert marker["supporting_blower_ids"] == ["blower"]
+    assert {stream_id.rsplit("|", 1)[-1] for stream_id in history} == expected_modes
+    for marker in (raw_history[0] for raw_history in history.values()):
+        assert marker["complete"] is False
+        assert marker["excluded_from_baseline"] is True
+        assert marker["participant_signature"] == ["driver"]
+        assert marker["supporting_blower_ids"] == ["blower"]
 
 
 def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:
