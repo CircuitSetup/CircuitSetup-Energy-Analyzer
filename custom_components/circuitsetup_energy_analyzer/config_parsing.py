@@ -552,6 +552,7 @@ _NON_ENERGY_METRIC_SUFFIXES = tuple(
     for suffix in _SOURCE_METRIC_SUFFIXES
     if suffix not in {"_energy", "_kvarh", "_kwh", "_mwh", "_varh", "_wh"}
 )
+_SOURCE_VALUE_QUALIFIER_SUFFIXES = ("_rms", "_average", "_avg", "_mean")
 _SOURCE_LEG_SUFFIXES = (
     "_leg_a",
     "_leg_b",
@@ -665,19 +666,35 @@ def _strip_trailing_source_qualifiers(object_id: str) -> str:
         if without_leg != stripped:
             stripped = without_leg
             continue
+        without_value_qualifier = _strip_trailing_value_qualifier(stripped)
+        if without_value_qualifier != stripped and _source_metric_suffix_exposed(
+            without_value_qualifier
+        ):
+            stripped = without_value_qualifier
+            continue
         without_index = re.sub(r"_\d+$", "", stripped)
-        if without_index != stripped:
-            metric_probe = without_index
-            while (
-                without_leg := _strip_trailing_leg_token(metric_probe)
-            ) != metric_probe:
-                metric_probe = without_leg
-            if any(
-                metric_probe.endswith(suffix) for suffix in _SOURCE_METRIC_SUFFIXES
-            ):
-                stripped = without_index
-                continue
+        if without_index != stripped and _source_metric_suffix_exposed(without_index):
+            stripped = without_index
+            continue
         return stripped
+
+
+def _strip_trailing_value_qualifier(object_id: str) -> str:
+    for suffix in _SOURCE_VALUE_QUALIFIER_SUFFIXES:
+        if object_id.endswith(suffix):
+            return object_id[: -len(suffix)]
+    return object_id
+
+
+def _source_metric_suffix_exposed(object_id: str) -> bool:
+    probe = object_id
+    while True:
+        normalized = _strip_trailing_leg_token(probe)
+        if normalized == probe:
+            normalized = _strip_trailing_value_qualifier(probe)
+        if normalized == probe:
+            return any(probe.endswith(suffix) for suffix in _SOURCE_METRIC_SUFFIXES)
+        probe = normalized
 
 
 def _entity_object_id(entity_id: str) -> str:

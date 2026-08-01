@@ -3802,10 +3802,21 @@ def test_options_source_merge_excludes_reactive_energy() -> None:
     )
 
 
-def test_guided_assignment_uses_terminal_metric_role() -> None:
+@pytest.mark.parametrize(
+    ("entity_id", "expected_role"),
+    (
+        ("sensor.high_voltage_panel_active_power", "real_power"),
+        ("sensor.panel_voltage_rms", "voltage"),
+        ("sensor.panel_current_rms", "current"),
+        ("sensor.panel_reactive_power_average", "reactive_power"),
+    ),
+)
+def test_guided_assignment_uses_terminal_metric_role(
+    entity_id: str,
+    expected_role: str,
+) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
-    entity_id = "sensor.high_voltage_panel_active_power"
     circuit = config_flow._circuit_from_assignment_group(
         {
             "circuit_id": "high_voltage_panel",
@@ -3821,7 +3832,7 @@ def test_guided_assignment_uses_terminal_metric_role() -> None:
     )
 
     assert circuit is not None
-    assert circuit["sensors"][0]["role"] == "real_power"
+    assert circuit["sensors"][0]["role"] == expected_role
 
 
 def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
