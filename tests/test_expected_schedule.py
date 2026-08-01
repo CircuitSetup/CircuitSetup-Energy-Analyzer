@@ -320,6 +320,24 @@ def _nilm_coordinator(
     return coordinator
 
 
+def test_nilm_schedule_source_is_included_for_reconciliation() -> None:
+    for profile, mode in (
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED),
+    ):
+        coordinator = _nilm_coordinator([])
+        coordinator.circuit_configs = (
+            CircuitConfig(
+                circuit_id="mains",
+                name="Shared source",
+                appliance_profile=profile,
+                mode=mode,
+            ),
+        )
+
+        assert expected_schedule_circuit_ids(coordinator) == {"mains"}
+
+
 def test_completed_window_with_minimum_runtime_is_not_missed() -> None:
     events = [
         CircuitEvent(

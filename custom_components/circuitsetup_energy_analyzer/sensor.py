@@ -2259,12 +2259,14 @@ def sensor_description_applies(
 ) -> bool:
     """Return whether a diagnostic sensor is useful for this circuit."""
     key = description.key
-    if key in _CORE_SENSOR_KEYS:
-        return True
-
-    roles = _sensor_roles(circuit)
     profile = _appliance_profile(circuit)
     mode = _circuit_mode(circuit)
+    if key in _CORE_SENSOR_KEYS:
+        return key != "activity_summary" or (
+            mode is not CircuitMode.MIXED and profile is not ApplianceProfile.MIXED
+        )
+
+    roles = _sensor_roles(circuit)
     is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
     supports_direct = supports_direct_appliance_analysis(circuit)
     supports_power_quality = supports_power_quality_analysis(circuit)

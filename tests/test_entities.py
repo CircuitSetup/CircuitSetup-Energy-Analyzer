@@ -3318,6 +3318,7 @@ def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
     )
 
     for key in (
+        "activity_summary",
         "run_cycle_count",
         "power_quality_score",
         "reactive_power_drift",

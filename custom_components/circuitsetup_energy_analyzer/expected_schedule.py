@@ -473,7 +473,8 @@ def expected_schedule_circuit_ids(coordinator: Any) -> set[str]:
         for appliance_key in raw_settings
         if (target := _schedule_target(store_data, str(appliance_key or "").strip()))
         and (
-            (config := configs.get(target.circuit_id)) is None
+            target.assignment_id is not None
+            or (config := configs.get(target.circuit_id)) is None
             or supports_direct_appliance_analysis(config)
         )
     }
