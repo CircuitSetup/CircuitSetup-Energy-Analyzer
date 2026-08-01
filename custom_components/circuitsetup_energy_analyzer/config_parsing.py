@@ -224,7 +224,7 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
     )
     return harmonic_measurement is not None or (
         reactive_energy_measurement
-        and not _has_metric_suffix(object_id, _REAL_POWER_METRIC_SUFFIXES)
+        and not _has_metric_suffix(object_id, _NON_ENERGY_METRIC_SUFFIXES)
     )
 
 
@@ -547,6 +547,11 @@ _SOURCE_METRIC_SUFFIXES = (
     "_pf",
     "_hz",
 )
+_NON_ENERGY_METRIC_SUFFIXES = tuple(
+    suffix.removeprefix("_")
+    for suffix in _SOURCE_METRIC_SUFFIXES
+    if suffix not in {"_energy", "_kvarh", "_kwh", "_mwh", "_varh", "_wh"}
+)
 _SOURCE_LEG_SUFFIXES = (
     "_leg_a",
     "_leg_b",
@@ -656,11 +661,23 @@ def _strip_trailing_leg_token(object_id: str) -> str:
 def _strip_trailing_source_qualifiers(object_id: str) -> str:
     stripped = object_id
     while True:
-        normalized = _strip_trailing_leg_token(stripped)
-        normalized = re.sub(r"_\d+$", "", normalized)
-        if normalized == stripped:
-            return stripped
-        stripped = normalized
+        without_leg = _strip_trailing_leg_token(stripped)
+        if without_leg != stripped:
+            stripped = without_leg
+            continue
+        without_index = re.sub(r"_\d+$", "", stripped)
+        if without_index != stripped:
+            metric_probe = without_index
+            while (
+                without_leg := _strip_trailing_leg_token(metric_probe)
+            ) != metric_probe:
+                metric_probe = without_leg
+            if any(
+                metric_probe.endswith(suffix) for suffix in _SOURCE_METRIC_SUFFIXES
+            ):
+                stripped = without_index
+                continue
+        return stripped
 
 
 def _entity_object_id(entity_id: str) -> str:

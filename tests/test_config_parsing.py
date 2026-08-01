@@ -77,6 +77,23 @@ def test_config_parser_preserves_numbered_channel_basename() -> None:
     assert [config.circuit_id for config in configs] == ["hvac_1", "hvac_2"]
 
 
+def test_config_parser_preserves_metric_free_numbered_channels() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.channel_1",
+                "sensor.channel_2",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["channel_1", "channel_2"]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
@@ -101,6 +118,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.energy_meter_house_total_power"},
                         {"entity_id": "sensor.reactive_energy_monitor_power"},
                         {"entity_id": "sensor.varh_meter_active_power"},
+                        {"entity_id": "sensor.reactive_energy_monitor_current"},
+                        {"entity_id": "sensor.varh_meter_voltage"},
                         {"entity_id": "sensor.harmonic_filter_power"},
                         {"entity_id": "sensor.high_voltage_panel_active_power"},
                         {"entity_id": "sensor.current_pump_active_power"},
@@ -133,6 +152,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.energy_meter_house_total_power", SensorRole.REAL_POWER),
         ("sensor.reactive_energy_monitor_power", SensorRole.REAL_POWER),
         ("sensor.varh_meter_active_power", SensorRole.REAL_POWER),
+        ("sensor.reactive_energy_monitor_current", SensorRole.CURRENT),
+        ("sensor.varh_meter_voltage", SensorRole.VOLTAGE),
         ("sensor.harmonic_filter_power", SensorRole.REAL_POWER),
         ("sensor.high_voltage_panel_active_power", SensorRole.REAL_POWER),
         ("sensor.current_pump_active_power", SensorRole.REAL_POWER),
