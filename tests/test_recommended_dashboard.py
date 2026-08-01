@@ -23,7 +23,6 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import (
     SUMMARY_CARD,
     build_recommended_dashboard,
     dashboard_graph_module_resource,
-    dashboard_preflight_summary,
 )
 from custom_components.circuitsetup_energy_analyzer.managers import (
     dashboard_controller as dashboard_storage,
@@ -167,42 +166,9 @@ def _dashboard_views(config: dict[str, object]) -> list[dict[str, object]]:
     return [view for view in views if isinstance(view, dict)]
 
 
-def _entity_ref_counts_by_view(
-    config: dict[str, object],
-) -> dict[str, dict[str, int]]:
-    counts_by_view: dict[str, dict[str, int]] = {}
-    for view in _dashboard_views(config):
-        counts: dict[str, int] = {}
-
-        def walk(value: object, target_counts: dict[str, int]) -> None:
-            if isinstance(value, str):
-                if value.startswith(
-                    ("sensor.", "binary_sensor.", "button.", "select.", "number.")
-                ):
-                    target_counts[value] = target_counts.get(value, 0) + 1
-            elif isinstance(value, dict):
-                for nested in value.values():
-                    walk(nested, target_counts)
-            elif isinstance(value, list):
-                for nested in value:
-                    walk(nested, target_counts)
-
-        walk(view, counts)
-        counts_by_view[str(view.get("path") or "")] = counts
-    return counts_by_view
-
-
 def _card_of_type(config: dict[str, object], card_type: str) -> dict[str, object]:
     return next(
         card for card in _dashboard_cards(config) if card.get("type") == card_type
-    )
-
-
-def _dashboard_section(config: dict[str, object], title: str) -> dict[str, object]:
-    return next(
-        section
-        for section in _dashboard_sections(config)
-        if section.get("title") == title
     )
 
 
@@ -221,24 +187,6 @@ def _dashboard_cards(node: object) -> list[dict[str, object]]:
 
 def _card_with_title(node: object, title: str) -> dict[str, object]:
     return next(card for card in _dashboard_cards(node) if card.get("title") == title)
-
-
-def _entity_ref_count(config: dict[str, object], entity_id: str) -> int:
-    count = 0
-
-    def walk(value: object) -> None:
-        nonlocal count
-        if value == entity_id:
-            count += 1
-        elif isinstance(value, dict):
-            for nested in value.values():
-                walk(nested)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-
-    walk(config)
-    return count
 
 
 def _markdown_contents(config: dict[str, object]) -> list[str]:
@@ -1276,30 +1224,6 @@ def test_dashboard_omits_empty_views_and_cards(appliance_count: int) -> None:
             assert all(card for card in section["cards"])
 
 
-def test_dashboard_preflight_reports_views_and_visual_capabilities() -> None:
-    preflight = dashboard_preflight_summary(
-        _example_circuits(),
-        DASHBOARD_LAYOUT_STANDARD,
-        outdoor_temperature_entity="sensor.outdoor_temperature",
-    )
-
-    assert preflight["views"] == [
-        "Home",
-        "Energy & Costs",
-        "Insights",
-    ]
-    assert preflight["capabilities"] == {
-        "house_flow": True,
-        "appliance_grid": True,
-        "energy_cost": True,
-        "running_timeline": True,
-        "mains_nilm": True,
-        "weather": True,
-        "water": False,
-    }
-    assert preflight["costs"] in {"recorded", "estimated", "unavailable"}
-
-
 def test_generated_dashboard_uses_dashboard_example_sections() -> None:
     dashboard = build_recommended_dashboard(
         _example_circuits(),
@@ -1511,18 +1435,16 @@ def test_dashboard_omits_empty_appliance_status_for_mains_only() -> None:
         (mains,),
         DASHBOARD_LAYOUT_STANDARD,
     )
-    preflight = dashboard_preflight_summary(
-        (mains,),
-        DASHBOARD_LAYOUT_STANDARD,
-    )
-
     assert not [
         card
         for card in _dashboard_cards(dashboard)
         if card.get("type")
         == "custom:circuitsetup-energy-analyzer-appliance-grid"
     ]
-    assert preflight["will_include"] == ["Home", "Insights"]
+    assert [view["title"] for view in _dashboard_views(dashboard)] == [
+        "Home",
+        "Insights",
+    ]
 
 
 def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> None:
@@ -1534,51 +1456,6 @@ def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> 
     assert "mains-nilm" not in {
         view["path"] for view in _dashboard_views(dashboard)
     }
-
-
-def test_dashboard_preflight_summarizes_included_and_skipped_sections() -> None:
-    preflight = dashboard_preflight_summary(
-        _example_circuits(),
-        DASHBOARD_LAYOUT_STANDARD,
-    )
-
-    assert preflight["layout"] == DASHBOARD_LAYOUT_STANDARD
-    assert preflight["will_include"] == [
-        "Home",
-        "Energy & Costs",
-        "Insights",
-    ]
-    assert preflight["nilm_enabled"] is True
-    assert preflight["estimated_appliance_count"] == 0
-
-
-def test_dashboard_preflight_reports_missing_and_disabled_entities() -> None:
-    hass = SimpleNamespace(
-        entity_registry=SimpleNamespace(
-            entities={
-                "sensor.fridge_activity": _registry_entry(
-                    "sensor.fridge_activity",
-                    "entry-1_fridge_activity_summary",
-                ),
-                "sensor.fridge_health": _registry_entry(
-                    "sensor.fridge_health",
-                    "entry-1_fridge_health_summary",
-                    disabled_by="integration",
-                ),
-            }
-        )
-    )
-
-    preflight = dashboard_preflight_summary(
-        (next(iter(_example_circuits())),),
-        DASHBOARD_LAYOUT_STANDARD,
-        hass=hass,
-        entry_id="entry-1",
-    )
-
-    assert "Refrigerator: Health" in preflight["disabled_entities"]
-    assert "Refrigerator: Energy Summary" in preflight["missing_source_data"]
-    assert "Refrigerator: Daily Energy Usage" in preflight["missing_source_data"]
 
 
 def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None:

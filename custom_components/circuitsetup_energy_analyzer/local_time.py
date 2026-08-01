@@ -26,23 +26,6 @@ def local_date(dt: datetime, time_zone: TimeZone) -> date:
     return as_ha_local(dt, time_zone).date()
 
 
-def local_day_type(dt: datetime, time_zone: TimeZone) -> str:
-    """Return weekday/weekend for a Home Assistant local timestamp."""
-    return "weekend" if as_ha_local(dt, time_zone).weekday() >= 5 else "weekday"
-
-
-def local_time_bucket(dt: datetime, time_zone: TimeZone) -> str:
-    """Return a coarse Home Assistant local time-of-day bucket."""
-    hour = as_ha_local(dt, time_zone).hour
-    if hour < 6:
-        return "night"
-    if hour < 12:
-        return "morning"
-    if hour < 18:
-        return "afternoon"
-    return "evening"
-
-
 def local_day_start(dt: datetime, time_zone: TimeZone) -> datetime:
     """Return the UTC instant for midnight on the Home Assistant local day."""
     local_dt = as_ha_local(dt, time_zone)

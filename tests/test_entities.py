@@ -170,213 +170,6 @@ def test_circuit_device_info_matches_ranked_existing_area_names(
     assert analyzer_entity.device_info["suggested_area"] == "Basement"
 
 
-def test_apply_entity_profile_to_registry_changes_only_integration_owned_rows(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer import entity
-    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
-
-    class FakeDisabler:
-        INTEGRATION = "integration"
-        USER = "user"
-
-    class FakeRegistry:
-        def __init__(self) -> None:
-            self.entities = {
-                "sensor.fridge_activity_summary": SimpleNamespace(
-                    entity_id="sensor.fridge_activity_summary",
-                    unique_id="entry-1_fridge_activity_summary",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                ),
-                "sensor.fridge_energy_goal_status": SimpleNamespace(
-                    entity_id="sensor.fridge_energy_goal_status",
-                    unique_id="entry-1_fridge_energy_goal_status",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by=None,
-                ),
-                "sensor.fridge_power_quality_evidence": SimpleNamespace(
-                    entity_id="sensor.fridge_power_quality_evidence",
-                    unique_id="entry-1_fridge_power_quality_evidence",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="integration",
-                ),
-                "sensor.fridge_alert_evidence": SimpleNamespace(
-                    entity_id="sensor.fridge_alert_evidence",
-                    unique_id="entry-1_fridge_alert_evidence",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="user",
-                ),
-            }
-            self.updated: list[tuple[str, object]] = []
-
-        def async_update_entity(self, entity_id, **kwargs) -> None:
-            self.updated.append((entity_id, kwargs.get("disabled_by")))
-            self.entities[entity_id].disabled_by = kwargs.get("disabled_by")
-
-    fake_registry = FakeRegistry()
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry_module.RegistryEntryDisabler = FakeDisabler
-    entity_registry_module.async_get = lambda hass: hass.entity_registry
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    simple_plan = entity.apply_entity_profile_to_registry(
-        SimpleNamespace(entity_registry=fake_registry),
-        entry_id="entry-1",
-        entity_domain="sensor",
-        tier_by_unique_id_suffix={
-            "activity_summary": EntityTier.SUMMARY,
-            "energy_goal_status": EntityTier.FEATURE,
-            "power_quality_evidence": EntityTier.DIAGNOSTIC,
-            "alert_evidence": EntityTier.DIAGNOSTIC,
-        },
-        detail_level="simple",
-    )
-
-    assert simple_plan["will_disable"] == 1
-    assert fake_registry.updated == [
-        ("sensor.fridge_energy_goal_status", "integration")
-    ]
-
-    expert_plan = entity.apply_entity_profile_to_registry(
-        SimpleNamespace(entity_registry=fake_registry),
-        entry_id="entry-1",
-        entity_domain="sensor",
-        tier_by_unique_id_suffix={
-            "activity_summary": EntityTier.SUMMARY,
-            "energy_goal_status": EntityTier.FEATURE,
-            "power_quality_evidence": EntityTier.DIAGNOSTIC,
-            "alert_evidence": EntityTier.DIAGNOSTIC,
-        },
-        detail_level="expert",
-    )
-
-    assert expert_plan["will_enable"] == 2
-    assert expert_plan["left_user_disabled"] == 1
-    assert fake_registry.updated[-2:] == [
-        ("sensor.fridge_energy_goal_status", None),
-        ("sensor.fridge_power_quality_evidence", None),
-    ]
-
-
-def test_enable_summary_registry_entries_repairs_newly_promoted_entities(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer import entity
-    from custom_components.circuitsetup_energy_analyzer.entity import EntityTier
-
-    class FakeRegistry:
-        def __init__(self) -> None:
-            self.entities = {
-                "sensor.mains_nilm_nilm_unknown_loads": SimpleNamespace(
-                    entity_id="sensor.mains_nilm_nilm_unknown_loads",
-                    unique_id="entry-1_mains_nilm_unknown_loads",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="integration",
-                ),
-                "sensor.mains_nilm_nilm_discovered_signatures": SimpleNamespace(
-                    entity_id="sensor.mains_nilm_nilm_discovered_signatures",
-                    unique_id="entry-1_mains_nilm_signature_count",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="integration",
-                ),
-                "sensor.mains_nilm_power_quality_evidence": SimpleNamespace(
-                    entity_id="sensor.mains_nilm_power_quality_evidence",
-                    unique_id="entry-1_mains_power_quality_evidence",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="integration",
-                ),
-                "sensor.mains_nilm_activity_summary": SimpleNamespace(
-                    entity_id="sensor.mains_nilm_activity_summary",
-                    unique_id="entry-1_mains_activity_summary",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    disabled_by="user",
-                ),
-            }
-            self.updated: list[tuple[str, object]] = []
-
-        def async_update_entity(self, entity_id, **kwargs) -> None:
-            self.updated.append((entity_id, kwargs.get("disabled_by")))
-            self.entities[entity_id].disabled_by = kwargs.get("disabled_by")
-
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry_module.async_get = lambda hass: hass.entity_registry
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    plan = entity.enable_summary_registry_entries(
-        SimpleNamespace(entity_registry=FakeRegistry()),
-        entry_id="entry-1",
-        entity_domain="sensor",
-        tier_by_unique_id_suffix={
-            "activity_summary": EntityTier.SUMMARY,
-            "nilm_signature_count": EntityTier.SUMMARY,
-            "nilm_unknown_loads": EntityTier.SUMMARY,
-            "power_quality_evidence": EntityTier.DIAGNOSTIC,
-        },
-    )
-
-    assert plan == {
-        "enabled": 2,
-        "left_user_disabled": 1,
-        "unchanged": 0,
-        "ignored": 1,
-        "actions": [
-            {
-                "action": "enable",
-                "entity_id": "sensor.mains_nilm_nilm_unknown_loads",
-                "suffix": "nilm_unknown_loads",
-            },
-            {
-                "action": "enable",
-                "entity_id": "sensor.mains_nilm_nilm_discovered_signatures",
-                "suffix": "nilm_signature_count",
-            },
-            {
-                "action": "ignore",
-                "entity_id": "sensor.mains_nilm_power_quality_evidence",
-                "suffix": "power_quality_evidence",
-            },
-            {
-                "action": "left_user_disabled",
-                "entity_id": "sensor.mains_nilm_activity_summary",
-                "suffix": "activity_summary",
-            },
-        ],
-    }
-
-
 def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) -> None:
     import sys
     from types import ModuleType
@@ -498,82 +291,6 @@ def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(
     assert fake_registry.updated == [
         ("sensor.fridge_last_event", "integration"),
     ]
-
-
-def test_sync_entity_registry_visibility_unhides_integration_hidden_for_expert(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer import entity
-
-    class FakeHider:
-        INTEGRATION = "integration"
-        USER = "user"
-
-    class FakeRegistry:
-        def __init__(self) -> None:
-            self.entities = {
-                "binary_sensor.fridge_learning": SimpleNamespace(
-                    entity_id="binary_sensor.fridge_learning",
-                    unique_id="entry-1_fridge_learning",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    hidden_by="integration",
-                ),
-                "binary_sensor.fridge_data_quality_problem": SimpleNamespace(
-                    entity_id="binary_sensor.fridge_data_quality_problem",
-                    unique_id="entry-1_fridge_data_quality_problem",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    hidden_by="user",
-                ),
-                "binary_sensor.fridge_water_flow_mismatch": SimpleNamespace(
-                    entity_id="binary_sensor.fridge_water_flow_mismatch",
-                    unique_id="entry-1_fridge_water_flow_mismatch",
-                    config_entry_id="entry-1",
-                    platform=DOMAIN,
-                    hidden_by=None,
-                ),
-            }
-            self.updated: list[tuple[str, object]] = []
-
-        def async_update_entity(self, entity_id, **kwargs) -> None:
-            if "hidden_by" in kwargs:
-                self.updated.append((entity_id, kwargs["hidden_by"]))
-                self.entities[entity_id].hidden_by = kwargs["hidden_by"]
-            if "entity_category" in kwargs:
-                self.entities[entity_id].entity_category = kwargs["entity_category"]
-
-    fake_registry = FakeRegistry()
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-    entity_registry_module.RegistryEntryHider = FakeHider
-    entity_registry_module.async_get = lambda hass: hass.entity_registry
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    entity.sync_entity_registry_visibility(
-        SimpleNamespace(entity_registry=fake_registry),
-        entry_id="entry-1",
-        entity_domain="binary_sensor",
-        hidden_unique_id_suffixes={"learning", "data_quality_problem"},
-        detail_level=ENTITY_DETAIL_EXPERT,
-    )
-
-    assert fake_registry.updated == [("binary_sensor.fridge_learning", None)]
-    assert (
-        fake_registry.entities["binary_sensor.fridge_data_quality_problem"].hidden_by
-        == "user"
-    )
 
 
 class _VisibilitySetupFakeHider:
@@ -831,7 +548,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
         demand_peak_rank_value,
         demand_peak_status_value,
         demand_status_value,
-        electrical_health_value,
         energy_dashboard_status_value,
         energy_goal_status_value,
         energy_goal_usage_value,
@@ -1140,7 +856,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert circuit_mode_value(state, "fridge") == "Dual Phase"
     assert power_flow_value(state, "fridge") == "Generation / Solar Export"
     assert activity_summary_value(state, "fridge") == "Idle"
-    assert electrical_health_value(state, "fridge") == "Possible Imbalance"
     assert energy_summary_value(state, "fridge") == "High Usage"
     assert daily_energy_usage_value(state, "fridge") == 12.9
     assert energy_usage_share_value(state, "fridge") == 25.8
@@ -1220,7 +935,6 @@ def test_sensor_helpers_return_diagnostic_values_and_defaults() -> None:
     assert recent_activity_value(state, "unknown") == "No recent activity"
     assert sensitivity_value(state, "unknown") == "Balanced"
     assert activity_summary_value(state, "unknown") == "No Activity"
-    assert electrical_health_value(state, "unknown") == "Needs Metrics"
     assert energy_summary_value(state, "unknown") == "Needs Energy Data"
     assert daily_energy_usage_value(state, "unknown") == 0.0
     assert energy_usage_share_value(state, "unknown") == 0.0
@@ -1835,7 +1549,6 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
         activity_summary_attributes,
         activity_summary_value,
         electrical_health_attributes,
-        electrical_health_value,
         energy_summary_attributes,
         energy_summary_value,
         health_summary_attributes,
@@ -1904,8 +1617,8 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
         "summary_explanation": "The appliance is currently active.",
     }
 
-    assert electrical_health_value(state, "washer") == "Possible Metric Mismatch"
     electrical_attrs = electrical_health_attributes(state, "washer")
+    assert electrical_attrs["summary"] == "Possible Metric Mismatch"
     assert electrical_attrs["metric_consistency_status"] == "metric_mismatch"
     assert electrical_attrs["metric_consistency_score"] == 28.5
     assert electrical_attrs["alert_confirmed"] is True
@@ -1936,7 +1649,6 @@ def test_summary_sensors_answer_primary_user_questions() -> None:
 def test_health_summary_attributes_explain_observation_without_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         electrical_health_attributes,
-        electrical_health_value,
         energy_summary_attributes,
         energy_summary_value,
         health_summary_attributes,
@@ -1963,8 +1675,9 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
         power_quality_score_by_circuit={"pump": 0.35},
     )
 
-    assert electrical_health_value(power_quality_only_state, "pump") == (
-        "Possible Power Quality Change"
+    assert (
+        electrical_health_attributes(power_quality_only_state, "pump")["summary"]
+        == "Possible Power Quality Change"
     )
     assert (
         electrical_health_attributes(power_quality_only_state, "pump")[
@@ -1984,7 +1697,9 @@ def test_health_summary_attributes_explain_observation_without_alert() -> None:
         power_quality_score_by_circuit={"mixed": 0.35},
     )
 
-    assert electrical_health_value(score_only_state, "mixed") == "Needs Metrics"
+    assert electrical_health_attributes(score_only_state, "mixed")["summary"] == (
+        "Needs Metrics"
+    )
 
     power_only_state = AnalyzerState()
     assert energy_summary_value(power_only_state, "pump") == "Needs Energy Data"

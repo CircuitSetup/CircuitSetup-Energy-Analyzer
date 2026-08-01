@@ -15805,18 +15805,10 @@ async def test_settings_recommendation_episode_survives_retention_after_restart(
 
 @pytest.mark.asyncio
 async def test_set_entity_detail_level_persists_options_and_reloads_entry(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
-    from custom_components.circuitsetup_energy_analyzer import entity as entity_module
-
-    apply_calls: list[tuple[str, str]] = []
-
-    def fake_apply(*_args, entity_domain: str, detail_level: str, **_kwargs):
-        apply_calls.append((entity_domain, detail_level))
-        return {}
 
     class FakeConfigEntries:
         def __init__(self) -> None:
@@ -15830,12 +15822,6 @@ async def test_set_entity_detail_level_persists_options_and_reloads_entry(
 
         async def async_reload(self, entry_id: str) -> None:
             self.reloaded.append(entry_id)
-
-    monkeypatch.setattr(
-        entity_module,
-        "apply_entity_profile_to_registry",
-        fake_apply,
-    )
 
     entry = SimpleNamespace(entry_id="entry-1", data={}, options=MappingProxyType({}))
     hass = SimpleNamespace(
@@ -15858,7 +15844,6 @@ async def test_set_entity_detail_level_persists_options_and_reloads_entry(
     ]
     assert coordinator.options[CONF_ENTITY_DETAIL_LEVEL] == ENTITY_DETAIL_EXPERT
     assert hass.config_entries.reloaded == ["entry-1"]
-    assert apply_calls == []
 
 
 @pytest.mark.asyncio

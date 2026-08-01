@@ -200,11 +200,6 @@ def compact_creation_rule_for_entity(domain: str, key: str) -> EntityCreationRul
     return COMPACT_ENTITY_RULES[(domain, key)]
 
 
-def compact_creation_rules_by_key() -> Mapping[tuple[str, str], EntityCreationRule]:
-    """Return all known compact-model creation rules."""
-    return COMPACT_ENTITY_RULES
-
-
 def selected_entity_groups_for_coordinator(coordinator: Any) -> set[EntityGroup]:
     """Return compact expert groups selected for this config entry."""
     options = getattr(coordinator, "options", {})
@@ -248,55 +243,6 @@ def compact_descriptions_for_setup(
         ):
             compact_descriptions.append(description)
     return tuple(compact_descriptions)
-
-
-def desired_compact_entity_rules(
-    *,
-    current_entities: Collection[tuple[str, str]],
-    circuit: Any,
-    coordinator: Any,
-    detail_level: str,
-    selected_groups: Collection[str | EntityGroup],
-) -> tuple[EntityCreationRule, ...]:
-    """Return compact rules for currently applicable entity keys."""
-    rules = (
-        compact_creation_rule_for_entity(domain, key)
-        for domain, key in sorted(current_entities)
-    )
-    return tuple(
-        rule
-        for rule in rules
-        if should_create_entity(
-            rule=rule,
-            circuit=circuit,
-            coordinator=coordinator,
-            detail_level=detail_level,
-            selected_groups=selected_groups,
-        )
-    )
-
-
-def compact_entity_count_preview(
-    *,
-    current_entities: Collection[tuple[str, str]],
-    circuit: Any,
-    coordinator: Any,
-    detail_level: str,
-    selected_groups: Collection[str | EntityGroup],
-) -> dict[str, int]:
-    """Return desired compact entity counts by Home Assistant domain."""
-    counts = dict.fromkeys(_COUNT_DOMAINS, 0)
-    rules = desired_compact_entity_rules(
-        current_entities=current_entities,
-        circuit=circuit,
-        coordinator=coordinator,
-        detail_level=detail_level,
-        selected_groups=selected_groups,
-    )
-    for rule in rules:
-        counts[rule.domain] = counts.get(rule.domain, 0) + 1
-    counts["total"] = sum(counts.values())
-    return counts
 
 
 def _normalize_detail_level(value: Any) -> str:
@@ -352,9 +298,6 @@ def _rule(
         create_in_standard=standard,
         create_in_expert=expert,
     )
-
-
-_COUNT_DOMAINS = ("sensor", "binary_sensor", "button", "select", "number", "switch")
 
 
 def _graph_sensor(

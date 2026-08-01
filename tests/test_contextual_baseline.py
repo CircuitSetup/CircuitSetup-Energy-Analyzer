@@ -14,7 +14,6 @@ from custom_components.circuitsetup_energy_analyzer.contextual_baseline import (
     contextual_sample_to_dict,
     day_type_for_datetime,
     humidity_bin,
-    rain_intensity_bin,
     rain_state,
     season_for_datetime,
     select_contextual_baseline,
@@ -87,11 +86,6 @@ def test_context_bucket_helpers() -> None:
     assert humidity_bin(55.0) == "moderate"
     assert humidity_bin(75.0) == "humid"
     assert humidity_bin(85.0) == "very_humid"
-    assert rain_intensity_bin(None) == "unknown"
-    assert rain_intensity_bin(0.0) == "none"
-    assert rain_intensity_bin(0.08) == "light"
-    assert rain_intensity_bin(0.4) == "moderate"
-    assert rain_intensity_bin(0.9) == "heavy"
     assert rain_state(False, None) == "dry"
     assert rain_state(True, 0.9) == "heavy_rain"
     assert rain_state(None, 0.4) == "raining"

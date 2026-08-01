@@ -802,53 +802,10 @@ def _nilm_edges_for_circuit(coordinator: Any, circuit_id: str) -> list[NilmEdge]
     ]
 
 
-def _latest_nilm_session(
-    sessions: Iterable[NilmSession],
-) -> NilmSession | None:
-    latest: NilmSession | None = None
-    latest_seen: datetime | None = None
-    for session in sessions:
-        seen = _nilm_session_seen(session)
-        if seen is None:
-            continue
-        if latest_seen is None or seen > latest_seen:
-            latest = session
-            latest_seen = seen
-    return latest
-
-
 def _nilm_session_seen(session: NilmSession | None) -> datetime | None:
     if session is None:
         return None
     return session.end or session.start
-
-
-def _nilm_reference_date(
-    edges: list[NilmEdge],
-    sessions: list[NilmSession],
-) -> Any:
-    latest_edge = max((edge.timestamp for edge in edges), default=None)
-    if latest_edge is not None:
-        return latest_edge.date()
-    latest_session = _latest_nilm_session(sessions)
-    seen = _nilm_session_seen(latest_session)
-    return seen.date() if seen else None
-
-
-def _nilm_daily_energy(
-    sessions: list[NilmSession],
-    reference_date: Any,
-) -> float:
-    if reference_date is None:
-        return 0.0
-    return round(
-        sum(
-            session.estimated_energy_kwh
-            for session in sessions
-            if session.start.date() == reference_date
-        ),
-        3,
-    )
 
 
 def _mains_source_entity_id(coordinator: Any, circuit_id: str) -> str | None:

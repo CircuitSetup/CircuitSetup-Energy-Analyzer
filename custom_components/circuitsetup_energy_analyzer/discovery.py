@@ -122,25 +122,6 @@ def friendly_source_name(value: str) -> str:
     return " ".join("AC" if word.lower() == "ac" else word.title() for word in words)
 
 
-def score_circuitsetup_candidate(sensor: DiscoveredSensor) -> int:
-    """Score likely CircuitSetup energy meter sensors higher."""
-    score = 0
-    text = f"{sensor.entity_id} {sensor.name}".lower()
-
-    if sensor.integration_domain == "esphome":
-        score += 2
-    if "circuitsetup" in text:
-        score += 2
-    if "energy" in text or "meter" in text:
-        score += 1
-    if sensor.role is not None:
-        score += 1
-    if sensor.device_class in _DEVICE_CLASSES:
-        score += 1
-
-    return score
-
-
 def is_energy_source_sensor(sensor: DiscoveredSensor) -> bool:
     """Return true when a sensor looks useful for energy analysis."""
     if sensor.device_class in _DEVICE_CLASSES:
@@ -149,15 +130,6 @@ def is_energy_source_sensor(sensor: DiscoveredSensor) -> bool:
         return True
     unit = (sensor.unit or "").strip().lower()
     return unit in _ENERGY_SOURCE_UNITS
-
-
-async def async_discover_sensors(hass: Any) -> list[DiscoveredSensor]:
-    """Discover candidate sensor entities from HA registry and current states."""
-    return [
-        sensor
-        for sensor in _build_discovered_sensors(hass)
-        if score_circuitsetup_candidate(sensor) >= 3
-    ]
 
 
 async def async_discover_energy_source_entities(hass: Any) -> list[str]:

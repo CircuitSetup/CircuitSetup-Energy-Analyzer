@@ -17,14 +17,12 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.entity_catalog import (
+    COMPACT_ENTITY_RULES,
     EntityCreationRule,
     EntityExposure,
     EntityGroup,
     compact_creation_rule_for_entity,
-    compact_creation_rules_by_key,
     compact_descriptions_for_setup,
-    compact_entity_count_preview,
-    desired_compact_entity_rules,
     selected_entity_groups_for_coordinator,
     should_create_entity,
 )
@@ -149,7 +147,7 @@ def test_should_create_entity_defaults_invalid_detail_levels_to_simple() -> None
 
 
 def test_pause_alerts_button_is_not_a_current_compact_entity() -> None:
-    assert ("button", "pause_alerts") not in compact_creation_rules_by_key()
+    assert ("button", "pause_alerts") not in COMPACT_ENTITY_RULES
 
 
 def test_should_create_entity_checks_feature_source_applicability() -> None:
@@ -238,53 +236,6 @@ def test_compact_creation_catalog_rules_have_entity_descriptions() -> None:
         ),
     }
 
-    missing = set(compact_creation_rules_by_key()) - description_keys
+    missing = set(COMPACT_ENTITY_RULES) - description_keys
 
     assert missing == set()
-
-
-def test_desired_compact_rules_preview_uses_current_applicability() -> None:
-    current_entities = {
-        ("sensor", "health_summary"),
-        ("sensor", "activity_summary"),
-        ("sensor", "billing_cycle_usage"),
-        ("sensor", "run_cycle_runtime"),
-        ("select", "alert_sensitivity"),
-    }
-
-    simple_rules = desired_compact_entity_rules(
-        current_entities=current_entities,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_SIMPLE,
-        selected_groups=(),
-    )
-    expert_rules = desired_compact_entity_rules(
-        current_entities=current_entities,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_EXPERT,
-        selected_groups={EntityGroup.CYCLE_METRICS},
-    )
-
-    assert {(rule.domain, rule.key) for rule in simple_rules} == {
-        ("sensor", "health_summary"),
-        ("sensor", "activity_summary"),
-        ("select", "alert_sensitivity"),
-    }
-    assert {(rule.domain, rule.key) for rule in expert_rules} == current_entities
-    assert compact_entity_count_preview(
-        current_entities=current_entities,
-        circuit=None,
-        coordinator=None,
-        detail_level=ENTITY_DETAIL_SIMPLE,
-        selected_groups=(),
-    ) == {
-        "sensor": 2,
-        "binary_sensor": 0,
-        "button": 0,
-        "select": 1,
-        "number": 0,
-        "switch": 0,
-        "total": 3,
-    }
