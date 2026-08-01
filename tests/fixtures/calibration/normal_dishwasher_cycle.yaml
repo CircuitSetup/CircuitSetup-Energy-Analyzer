@@ -2,7 +2,7 @@ schema_version: 1
 id: normal_dishwasher_cycle
 description: Normal dishwasher wash and heated-dry cycle stays quiet.
 scenario_type: normal
-appliance_profile: mixed
+appliance_profile: dishwasher
 circuit_mode: single_phase
 power_flow: load
 start_time: "2026-01-01T00:00:00+00:00"
