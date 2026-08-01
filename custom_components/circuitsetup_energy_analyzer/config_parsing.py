@@ -213,8 +213,15 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def _untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = _entity_object_id(entity_id)
+    harmonic_object_id = re.sub(
+        r"_\d+$", "", _strip_trailing_leg_token(object_id)
+    )
     return (
-        "harmonic" in set(object_id.split("_"))
+        re.search(
+            r"(?:^|_)harmonic(?:_(?:power|watts?|[km]?w))?$",
+            harmonic_object_id,
+        )
+        is not None
         or re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
         or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
     )
