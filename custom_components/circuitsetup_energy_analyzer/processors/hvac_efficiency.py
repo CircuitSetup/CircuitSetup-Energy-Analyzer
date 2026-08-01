@@ -28,6 +28,7 @@ from ..hvac_efficiency import (
     episode_to_dict,
     evaluate_efficiency,
     observation_response_mode,
+    response_comparison_token,
 )
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile
@@ -892,6 +893,53 @@ def _compact_circuit_response_history(
                 not in dates_by_mode[opposing_mode]
             )
         ]
+        contexts: dict[str, list[HvacResponseEpisode]] = {}
+        for episode in episodes:
+            if episode.complete and not episode.excluded_from_baseline:
+                contexts.setdefault(response_comparison_token(episode), []).append(
+                    episode
+                )
+        if contexts:
+            context_by_stream = context.store_data.hvac_response_context_by_stream
+            raw_context = context_by_stream.get(stream_id, {})
+            selected = str(raw_context.get("selected") or "")
+            known = {
+                str(token)
+                for token in raw_context.get("known", ())
+                if str(token)
+            }
+            new_contexts = set(contexts) - known
+            if new_contexts:
+                selected = max(
+                    new_contexts,
+                    key=lambda token: max(
+                        episode.ended_at or episode.started_at
+                        for episode in contexts[token]
+                    ),
+                )
+            elif selected not in contexts:
+                selected = max(
+                    contexts,
+                    key=lambda token: (
+                        len(contexts[token]),
+                        max(
+                            episode.ended_at or episode.started_at
+                            for episode in contexts[token]
+                        ),
+                    ),
+                )
+            updated_context = {
+                "selected": selected,
+                "known": sorted(known | set(contexts)),
+            }
+            if updated_context != raw_context:
+                context_by_stream[stream_id] = updated_context
+                changed = True
+            episodes = [
+                episode
+                for episode in episodes
+                if response_comparison_token(episode) == selected
+            ]
         compacted = pending_old_era
         for episode in compact_completed_core_days(
             episodes,

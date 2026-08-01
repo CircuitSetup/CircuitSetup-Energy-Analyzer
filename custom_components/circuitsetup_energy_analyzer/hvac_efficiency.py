@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence, Set
@@ -671,6 +672,11 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
         episode.participant_signature,
         episode.supporting_blower_ids,
     )
+
+
+def response_comparison_token(episode: HvacResponseEpisode) -> str:
+    """Return a stable persisted identity for comparable HVAC evidence."""
+    return json.dumps(_comparison_key(episode), separators=(",", ":"))
 
 
 def compact_completed_core_days(

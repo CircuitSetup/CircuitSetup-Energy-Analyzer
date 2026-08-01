@@ -40,6 +40,7 @@ class _ActionCoordinator:
             alert_feedback={},
             alerts=[],
             hvac_baseline_era_by_stream={},
+            hvac_response_context_by_stream={},
             hvac_response_history_by_stream={},
             learning_started_at_by_circuit={},
         )
@@ -336,6 +337,9 @@ async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
     alert_id = notification_id_for_alert(alert)
     coordinator.store_data.alerts = [alert]
     coordinator.state.active_alerts_by_circuit = {"heat_pump": [alert]}
+    coordinator.store_data.hvac_response_context_by_stream[stream_id] = {
+        "selected": "old-context"
+    }
     started = coordinator.now - timedelta(minutes=20)
     coordinator.state.hvac_current_episode_by_stream[stream_id] = episode_to_dict(
         HvacResponseEpisode(
@@ -377,6 +381,7 @@ async def test_expected_hvac_feedback_starts_new_baseline_era() -> None:
         coordinator.now.isoformat()
     )
     assert coordinator.state.hvac_current_episode_by_stream == {}
+    assert coordinator.store_data.hvac_response_context_by_stream == {}
     marker = coordinator.store_data.hvac_response_history_by_stream[stream_id][0]
     assert marker["ended_at"] == coordinator.now.isoformat()
     assert marker["excluded_from_baseline"] is True

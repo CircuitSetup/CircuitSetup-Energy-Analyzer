@@ -1730,6 +1730,55 @@ def test_hvac_efficiency_ignores_history_from_previous_appliance_profile() -> No
     assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 55
 
 
+def test_hvac_new_equipment_context_replaces_mature_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    history = _hvac_response_history(stream_id)
+    for raw in history:
+        raw["participant_signature"] = ["heat_pump", "old"]
+    context.store_data.hvac_response_history_by_stream[stream_id] = history
+    processor = HvacEfficiencyProcessor()
+
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    first_new = _hvac_response_history(stream_id, count=56)[-1]
+    first_new["participant_signature"] = ["heat_pump", "new"]
+    context.store_data.hvac_response_history_by_stream[stream_id].append(first_new)
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    retained = context.store_data.hvac_response_history_by_stream[stream_id]
+    assert len(retained) == 1
+    assert retained[0]["participant_signature"] == ["heat_pump", "new"]
+
+    second_new = _hvac_response_history(stream_id, count=57)[-1]
+    second_new["participant_signature"] = ["heat_pump", "new"]
+    retained.append(second_new)
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 2
+
+
 def test_hvac_efficiency_uses_only_the_current_temperature_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         ConservativeAlertPolicy,
@@ -1787,7 +1836,7 @@ def test_hvac_efficiency_uses_only_the_current_temperature_source() -> None:
     assert payload["streams"][stream_id]["status"] == "provisional"
     assert payload["finding"] is None
     assert result.alerts == result.notifications == []
-    assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 55
+    assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 46
 
 
 def test_hvac_response_requires_maturity_and_never_scores_cooling_blower() -> None:

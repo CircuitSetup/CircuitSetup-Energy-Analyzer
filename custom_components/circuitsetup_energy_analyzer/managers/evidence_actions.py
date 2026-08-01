@@ -288,6 +288,10 @@ class EvidenceActionController:
             return
         store_data = self._coordinator.store_data
         if action == "expected":
+            getattr(store_data, "hvac_response_context_by_stream", {}).pop(
+                stream_id,
+                None,
+            )
             state = self._coordinator.state
             current = getattr(state, "hvac_current_episode_by_stream", {}).pop(
                 stream_id,

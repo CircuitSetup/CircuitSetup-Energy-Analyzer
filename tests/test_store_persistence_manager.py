@@ -70,6 +70,10 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
             "fridge|climate.kitchen|cooling": [{"complete": True}],
             "washer|climate.laundry|cooling": [{"complete": True}],
         },
+        hvac_response_context_by_stream={
+            "fridge|climate.kitchen|cooling": {"selected": "fridge"},
+            "washer|climate.laundry|cooling": {"selected": "washer"},
+        },
         hvac_baseline_era_by_stream={
             "fridge|climate.kitchen|cooling": "era-1",
             "washer|climate.laundry|cooling": "era-2",
@@ -100,6 +104,9 @@ def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     assert [event.circuit_id for event in store_data.events] == ["fridge", "washer"]
     assert store_data.hvac_response_history_by_stream == {
         "washer|climate.laundry|cooling": [{"complete": True}]
+    }
+    assert store_data.hvac_response_context_by_stream == {
+        "washer|climate.laundry|cooling": {"selected": "washer"}
     }
     assert store_data.hvac_baseline_era_by_stream == {
         "washer|climate.laundry|cooling": "era-2"
