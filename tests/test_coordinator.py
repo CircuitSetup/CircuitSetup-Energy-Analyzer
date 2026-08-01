@@ -757,6 +757,62 @@ async def test_relearn_clears_appliance_health_state_and_policy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_relearn_preserves_active_hvac_call_as_excluded_marker() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
+        HvacResponseEpisode,
+        episode_to_dict,
+    )
+
+    now = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        now_fn=lambda: now,
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator.refresh_ux_state_for_circuit = lambda circuit_id, refreshed_at: None
+    coordinator.async_set_updated_data = lambda state: None
+    coordinator._async_save_store = AsyncMock()
+    stream_id = "heat_pump|climate.downstairs|cooling"
+    coordinator.state.hvac_current_episode_by_stream[stream_id] = episode_to_dict(
+        HvacResponseEpisode(
+            stream_id=stream_id,
+            circuit_id="heat_pump",
+            thermostat_entity_id="climate.downstairs",
+            mode="cooling",
+            started_at=now - timedelta(minutes=20),
+            ended_at=None,
+            start_temperature_f=78.0,
+            target_temperature_f=72.0,
+            latest_temperature_f=76.0,
+            elapsed_minutes=20.0,
+            active_minutes=20.0,
+            outdoor_temperature_f=90.0,
+            season="summer",
+            weather_mode="cooling",
+            temperature_bin="very_hot",
+            gap_bin="5F+",
+            participant_signature=("heat_pump",),
+            supporting_blower_ids=(),
+            complete=False,
+        ),
+        allow_incomplete=True,
+    )
+
+    await coordinator.async_relearn_baseline("heat_pump")
+
+    marker = coordinator.store_data.hvac_response_history_by_stream[stream_id][0]
+    assert marker["ended_at"] == now.isoformat()
+    assert marker["complete"] is False
+    assert marker["excluded_from_baseline"] is True
+    assert coordinator.state.hvac_current_episode_by_stream == {}
+
+
+@pytest.mark.asyncio
 async def test_relearn_starts_fresh_cold_storage_learning_epoch() -> None:
     from custom_components.circuitsetup_energy_analyzer.cold_storage import (
         COLD_STORAGE_BASELINE_FEATURES,
