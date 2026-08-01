@@ -48,6 +48,39 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
     ]
 
 
+def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "appliance_profile": "mains_nilm",
+                    "mode": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.energy_meter_mains_l1_harmonic"},
+                        {"entity_id": "sensor.energy_meter_mains_l1_watts"},
+                        {"entity_id": "sensor.energy_meter_frequency_1"},
+                        {"entity_id": "sensor.energy_meter_voltage_1"},
+                        {"entity_id": "sensor.energy_meter_house_total_power"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert [(sensor.entity_id, sensor.role) for sensor in configs[0].sensors] == [
+        ("sensor.energy_meter_mains_l1_watts", SensorRole.REAL_POWER),
+        ("sensor.energy_meter_frequency_1", SensorRole.FREQUENCY),
+        ("sensor.energy_meter_voltage_1", SensorRole.VOLTAGE),
+        ("sensor.energy_meter_house_total_power", SensorRole.REAL_POWER),
+    ]
+
+
 def test_config_parser_groups_peak_current_under_mac_suffixed_channel() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

@@ -15,7 +15,7 @@ from .const import (
 from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
-from .discovery import friendly_source_name
+from .discovery import friendly_source_name, infer_sensor_role
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
 )
@@ -204,6 +204,10 @@ def _source_entity_configs_from_sources(
 def _automatic_source_entity_excluded(entity_id: str) -> bool:
     tokens = set(_entity_object_id(entity_id).split("_"))
     return bool(tokens & {"harmonic", "total"})
+
+
+def _harmonic_source_entity(entity_id: str) -> bool:
+    return "harmonic" in set(_entity_object_id(entity_id).split("_"))
 
 
 def mains_context_config_from_sources(
@@ -443,6 +447,8 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
         return raw_sensor
     if isinstance(raw_sensor, str):
+        if _harmonic_source_entity(raw_sensor):
+            return None
         return SensorRef(
             entity_id=raw_sensor,
             role=_sensor_role_from_entity_id(raw_sensor),
@@ -454,10 +460,16 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     entity_id = raw_sensor.get("entity_id")
     if not entity_id:
         return None
-    try:
-        role = SensorRole(raw_sensor.get("role", SensorRole.REAL_POWER.value))
-    except ValueError:
-        return None
+    raw_role = raw_sensor.get("role")
+    if raw_role is None:
+        if _harmonic_source_entity(str(entity_id)):
+            return None
+        role = _sensor_role_from_entity_id(str(entity_id))
+    else:
+        try:
+            role = SensorRole(raw_role)
+        except ValueError:
+            return None
     return SensorRef(
         entity_id=str(entity_id),
         role=role,
@@ -524,6 +536,9 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
 def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
+    inferred_role = infer_sensor_role(entity_id, None)
+    if inferred_role is not None:
+        return inferred_role
     object_id = _entity_object_id(entity_id)
     if _has_metric_suffix(
         object_id,
