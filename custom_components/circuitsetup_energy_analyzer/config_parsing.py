@@ -112,7 +112,11 @@ def _configs_with_merged_source_entity_refs(
         sensor.entity_id for config in configs for sensor in config.sensors
     }
     for entity_id in source_entities:
-        if entity_id in mains_entities or entity_id in existing_source_entities:
+        if (
+            entity_id in mains_entities
+            or entity_id in existing_source_entities
+            or _untyped_source_entity_excluded(entity_id)
+        ):
             continue
         config_index_value = config_index.get(
             _source_circuit_id_from_entity_id(entity_id)

@@ -12,7 +12,13 @@ UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
 _UNIT_SCALE_BY_ROLE = {
-    SensorRole.REAL_POWER: {"kW": 1_000.0, "kw": 1_000.0, "MW": 1_000_000.0},
+    SensorRole.REAL_POWER: {
+        "kW": 1_000.0,
+        "kw": 1_000.0,
+        "KW": 1_000.0,
+        "Kw": 1_000.0,
+        "MW": 1_000_000.0,
+    },
     SensorRole.REACTIVE_POWER: {"kVAR": 1_000.0, "MVAR": 1_000_000.0},
     SensorRole.APPARENT_POWER: {"kVA": 1_000.0, "MVA": 1_000_000.0},
     SensorRole.CURRENT: {"kA": 1_000.0, "mA": 0.001},

@@ -19,7 +19,8 @@ from custom_components.circuitsetup_energy_analyzer.normalize import (
 )
 
 
-def test_build_circuit_sample_converts_kw_to_watts() -> None:
+@pytest.mark.parametrize("unit", ("kW", "KW", "Kw"))
+def test_build_circuit_sample_converts_kw_to_watts(unit: str) -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(
         circuit_id="fridge",
@@ -35,7 +36,7 @@ def test_build_circuit_sample_converts_kw_to_watts() -> None:
         "sensor.fridge_power": SourceState(
             "sensor.fridge_power",
             "0.18",
-            "kW",
+            unit,
             now,
         ),
         "sensor.fridge_current": SourceState(

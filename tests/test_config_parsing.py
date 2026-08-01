@@ -144,6 +144,7 @@ def test_config_parser_does_not_create_orphan_configs_for_unassigned_sources() -
             ],
             CONF_SOURCE_ENTITIES: [
                 "sensor.refrigerator_power",
+                "sensor.refrigerator_kvarh",
                 "sensor.car_charger_l1_harmonic_power",
                 "sensor.house_total_power",
                 "sensor.new_unassigned_power",
@@ -152,6 +153,9 @@ def test_config_parser_does_not_create_orphan_configs_for_unassigned_sources() -
     )
 
     assert [config.circuit_id for config in configs] == ["refrigerator"]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.refrigerator_power"
+    ]
 
 
 def test_config_parser_excludes_harmonic_and_total_automatic_configs() -> None:
