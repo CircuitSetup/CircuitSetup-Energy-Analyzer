@@ -113,6 +113,7 @@ def advance_episode(
     action = str(observation.action or "").lower()
     action_active = action in {"heating", "cooling"}
     range_capabilities = set(observation.available_capabilities)
+    call_active = action_active or "hvac_action" not in range_capabilities
     preserved_target = False
     if (
         current is not None
@@ -156,7 +157,7 @@ def advance_episode(
             return None, None
         missing_temperature = actual is None or target is None
         if missing_temperature:
-            if not action_active:
+            if not call_active:
                 return None, None
             actual = actual if actual is not None else target or 0.0
             target = target if target is not None else actual
@@ -164,7 +165,7 @@ def advance_episode(
         episode_kind = "setpoint_response"
         rejected_call = missing_temperature
         if not _meets_minimum(gap, _MINIMUM_START_GAP_F):
-            if not action_active:
+            if not call_active:
                 return None, None
             episode_kind = "thermostat_call"
             rejected_call = rejected_call or not _meets_minimum(

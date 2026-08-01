@@ -730,10 +730,10 @@ behavior does not get mixed with the old system.
 
 The update path reads only Home Assistant's current in-memory state snapshot.
 It does not query Recorder, call a network service, write files, or save
-synchronously on the Home Assistant event loop. Completed histories are capped
-at 256 records per circuit/thermostat/mode stream, pre-link correlation is
-capped at 256 calls per circuit, and persistence uses the integration's existing
-deferred dirty-save path.
+synchronously on the Home Assistant event loop. Completed response histories
+retain 17 compact core days in Lightweight or 55 in Standard/Diagnostic, plus
+the open local day. Pre-link correlation is capped at 256 calls per circuit, and
+persistence uses the integration's existing deferred dirty-save path.
 
 ### Rain and pump correlation
 

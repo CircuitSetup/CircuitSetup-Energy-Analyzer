@@ -294,6 +294,8 @@ class HvacEfficiencyProcessor:
                             )
                         )
                         is not None
+                        if response_comparison_token(episode)
+                        == response_comparison_token(finalized)
                     )
                     if not already_marked:
                         history.append(stored_episode)
@@ -1212,13 +1214,12 @@ def _circuit_efficiency_payload(
                 )
             ),
             "baseline_era": baseline_eras[stream_id],
-            "response_context_fingerprint": (
-                hashlib.sha256(
-                    f"{selected_context}\0{configured_temperature}".encode()
-                ).hexdigest()
-                if selected_context or configured_temperature
-                else ""
-            ),
+            "response_context_fingerprint": hashlib.sha256(
+                (
+                    f"{config.appliance_profile.value}\0{selected_context}"
+                    f"\0{configured_temperature}"
+                ).encode()
+            ).hexdigest(),
         }
     ready_scores = [
         float(evaluation["score"])

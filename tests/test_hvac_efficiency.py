@@ -260,6 +260,21 @@ def test_active_call_missing_temperature_creates_excluded_date_marker(
     ) == marker
 
 
+def test_running_call_without_hvac_action_missing_temperature_creates_marker() -> None:
+    current, marker = _advance(
+        None,
+        replace(
+            _observation(actual=None, target=72.0, action=None),
+            available_capabilities=("current_temperature", "temperature"),
+        ),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.excluded_from_baseline is True
+
+
 def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
     current, completed = _advance(
         None,

@@ -604,6 +604,47 @@ def test_hvac_instant_marker_deduplication_is_scoped_to_baseline_era() -> None:
     assert [raw["baseline_era"] for raw in history] == ["initial", "era-2"]
 
 
+def test_hvac_instant_marker_deduplication_is_scoped_to_response_context() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    auxiliary = _hvac_config("auxiliary", ApplianceProfile.HVAC_COMPRESSOR)
+    configs = (heat_pump, auxiliary)
+    linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+    context = _hvac_context(
+        configs=configs,
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            75.25,
+            75.2,
+            "cool",
+            "cooling",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={"heat_pump": linked, "auxiliary": linked},
+        running_circuit_ids={"heat_pump"},
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    processor = HvacEfficiencyProcessor()
+
+    processor.process([(config, SimpleNamespace()) for config in configs], context)
+    context.state.operating_state_snapshot_by_circuit["auxiliary"] = {
+        "state": "running",
+        "stable_state": "running",
+    }
+    processor.process([(config, SimpleNamespace()) for config in configs], context)
+
+    history = context.store_data.hvac_response_history_by_stream[stream_id]
+    assert [raw["participant_signature"] for raw in history] == [
+        ["heat_pump"],
+        ["auxiliary", "heat_pump"],
+    ]
+
+
 def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
@@ -1395,6 +1436,7 @@ def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
         )
     )
     initial = processor.process([(heat_pump, SimpleNamespace())], context)
+    assert initial.alerts
     context.state.active_alerts_by_circuit = {"heat_pump": initial.alerts}
     context = replace(
         context,
@@ -1433,6 +1475,60 @@ def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
     context.store_data.hvac_response_history_by_stream[stream_id].append(replacement)
 
     handoff = processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert _state_update_values(
+        handoff,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]["streams"][stream_id]["status"] == "no_data"
+    assert handoff.preserved_alerts == []
+
+
+def test_hvac_profile_handoff_retires_alert_while_idle() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    linked = {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={"heat_pump": linked},
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.store_data.hvac_response_history_by_stream[stream_id] = (
+        _hvac_response_history(stream_id, recent_rate=12.5)
+    )
+    processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(
+            min_repeated=1,
+            min_total_score=1.0,
+            min_average_score=1.0,
+            min_baseline_confidence=0.0,
+        )
+    )
+    initial = processor.process([(heat_pump, SimpleNamespace())], context)
+    assert initial.alerts
+    context.state.active_alerts_by_circuit = {"heat_pump": initial.alerts}
+    compressor = replace(
+        heat_pump,
+        appliance_profile=ApplianceProfile.HVAC_COMPRESSOR,
+    )
+
+    handoff = processor.process([(compressor, SimpleNamespace())], context)
 
     assert _state_update_values(
         handoff,
