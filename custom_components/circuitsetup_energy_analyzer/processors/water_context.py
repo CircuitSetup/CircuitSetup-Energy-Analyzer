@@ -7,6 +7,7 @@ from typing import Any
 
 from ..alerting import Observation
 from ..models import CircuitConfig
+from ..profiles import supports_direct_appliance_analysis
 from .base import AlertPolicy, FeatureResult, ProcessingContext
 
 ALERT_STATUSES = frozenset(
@@ -41,6 +42,8 @@ class WaterContextAlertProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return the first actionable water-context alert for a circuit."""
+        if not supports_direct_appliance_analysis(circuit_config):
+            return FeatureResult()
         circuit_id = circuit_config.circuit_id
         for feature, evidence in (
             (

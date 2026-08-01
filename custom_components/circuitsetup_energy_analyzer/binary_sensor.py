@@ -35,6 +35,7 @@ from .nilm_virtual import (
     nilm_virtual_unique_id,
     published_nilm_virtual_appliance_states,
 )
+from .profiles import supports_direct_appliance_analysis
 from .state import circuit_is_learning
 
 try:
@@ -311,7 +312,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         descriptions = tuple(
             description
             for description in BINARY_SENSOR_DESCRIPTIONS
-            if binary_sensor_description_applies(description, circuit, coordinator)
+            if binary_sensor_description_applies(
+                description, raw_circuit, coordinator
+            )
         )
         descriptions = compact_descriptions_for_setup(
             "binary_sensor",
@@ -368,7 +371,12 @@ def binary_sensor_description_applies(
     """Return whether a binary sensor is useful for this circuit."""
     if description.key == "water_flow_mismatch":
         return (
-            _appliance_profile(getattr(circuit, "appliance_profile", None))
+            supports_direct_appliance_analysis(circuit)
+            and _appliance_profile(
+                circuit.get("appliance_profile")
+                if isinstance(circuit, Mapping)
+                else getattr(circuit, "appliance_profile", None)
+            )
             in {
                 ApplianceProfile.WATER_PUMP,
                 ApplianceProfile.WELL_PUMP,

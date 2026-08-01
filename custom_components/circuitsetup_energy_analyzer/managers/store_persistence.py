@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ..alert_feedback import alert_feedback_is_expired
+from ..appliance_notifications import mixed_circuit_allows_alert
+from ..cycles import RUN_CYCLE_RUNTIME_TODAY_FEATURE
 from ..local_time import local_date
 from ..settings_advisor import RecommendationStatus
 from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
@@ -13,6 +16,21 @@ from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 STORE_RETENTION_SAVE_INTERVAL = timedelta(minutes=1)
 STORE_DIRTY_SAVE_INTERVAL = timedelta(seconds=30)
+_DIRECT_SETTING_KEYS = frozenset(
+    {
+        "max_active_minutes",
+        "standby_threshold_w",
+        "operating_on_threshold_w",
+        "operating_off_threshold_w",
+        "apparent_power_tolerance_percent",
+        "power_factor_tolerance",
+        "minimum_apparent_power_va",
+        "linked_thermostat_entities",
+        "thermostat_temperature_sensor_map",
+        "blower_represents_gas_heat",
+        "hvac_efficiency_change_threshold_pct",
+    }
+)
 
 
 class StorePersistenceManager:
@@ -127,6 +145,108 @@ class StorePersistenceManager:
                 store_data.contextual_baseline_samples_by_circuit.pop(circuit_id)
         store_data.learning_started_at_by_circuit[circuit_id] = now.isoformat()
         self.mark_dirty()
+
+    def clear_direct_appliance_state_for_circuit(
+        self, circuit_id: str, baseline_values: dict[str, list[float]]
+    ) -> bool:
+        """Remove appliance-specific state after a circuit becomes mixed."""
+        store = self._coordinator.store_data
+        prefix = f"{circuit_id}:"
+        stream_prefix = f"{circuit_id}|"
+        changed = False
+
+        def pop(mapping: dict[str, Any], key: str = circuit_id) -> None:
+            nonlocal changed
+            if key in mapping:
+                mapping.pop(key)
+                changed = True
+
+        for mapping in (store.baselines, baseline_values):
+            for key in tuple(mapping):
+                if key.startswith(prefix):
+                    mapping.pop(key)
+                    changed = True
+        for name in ("hvac_response_history_by_stream", "hvac_baseline_era_by_stream"):
+            mapping = getattr(store, name)
+            for key in tuple(mapping):
+                if key.startswith(stream_prefix):
+                    mapping.pop(key)
+                    changed = True
+        old_events = store.events
+        store.events = [event for event in old_events if event.circuit_id != circuit_id]
+        changed |= len(store.events) != len(old_events)
+        old_alerts = store.alerts
+        store.alerts = [
+            alert
+            for alert in old_alerts
+            if alert.circuit_id != circuit_id
+            or mixed_circuit_allows_alert(alert.feature)
+        ]
+        changed |= len(store.alerts) != len(old_alerts)
+        for name in (
+            "hvac_correlation_history_by_circuit",
+            "weather_context_by_circuit",
+            "weather_context_history_by_circuit",
+            "rain_pump_context_by_circuit",
+            "water_flow_context_by_circuit",
+            "water_context_history_by_circuit",
+            "standby_by_circuit",
+            "operating_detection_settings_by_circuit",
+            "activity_alert_settings_by_circuit",
+            "appliance_schedule_settings",
+            "appliance_schedule_evidence",
+        ):
+            pop(getattr(store, name))
+        for name in ("appliance_schedule_settings", "appliance_schedule_evidence"):
+            pop(getattr(store, name), f"circuit:{circuit_id}")
+        direct_metrics = {
+            "run_cycle_duration_s",
+            "run_cycle_daily_start_count",
+            "run_cycle_daily_duty_cycle_percent",
+            RUN_CYCLE_RUNTIME_TODAY_FEATURE,
+            "standby_power_w",
+        }
+        for name in (
+            "contextual_baseline_samples_by_circuit",
+            "contextual_baselines_by_circuit",
+        ):
+            mapping = getattr(store, name)
+            value = mapping.get(circuit_id)
+            if isinstance(value, list):
+                filtered = [
+                    item for item in value if item.get("feature") not in direct_metrics
+                ]
+                if filtered != value:
+                    changed = True
+                    if filtered:
+                        mapping[circuit_id] = filtered
+                    else:
+                        mapping.pop(circuit_id)
+            elif isinstance(value, dict):
+                filtered = {
+                    key: item
+                    for key, item in value.items()
+                    if item.get("feature") not in direct_metrics
+                }
+                if filtered != value:
+                    changed = True
+                    if filtered:
+                        mapping[circuit_id] = filtered
+                    else:
+                        mapping.pop(circuit_id)
+        for key, recommendation in tuple(store.settings_recommendations.items()):
+            if (
+                recommendation.circuit_id == circuit_id
+                and recommendation.status is RecommendationStatus.PENDING
+                and recommendation.setting_key in _DIRECT_SETTING_KEYS
+            ):
+                store.settings_recommendations[key] = replace(
+                    recommendation, status=RecommendationStatus.STALE
+                )
+                changed = True
+        if changed:
+            self.mark_dirty()
+        return changed
 
     async def async_save_if_dirty(self, now: datetime, *, force: bool = True) -> None:
         async with self._save_lock:

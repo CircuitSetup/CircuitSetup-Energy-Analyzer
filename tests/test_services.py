@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from datetime import UTC, date, datetime
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import voluptuous as vol
@@ -1061,9 +1062,11 @@ def test_setting_recommendation_service_schemas_validate_fields() -> None:
 @pytest.mark.asyncio
 async def test_setup_and_unload_services_with_fake_hass() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
+        MARK_CIRCUIT_MIXED_SERVICE_SCHEMA,
         SERVICE_APPLY_SETTING_RECOMMENDATION,
         SERVICE_DENY_SETTING_RECOMMENDATION,
         SERVICE_DISMISS_SETTING_RECOMMENDATION,
+        SERVICE_MARK_CIRCUIT_MIXED,
         SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS,
         SERVICE_RELEARN_BASELINE,
         async_setup_services,
@@ -1099,6 +1102,9 @@ async def test_setup_and_unload_services_with_fake_hass() -> None:
     assert (DOMAIN, SERVICE_DENY_SETTING_RECOMMENDATION) in hass.services.registered
     assert (DOMAIN, SERVICE_DISMISS_SETTING_RECOMMENDATION) in (
         hass.services.registered
+    )
+    assert hass.services.registered[(DOMAIN, SERVICE_MARK_CIRCUIT_MIXED)][1] is (
+        MARK_CIRCUIT_MIXED_SERVICE_SCHEMA
     )
 
     handler, _schema = hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)]
@@ -4283,3 +4289,114 @@ def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> Non
     assert _boolean_value(0) is False
     with pytest.raises(Exception, match="Expected a boolean"):
         _boolean_value("sometimes")
+
+
+def test_mark_circuit_mixed_uses_dedicated_entry_scoped_schema() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _SERVICE_SCHEMAS,
+        ATTR_ENTRY_ID,
+        CIRCUIT_SERVICE_SCHEMA,
+        MARK_CIRCUIT_MIXED_SERVICE_SCHEMA,
+        SERVICE_MARK_CIRCUIT_MIXED,
+    )
+
+    schema = _SERVICE_SCHEMAS[SERVICE_MARK_CIRCUIT_MIXED]
+    assert schema is MARK_CIRCUIT_MIXED_SERVICE_SCHEMA
+    assert schema is not CIRCUIT_SERVICE_SCHEMA
+    assert schema({"circuit_id": "fridge", ATTR_ENTRY_ID: "entry-1"}) == {
+        "circuit_id": "fridge",
+        ATTR_ENTRY_ID: "entry-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_mark_circuit_mixed_dispatches_to_coordinator() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        SERVICE_MARK_CIRCUIT_MIXED,
+        _dispatch_service,
+    )
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="fridge")],
+        async_mark_circuit_mixed=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry": coordinator}})
+
+    await _dispatch_service(
+        hass, SERVICE_MARK_CIRCUIT_MIXED, {ATTR_CIRCUIT_ID: "fridge"}
+    )
+
+    coordinator.async_mark_circuit_mixed.assert_awaited_once_with("fridge")
+
+
+@pytest.mark.asyncio
+async def test_mark_circuit_mixed_scopes_duplicate_circuit_to_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
+        SERVICE_MARK_CIRCUIT_MIXED,
+        _dispatch_service,
+    )
+
+    first = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="fridge")],
+        async_mark_circuit_mixed=AsyncMock(),
+    )
+    second = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="fridge")],
+        async_mark_circuit_mixed=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+
+    await _dispatch_service(
+        hass,
+        SERVICE_MARK_CIRCUIT_MIXED,
+        {ATTR_ENTRY_ID: "entry-2", ATTR_CIRCUIT_ID: "fridge"},
+    )
+
+    first.async_mark_circuit_mixed.assert_not_awaited()
+    second.async_mark_circuit_mixed.assert_awaited_once_with("fridge")
+
+    await _dispatch_service(
+        hass, SERVICE_MARK_CIRCUIT_MIXED, {ATTR_CIRCUIT_ID: "fridge"}
+    )
+    first.async_mark_circuit_mixed.assert_awaited_once_with("fridge")
+    assert second.async_mark_circuit_mixed.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("entry_id", "circuit_id", "message"),
+    (
+        ("missing", "fridge", "Unknown entry_id 'missing'"),
+        ("entry-1", "oven", "Unknown circuit_id 'oven'.*entry_id 'entry-1'"),
+    ),
+)
+async def test_mark_circuit_mixed_rejects_invalid_scoped_target(
+    entry_id: str, circuit_id: str, message: str
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
+        SERVICE_MARK_CIRCUIT_MIXED,
+        HomeAssistantError,
+        _dispatch_service,
+    )
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="fridge")],
+        async_mark_circuit_mixed=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    with pytest.raises(HomeAssistantError, match=message):
+        await _dispatch_service(
+            hass,
+            SERVICE_MARK_CIRCUIT_MIXED,
+            {ATTR_ENTRY_ID: entry_id, ATTR_CIRCUIT_ID: circuit_id},
+        )

@@ -247,6 +247,7 @@ ERROR_NO_SOURCE_DEVICES = "no_source_devices"
 ERROR_NO_SOURCE_DEVICE_ENTITIES = "no_source_device_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
+ERROR_MIXED_DUAL_PHASE_NOT_SUPPORTED = "mixed_dual_phase_not_supported"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("quiet", "balanced", "sensitive")
 _SENSITIVITY_LABELS = SENSITIVITY_LABELS
@@ -276,6 +277,7 @@ FIELD_INCLUDED_SENSORS = "included_sensors"
 FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_REMOVE_ASSIGNMENTS = "remove_assignments"
 FIELD_CIRCUIT_NAME = "circuit_name"
+FIELD_CIRCUIT_IS_SHARED = "circuit_is_shared"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
 FIELD_POWER_FLOW = "power_flow"
@@ -1615,6 +1617,15 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=str(group.get("appliance_profile") or ApplianceProfile.MIXED),
             ): _select_selector(appliance_profile_options()),
             vol.Required(
+                FIELD_CIRCUIT_IS_SHARED,
+                default=(
+                    str(group.get("mode") or "") == CircuitMode.MIXED.value
+                    or str(group.get("appliance_profile") or "")
+                    == ApplianceProfile.MIXED.value
+                    or bool(group.get(FIELD_CIRCUIT_IS_SHARED, False))
+                ),
+            ): bool,
+            vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
                 default=str(group.get("retention_mode") or DEFAULT_RETENTION_MODE),
             ): _select_selector(retention_mode_options()),
@@ -2723,13 +2734,16 @@ def assignment_groups_from_sources(
                 ),
                 "appliance_profile": saved_profile,
                 "mode": (
-                    _assignment_mode_for_profile_and_entities(
+                    CircuitMode.MIXED.value
+                    if str(saved_circuit.get("mode") or "")
+                    == CircuitMode.MIXED.value
+                    else _assignment_mode_for_profile_and_entities(
                         saved_profile,
                         selected_entity_ids,
                     )
-                    if selected_entity_ids
-                    else str(saved_circuit.get("mode") or CircuitMode.MIXED.value)
                 ),
+                "saved_mode": str(saved_circuit.get("mode") or ""),
+                "saved_entity_ids": tuple(saved_sensor_entities),
                 "power_flow": _normalize_power_flow(
                     str(saved_circuit.get("power_flow") or "")
                 ),
@@ -3072,6 +3086,30 @@ def _handle_assignment_review_submission(
     )
 
 
+def _remember_assignment_review_input(flow: Any, user_input: Mapping[str, Any]) -> None:
+    groups = list(getattr(flow, "_assignment_groups", []) or [])
+    index = int(getattr(flow, "_assignment_index", 0) or 0)
+    if not 0 <= index < len(groups):
+        return
+    group = dict(groups[index])
+    for field in (
+        FIELD_CIRCUIT_NAME,
+        FIELD_APPLIANCE_PROFILE,
+        FIELD_CIRCUIT_RETENTION_MODE,
+        FIELD_CIRCUIT_IS_SHARED,
+    ):
+        if field in user_input:
+            group[
+                FIELD_CIRCUIT_IS_SHARED
+                if field == FIELD_CIRCUIT_IS_SHARED
+                else field.removeprefix("circuit_")
+            ] = user_input[field]
+    if FIELD_INCLUDED_SENSORS in user_input:
+        group["selected_entity_ids"] = tuple(user_input[FIELD_INCLUDED_SENSORS])
+    groups[index] = group
+    flow._assignment_groups = groups
+
+
 def _circuit_from_assignment_group(
     group: Mapping[str, Any],
     user_input: Mapping[str, Any],
@@ -3100,11 +3138,30 @@ def _circuit_from_assignment_group(
             or DEFAULT_RETENTION_MODE
         )
     )
+    entity_ids = _included_entity_ids_for_assignment(group, user_input)
+    shared = bool(user_input.get(FIELD_CIRCUIT_IS_SHARED, False)) or (
+        profile == ApplianceProfile.MIXED.value
+    )
+    legacy_mixed = (
+        str(group.get("saved_mode") or "") == CircuitMode.MIXED.value
+        and str(group.get("mode") or "") == CircuitMode.MIXED.value
+        and set(entity_ids) == set(group.get("saved_entity_ids", ()))
+    )
+    if shared and (
+        profile in {
+            ApplianceProfile.MAINS_NILM.value,
+            ApplianceProfile.SOLAR_INVERTER.value,
+        }
+        or _assignment_entities_have_both_legs(entity_ids) and not legacy_mixed
+    ):
+        raise SetupValidationError(ERROR_MIXED_DUAL_PHASE_NOT_SUPPORTED)
     if profile not in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
-
-    entity_ids = _included_entity_ids_for_assignment(group, user_input)
-    mode = _assignment_mode_for_profile_and_entities(profile, entity_ids)
+    mode = (
+        CircuitMode.MIXED.value
+        if shared
+        else _assignment_mode_for_profile_and_entities(profile, entity_ids)
+    )
     power_flow = _default_power_flow_for_assignment(profile, mode)
     sensors = [
         {
@@ -3760,6 +3817,7 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
                     user_input,
                 )
             except SetupValidationError as err:
+                _remember_assignment_review_input(self, user_input)
                 return _assignment_review_form(self, errors={"base": err.error_key})
             if assignment_result.get("type") == "form":
                 return assignment_result
@@ -4127,6 +4185,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     user_input,
                 )
             except SetupValidationError as err:
+                _remember_assignment_review_input(self, user_input)
                 return _assignment_review_form(self, errors={"base": err.error_key})
             if assignment_result.get("type") == "form":
                 return assignment_result

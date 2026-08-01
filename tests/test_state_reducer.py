@@ -425,6 +425,82 @@ def test_state_reducer_refreshes_alert_evidence_and_recent_activity() -> None:
     assert state.alert_evidence_by_circuit == {}
 
 
+def test_state_reducer_clears_only_direct_appliance_state() -> None:
+    state = AnalyzerState()
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    state.active_alerts_by_circuit = {
+        "fridge": [
+            AlertEvidence(
+                now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+            ),
+            AlertEvidence(
+                now, "fridge", Severity.WARNING, "aggregate",
+                feature="circuit_capacity",
+            ),
+        ],
+        "washer": [
+            AlertEvidence(
+                now, "washer", Severity.WARNING, "other", feature="always_on_power"
+            )
+        ],
+    }
+    state.alert_evidence_by_circuit = {
+        "fridge": {"feature": "always_on_power"},
+        "washer": {"feature": "always_on_power"},
+    }
+    state.recent_observations_by_circuit = {"fridge": [{}], "washer": [{}]}
+    state.operating_state_by_circuit = {"fridge": "on", "washer": "off"}
+    state.appliance_health_status_by_circuit = {"fridge": "watch", "washer": "ok"}
+    state.power_quality_score_by_circuit = {"fridge": 0.5, "washer": 1.0}
+    state.standby_status_by_circuit = {"fridge": "high", "washer": "ok"}
+    state.weather_context_by_circuit = {"fridge": {}, "washer": {}}
+    state.rain_pump_context_by_circuit = {"fridge": {}, "washer": {}}
+    state.water_flow_context_by_circuit = {"fridge": {}, "washer": {}}
+    state.water_context_history_by_circuit = {"fridge": [{}], "washer": [{}]}
+    state.run_cycle_status_by_circuit = {"fridge": "running", "washer": "idle"}
+    state.daily_energy_usage_by_circuit = {"fridge": 2.0}
+    state.hvac_current_episode_by_stream = {
+        "fridge|climate.kitchen|cooling": {"active": True},
+        "washer|climate.laundry|cooling": {"active": True},
+    }
+    state.hvac_efficiency_by_circuit = {
+        "fridge": {"streams": {"climate.kitchen": {}}},
+        "washer": {"streams": {"climate.laundry": {}}},
+    }
+    state.expected_schedule_by_appliance = {
+        "circuit:fridge": {"status": "due"},
+        "circuit:washer": {"status": "normal"},
+    }
+
+    reducer = StateReducer()
+    assert reducer.clear_direct_appliance_state(state, "fridge")
+    assert not reducer.clear_direct_appliance_state(state, "fridge")
+    assert state.run_cycle_status_by_circuit == {"washer": "idle"}
+    assert [alert.feature for alert in state.active_alerts_by_circuit["fridge"]] == [
+        "circuit_capacity"
+    ]
+    assert "fridge" not in state.alert_evidence_by_circuit
+    for mapping in (
+        state.recent_observations_by_circuit, state.operating_state_by_circuit,
+        state.appliance_health_status_by_circuit, state.power_quality_score_by_circuit,
+        state.standby_status_by_circuit, state.weather_context_by_circuit,
+        state.rain_pump_context_by_circuit, state.water_flow_context_by_circuit,
+        state.water_context_history_by_circuit,
+    ):
+        assert set(mapping) == {"washer"}
+    assert state.daily_energy_usage_by_circuit == {"fridge": 2.0}
+    assert set(state.hvac_current_episode_by_stream) == {
+        "washer|climate.laundry|cooling"
+    }
+    assert state.hvac_efficiency_by_circuit == {
+        "washer": {"streams": {"climate.laundry": {}}}
+    }
+    assert state.expected_schedule_by_appliance == {
+        "circuit:washer": {"status": "normal"}
+    }
+    assert state.hvac_association_revision_by_circuit == {"fridge": 1}
+
+
 def test_state_reducer_hydrates_context_state_from_store() -> None:
     state = AnalyzerState()
     store_data = FeatureStoreData()

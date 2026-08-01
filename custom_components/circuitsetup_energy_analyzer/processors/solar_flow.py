@@ -28,6 +28,7 @@ from ..load_shift import (
 )
 from ..models import ApplianceProfile, CircuitConfig, CircuitMode, PowerFlowMode
 from ..normalize import NormalizedCircuitSample
+from ..profiles import supports_direct_appliance_analysis
 from ..solar_flow import (
     EXPORT_TOLERANCE_W,
     HIGH_SOLAR_SURPLUS_THRESHOLD_W,
@@ -337,8 +338,7 @@ def _is_generation(config: CircuitConfig) -> bool:
 
 def _is_flexible_solar_load(config: CircuitConfig) -> bool:
     return (
-        config.power_flow is PowerFlowMode.LOAD
-        and config.mode is not CircuitMode.MAINS_NILM
+        supports_direct_appliance_analysis(config)
         and config.appliance_profile in FLEXIBLE_SOLAR_LOAD_PROFILES
     )
 

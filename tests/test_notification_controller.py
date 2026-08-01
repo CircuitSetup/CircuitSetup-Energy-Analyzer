@@ -26,6 +26,50 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 
 
 @pytest.mark.asyncio
+async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> None:
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    target = AlertEvidence(now, "fridge", Severity.WARNING, "cycle", feature="cycle")
+    aggregate = AlertEvidence(
+        now, "fridge", Severity.WARNING, "capacity", feature="circuit_capacity"
+    )
+    other = AlertEvidence(now, "washer", Severity.WARNING, "cycle", feature="cycle")
+    target_id = notification_id_for_alert(target)
+    other_id = notification_id_for_alert(other)
+    aggregate_id = notification_id_for_alert(aggregate)
+    dirty = []
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(),
+        store_data=SimpleNamespace(
+            alerts=[target, aggregate, other],
+            settings_recommendation_notification_episode_key=(),
+            notification_delivery_state={
+                "deferred": [
+                    {"alert_id": target_id}, {"alert_id": aggregate_id},
+                    {"alert_id": other_id},
+                ],
+                "daily": [{"alert_id": target_id}, {"alert_id": aggregate_id}],
+                "weekly": [{"alert_id": target_id}, {"alert_id": aggregate_id}],
+                "summary_recovery_alert_ids": [target_id, aggregate_id],
+            },
+        ),
+        state=SimpleNamespace(active_alerts_by_circuit={}),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+    monkeypatch.setattr(controller, "async_dismiss_alert_notification", AsyncMock())
+
+    await controller.async_dismiss_circuit_alert_notifications("fridge")
+
+    assert coordinator.store_data.notification_delivery_state == {
+        "deferred": [{"alert_id": aggregate_id}, {"alert_id": other_id}],
+        "daily": [{"alert_id": aggregate_id}],
+        "weekly": [{"alert_id": aggregate_id}],
+        "summary_recovery_alert_ids": [aggregate_id],
+    }
+    assert dirty == [True]
+
+
+@pytest.mark.asyncio
 async def test_learning_completion_lifecycle_is_opt_in_and_once_per_epoch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -7,6 +7,23 @@ from typing import Any, Literal
 
 from .notifications import POWER_QUALITY_ALERT_FEATURES
 
+MIXED_CIRCUIT_ALERT_FEATURES = frozenset(
+    {
+        "daily_energy_usage_spike",
+        "daily_energy_goal",
+        "billing_cycle_budget",
+        "demand_limit",
+        "demand_monthly_peak",
+        "circuit_capacity",
+        "utility_energy_mismatch",
+    }
+)
+
+
+def mixed_circuit_allows_alert(feature: str) -> bool:
+    """Return whether a mixed aggregate circuit may retain an alert."""
+    return feature in MIXED_CIRCUIT_ALERT_FEATURES or feature.startswith("nilm_")
+
 DELIVERY_MODES = frozenset(
     {"immediate", "daily_summary", "weekly_digest", "disabled"}
 )

@@ -1088,6 +1088,52 @@ def test_mains_and_solar_recommendations_use_aggregate_patterns() -> None:
     assert high_surplus.setting_label == "High Solar Surplus Power Threshold"
 
 
+def test_mixed_mode_runs_only_aggregate_safe_recommendation_rules(
+    monkeypatch,
+) -> None:
+    advisor = _advisor()
+    called: list[str] = []
+    safe = {
+        "_energy_usage_recommendations",
+        "_capacity_recommendations",
+        "_retention_recommendations",
+    }
+    rule_names = (
+        "_energy_usage_recommendations",
+        "_cycle_recommendations",
+        "_capacity_recommendations",
+        "_operating_detection_recommendations",
+        "_standby_recommendations",
+        "_dual_phase_recommendations",
+        "_metric_consistency_recommendations",
+        "_mains_balance_recommendations",
+        "_solar_flow_recommendations",
+        "_hvac_efficiency_recommendations",
+        "_retention_recommendations",
+    )
+    for name in rule_names:
+        monkeypatch.setattr(
+            advisor,
+            name,
+            lambda _inputs, name=name: called.append(name) or [],
+        )
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 7, 31, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mixed",
+            circuit_name="Mixed",
+            appliance_profile="refrigerator",
+            circuit_mode="mixed",
+            power_flow="load",
+            advanced_settings={},
+        ),
+        feature_history={},
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
+    assert set(called) == safe
+
+
 def test_recommendation_guidance_covers_advanced_setting_families() -> None:
     from custom_components.circuitsetup_energy_analyzer.balance import (
         DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,

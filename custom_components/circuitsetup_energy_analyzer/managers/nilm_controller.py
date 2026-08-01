@@ -74,6 +74,8 @@ class NilmController:
         return enabled and (
             config.mode is CircuitMode.MAINS_NILM
             or config.appliance_profile is ApplianceProfile.MAINS_NILM
+            or config.mode is CircuitMode.MIXED
+            or config.appliance_profile is ApplianceProfile.MIXED
         )
 
     def clear_topology_state(self, circuit_id: str) -> None:
@@ -112,6 +114,14 @@ class NilmController:
         events: Iterable[Any],
     ) -> Iterable[Any]:
         """Yield events that may mask a mains NILM edge."""
+        nilm_config = self._coordinator.circuit_registry.config_for_circuit(
+            nilm_circuit_id
+        )
+        if nilm_config is not None and (
+            nilm_config.mode is CircuitMode.MIXED
+            or nilm_config.appliance_profile is ApplianceProfile.MIXED
+        ):
+            return
         known_load_circuit_ids = (
             self._coordinator.circuit_registry.known_load_circuit_ids
         )

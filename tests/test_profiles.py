@@ -5,16 +5,65 @@ import pytest
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
+    CircuitConfig,
     CircuitEvent,
     CircuitMode,
     EventType,
+    PowerFlowMode,
     RetentionMode,
     SensorRole,
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import (
     get_profile_definition,
+    supports_direct_appliance_analysis,
+    supports_power_quality_analysis,
 )
 
+
+def test_direct_appliance_analysis_requires_dedicated_mode() -> None:
+    mixed = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.MIXED,
+    )
+    assert not supports_direct_appliance_analysis(mixed)
+    assert supports_direct_appliance_analysis(
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Fridge",
+            appliance_profile=ApplianceProfile.REFRIGERATOR,
+            mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
+
+
+def test_power_quality_analysis_allows_generation_but_not_mixed_or_mains() -> None:
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar Inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+
+    assert supports_power_quality_analysis(solar)
+    assert not supports_power_quality_analysis(
+        CircuitConfig(
+            circuit_id="mixed",
+            name="Mixed",
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.MIXED,
+        )
+    )
+    assert not supports_power_quality_analysis(
+        CircuitConfig(
+            circuit_id="mains",
+            name="Mains",
+            appliance_profile=ApplianceProfile.MAINS_NILM,
+            mode=CircuitMode.MAINS_NILM,
+        )
+    )
 
 def test_domain_is_stable() -> None:
     assert DOMAIN == "circuitsetup_energy_analyzer"

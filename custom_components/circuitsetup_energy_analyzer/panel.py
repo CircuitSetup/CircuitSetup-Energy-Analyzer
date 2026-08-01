@@ -41,6 +41,7 @@ from .models import (
     AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
+    CircuitMode,
     SensorRole,
 )
 from .notifications import notification_id_for_alert
@@ -76,6 +77,7 @@ from .panel_views import (
     NilmWorkspaceView,
     SetupHealthView,
 )
+from .profiles import supports_direct_appliance_analysis
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
@@ -97,6 +99,7 @@ from .services import (
     SERVICE_MARK_ALERT_CONFIRMED,
     SERVICE_MARK_ALERT_EXPECTED,
     SERVICE_MARK_ALERT_UNHELPFUL,
+    SERVICE_MARK_CIRCUIT_MIXED,
     SERVICE_MARK_NILM_APPLIANCE_CORRECT,
     SERVICE_MARK_NILM_APPLIANCE_WRONG,
     SERVICE_REJECT_NILM_SESSION,
@@ -1381,6 +1384,19 @@ def _actions_for_context(
                 ),
             }
         )
+        if (
+            config is not None
+            and config.mode is CircuitMode.SINGLE_PHASE
+            and supports_direct_appliance_analysis(config)
+        ):
+            actions["mark_circuit_mixed"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MARK_CIRCUIT_MIXED,
+                "data": {
+                    ATTR_ENTRY_ID: coordinator.entry_id,
+                    ATTR_CIRCUIT_ID: circuit_id,
+                },
+            }
 
     recommendations = _setting_recommendations_for_circuit(
         coordinator,

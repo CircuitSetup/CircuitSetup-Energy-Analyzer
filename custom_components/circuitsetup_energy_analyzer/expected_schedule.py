@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from .cycles import build_normalized_run_sessions
 from .models import AlertEvidence, EventType, Severity
+from .profiles import supports_direct_appliance_analysis
 from .ux import data_quality_checklist
 
 DEFAULT_REQUIRED_REPEATS = 3
@@ -281,12 +282,26 @@ def refresh_expected_schedule_contexts(
     contexts: dict[str, dict[str, Any]] = {}
     alerts: list[AlertEvidence] = []
     changed = False
+    configs = {
+        config.circuit_id: config
+        for config in getattr(coordinator, "circuit_configs", ())
+    }
 
     for appliance_key, raw in raw_settings.items():
         key = str(appliance_key or "").strip()
         settings = schedule_settings_from_dict(raw, appliance_key=key)
         target = _schedule_target(store_data, key)
         circuit_id = target.circuit_id if target else None
+        config = configs.get(circuit_id)
+        if (
+            target is not None
+            and target.assignment_id is None
+            and config is not None
+            and not supports_direct_appliance_analysis(config)
+        ):
+            if raw_evidence.pop(key, None) is not None:
+                changed = True
+            continue
         is_running = _target_is_running(state, store_data, target, local_now)
         source_available = _target_source_available(
             coordinator,
@@ -449,10 +464,19 @@ def expected_schedule_circuit_ids(coordinator: Any) -> set[str]:
     raw_settings = getattr(store_data, "appliance_schedule_settings", {})
     if not isinstance(raw_settings, Mapping):
         return set()
+    configs = {
+        config.circuit_id: config
+        for config in getattr(coordinator, "circuit_configs", ())
+    }
     return {
         target.circuit_id
         for appliance_key in raw_settings
         if (target := _schedule_target(store_data, str(appliance_key or "").strip()))
+        and (
+            target.assignment_id is not None
+            or (config := configs.get(target.circuit_id)) is None
+            or supports_direct_appliance_analysis(config)
+        )
     }
 
 

@@ -23,6 +23,7 @@ from ..models import (
     PowerFlowMode,
 )
 from ..normalize import NormalizedCircuitSample
+from ..profiles import supports_direct_appliance_analysis
 from ..standby import (
     StandbyLimitEvidence,
     StandbyResult,
@@ -65,6 +66,8 @@ class StandbyProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Record standby state and return configured Always On alerts."""
+        if not supports_direct_appliance_analysis(circuit_config):
+            return FeatureResult()
         power_w = _standby_power_w(sample)
         settings = self._settings_for_config(circuit_config, circuit_config.circuit_id)
         if self._seed_demo_history is not None:

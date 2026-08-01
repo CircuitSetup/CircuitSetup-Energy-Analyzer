@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..activity_timeline import build_recent_activity_timeline, timeline_payload
+from ..appliance_notifications import mixed_circuit_allows_alert
 from ..processors.base import FeatureResult, StateUpdate
 from ..ux import alert_evidence_detail, friendly_feature_name
 
@@ -100,6 +101,63 @@ class StateReducer:
     def apply_update(self, state: Any, path: tuple[str, ...], value: Any) -> None:
         """Apply one validated state update path."""
         apply_state_update(state, path, value)
+
+    def clear_direct_appliance_state(self, state: Any, circuit_id: str) -> bool:
+        """Clear volatile appliance-specific state for a mixed circuit."""
+        removed = False
+        active = state.active_alerts_by_circuit.get(circuit_id)
+        if active is not None:
+            retained = [
+                alert for alert in active if mixed_circuit_allows_alert(alert.feature)
+            ]
+            if retained != active:
+                removed = True
+                if retained:
+                    state.active_alerts_by_circuit[circuit_id] = retained
+                else:
+                    state.active_alerts_by_circuit.pop(circuit_id)
+        evidence = state.alert_evidence_by_circuit.get(circuit_id)
+        if evidence is not None and not mixed_circuit_allows_alert(
+            str(evidence.get("feature") or "")
+        ):
+            state.alert_evidence_by_circuit.pop(circuit_id)
+            removed = True
+        roots = (
+            "recent_observations_by_circuit",
+            "operating_state_by_circuit",
+            "operating_state_snapshot_by_circuit", "run_cycle_count_by_circuit",
+            "run_cycle_runtime_seconds_by_circuit", "run_cycle_duty_cycle_by_circuit",
+            "run_cycle_status_by_circuit", "run_cycle_evidence_by_circuit",
+            "appliance_health_status_by_circuit",
+            "appliance_health_evidence_by_circuit",
+            "hvac_thermostat_setup_issues_by_circuit",
+            "weather_context_by_circuit", "rain_pump_context_by_circuit",
+            "water_flow_context_by_circuit", "water_context_history_by_circuit",
+            "power_quality_score_by_circuit", "power_quality_evidence_by_circuit",
+            "reactive_power_drift_by_circuit", "apparent_power_drift_by_circuit",
+            "power_factor_drift_by_circuit", "always_on_power_w_by_circuit",
+            "standby_threshold_w_by_circuit", "standby_status_by_circuit",
+            "always_on_limit_usage_by_circuit", "standby_evidence_by_circuit",
+        )
+        removed |= _pop_circuit_state(state, circuit_id, roots)
+        schedule_key = f"circuit:{circuit_id}"
+        if schedule_key in state.expected_schedule_by_appliance:
+            state.expected_schedule_by_appliance.pop(schedule_key)
+            removed = True
+        if circuit_id in state.hvac_efficiency_by_circuit:
+            clear_hvac_efficiency(state, circuit_id)
+            removed = True
+        prefix = f"{circuit_id}|"
+        for root in (
+            "hvac_current_episode_by_stream",
+            "hvac_correlation_active_by_pair",
+        ):
+            mapping = getattr(state, root)
+            for key in tuple(mapping):
+                if key.startswith(prefix):
+                    mapping.pop(key)
+                    removed = True
+        return removed
 
     def apply_updates(self, state: Any, updates: Iterable[StateUpdate]) -> None:
         """Apply a batch of validated state update paths."""

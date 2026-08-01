@@ -31,6 +31,7 @@ from ..hvac_efficiency import (
 )
 from ..models import AlertEvidence, ApplianceProfile, Severity
 from ..operating_detection import operating_state_is_running
+from ..profiles import supports_direct_appliance_analysis
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 _COOLING_DRIVER_PROFILES = frozenset(
@@ -75,7 +76,8 @@ class HvacEfficiencyProcessor:
         configs = {
             config.circuit_id: config
             for config, _sample in samples
-            if config.appliance_profile
+            if supports_direct_appliance_analysis(config)
+            and config.appliance_profile
             in _COOLING_DRIVER_PROFILES
             | _HEATING_DRIVER_PROFILES
             | {ApplianceProfile.HVAC_BLOWER}

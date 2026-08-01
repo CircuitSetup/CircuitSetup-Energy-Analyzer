@@ -29,6 +29,7 @@ from ..context_sources import (
 from ..contextual_baseline import rain_context, weather_mode_for_temperature
 from ..local_time import local_date
 from ..models import AlertEvidence, ApplianceProfile, CircuitConfig
+from ..profiles import supports_direct_appliance_analysis
 from ..water_correlations import (
     FlowCorrelationInput,
     RainPumpCorrelationInput,
@@ -83,7 +84,10 @@ class EnvironmentalContextManager:
     ) -> None:
         coordinator = self._coordinator
         circuit_id = config.circuit_id
-        if config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES:
+        if (
+            not supports_direct_appliance_analysis(config)
+            or config.appliance_profile not in HVAC_WEATHER_CONTEXT_PROFILES
+        ):
             if coordinator.state_reducer.clear_weather_context_state(
                 coordinator.state,
                 coordinator.store_data,
@@ -210,6 +214,20 @@ class EnvironmentalContextManager:
         )
         profile = config.appliance_profile
         changed = False
+
+        if not supports_direct_appliance_analysis(config):
+            changed = coordinator.state_reducer.clear_rain_pump_context_state(
+                coordinator.state, coordinator.store_data, circuit_id
+            )
+            changed = coordinator.state_reducer.clear_water_flow_context_state(
+                coordinator.state, coordinator.store_data, circuit_id
+            ) or changed
+            changed = coordinator.state_reducer.clear_water_context_history(
+                coordinator.state, coordinator.store_data, circuit_id
+            ) or changed
+            if changed:
+                self._mark_store_dirty()
+            return
 
         if profile in PUMP_WATER_CONTEXT_PROFILES and bool(
             advanced_settings.get(

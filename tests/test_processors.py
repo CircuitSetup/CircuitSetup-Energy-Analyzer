@@ -4311,6 +4311,156 @@ def test_activity_alert_processor_skips_left_on_for_mains_nilm_config() -> None:
     assert policy.observations == []
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.WASHER, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ),
+)
+def test_activity_alert_processor_skips_idle_alerts_for_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(minutes=45),
+                    circuit_id="washer",
+                    event_type=EventType.STOP,
+                )
+            ]
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=profile,
+        mode=mode,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_idle_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+    assert policy.observations == []
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.WASHER, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ),
+)
+def test_event_processor_skips_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=profile,
+        mode=mode,
+    )
+
+    processor = CircuitEventProcessor()
+    results = [
+        processor.process(_sample(seconds, power), config, context)
+        for seconds, power in ((0, 5.0), (10, 100.0), (21, 100.0))
+    ]
+
+    assert all(result.events == [] for result in results)
+    assert all(result.state_updates == [] for result in results)
+    assert processor.detectors == {}
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.SOLAR_INVERTER, CircuitMode.SINGLE_PHASE),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM),
+    ),
+)
+def test_event_processor_retains_generic_events_for_non_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="source",
+        name="Source",
+        appliance_profile=profile,
+        mode=mode,
+    )
+    processor = CircuitEventProcessor()
+
+    processor.process(_sample(0, 5.0), config, context)
+    processor.process(_sample(10, 100.0), config, context)
+    result = processor.process(_sample(30, 100.0), config, context)
+
+    assert [event.event_type for event in result.events] == [EventType.START]
+    assert "source" in processor.detectors
+
+
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -6250,6 +6400,83 @@ def test_solar_flow_processor_updates_flow_and_load_shift_state() -> None:
     ]
 
 
+def test_solar_flow_processor_ignores_mixed_flexible_loads() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+    mixed_pool = CircuitConfig(
+        circuit_id="pool",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.MIXED,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    result = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda _circuit_id: {}
+    ).process(
+        [
+            (mains, sample("mains", -500.0)),
+            (solar, sample("solar", 2000.0)),
+            (mixed_pool, sample("pool", 800.0)),
+        ],
+        context,
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("solar_flexible_load_power_w_by_circuit", "mains")] == 0.0
+    assert (
+        updates[("solar_load_shift_status_by_circuit", "mains")]
+        == "no_flexible_loads"
+    )
+    assert updates[("solar_load_shift_evidence_by_circuit", "mains")][
+        "candidate_loads"
+    ] == []
+
+
 def test_solar_flow_processor_ignores_batches_without_mains() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -7385,6 +7612,96 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     )
 
 
+def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        mode=CircuitMode.MIXED,
+    )
+    controller = nilm_controller.NilmController(
+        SimpleNamespace(
+            options={"enable_experimental_nilm": True},
+            entry_data={},
+            circuit_registry=SimpleNamespace(
+                config_for_circuit=lambda _circuit_id: config,
+                known_load_circuit_ids=frozenset({"fridge"}),
+            ),
+        ),
+        label_interval_max_items=1,
+        assignment_max_items=1,
+    )
+    observed_matches = []
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=controller.enabled_for_config,
+        seed_demo_nilm_state=controller.seed_demo_state,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=controller.known_load_events,
+        observe_topology=lambda _config, match, _context: observed_matches.append(match)
+        or [],
+    )
+
+    def sample(seconds: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=seconds),
+            circuit_id="mixed",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    known_event = CircuitEvent(
+        timestamp=now + timedelta(seconds=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 320.0},
+    )
+    processor.process(sample(0, 100.0), config, context, events=())
+    processor.process(sample(5, 420.0), config, context, events=(known_event,))
+    result = processor.process(sample(10, 420.0), config, context, events=())
+
+    assert observed_matches == []
+    assert result.alerts == []
+    assert processor.total_events_by_circuit["mixed"] == 1
+    assert len(processor.unmatched_edges_by_circuit["mixed"]) == 1
+    assert not any(
+        update.path[0].startswith("nilm_topology") for update in result.state_updates
+    )
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -7600,7 +7917,7 @@ def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
     config = CircuitConfig(
         circuit_id="office",
         name="Office",
-        appliance_profile=ApplianceProfile.MIXED,
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.SINGLE_PHASE,
     )
     policy = _CaptureAlertPolicy()
@@ -7783,7 +8100,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     config = CircuitConfig(
         circuit_id="office",
         name="Office",
-        appliance_profile=ApplianceProfile.MIXED,
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.SINGLE_PHASE,
     )
     seeded: list[str] = []
@@ -7840,7 +8157,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     }
 
 
-def test_power_quality_processor_updates_state_and_returns_alert() -> None:
+def test_power_quality_processor_updates_generation_state_and_returns_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -7941,6 +8258,7 @@ def test_power_quality_processor_updates_state_and_returns_alert() -> None:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
     )
     sample = CircuitSample(
         timestamp=now,
@@ -7964,6 +8282,7 @@ def test_power_quality_processor_updates_state_and_returns_alert() -> None:
 
     result = processor.process(sample, config, context)
 
+    assert result.clear_power_quality_state is None
     assert result.store_dirty is False
     assert len(result.state_updates) == 6
     assert len(result.alerts) == 1
@@ -7978,6 +8297,63 @@ def test_power_quality_processor_updates_state_and_returns_alert() -> None:
     assert updates[("reactive_power_drift_by_circuit", "fridge")] > 0.0
     assert updates[("apparent_power_drift_by_circuit", "fridge")] > 0.0
     assert updates[("power_factor_drift_by_circuit", "fridge")] > 0.0
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    [
+        (ApplianceProfile.REFRIGERATOR, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ],
+)
+def test_power_quality_processor_marks_mixed_circuit_aggregate_ready(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    policy = _CaptureAlertPolicy()
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_power_quality_baselines=lambda _config, _features: None,
+    )
+
+    result = processor.process(
+        _sample(0, 120.0),
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=profile,
+            mode=mode,
+        ),
+        context,
+    )
+
+    assert result.clear_power_quality_state == "fridge"
+    assert [(update.path, update.value) for update in result.state_updates] == [
+        (("learning_by_circuit", "fridge"), False)
+    ]
+    assert result.alerts == []
+    assert policy.observations == []
+    assert context.store_data.baselines == {}
 
 
 def test_power_quality_processor_requests_clear_when_features_missing() -> None:

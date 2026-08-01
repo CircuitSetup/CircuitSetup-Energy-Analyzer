@@ -1,3 +1,20 @@
+mark_circuit_mixed:
+  name: Mark circuit mixed
+  description: "Advanced/script action: confirm that a circuit supplies multiple appliances and remove direct-appliance state. The normal user path is the evidence panel's This circuit powers other loads action."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Circuit to classify as mixed.
+      required: true
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional analyzer config entry to target when circuit IDs are duplicated. Panel actions include this automatically.
+      required: false
+      selector:
+        text:
+
 relearn_baseline:
   name: Relearn baseline
   description: "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity."

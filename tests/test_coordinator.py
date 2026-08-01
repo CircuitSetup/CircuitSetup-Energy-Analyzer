@@ -65,6 +65,487 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 
+@pytest.mark.asyncio
+async def test_mark_circuit_mixed_persists_cleans_saves_then_reloads() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    circuits = [
+        {
+            "circuit_id": "fridge",
+            "name": "Fridge",
+            "mode": "single_phase",
+            "appliance_profile": "refrigerator",
+            "sensors": [],
+        }
+    ]
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits}
+    )
+    calls = []
+    coordinator.config_entry_controller.async_update_options = AsyncMock(
+        side_effect=lambda updates: calls.append(("persist", updates))
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock(side_effect=lambda circuit_id: calls.append(("dismiss", circuit_id)))
+    )
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        lambda circuit_id, values: calls.append(("store", circuit_id)) or True
+    )
+    coordinator.state_reducer.clear_direct_appliance_state = (
+        lambda state, circuit_id: calls.append(("state", circuit_id)) or True
+    )
+    coordinator.state_reducer.refresh_recent_activity_state = lambda *args: None
+    coordinator.refresh_ux_state_for_circuit = lambda *args: None
+    coordinator._async_save_store = AsyncMock(
+        side_effect=lambda now: calls.append(("save", now))
+    )
+    coordinator.config_entry_controller.async_reload = AsyncMock(
+        side_effect=lambda: calls.append(("reload", None))
+    )
+
+    await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert [call[0] for call in calls] == [
+        "persist", "dismiss", "store", "state", "save", "reload"
+    ]
+    assert calls[0][1][CONF_CIRCUITS][0]["mode"] == "mixed"
+
+
+def _mixed_transition_coordinator(mode: str = "single_phase", *, power_flow="load"):
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    circuit = {
+        "circuit_id": "fridge",
+        "name": "Fridge",
+        "mode": mode,
+        "power_flow": power_flow,
+        "appliance_profile": "refrigerator",
+        "sensors": [],
+    }
+    return EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: [circuit]}
+    )
+
+
+def _spy_mixed_transition(coordinator):
+    calls = []
+    coordinator.config_entry_controller.async_update_options = AsyncMock(
+        side_effect=lambda updates: calls.append("persist")
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock(side_effect=lambda circuit_id: calls.append("dismiss"))
+    )
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        lambda circuit_id, values: calls.append("cleanup") or True
+    )
+    coordinator.state_reducer.clear_direct_appliance_state = lambda *args: True
+    coordinator.state_reducer.refresh_recent_activity_state = lambda *args: None
+    coordinator.refresh_ux_state_for_circuit = lambda *args: None
+    coordinator._async_save_store = AsyncMock(
+        side_effect=lambda now: calls.append("save")
+    )
+    coordinator.config_entry_controller.async_reload = AsyncMock(
+        side_effect=lambda: calls.append("reload")
+    )
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_mark_already_mixed_cleans_saves_and_reloads_without_write() -> None:
+    coordinator = _mixed_transition_coordinator("mixed")
+    calls = _spy_mixed_transition(coordinator)
+
+    await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == ["dismiss", "cleanup", "save", "reload"]
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_persistence_failure_stops_cleanup_and_reload() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+    coordinator.config_entry_controller.async_update_options.side_effect = RuntimeError(
+        "persist failed"
+    )
+
+    with pytest.raises(RuntimeError, match="persist failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_cleanup_failure_reloads_then_raises_cleanup() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+
+    def fail_cleanup(circuit_id, values):
+        calls.append("cleanup")
+        raise RuntimeError("cleanup failed")
+
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        fail_cleanup
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert calls == ["persist", "dismiss", "cleanup", "reload"]
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_cleanup_remains_primary_when_reload_also_fails() -> None:
+    coordinator = _mixed_transition_coordinator()
+    _spy_mixed_transition(coordinator)
+
+    def fail_cleanup(circuit_id, values):
+        raise RuntimeError("cleanup failed")
+
+    coordinator.store_persistence.clear_direct_appliance_state_for_circuit = (
+        fail_cleanup
+    )
+    coordinator.config_entry_controller.async_reload.side_effect = RuntimeError(
+        "reload failed"
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed") as raised:
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert str(raised.value.__cause__) == "reload failed"
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_reload_failure_keeps_persisted_mixed_options() -> None:
+    coordinator = _mixed_transition_coordinator()
+    calls = _spy_mixed_transition(coordinator)
+
+    async def persist(updates):
+        coordinator.options.update(updates)
+        calls.append("persist")
+
+    coordinator.config_entry_controller.async_update_options.side_effect = persist
+    coordinator.config_entry_controller.async_reload.side_effect = RuntimeError(
+        "reload failed"
+    )
+
+    with pytest.raises(RuntimeError, match="reload failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+
+    assert coordinator.options[CONF_CIRCUITS][0]["mode"] == "mixed"
+    assert "save" in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("circuit_id", "mode", "power_flow"),
+    [
+        ("unknown", "single_phase", "load"),
+        ("fridge", "mains_nilm", "load"),
+        ("fridge", "single_phase", "generation"),
+        ("fridge", "dual_phase", "load"),
+    ],
+)
+async def test_mark_mixed_rejects_ineligible_without_side_effects(
+    circuit_id, mode, power_flow
+) -> None:
+    coordinator = _mixed_transition_coordinator(mode, power_flow=power_flow)
+    calls = _spy_mixed_transition(coordinator)
+
+    with pytest.raises(ValueError):
+        await coordinator.async_mark_circuit_mixed(circuit_id)
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "profile"),
+    [("mixed", "refrigerator"), ("single_phase", "mixed")],
+    ids=("mode", "legacy_profile"),
+)
+async def test_start_reconciles_saved_mixed_notifications_before_saving(
+    monkeypatch,
+    mode,
+    profile,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    aggregate = AlertEvidence(
+        now, "fridge", Severity.WARNING, "aggregate", feature="circuit_capacity"
+    )
+    unrelated = AlertEvidence(
+        now, "washer", Severity.WARNING, "unrelated", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+    aggregate_id = notifications_module.notification_id_for_alert(aggregate)
+    unrelated_id = notifications_module.notification_id_for_alert(unrelated)
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
+    store_data = FeatureStoreData(
+        baselines={"fridge:run_cycle": BaselineStats("run_cycle", 1, 1, 0, 1, 1, 1)},
+        alerts=[direct, aggregate, unrelated],
+        standby_by_circuit={"fridge": {"samples": []}},
+        energy_usage_by_circuit={"fridge": {"days": [{"date": "2026-07-31"}]}},
+        notification_delivery_state={
+            key: [
+                {"alert_id": direct_id}, {"alert_id": aggregate_id},
+                {"alert_id": unrelated_id},
+            ]
+            for key in ("deferred", "daily", "weekly")
+        } | {"summary_recovery_alert_ids": [direct_id, aggregate_id, unrelated_id]},
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [{
+                "circuit_id": "fridge", "name": "Fridge", "mode": mode,
+                "appliance_profile": profile, "sensors": [],
+            }]
+        },
+        store=store,
+        store_data=store_data,
+    )
+    coordinator.source_updates.async_start = AsyncMock()
+
+    await coordinator.async_start(())
+
+    assert store_data.baselines == {}
+    assert store_data.standby_by_circuit == {}
+    assert "fridge" in store_data.energy_usage_by_circuit
+    assert dismissed == [direct_id]
+    assert [alert.feature for alert in store_data.alerts] == [
+        "circuit_capacity", "always_on_power"
+    ]
+    for key in ("deferred", "daily", "weekly"):
+        queued_ids = [
+            item["alert_id"]
+            for item in store_data.notification_delivery_state[key]
+        ]
+        assert queued_ids == [
+            aggregate_id, unrelated_id
+        ]
+    assert store_data.notification_delivery_state["summary_recovery_alert_ids"] == [
+        aggregate_id, unrelated_id
+    ]
+    store.async_save.assert_awaited_once()
+
+    await coordinator.async_start(())
+    assert dismissed == [direct_id]
+    store.async_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "profile"),
+    [("mixed", "refrigerator"), ("single_phase", "mixed")],
+    ids=("mode", "legacy_profile"),
+)
+async def test_start_dismissal_failure_keeps_alert_retriable(
+    monkeypatch, mode, profile
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+
+    def stored_data():
+        return FeatureStoreData(
+            alerts=[direct],
+            notification_delivery_state={
+                key: [{"alert_id": direct_id}]
+                for key in ("deferred", "daily", "weekly")
+            },
+        )
+
+    async def fail_dismiss(_hass, _alert_id):
+        raise RuntimeError("dismiss failed")
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", fail_dismiss
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    entry_data = {
+        CONF_CIRCUITS: [{
+            "circuit_id": "fridge", "name": "Fridge", "mode": mode,
+            "appliance_profile": profile, "sensors": [],
+        }]
+    }
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data=entry_data,
+        store=store, store_data=stored_data(),
+    )
+    coordinator.source_updates.async_start = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="dismiss failed"):
+        await coordinator.async_start(())
+    store.async_save.assert_not_awaited()
+
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
+    retry_store = SimpleNamespace(data=None, async_save=AsyncMock())
+    retry = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data=entry_data,
+        store=retry_store, store_data=stored_data(),
+    )
+    retry.source_updates.async_start = AsyncMock()
+
+    await retry.async_start(())
+
+    assert dismissed == [direct_id]
+    retry_store.async_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_mixed_dismissal_failure_retries_after_reconstruction(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+    direct = AlertEvidence(
+        now, "fridge", Severity.WARNING, "direct", feature="always_on_power"
+    )
+    direct_id = notifications_module.notification_id_for_alert(direct)
+    circuits = [{
+        "circuit_id": "fridge", "name": "Fridge", "mode": "single_phase",
+        "appliance_profile": "refrigerator", "sensors": [],
+    }]
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits},
+        store_data=FeatureStoreData(alerts=[direct]),
+    )
+    persisted = {}
+    reloaded = []
+
+    async def persist(updates):
+        persisted.update(updates)
+
+    async def reload():
+        reloaded.append(True)
+
+    async def fail_dismiss(_hass, _alert_id):
+        raise RuntimeError("dismiss failed")
+
+    coordinator.config_entry_controller.async_update_options = persist
+    coordinator.config_entry_controller.async_reload = reload
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", fail_dismiss
+    )
+
+    with pytest.raises(RuntimeError, match="dismiss failed"):
+        await coordinator.async_mark_circuit_mixed("fridge")
+    assert reloaded == [True]
+    assert persisted[CONF_CIRCUITS][0]["mode"] == "mixed"
+
+    dismissed = []
+
+    async def dismiss(_hass, alert_id):
+        dismissed.append(alert_id)
+
+    monkeypatch.setattr(
+        notifications_module, "async_dismiss_persistent_notification", dismiss
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    retry = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}), entry_data={CONF_CIRCUITS: circuits},
+        options=persisted, store=store,
+        store_data=FeatureStoreData(alerts=[direct]),
+    )
+    retry.source_updates.async_start = AsyncMock()
+
+    await retry.async_start(())
+
+    assert dismissed == [direct_id]
+    store.async_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mixed_result_boundary_keeps_only_aggregate_alerts() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import FeatureResult
+
+    now = datetime(2026, 7, 31, tzinfo=UTC)
+
+    def alert(feature: str) -> AlertEvidence:
+        return AlertEvidence(
+            timestamp=now,
+            circuit_id="mixed",
+            severity=Severity.WARNING,
+            message=feature,
+            feature=feature,
+        )
+
+    direct_cycle = alert("cycle_duration_change")
+    aggregate_energy = alert("daily_energy_usage_spike")
+    direct_standby = alert("always_on_power")
+    aggregate_capacity = alert("circuit_capacity")
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mixed",
+                    "name": "Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    coordinator.state.learning_by_circuit["mixed"] = False
+    coordinator._notify_alert = AsyncMock()
+
+    _events, active = await coordinator.async_apply_feature_result(
+        FeatureResult(
+            alerts=[direct_cycle, aggregate_energy],
+            preserved_alerts=[direct_standby, aggregate_capacity],
+            notifications=[direct_cycle, aggregate_energy],
+        )
+    )
+
+    assert {item.feature for item in active} == {
+        "daily_energy_usage_spike",
+        "circuit_capacity",
+    }
+    notified = [
+        call.args[0].feature for call in coordinator._notify_alert.await_args_list
+    ]
+    assert notified == ["daily_energy_usage_spike"]
+
+
 def test_coordinator_fires_hvac_association_revision_event_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4946,8 +5427,8 @@ async def test_runtime_blocks_alerts_until_learning_window_or_cycles_mature(
                 )
             }
         ),
-        now_fn=lambda: holder["time"],
-    )
+            now_fn=lambda: holder["time"],
+        )
 
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
@@ -5438,7 +5919,7 @@ def test_runtime_retention_prunes_daily_rows_by_ha_local_date() -> None:
                     ],
                 }
             },
-            demand_by_circuit={
+                demand_by_circuit={
                 "fridge": {
                     "daily_peaks": [
                         {"date": "2026-05-26", "peak_demand_w": 1000.0},
@@ -6212,8 +6693,8 @@ async def test_runtime_dual_phase_tracks_leg_imbalance_and_notifies(
             baselines=_learned_real_power_baselines("hvac", 3600.0),
             energy_usage_by_circuit=_completed_energy_learning_history("hvac", now),
         ),
-        now_fn=lambda: holder["time"],
-    )
+            now_fn=lambda: holder["time"],
+        )
 
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
@@ -10947,7 +11428,7 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
     assert usage["baseline_day_count"] >= 7
     assert usage["status"] != "learning"
-    assert coordinator.state.learning_by_circuit[circuit_id] is False
+    assert circuit_id not in coordinator.state.learning_by_circuit
     assert coordinator.state.nilm_signature_count_by_circuit[circuit_id] > 0
     unknown_loads = coordinator.state.nilm_unknown_loads_by_circuit[circuit_id]
     assert unknown_loads["unknown_load_count"] > 0
@@ -14263,8 +14744,9 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
         await coordinator.async_process_update()
 
     assert notifications == []
-    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
-    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
+    assert "mixed" not in coordinator.state.power_quality_score_by_circuit
+    assert "mixed" not in coordinator.state.power_quality_evidence_by_circuit
+    assert coordinator.state.learning_by_circuit["mixed"] is False
 
 
 @pytest.mark.asyncio
@@ -14332,11 +14814,12 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
                         {"date": "2026-06-02", "usage_kwh": 8.0, "complete": True},
                     ],
                 }
-            }
-        ),
-        now_fn=lambda: holder["time"],
-    )
+                }
+            ),
+            now_fn=lambda: holder["time"],
+        )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         holder["energy"] += 0.1
@@ -16412,7 +16895,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
                     "circuit_id": "mains",
                     "name": "Mains",
                     "mode": "mains_nilm",
-                    "appliance_profile": "mixed",
+                    "appliance_profile": "mains_nilm",
                     "sensors": [
                         {"entity_id": "sensor.mains_power", "role": "real_power"},
                     ],
@@ -16450,6 +16933,7 @@ async def test_runtime_tracks_monthly_peak_demand_rank_and_notifies(
         now_fn=lambda: holder["time"],
     )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         await coordinator.async_process_update()
@@ -16916,7 +17400,7 @@ async def test_runtime_tracks_always_on_and_notifies_limit(monkeypatch) -> None:
                     "circuit_id": "office",
                     "name": "Office",
                     "mode": "single_phase",
-                    "appliance_profile": "mixed",
+                    "appliance_profile": "motor_load",
                     "standby_threshold_w": 8.0,
                     "always_on_alert_w": 25.0,
                     "standby_min_samples": 6,
@@ -17113,17 +17597,18 @@ async def test_runtime_compares_utility_to_configured_mains_energy_and_notifies(
             events=_completed_learning_events("mains", now),
             baselines=_learned_real_power_baselines("mains", 1000.0),
             energy_usage_by_circuit=_completed_energy_learning_history("mains", now),
-            utility_comparison_settings_by_circuit={
+                utility_comparison_settings_by_circuit={
                 "mains": {
                     "utility_energy_entity": "sensor.opower_current_bill_usage",
                     "measured_energy_entities": ["sensor.panel_import_energy"],
                     "tolerance_percent": 10.0,
                 }
-            }
-        ),
-        now_fn=lambda: holder["time"],
-    )
+                }
+            ),
+            now_fn=lambda: holder["time"],
+        )
 
+    coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
         await coordinator.async_process_update()
@@ -18479,5 +18964,5 @@ async def test_runtime_mixed_circuit_suppresses_power_quality_notification(
 
     assert notifications == []
     assert coordinator.state.active_alerts_by_circuit.get("mixed", []) == []
-    assert coordinator.state.power_quality_score_by_circuit["mixed"] > 0.0
-    assert coordinator.state.power_quality_evidence_by_circuit["mixed"] == ""
+    assert "mixed" not in coordinator.state.power_quality_score_by_circuit
+    assert "mixed" not in coordinator.state.power_quality_evidence_by_circuit

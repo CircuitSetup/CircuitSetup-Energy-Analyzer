@@ -15,6 +15,7 @@ from ..operating_detection import (
     operating_state_is_running,
     resolve_operating_detection_from_settings,
 )
+from ..profiles import supports_direct_appliance_analysis
 from .base import AlertPolicy, FeatureResult, ProcessingContext
 
 type ActivityAlertSettingsProvider = Callable[
@@ -45,6 +46,8 @@ class ActivityAlertProcessor:
         context: ProcessingContext,
     ) -> FeatureResult:
         """Return configured activity alerts for the current cycle summary."""
+        if not supports_direct_appliance_analysis(circuit_config):
+            return FeatureResult()
         merge_gap_seconds = resolve_operating_detection_from_settings(
             circuit_config,
             getattr(
@@ -70,7 +73,10 @@ class ActivityAlertProcessor:
                 circuit_config,
                 circuit_config.circuit_id,
             ),
-            suppress_active_duration_alert=_is_mains_nilm(circuit_config),
+            suppress_active_duration_alert=(
+                _is_mains_nilm(circuit_config)
+                or circuit_config.mode is CircuitMode.MIXED
+            ),
         )
         if evidence is None:
             return FeatureResult()

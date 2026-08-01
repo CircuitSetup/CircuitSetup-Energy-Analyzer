@@ -5,8 +5,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+)
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
     NilmController,
+)
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import (
     FeatureStoreData,
@@ -16,10 +24,15 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 
 
 def test_nilm_controller_filters_known_load_events_from_registry() -> None:
+    mains_config = SimpleNamespace(
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+    )
     controller = _nilm_controller(
         SimpleNamespace(
             circuit_registry=SimpleNamespace(
                 known_load_circuit_ids=frozenset({"fridge"}),
+                config_for_circuit=lambda _circuit_id: mains_config,
             ),
         )
     )
@@ -32,6 +45,77 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        SimpleNamespace(
+            mode=CircuitMode.SINGLE_PHASE,
+            appliance_profile=ApplianceProfile.MIXED,
+        ),
+        SimpleNamespace(
+            mode=CircuitMode.MIXED,
+            appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        ),
+    ),
+)
+def test_nilm_controller_enables_mixed_sources_only_when_experimental(
+    config: SimpleNamespace,
+) -> None:
+    disabled = _nilm_controller(
+        SimpleNamespace(options={}, entry_data={})
+    )
+    enabled = _nilm_controller(
+        SimpleNamespace(
+            options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+            entry_data={},
+        )
+    )
+
+    assert disabled.enabled_for_config(config) is False
+    assert enabled.enabled_for_config(config) is True
+
+
+@pytest.mark.parametrize(
+    ("source_config", "expected_circuit_ids"),
+    (
+        (
+            SimpleNamespace(
+                mode=CircuitMode.MIXED,
+                appliance_profile=ApplianceProfile.MOTOR_LOAD,
+            ),
+            [],
+        ),
+        (
+            SimpleNamespace(
+                mode=CircuitMode.SINGLE_PHASE,
+                appliance_profile=ApplianceProfile.MIXED,
+            ),
+            [],
+        ),
+        (None, ["fridge"]),
+    ),
+)
+def test_nilm_controller_masks_known_loads_only_for_known_nonmixed_sources(
+    source_config: SimpleNamespace | None,
+    expected_circuit_ids: list[str],
+) -> None:
+    controller = _nilm_controller(
+        SimpleNamespace(
+            circuit_registry=SimpleNamespace(
+                known_load_circuit_ids=frozenset({"fridge"}),
+                config_for_circuit=lambda _circuit_id: source_config,
+            ),
+        )
+    )
+
+    assert [
+        event.circuit_id
+        for event in controller.known_load_events(
+            "mixed", [SimpleNamespace(circuit_id="fridge")]
+        )
+    ] == expected_circuit_ids
 
 
 def test_nilm_controller_builds_signature_payloads_with_public_current_time() -> None:
@@ -113,7 +197,7 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     store_data = FeatureStoreData(
         nilm_session_history_by_circuit={
-            "mains": [
+            "mixed": [
                 {
                     "session_id": "session-old",
                     "assignment_id": "assignment-dishwasher",
@@ -139,7 +223,7 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
         SimpleNamespace(current_time=lambda: now, store_data=store_data)
     )
     assignment = controller.upsert_assignment(
-        "mains",
+        "mixed",
         assignment_id="assignment-dishwasher",
         appliance_id="dishwasher",
         label="Kitchen Dishwasher",
@@ -159,11 +243,11 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
         SimpleNamespace(current_time=lambda: now, store_data=restored)
     )
     restored_assignment = restarted.assignment_for_id(
-        "mains",
+        "mixed",
         "assignment-dishwasher",
     )
     history = restarted.assignment_session_history(
-        "mains",
+        "mixed",
         "assignment-dishwasher",
     )
 
@@ -176,6 +260,50 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
         "session-new",
         "session-old",
     ]
+
+
+@pytest.mark.asyncio
+async def test_mixed_nilm_signature_review_keeps_stable_assignment_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mixed": [
+                    {
+                        "signature_id": "signature-dishwasher",
+                        "feedback_fingerprint": "dishwasher-fingerprint",
+                    }
+                ]
+            }
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="mixed",
+            name="Mixed",
+            mode=CircuitMode.MIXED,
+            appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        ),
+    )
+
+    assignment = await coordinator.async_assign_nilm_signature(
+        "mixed",
+        "signature-dishwasher",
+        label="Dishwasher",
+        appliance_id="dishwasher",
+        assignment_id="assignment-dishwasher",
+    )
+
+    assert assignment["assignment_id"] == "assignment-dishwasher"
+    assert assignment["appliance_key"] == "nilm:assignment-dishwasher"
+    assert coordinator.store_data.nilm_signatures["mixed"][0]["assignment_id"] == (
+        "assignment-dishwasher"
+    )
 
 
 @pytest.mark.asyncio

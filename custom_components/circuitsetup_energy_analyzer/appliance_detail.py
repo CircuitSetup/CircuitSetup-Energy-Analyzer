@@ -716,7 +716,17 @@ def metric_comparisons_for_circuit(
         ),
     )
     comparisons: list[MetricComparison] = []
+    is_mixed = (
+        config.mode is CircuitMode.MIXED
+        or config.appliance_profile is ApplianceProfile.MIXED
+    )
     for metric_id, label, unit, field, baseline_features in specs:
+        if is_mixed and metric_id in {
+            "runtime_today_seconds",
+            "run_count_today",
+            "current_power_w",
+        }:
+            continue
         if (
             metric_id == "capacity_usage_percent"
             and _mapping_status(
@@ -728,8 +738,6 @@ def metric_comparisons_for_circuit(
         ):
             continue
         if metric_id == "current_power_w":
-            if config.mode is CircuitMode.MIXED:
-                continue
             operating_status = _mapping_status(
                 state,
                 "run_cycle_status_by_circuit",
@@ -1098,6 +1106,29 @@ def _primary_appliance_expectations_for_circuit(
                     "Behavior guidance is only useful when inputs are valid."
                 ),
                 what_to_check_first=("Review source sensor data.",),
+                evidence_path=evidence_path,
+            ),
+        )
+
+    if (
+        config.mode is CircuitMode.MIXED
+        or config.appliance_profile is ApplianceProfile.MIXED
+    ):
+        return (
+            _expectation(
+                config,
+                title="Shared circuit measurement",
+                status="not_enough_data",
+                source_type=expectation_source,
+                observed="This measurement covers the whole shared circuit.",
+                expected=(
+                    "Reviewed Experimental NILM is required for "
+                    "appliance-specific evidence."
+                ),
+                why_it_matters=(
+                    "Direct appliance classifications do not apply to shared loads."
+                ),
+                what_to_check_first=("Review Experimental NILM assignments.",),
                 evidence_path=evidence_path,
             ),
         )

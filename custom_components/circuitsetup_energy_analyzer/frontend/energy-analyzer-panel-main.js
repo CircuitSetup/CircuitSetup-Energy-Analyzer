@@ -30,6 +30,7 @@ export const ACTION_SERVICE_NAMES = {
   mark_unhelpful: "mark_alert_unhelpful",
   pause_alerts: "pause_alerts",
   relearn_baseline: "relearn_baseline",
+  mark_circuit_mixed: "mark_circuit_mixed",
   apply_setting_recommendation: "apply_setting_recommendation",
   dismiss_setting_recommendation: "dismiss_setting_recommendation",
   undo_setting_recommendation: "undo_setting_recommendation",
@@ -437,14 +438,19 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _renderActionConfirmation() {
-    if (this._pendingConfirmationAction !== "relearn_baseline") {
+    const confirmationKeys = {
+      relearn_baseline: ["confirmations.relearn_title", "confirmations.relearn_message", "confirmations.confirm_relearn"],
+      mark_circuit_mixed: ["confirmations.mixed_title", "confirmations.mixed_message", "confirmations.confirm_mixed"],
+    };
+    const keys = confirmationKeys[this._pendingConfirmationAction];
+    if (!keys) {
       return "";
     }
     return `
-      <ha-dialog open heading="${this._escape(this._panelText("confirmations.relearn_title"))}">
-        <p>${this._escape(this._panelText("confirmations.relearn_message"))}</p>
+      <ha-dialog open heading="${this._escape(this._panelText(keys[0]))}">
+        <p>${this._escape(this._panelText(keys[1]))}</p>
         <mwc-button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</mwc-button>
-        <mwc-button slot="primaryAction" id="confirm_action">${this._escape(this._panelText("confirmations.confirm_relearn"))}</mwc-button>
+        <mwc-button slot="primaryAction" id="confirm_action">${this._escape(this._panelText(keys[2]))}</mwc-button>
       </ha-dialog>
     `;
   }

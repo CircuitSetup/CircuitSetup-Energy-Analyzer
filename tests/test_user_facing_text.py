@@ -699,6 +699,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
+            "circuit_is_shared": "This circuit also powers unrelated loads",
             "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
@@ -709,6 +710,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
+        assert "primary appliance" in descriptions["circuit_is_shared"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
@@ -5317,6 +5319,75 @@ for (const expected of [
     throw new Error(`missing ${expected}: ${html}`);
   }
 }
+"""
+    )
+
+
+def test_no_evidence_fallback_renders_mixed_circuit_action() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  actions: {
+    mark_circuit_mixed: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_circuit_mixed",
+      data: { circuit_id: "fridge" },
+    },
+  },
+};
+const html = panel._renderNotFound();
+assert.match(html, /id="mark_circuit_mixed"/);
+assert.match(html, />This circuit powers other loads</);
+"""
+    )
+
+
+def test_mark_circuit_mixed_requires_confirmation_and_reports_result() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const calls = [];
+  const panel = new context.Panel();
+  panel._payload = { actions: { mark_circuit_mixed: {
+    domain: "circuitsetup_energy_analyzer",
+    service: "mark_circuit_mixed",
+    data: { circuit_id: "fridge" },
+  } } };
+  panel._hass = { callService: async (...args) => { calls.push(args); } };
+  panel._render = () => {};
+  panel._scrollToTop = () => {};
+  panel._loadEvidence = async () => {};
+  panel._loadedRouteKey = panel._routeKey();
+
+  const evidence = panel._renderActionDisclosure("tune", "Tune", "Tune it", [
+    panel._actionButton("mark_circuit_mixed", panel._panelText("actions.labels.mark_circuit_mixed"), true),
+  ]);
+  assert.match(evidence, /This circuit powers other loads/);
+
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  assert.equal(calls.length, 0);
+  const confirmation = panel._renderActionConfirmation();
+  for (const expected of ["keep aggregate history", "stop direct-appliance classifications and alerts", "reload the integration"]) {
+    assert.ok(confirmation.includes(expected), confirmation);
+  }
+  assert.ok(!confirmation.includes("detected another load"), confirmation);
+  panel._cancelActionConfirmation();
+  assert.equal(calls.length, 0);
+
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  await panel._confirmPendingAction();
+  assert.deepEqual(calls, [["circuitsetup_energy_analyzer", "mark_circuit_mixed", { circuit_id: "fridge" }]]);
+  assert.equal(panel._lastActionMessage, "Circuit marked as mixed.");
+
+  panel._hass.callService = async () => { throw new Error("service failed"); };
+  panel._renderAndScrollToTop = () => {};
+  panel._requestActionConfirmation("mark_circuit_mixed");
+  await panel._confirmPendingAction();
+  assert.match(panel._error, /service failed/);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
 

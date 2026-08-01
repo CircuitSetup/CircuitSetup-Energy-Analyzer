@@ -11,6 +11,7 @@ from typing import Any, Self
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
+from .appliance_notifications import mixed_circuit_allows_alert
 from .config_parsing import (
     circuit_configs_from_entry_data as _circuit_configs_from_entry_data,
 )
@@ -18,6 +19,7 @@ from .config_parsing import (
     mains_context_config_from_sources,
 )
 from .const import (
+    CONF_CIRCUITS,
     DOMAIN,
     EVENT_HVAC_ASSOCIATION_UPDATED,
 )
@@ -32,6 +34,7 @@ from .managers.utility_energy_sources import (
 )
 from .models import (
     AlertEvidence,
+    ApplianceProfile,
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
@@ -39,6 +42,7 @@ from .models import (
     SensorRole,
 )
 from .normalize import NormalizedCircuitSample, SourceState
+from .notifications import notification_id_for_alert
 from .operating_detection import resolve_operating_detection_from_settings
 from .processors import (
     FeatureResult,
@@ -201,6 +205,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
+        self._mixed_startup_store_dirty = False
+        self._mixed_startup_direct_alert_ids: set[str] = set()
+        for config in self.circuit_configs:
+            if (
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            ):
+                self._mixed_startup_direct_alert_ids.update(
+                    notification_id_for_alert(alert)
+                    for alert in self.store_data.alerts
+                    if alert.circuit_id == config.circuit_id
+                    and not mixed_circuit_allows_alert(alert.feature)
+                )
+                self._mixed_startup_store_dirty |= (
+                    self.store_persistence.clear_direct_appliance_state_for_circuit(
+                        config.circuit_id, self._baseline_values
+                    )
+                )
         self._hydrate_state_from_store()
         self.async_set_updated_data(self.state)
 
@@ -223,6 +245,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self.evidence_actions.async_expire_maintenance_if_due(
             self.current_time()
         )
+        if self._mixed_startup_direct_alert_ids:
+            await self.notification_controller.async_dismiss_alert_notification_ids(
+                self._mixed_startup_direct_alert_ids
+            )
+            self._mixed_startup_direct_alert_ids.clear()
+        if self._mixed_startup_store_dirty:
+            await self._async_save_store(self.current_time())
+            self._mixed_startup_store_dirty = False
         entities = [
             str(entity_id)
             for entity_id in source_entities
@@ -734,6 +764,60 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             preset,
         )
+
+    async def async_mark_circuit_mixed(self, circuit_id: str) -> None:
+        """Persist a user-confirmed shared circuit and reconcile direct state."""
+        config = self.circuit_registry.config_for_circuit(circuit_id)
+        if (
+            config is None
+            or config.mode in (CircuitMode.MAINS_NILM, CircuitMode.DUAL_PHASE)
+            or config.power_flow.value != "load"
+        ):
+            raise ValueError(f"Circuit cannot be marked mixed: {circuit_id}")
+        if config.mode is not CircuitMode.MIXED:
+            circuits = [dict(item) for item in self.options.get(
+                CONF_CIRCUITS, self.entry_data.get(CONF_CIRCUITS, [])
+            )]
+            found = False
+            for item in circuits:
+                if item.get("circuit_id") == circuit_id:
+                    item["mode"] = CircuitMode.MIXED.value
+                    found = True
+                    break
+            if not found:
+                raise ValueError(f"Circuit is not explicitly configured: {circuit_id}")
+            await self.config_entry_controller.async_update_options(
+                {CONF_CIRCUITS: circuits}
+            )
+
+        cleanup_error: BaseException | None = None
+        try:
+            await (
+                self.notification_controller.async_dismiss_circuit_alert_notifications(
+                    circuit_id
+                )
+            )
+            self.store_persistence.clear_direct_appliance_state_for_circuit(
+                circuit_id, self._baseline_values
+            )
+            self.state_reducer.clear_direct_appliance_state(self.state, circuit_id)
+            now = self.current_time()
+            self.state_reducer.refresh_recent_activity_state(
+                self.state, self.store_data, circuit_id, now
+            )
+            self.refresh_ux_state_for_circuit(circuit_id, now)
+            self.async_set_updated_data(self.state)
+            await self._async_save_store(now)
+        except BaseException as err:
+            cleanup_error = err
+        try:
+            await self.config_entry_controller.async_reload()
+        except BaseException as reload_error:
+            if cleanup_error is not None:
+                raise cleanup_error from reload_error
+            raise
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def async_set_entity_detail_level(self: Self, detail_level: str) -> None:
         """Persist the entity detail level and reload desired entities."""
@@ -1550,23 +1634,42 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> tuple[list[CircuitEvent], list[AlertEvidence]]:
         """Apply processor output to coordinator-owned state and side effects."""
         self.state_reducer.apply_updates(self.state, result.state_updates)
+
+        def allows(alert: AlertEvidence) -> bool:
+            config = next(
+                (
+                    config
+                    for config in self.circuit_configs
+                    if config.circuit_id == alert.circuit_id
+                ),
+                None,
+            )
+            is_mixed = config is not None and (
+                config.mode is CircuitMode.MIXED
+                or config.appliance_profile is ApplianceProfile.MIXED
+            )
+            return not is_mixed or mixed_circuit_allows_alert(alert.feature)
+
         result = replace(
             result,
             state_updates=[],
             alerts=[
                 alert
                 for alert in result.alerts
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
             preserved_alerts=[
                 alert
                 for alert in result.preserved_alerts
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
             notifications=[
                 alert
                 for alert in result.notifications
-                if self.notification_controller.learning_allows_alert(alert)
+                if allows(alert)
+                and self.notification_controller.learning_allows_alert(alert)
             ],
         )
         applied = self.state_reducer.apply_feature_result(

@@ -6,16 +6,39 @@ from zoneinfo import ZoneInfo
 
 from custom_components.circuitsetup_energy_analyzer.expected_schedule import (
     evaluate_expected_schedule,
+    expected_schedule_circuit_ids,
     refresh_expected_schedule_contexts,
     schedule_settings_from_dict,
     schedule_window_state,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     EventType,
 )
+from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
 
 TIME_ZONE = ZoneInfo("America/New_York")
+
+
+def test_mixed_circuit_is_not_scheduled_for_direct_evaluation() -> None:
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            appliance_schedule_settings={"circuit:fridge": {"enabled": True}}
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="fridge",
+                name="Fridge",
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
+                mode=CircuitMode.MIXED,
+            ),
+        ),
+    )
+
+    assert expected_schedule_circuit_ids(coordinator) == set()
 
 
 def _settings(**overrides: object):
@@ -241,6 +264,30 @@ def _coordinator(
     )
 
 
+def test_refresh_discards_mixed_direct_circuit_schedule_context() -> None:
+    coordinator = _coordinator()
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="pool_pump",
+            name="Shared Pool Circuit",
+            appliance_profile=ApplianceProfile.POOL_PUMP,
+            mode=CircuitMode.MIXED,
+        ),
+    )
+    coordinator.store_data.appliance_schedule_evidence["circuit:pool_pump"] = {
+        "missed_window_ids": ["stale"]
+    }
+
+    alerts = refresh_expected_schedule_contexts(
+        coordinator,
+        datetime(2026, 7, 13, 12, 0, tzinfo=TIME_ZONE),
+    )
+
+    assert alerts == []
+    assert coordinator.state.expected_schedule_by_appliance == {}
+    assert coordinator.store_data.appliance_schedule_evidence == {}
+
+
 def _nilm_coordinator(
     sessions: list[dict[str, object]],
     *,
@@ -271,6 +318,24 @@ def _nilm_coordinator(
         "numeric_states_valid": True,
     }
     return coordinator
+
+
+def test_nilm_schedule_source_is_included_for_reconciliation() -> None:
+    for profile, mode in (
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED),
+    ):
+        coordinator = _nilm_coordinator([])
+        coordinator.circuit_configs = (
+            CircuitConfig(
+                circuit_id="mains",
+                name="Shared source",
+                appliance_profile=profile,
+                mode=mode,
+            ),
+        )
+
+        assert expected_schedule_circuit_ids(coordinator) == {"mains"}
 
 
 def test_completed_window_with_minimum_runtime_is_not_missed() -> None:

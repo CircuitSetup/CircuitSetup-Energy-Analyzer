@@ -1529,6 +1529,7 @@ export class PanelShellMethods {
     }
     this._listen("#pause_alerts", () => this._callAction("pause_alerts"));
     this._listen("#relearn_baseline", () => this._requestActionConfirmation("relearn_baseline"));
+    this._listen("#mark_circuit_mixed", () => this._requestActionConfirmation("mark_circuit_mixed"));
     this._listen("#cancel_action_confirmation", () => this._cancelActionConfirmation());
     this._listen("#confirm_action", () => this._confirmPendingAction());
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));

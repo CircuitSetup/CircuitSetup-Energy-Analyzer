@@ -8,6 +8,7 @@ from .. import notifications
 from ..appliance_notifications import (
     alert_notification_category,
     decide_notification_delivery,
+    mixed_circuit_allows_alert,
     preferences_from_dict,
 )
 from ..cold_storage import (
@@ -385,7 +386,39 @@ class NotificationController:
             notifications.notification_id_for_alert(alert)
             for alert in alerts
             if alert.circuit_id == circuit_id
+            and not mixed_circuit_allows_alert(alert.feature)
         }
+        await self.async_dismiss_alert_notification_ids(alert_ids)
+
+    async def async_dismiss_alert_notification_ids(
+        self,
+        alert_ids: set[str],
+    ) -> None:
+        """Dismiss exact alert IDs and prune their queued delivery state."""
+        delivery = self._delivery_state()
+        queue_changed = False
+        for queue_name in ("deferred", "daily", "weekly"):
+            queue = delivery.get(queue_name)
+            if not isinstance(queue, list):
+                continue
+            retained = [
+                item
+                for item in queue
+                if not isinstance(item, dict) or item.get("alert_id") not in alert_ids
+            ]
+            if retained != queue:
+                delivery[queue_name] = retained
+                queue_changed = True
+        summary_ids = delivery.get("summary_recovery_alert_ids")
+        if isinstance(summary_ids, list):
+            retained_summary_ids = [
+                alert_id for alert_id in summary_ids if alert_id not in alert_ids
+            ]
+            if retained_summary_ids != summary_ids:
+                delivery["summary_recovery_alert_ids"] = retained_summary_ids
+                queue_changed = True
+        if queue_changed:
+            self._coordinator.store_persistence.mark_dirty()
         for alert_id in sorted(alert_ids):
             await self.async_dismiss_alert_notification(alert_id)
 

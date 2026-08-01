@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
     CircuitMode,
     EventType,
+    PowerFlowMode,
     SensorRef,
     SensorRole,
     Severity,
@@ -3280,6 +3282,94 @@ def test_settings_suggestions_sensor_applies_to_every_configured_circuit() -> No
     )
 
 
+def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+        binary_sensor_description_applies,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    sensors = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    binary = {
+        description.key: description for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    circuit = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef("sensor.power", SensorRole.REAL_POWER),
+            SensorRef("sensor.current", SensorRole.CURRENT),
+            SensorRef("sensor.voltage", SensorRole.VOLTAGE),
+            SensorRef("sensor.var", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.va", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.pf", SensorRole.POWER_FACTOR),
+        ),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(),
+        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["binary_sensor.water"]},
+        entry_data={},
+        store_data=FeatureStoreData(),
+    )
+
+    for key in (
+        "activity_summary",
+        "run_cycle_count",
+        "power_quality_score",
+        "reactive_power_drift",
+        "apparent_power_drift",
+        "power_factor_drift",
+        "always_on_power",
+        "water_flow_correlation",
+    ):
+        assert not sensor_description_applies(sensors[key], circuit, coordinator)
+    assert sensor_description_applies(
+        sensors["energy_usage_status"], circuit, coordinator
+    )
+    assert sensor_description_applies(
+        sensors["metric_consistency_score"], circuit, coordinator
+    )
+    assert not binary_sensor_description_applies(
+        binary["water_flow_mismatch"], circuit, coordinator
+    )
+
+
+def test_solar_generation_exposes_power_quality_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar Inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+        sensors=(
+            SensorRef("sensor.solar_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.solar_var", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.solar_va", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.solar_pf", SensorRole.POWER_FACTOR),
+        ),
+    )
+
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    for key in (
+        "power_quality_score",
+        "reactive_power_drift",
+        "apparent_power_drift",
+        "power_factor_drift",
+    ):
+        assert sensor_description_applies(descriptions[key], solar, coordinator)
+
+
 def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
     from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
         BINARY_SENSOR_DESCRIPTIONS,
@@ -5858,10 +5948,22 @@ async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch(
             entry_data={},
         ),
     )
+    mixed_with_flow = await entity_keys_for(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(replace(washer, mode=CircuitMode.MIXED),),
+            options={
+                CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+                CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            },
+            entry_data={},
+        ),
+    )
 
     assert "entry-1_washer_water_flow_mismatch" not in without_flow
     assert "entry-1_washer_water_flow_mismatch" in with_flow
     assert "entry-1_washer_water_flow_mismatch" in with_linked_flow
+    assert "entry-1_washer_water_flow_mismatch" not in mixed_with_flow
 
 
 @pytest.mark.asyncio
