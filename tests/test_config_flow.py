@@ -44,9 +44,6 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     ENTITY_DETAIL_SIMPLE,
     ENTITY_DETAIL_STANDARD,
 )
-from custom_components.circuitsetup_energy_analyzer.discovery import DiscoveredSensor
-from custom_components.circuitsetup_energy_analyzer.mapping import DualPhaseSuggestion
-from custom_components.circuitsetup_energy_analyzer.models import SensorRole
 
 CONF_DEMO_SOURCE_BUNDLE_ENABLED = "demo_source_bundle_enabled"
 
@@ -223,57 +220,6 @@ def _assert_create_entry_result(
 
 def _assert_no_description_placeholders(result: dict[str, object]) -> None:
     assert result.get("description_placeholders") in (None, {})
-
-
-def test_format_mapping_suggestions_shows_confirmation_text() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        format_mapping_suggestions,
-    )
-
-    left = DiscoveredSensor(
-        "sensor.panel_ch1_power",
-        "HVAC L1 Power",
-        SensorRole.REAL_POWER,
-        "meter-1",
-        "W",
-        "power",
-        "esphome",
-    )
-    right = DiscoveredSensor(
-        "sensor.panel_ch2_power",
-        "HVAC L2 Power",
-        SensorRole.REAL_POWER,
-        "meter-1",
-        "W",
-        "power",
-        "esphome",
-    )
-
-    text = format_mapping_suggestions(
-        [DualPhaseSuggestion(left, right, 0.8, ("neighboring channels",))]
-    )
-
-    assert "HVAC L1 Power" in text
-    assert "sensor.panel_ch1_power" in text
-    assert "HVAC L2 Power" in text
-    assert "sensor.panel_ch2_power" in text
-    assert "80%" in text
-    assert "neighboring channels" in text
-    assert "confirm or manually override" in text
-    assert "accept, edit, mark as mixed, or exclude" in text
-    assert "required metric availability" in text
-    assert "optional metric availability" in text
-
-
-def test_format_mapping_suggestions_requires_manual_definition_when_empty() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        format_mapping_suggestions,
-    )
-
-    text = format_mapping_suggestions([])
-
-    assert "Continue with source sensors" in text
-    assert "manual definition" not in text
 
 
 def _schema_keys(schema) -> set[str]:
@@ -1854,48 +1800,6 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_options_entity_detail_step_saves_profile_without_registry_apply(
-    monkeypatch,
-) -> None:
-    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        CircuitSetupEnergyAnalyzerOptionsFlow,
-    )
-
-    calls: list[tuple[object, object, str]] = []
-
-    def fake_apply(hass, entry, detail_level):
-        calls.append((hass, entry, detail_level))
-        return {"total": 3, "will_disable": 1}
-
-    monkeypatch.setattr(
-        config_flow,
-        "_apply_entity_detail_profile_to_existing_entities",
-        fake_apply,
-    )
-    hass = SimpleNamespace()
-    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
-    flow.hass = hass
-
-    result = await flow.async_step_entity_detail(
-        {
-            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
-            "apply_entity_detail_profile": True,
-        }
-    )
-
-    _assert_create_entry_result(
-        result,
-        {
-            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
-            CONF_SELECTED_ENTITY_GROUPS: [],
-        },
-    )
-    assert calls == []
-
-
-@pytest.mark.asyncio
 async def test_options_entity_detail_step_saves_expert_entity_groups() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -2791,19 +2695,13 @@ async def test_options_flow_dashboard_warns_when_layout_exceeds_entity_detail(
 
 
 @pytest.mark.asyncio
-async def test_options_flow_dashboard_matches_detail_without_registry_apply(
+async def test_options_flow_dashboard_matches_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
-
-    calls: list[tuple[object, object, str]] = []
-
-    def fake_apply(hass, entry, detail_level):
-        calls.append((hass, entry, detail_level))
-        return {"total": 8, "will_enable": 5}
 
     class Coordinator:
         def __init__(self) -> None:
@@ -2815,11 +2713,6 @@ async def test_options_flow_dashboard_matches_detail_without_registry_apply(
         async def async_create_dashboard(self) -> None:
             self.calls.append(("async_create_dashboard", ()))
 
-    monkeypatch.setattr(
-        config_flow,
-        "_apply_entity_detail_profile_to_existing_entities",
-        fake_apply,
-    )
     monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
     coordinator = Coordinator()
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -2848,7 +2741,6 @@ async def test_options_flow_dashboard_matches_detail_without_registry_apply(
             CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
         },
     )
-    assert calls == []
     assert coordinator.calls == [
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_EXPERT,)),
         ("async_create_dashboard", ()),
@@ -2905,19 +2797,13 @@ async def test_options_flow_dashboard_allows_expert_layout_with_standard_detail(
 
 
 @pytest.mark.asyncio
-async def test_options_flow_dashboard_create_failure_does_not_apply_registry_profile(
+async def test_options_flow_dashboard_create_failure_restores_layout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
-
-    calls: list[tuple[object, object, str]] = []
-
-    def fake_apply(hass, entry, detail_level):
-        calls.append((hass, entry, detail_level))
-        return {"total": 8, "will_enable": 5}
 
     class Coordinator:
         def __init__(self) -> None:
@@ -2933,11 +2819,6 @@ async def test_options_flow_dashboard_create_failure_does_not_apply_registry_pro
                 "reason": "lovelace_dashboard_collection_unavailable",
             }
 
-    monkeypatch.setattr(
-        config_flow,
-        "_apply_entity_detail_profile_to_existing_entities",
-        fake_apply,
-    )
     monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
     coordinator = Coordinator()
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -2962,7 +2843,6 @@ async def test_options_flow_dashboard_create_failure_does_not_apply_registry_pro
     assert result["type"] == "form"
     assert result["step_id"] == "dashboard"
     assert result["errors"] == {"base": "dashboard_creation_unavailable"}
-    assert calls == []
     assert coordinator.calls == [
         ("async_set_dashboard_layout", (DASHBOARD_LAYOUT_STANDARD,)),
         ("async_create_dashboard", ()),
@@ -4103,82 +3983,6 @@ def test_unassigned_filtered_sources_remain_available_for_later_assignment() -> 
     assert final_config[CONF_SOURCE_ENTITIES] == []
 
 
-def test_assignment_text_builds_circuits_and_excludes_sources() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        build_config_from_assignment_input,
-    )
-
-    pending = {
-        CONF_SOURCE_ENTITIES: [
-            "sensor.hvac_l1_power",
-            "sensor.hvac_l2_power",
-            "sensor.hvac_l1_current",
-            "sensor.hvac_l2_current",
-            "sensor.basement_lights_power",
-        ],
-        CONF_MAINS_SOURCE_ENTITIES: ["sensor.main_l1_power"],
-        CONF_SOURCE_DEVICES: ["meter-device"],
-        CONF_EXTRA_SOURCE_ENTITIES: [],
-        CONF_ENABLE_EXPERIMENTAL_NILM: True,
-        CONF_SENSITIVITY: "balanced",
-        CONF_RETENTION_MODE: "standard",
-    }
-
-    config = build_config_from_assignment_input(
-        pending,
-        {
-            CONF_CIRCUIT_ASSIGNMENTS: "\n".join(
-                [
-                    (
-                        "A/C Compressor | hvac_compressor | dual_phase | "
-                        "sensor.hvac_l1_power, sensor.hvac_l2_power, "
-                        "sensor.hvac_l1_current, sensor.hvac_l2_current"
-                    ),
-                    "Basement Lights | exclude | mixed | sensor.basement_lights_power",
-                ]
-            )
-        },
-    )
-
-    assert config[CONF_SOURCE_DEVICES] == ["meter-device"]
-    assert config[CONF_SOURCE_ENTITIES] == [
-        "sensor.hvac_l1_power",
-        "sensor.hvac_l2_power",
-        "sensor.hvac_l1_current",
-        "sensor.hvac_l2_current",
-    ]
-    assert config["circuits"] == [
-        {
-            "circuit_id": "a_c_compressor",
-            "name": "A/C Compressor",
-            "appliance_profile": "hvac_compressor",
-            "mode": "dual_phase",
-            "sensors": [
-                {
-                    "entity_id": "sensor.hvac_l1_power",
-                    "role": "real_power",
-                    "leg": "a",
-                },
-                {
-                    "entity_id": "sensor.hvac_l2_power",
-                    "role": "real_power",
-                    "leg": "b",
-                },
-                {
-                    "entity_id": "sensor.hvac_l1_current",
-                    "role": "current",
-                    "leg": "a",
-                },
-                {
-                    "entity_id": "sensor.hvac_l2_current",
-                    "role": "current",
-                    "leg": "b",
-                },
-            ],
-        }
-    ]
-
-
 @pytest.mark.asyncio
 async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
@@ -5027,19 +4831,6 @@ async def test_options_assignment_review_can_remove_last_appliance() -> None:
     assert result["data"][CONF_CIRCUITS] == []
     assert result["data"][CONF_SOURCE_ENTITIES] == []
     assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == ["sensor.microwave_power"]
-
-
-def test_circuit_mode_options_use_human_labels() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        circuit_mode_options,
-    )
-
-    assert circuit_mode_options() == [
-        {"value": "single_phase", "label": "Single Phase"},
-        {"value": "dual_phase", "label": "Dual Phase"},
-        {"value": "mixed", "label": "Mixed"},
-        {"value": "mains_nilm", "label": "Mains NILM"},
-    ]
 
 
 def test_power_flow_options_use_human_labels() -> None:

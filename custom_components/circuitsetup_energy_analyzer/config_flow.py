@@ -188,12 +188,10 @@ from .discovery import (
     infer_sensor_role,
 )
 from .entity import (
-    apply_entity_profile_to_registry,
     normalize_entity_detail_level,
 )
 from .entity_catalog import EntityGroup
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
-from .mapping import DualPhaseSuggestion
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -601,32 +599,6 @@ class SetupValidationError(ValueError):
 
 _DEMO_SOURCE_ENTITY_PREFIX = "sensor.cs_energy_analyzer_demo_"
 _DEMO_CURRENT_SOURCE_ENTITY_IDS = set(_DEMO_SOURCE_ENTITY_IDS)
-
-
-def format_mapping_suggestions(suggestions: Iterable[DualPhaseSuggestion]) -> str:
-    """Format auto-suggested dual-phase mappings for user confirmation."""
-    suggestion_list = list(suggestions)
-    if not suggestion_list:
-        return (
-            "No dual-phase mapping suggestions were found yet. Continue with "
-            "source sensors; the analyzer can still learn from selected inputs."
-        )
-
-    lines = [
-        "Suggested dual-phase channel pairs are listed below. Review each pair, "
-        "then confirm or manually override the mapping before saving. You can "
-        "accept, edit, mark as mixed, or exclude each suggested circuit. "
-        "Confidence may use naming, phase pairing, correlated changes, "
-        "required metric availability, and optional metric availability."
-    ]
-    for suggestion in suggestion_list:
-        reasons = ", ".join(suggestion.reasons) if suggestion.reasons else "no reasons"
-        lines.append(
-            f"- {suggestion.left.name} ({suggestion.left.entity_id}) + "
-            f"{suggestion.right.name} ({suggestion.right.entity_id}): "
-            f"{suggestion.confidence:.0%} confidence; reasons: {reasons}."
-        )
-    return "\n".join(lines)
 
 
 def _normalize_demo_source_entity_ids(entity_ids: Iterable[str]) -> list[str]:
@@ -1221,20 +1193,6 @@ def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
 
 def _time_selector() -> Any:
     return _selector({"time": {}}, str, allow_blank=True)
-
-
-def _weekday_select_selector() -> Any:
-    return _multi_select_selector(
-        [
-            {"value": "0", "label": "Monday"},
-            {"value": "1", "label": "Tuesday"},
-            {"value": "2", "label": "Wednesday"},
-            {"value": "3", "label": "Thursday"},
-            {"value": "4", "label": "Friday"},
-            {"value": "5", "label": "Saturday"},
-            {"value": "6", "label": "Sunday"},
-        ]
-    )
 
 
 def _optional_entity_marker(key: str, default: Any = None) -> vol.Optional:
@@ -2530,15 +2488,6 @@ def _profile_label(value: Any) -> str:
     return normalized.replace("_", " ").title() if normalized else "Appliance"
 
 
-def circuit_mode_options() -> list[dict[str, str]]:
-    return [
-        {"value": CircuitMode.SINGLE_PHASE.value, "label": "Single Phase"},
-        {"value": CircuitMode.DUAL_PHASE.value, "label": "Dual Phase"},
-        {"value": CircuitMode.MIXED.value, "label": "Mixed"},
-        {"value": CircuitMode.MAINS_NILM.value, "label": "Mains NILM"},
-    ]
-
-
 def power_flow_options() -> list[dict[str, str]]:
     """Return real-power sign convention options with readable labels."""
     return [
@@ -2799,27 +2748,6 @@ def _automatic_assignment_sensor_excluded(
 ) -> bool:
     tokens = set(_slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_"))
     return bool(tokens & {"harmonic", "total"})
-
-
-def _saved_circuit_for_group(
-    group: Mapping[str, Any],
-    existing_circuits: Iterable[Mapping[str, Any]],
-) -> Mapping[str, Any] | None:
-    group_entities = set(group.get("entity_ids", ()))
-    group_id = _canonical_assignment_circuit_id(group.get("group_id"))
-    for circuit in existing_circuits:
-        sensor_entities = set(_sensor_entity_ids_from_circuit(circuit))
-        if group_entities and group_entities <= sensor_entities:
-            return circuit
-        circuit_id = _canonical_assignment_circuit_id(
-            circuit.get("circuit_id") or circuit.get("id")
-        )
-        circuit_name = _canonical_assignment_circuit_id(circuit.get("name"))
-        if group_id in {circuit_id, circuit_name}:
-            return circuit
-        if group_entities and sensor_entities and group_entities & sensor_entities:
-            return circuit
-    return None
 
 
 def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ...]:
@@ -3440,70 +3368,6 @@ def _assignment_text_from_circuits(circuits: Iterable[Mapping[str, Any]]) -> str
         for circuit in circuits
     )
     return "\n".join(lines)
-
-
-def build_config_from_assignment_input(
-    pending_config: Mapping[str, Any],
-    assignment_input: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Build final config/options data from source selection and assignment text."""
-    circuits, assigned_source_entities = _circuits_from_assignment_text(
-        str(assignment_input.get(CONF_CIRCUIT_ASSIGNMENTS, ""))
-    )
-    if not assigned_source_entities:
-        raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
-
-    final_config = dict(pending_config)
-    final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
-    final_config[CONF_CIRCUITS] = circuits
-    final_config[CONF_CIRCUIT_ASSIGNMENTS] = str(
-        assignment_input.get(CONF_CIRCUIT_ASSIGNMENTS, "")
-    )
-    return final_config
-
-
-def _circuits_from_assignment_text(
-    assignment_text: str,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    circuits: list[dict[str, Any]] = []
-    assigned_source_entities: list[str] = []
-    for raw_line in assignment_text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [part.strip() for part in line.split("|")]
-        if len(parts) != 4 or not parts[0] or not parts[1] or not parts[3]:
-            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
-        name, raw_profile, raw_mode, raw_entities = parts
-        profile = _normalize_assignment_profile(raw_profile)
-        mode = _normalize_assignment_mode(raw_mode)
-        entity_ids = _strict_string_list(
-            raw_entities,
-            invalid_error_key=ERROR_INVALID_CIRCUIT_ASSIGNMENTS,
-        )
-        if profile == "exclude":
-            continue
-        if profile not in _ASSIGNMENT_PROFILE_OPTIONS:
-            raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
-        sensors = [
-            {
-                "entity_id": entity_id,
-                "role": _assignment_sensor_role(entity_id).value,
-                "leg": _assignment_leg_hint(entity_id),
-            }
-            for entity_id in entity_ids
-        ]
-        circuits.append(
-            {
-                "circuit_id": _slugify(name),
-                "name": name,
-                "appliance_profile": profile,
-                "mode": mode,
-                "sensors": sensors,
-            }
-        )
-        assigned_source_entities.extend(entity_ids)
-    return circuits, list(dict.fromkeys(assigned_source_entities))
 
 
 def _normalize_assignment_profile(raw_profile: str) -> str:
@@ -5822,52 +5686,6 @@ async def _async_save_options_flow_config(
         config_entry.options = dict(options)
 
 
-def _apply_entity_detail_profile_to_existing_entities(
-    hass: Any,
-    config_entry: config_entries.ConfigEntry,
-    detail_level: str,
-) -> dict[str, Any]:
-    if hass is None:
-        return {
-            "profile": normalize_entity_detail_level(detail_level),
-            "will_enable": 0,
-            "will_disable": 0,
-            "unchanged": 0,
-            "left_user_disabled": 0,
-            "total": 0,
-        }
-
-    from .binary_sensor import BINARY_SENSOR_ENTITY_TIER_BY_KEY
-    from .sensor import SENSOR_ENTITY_TIER_BY_KEY
-
-    entry_id = getattr(config_entry, "entry_id", "")
-    sensor_plan = apply_entity_profile_to_registry(
-        hass,
-        entry_id=entry_id,
-        entity_domain="sensor",
-        tier_by_unique_id_suffix=SENSOR_ENTITY_TIER_BY_KEY,
-        detail_level=detail_level,
-    )
-    binary_plan = apply_entity_profile_to_registry(
-        hass,
-        entry_id=entry_id,
-        entity_domain="binary_sensor",
-        tier_by_unique_id_suffix=BINARY_SENSOR_ENTITY_TIER_BY_KEY,
-        detail_level=detail_level,
-    )
-    return {
-        "profile": normalize_entity_detail_level(detail_level),
-        "will_enable": int(sensor_plan["will_enable"])
-        + int(binary_plan["will_enable"]),
-        "will_disable": int(sensor_plan["will_disable"])
-        + int(binary_plan["will_disable"]),
-        "unchanged": int(sensor_plan["unchanged"]) + int(binary_plan["unchanged"]),
-        "left_user_disabled": int(sensor_plan["left_user_disabled"])
-        + int(binary_plan["left_user_disabled"]),
-        "total": int(sensor_plan["total"]) + int(binary_plan["total"]),
-    }
-
-
 def _settings_map_for_entry(
     config_entry: config_entries.ConfigEntry,
     key: str,
@@ -6251,46 +6069,6 @@ def _flatten_advanced_settings_input(user_input: Mapping[str, Any]) -> dict[str,
             continue
         flattened[str(key)] = value
     return flattened
-
-
-def _set_optional_string(
-    settings: dict[str, Any],
-    user_input: Mapping[str, Any],
-    key: str,
-) -> None:
-    value = user_input.get(key)
-    if value is None:
-        return
-    text = str(value).strip()
-    if text:
-        settings[key] = text
-
-
-def _tou_weekday_selection(value: Any) -> list[str]:
-    return _weekday_values(value)
-
-
-def _weekday_values(value: Any) -> list[str]:
-    if value is None:
-        return []
-    raw_items: Iterable[Any]
-    if isinstance(value, str):
-        raw_items = re.split(r"[\n,]+", value)
-    elif isinstance(value, (list, tuple, set)):
-        raw_items = value
-    else:
-        raise SetupValidationError("invalid_advanced_settings")
-
-    selected: list[str] = []
-    for raw_item in raw_items:
-        item = str(raw_item).strip()
-        if not item:
-            continue
-        if item not in {"0", "1", "2", "3", "4", "5", "6"}:
-            raise SetupValidationError("invalid_advanced_settings")
-        if item not in selected:
-            selected.append(item)
-    return selected
 
 
 def _set_optional_bool(

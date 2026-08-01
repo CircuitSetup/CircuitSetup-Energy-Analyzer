@@ -230,11 +230,6 @@ _PROFILE_DEFAULTS: dict[ApplianceProfile, dict[str, float]] = {
     ApplianceProfile.MAINS_NILM: _GENERIC_PROFILE,
 }
 
-PROFILE_RUNNING_ON_THRESHOLDS_W = {
-    profile: values["on_threshold_w"] for profile, values in _PROFILE_DEFAULTS.items()
-}
-
-
 class OperatingThresholdSource(StrEnum):
     PROFILE_DEFAULT = "profile_default"
     USER_OVERRIDE = "user_override"

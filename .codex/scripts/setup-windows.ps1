@@ -59,6 +59,22 @@ if (-not (Test-Path -LiteralPath $pythonExe)) {
     }
 }
 
+$pipAvailable = $true
+try {
+    & $pythonExe -m pip --version *> $null
+    $pipAvailable = $LASTEXITCODE -eq 0
+}
+catch {
+    $pipAvailable = $false
+}
+if (-not $pipAvailable) {
+    & $pythonExe -m ensurepip --upgrade
+    & $pythonExe -m pip --version
+    if ($LASTEXITCODE -ne 0) {
+        throw "pip is unavailable in $pythonExe."
+    }
+}
+
 & $pythonExe -m pip install --upgrade pip
 & $pythonExe -m pip install -e ".[test]"
 & $pythonExe -m pip install ruff jinja2 PyYAML voluptuous-serialize

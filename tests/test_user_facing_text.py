@@ -7696,25 +7696,6 @@ def _dashboard_views(dashboard: object) -> list[dict[str, object]]:
     return [dashboard]
 
 
-def _dashboard_sections(dashboard: object) -> list[dict[str, object]]:
-    sections: list[dict[str, object]] = []
-    for view in _dashboard_views(dashboard):
-        view_sections = view.get("sections", [])
-        if isinstance(view_sections, list):
-            sections.extend(
-                section for section in view_sections if isinstance(section, dict)
-            )
-    return sections
-
-
-def _dashboard_section(dashboard: object, title: str) -> dict[str, object]:
-    return next(
-        section
-        for section in _dashboard_sections(dashboard)
-        if section.get("title") == title
-    )
-
-
 def _dashboard_entity_refs(dashboard_text: str) -> list[str]:
     return [
         match.group(1)

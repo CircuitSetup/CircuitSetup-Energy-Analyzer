@@ -1,13 +1,10 @@
 import asyncio
 
 from custom_components.circuitsetup_energy_analyzer.discovery import (
-    DiscoveredSensor,
     async_discover_energy_source_entities_for_devices,
-    async_discover_sensors,
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
     infer_sensor_role,
-    score_circuitsetup_candidate,
 )
 from custom_components.circuitsetup_energy_analyzer.models import SensorRole
 
@@ -97,84 +94,6 @@ def test_infer_sensor_role_from_circuitsetup_live_sensor_names() -> None:
 
     for entity_id, friendly_name, role in cases:
         assert infer_sensor_role(entity_id, friendly_name) is role
-
-
-def test_score_circuitsetup_candidate_prefers_esphome_meter_metadata() -> None:
-    sensor = DiscoveredSensor(
-        entity_id="sensor.circuitsetup_energy_meter_power_1",
-        name="CircuitSetup Energy Meter Power 1",
-        role=SensorRole.REAL_POWER,
-        device_id="device-1",
-        unit="W",
-        device_class="power",
-        integration_domain="esphome",
-    )
-
-    assert score_circuitsetup_candidate(sensor) >= 5
-
-
-def test_async_discover_sensors_returns_candidates_sorted_by_entity_id() -> None:
-    hass = FakeHass(
-        [
-            FakeState(
-                "sensor.circuitsetup_energy_meter_power_2",
-                {
-                    "friendly_name": "CircuitSetup Energy Meter Power 2",
-                    "device_class": "power",
-                    "integration_domain": "esphome",
-                    "unit_of_measurement": "W",
-                },
-            ),
-            FakeState(
-                "sensor.circuitsetup_energy_meter_power_1",
-                {
-                    "friendly_name": "CircuitSetup Energy Meter Power 1",
-                    "device_class": "power",
-                    "integration_domain": "esphome",
-                    "unit_of_measurement": "W",
-                },
-            ),
-        ]
-    )
-
-    sensors = asyncio.run(async_discover_sensors(hass))
-
-    assert [sensor.entity_id for sensor in sensors] == [
-        "sensor.circuitsetup_energy_meter_power_1",
-        "sensor.circuitsetup_energy_meter_power_2",
-    ]
-
-
-def test_async_discover_sensors_filters_low_score_generic_sensors() -> None:
-    hass = FakeHass(
-        [
-            FakeState(
-                "sensor.circuitsetup_energy_meter_power_1",
-                {
-                    "friendly_name": "CircuitSetup Energy Meter Power 1",
-                    "device_class": "power",
-                    "integration_domain": "esphome",
-                    "unit_of_measurement": "W",
-                },
-            ),
-            FakeState(
-                "sensor.random_power",
-                {
-                    "friendly_name": "Random Power",
-                    "device_class": "power",
-                    "unit_of_measurement": "W",
-                },
-            ),
-        ]
-    )
-
-    sensors = asyncio.run(async_discover_sensors(hass))
-
-    assert [sensor.entity_id for sensor in sensors] == [
-        "sensor.circuitsetup_energy_meter_power_1",
-    ]
-    assert score_circuitsetup_candidate(sensors[0]) >= 3
-    assert sensors[0].integration_domain == "esphome"
 
 
 def test_async_discover_energy_sources_includes_generic_sensors() -> None:
@@ -328,10 +247,6 @@ def test_async_discover_utility_statistic_ids_filters_recorder_metadata() -> Non
         "sensor.typical_monthly_electric_usage",
         "utility:gas_consumption",
     ]
-
-
-def test_async_discover_sensors_returns_empty_list_without_hass() -> None:
-    assert asyncio.run(async_discover_sensors(None)) == []
 
 
 def test_async_discover_energy_sources_returns_empty_without_hass() -> None:

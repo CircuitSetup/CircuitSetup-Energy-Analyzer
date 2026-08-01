@@ -71,13 +71,6 @@ def _leg_sample(leg: str, sample: CircuitSample) -> LegSample:
     )
 
 
-def _sum_optional(left: float | None, right: float | None) -> float | None:
-    values = [value for value in (left, right) if value is not None]
-    if not values:
-        return None
-    return sum(values)
-
-
 def _sum_complete_optional(left: float | None, right: float | None) -> float | None:
     if left is None or right is None:
         return None
