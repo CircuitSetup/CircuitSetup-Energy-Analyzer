@@ -124,6 +124,7 @@ except (ImportError, ModuleNotFoundError):
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .config_parsing import (
+    explicit_sensor_role_from_entity_id,
     sensor_role_from_entity_id,
     strip_trailing_source_detail_tokens,
     untyped_source_entity_excluded,
@@ -2571,9 +2572,12 @@ def assignment_groups_from_sources(
         entity_id: role.value
         for entity_id in source_entity_list
         if (
-            role := infer_sensor_role(
-                entity_id,
-                source_name_by_entity.get(entity_id),
+            role := (
+                explicit_sensor_role_from_entity_id(entity_id)
+                or infer_sensor_role(
+                    entity_id,
+                    source_name_by_entity.get(entity_id),
+                )
             )
         )
         is not None

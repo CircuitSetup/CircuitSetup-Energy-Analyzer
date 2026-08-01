@@ -611,6 +611,11 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
 def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
+    return explicit_sensor_role_from_entity_id(entity_id) or SensorRole.REAL_POWER
+
+
+def explicit_sensor_role_from_entity_id(entity_id: str) -> SensorRole | None:
+    """Return a role only when the entity ID exposes a terminal metric."""
     object_id = _strip_terminal_phase_letter(_entity_object_id(entity_id))
     if _has_metric_suffix(
         object_id,
@@ -648,7 +653,7 @@ def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         _REAL_POWER_METRIC_SUFFIXES,
     ):
         return SensorRole.REAL_POWER
-    return SensorRole.REAL_POWER
+    return None
 
 
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:

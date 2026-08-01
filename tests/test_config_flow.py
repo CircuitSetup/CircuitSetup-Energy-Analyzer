@@ -3867,13 +3867,28 @@ def test_guided_assignment_uses_terminal_metric_role(
     assert circuit["sensors"][0]["role"] == expected_role
 
 
-def test_guided_assignment_preserves_discovered_energy_role() -> None:
+@pytest.mark.parametrize(
+    ("entity_id", "friendly_name", "expected_role"),
+    (
+        (
+            "sensor.fridge_energy_consumption",
+            "Fridge Energy Consumption",
+            "energy",
+        ),
+        ("sensor.fridge_power", "Current Power", "real_power"),
+        ("sensor.fridge_energy", "Fridge Power Consumption", "energy"),
+    ),
+)
+def test_guided_assignment_preserves_discovered_or_explicit_role(
+    entity_id: str,
+    friendly_name: str,
+    expected_role: str,
+) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
-    entity_id = "sensor.fridge_energy_consumption"
     group = config_flow.assignment_groups_from_sources(
         [entity_id],
-        source_names={entity_id: "Fridge Energy Consumption"},
+        source_names={entity_id: friendly_name},
     )[0]
     circuit = config_flow._circuit_from_assignment_group(
         group,
@@ -3886,7 +3901,7 @@ def test_guided_assignment_preserves_discovered_energy_role() -> None:
     )
 
     assert circuit is not None
-    assert circuit["sensors"][0]["role"] == "energy"
+    assert circuit["sensors"][0]["role"] == expected_role
 
 
 def test_guided_assignment_preserves_saved_sensor_role() -> None:
