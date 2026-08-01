@@ -99,7 +99,6 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.voltage_panel_kvar", SensorRole.REACTIVE_POWER),
         ("sensor.voltage_panel_ka", SensorRole.CURRENT),
         ("sensor.current_pump_kv", SensorRole.VOLTAGE),
-        ("sensor.current_pump_kvarh", SensorRole.ENERGY),
     ]
 
 

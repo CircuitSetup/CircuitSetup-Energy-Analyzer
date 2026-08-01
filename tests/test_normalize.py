@@ -53,6 +53,41 @@ def test_build_circuit_sample_converts_kw_to_watts() -> None:
     assert sample.quality_issues == ()
 
 
+def test_build_circuit_sample_normalizes_scaled_measurements() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    sensors = (
+        SensorRef("sensor.power", SensorRole.REAL_POWER),
+        SensorRef("sensor.current", SensorRole.CURRENT),
+        SensorRef("sensor.voltage", SensorRole.VOLTAGE),
+        SensorRef("sensor.apparent", SensorRole.APPARENT_POWER),
+        SensorRef("sensor.reactive", SensorRole.REACTIVE_POWER),
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        sensors=sensors,
+    )
+    states = {
+        sensor.entity_id: SourceState(sensor.entity_id, state, unit, now)
+        for sensor, state, unit in zip(
+            sensors,
+            ("0.001", "500", "0.24", "2", "3"),
+            ("MW", "mA", "kV", "kVA", "kVAR"),
+            strict=True,
+        )
+    }
+
+    sample = build_circuit_sample(config, states, now)
+
+    assert sample.real_power == 1000.0
+    assert sample.current == 0.5
+    assert sample.voltage == 240.0
+    assert sample.apparent_power == 2000.0
+    assert sample.reactive_power == 3000.0
+
+
 def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(

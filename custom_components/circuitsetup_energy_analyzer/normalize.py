@@ -11,10 +11,12 @@ FUTURE_TIMESTAMP_TOLERANCE = timedelta(seconds=30)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
-_POWER_ROLES = {
-    SensorRole.REAL_POWER,
-    SensorRole.REACTIVE_POWER,
-    SensorRole.APPARENT_POWER,
+_UNIT_SCALE_BY_ROLE = {
+    SensorRole.REAL_POWER: {"kW": 1_000.0, "kw": 1_000.0, "MW": 1_000_000.0},
+    SensorRole.REACTIVE_POWER: {"kVAR": 1_000.0, "MVAR": 1_000_000.0},
+    SensorRole.APPARENT_POWER: {"kVA": 1_000.0, "MVA": 1_000_000.0},
+    SensorRole.CURRENT: {"kA": 1_000.0, "mA": 0.001},
+    SensorRole.VOLTAGE: {"kV": 1_000.0, "mV": 0.001},
 }
 
 
@@ -108,10 +110,13 @@ def build_circuit_sample(
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
-        if sensor.role in _POWER_ROLES and _is_kw(source.unit):
-            value *= 1000
-        elif sensor.role is SensorRole.ENERGY:
+        if sensor.role is SensorRole.ENERGY:
             value = _normalize_energy_kwh(value, source.unit)
+        elif source.unit is not None:
+            value *= _UNIT_SCALE_BY_ROLE.get(sensor.role, {}).get(
+                source.unit.strip(),
+                1.0,
+            )
         if not math.isfinite(value):
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} non_finite")
@@ -177,10 +182,6 @@ def suppress_inactive_stale_current_issues(
             if issue not in stale_current_issues
         ),
     )
-
-
-def _is_kw(unit: str | None) -> bool:
-    return unit is not None and unit.strip().lower() == "kw"
 
 
 def _timestamp_issue(now: datetime, source_last_updated: datetime) -> str | None:

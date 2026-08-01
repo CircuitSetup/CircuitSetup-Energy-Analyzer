@@ -206,8 +206,12 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
     return bool(tokens & {"harmonic", "total"})
 
 
-def _harmonic_source_entity(entity_id: str) -> bool:
-    return "harmonic" in set(_entity_object_id(entity_id).split("_"))
+def _untyped_source_entity_excluded(entity_id: str) -> bool:
+    object_id = _entity_object_id(entity_id)
+    return "harmonic" in set(object_id.split("_")) or _has_metric_suffix(
+        object_id,
+        ("kvarh", "varh"),
+    )
 
 
 def mains_context_config_from_sources(
@@ -234,7 +238,7 @@ def mains_context_config_from_sources(
                 leg=_entity_id_leg_hint(entity_id),
             )
             for entity_id in mains_entities
-            if not _harmonic_source_entity(entity_id)
+            if not _untyped_source_entity_excluded(entity_id)
         ),
         retention_mode=retention_mode_from_sources(entry_data, options),
         power_flow=PowerFlowMode.MAINS_NET,
@@ -448,7 +452,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
         return raw_sensor
     if isinstance(raw_sensor, str):
-        if _harmonic_source_entity(raw_sensor):
+        if _untyped_source_entity_excluded(raw_sensor):
             return None
         return SensorRef(
             entity_id=raw_sensor,
@@ -463,7 +467,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         return None
     raw_role = raw_sensor.get("role")
     if raw_role is None:
-        if _harmonic_source_entity(str(entity_id)):
+        if _untyped_source_entity_excluded(str(entity_id)):
             return None
         role = _sensor_role_from_entity_id(str(entity_id))
     else:
@@ -578,7 +582,7 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         return SensorRole.VOLTAGE
     if _has_metric_suffix(
         object_id,
-        ("energy", "kvarh", "varh", "kwh", "mwh", "wh"),
+        ("energy", "kwh", "mwh", "wh"),
     ):
         return SensorRole.ENERGY
     if _has_metric_suffix(
