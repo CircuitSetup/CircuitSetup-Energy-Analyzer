@@ -1288,11 +1288,22 @@ def test_hvac_response_change_emits_mature_slower_alert() -> None:
 
     changed_context = _hvac_response_history(stream_id, count=56)[-1]
     changed_context["participant_signature"] = ["heat_pump", "auxiliary"]
+    changed_started = datetime.fromisoformat(str(changed_context["started_at"]))
+    changed_context.update(
+        ended_at=(changed_started + timedelta(minutes=10)).isoformat(),
+        elapsed_minutes=10.0,
+        active_minutes=10.0,
+        outdoor_temperature_minutes=10.0,
+    )
     context.store_data.hvac_response_history_by_stream[stream_id].append(
         changed_context
     )
     handoff = processor.process([(heat_pump, SimpleNamespace())], context)
 
+    assert _state_update_values(
+        handoff,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]["streams"][stream_id]["status"] == "no_data"
     assert handoff.preserved_alerts == []
 
 

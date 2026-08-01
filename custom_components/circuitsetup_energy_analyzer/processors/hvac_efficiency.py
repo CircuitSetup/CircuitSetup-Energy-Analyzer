@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -1136,6 +1137,13 @@ def _circuit_efficiency_payload(
     for stream_id, episodes in episodes_by_stream.items():
         mode = stream_id.rsplit("|", 1)[-1]
         opposing_mode = "heating" if mode == "cooling" else "cooling"
+        selected_context = str(
+            context.store_data.hvac_response_context_by_stream.get(
+                stream_id,
+                {},
+            ).get("selected")
+            or ""
+        )
         evaluations[stream_id] = {
             **_evaluation_to_dict(
                 evaluate_efficiency(
@@ -1148,6 +1156,11 @@ def _circuit_efficiency_payload(
                 )
             ),
             "baseline_era": baseline_eras[stream_id],
+            "response_context_fingerprint": (
+                hashlib.sha256(selected_context.encode()).hexdigest()
+                if selected_context
+                else ""
+            ),
         }
     ready_scores = [
         float(evaluation["score"])
@@ -1228,7 +1241,18 @@ def _append_evaluation_alerts(
                 dict(evaluation.get("context", {})).get("normal_streak", 0)
             )
             evaluation_context = dict(evaluation.get("context", {}))
-            context_changed = any(
+            selected_context = str(
+                evaluation.get("response_context_fingerprint") or ""
+            )
+            alert_context = str(
+                active_alert.features.get("response_context_fingerprint")
+                if active_alert is not None
+                else ""
+            )
+            context_changed = (
+                bool(selected_context and alert_context)
+                and selected_context != alert_context
+            ) or any(
                 key in evaluation_context
                 and active_alert is not None
                 and active_alert.features.get(key) != evaluation_context[key]
@@ -1308,6 +1332,9 @@ def _finding_features(
         "health_feature": HVAC_EFFICIENCY_FEATURE,
         "health_evidence_key": recent_ids[-1] if recent_ids else stream_id,
         "stream_id": stream_id,
+        "response_context_fingerprint": evaluation.get(
+            "response_context_fingerprint"
+        ),
         "threshold_pct": threshold,
         "reference_value": evaluation["baseline_runtime_minutes"],
         "recent_value": evaluation["recent_runtime_minutes"],
