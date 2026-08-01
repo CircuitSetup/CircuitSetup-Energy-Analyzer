@@ -2669,11 +2669,7 @@ def assignment_groups_from_sources(
                 ),
                 "saved_mode": str(saved_circuit.get("mode") or ""),
                 "saved_entity_ids": tuple(saved_sensor_entities),
-                "sensor_roles": {
-                    entity_id: source_role_by_entity[entity_id]
-                    for entity_id in entity_ids
-                    if entity_id in source_role_by_entity
-                }
+                "sensor_roles": dict(source_role_by_entity)
                 | {
                     str(sensor["entity_id"]): str(sensor["role"])
                     for sensor in saved_circuit.get("sensors", ())
@@ -2722,11 +2718,7 @@ def assignment_groups_from_sources(
             {
                 "group_id": circuit_id,
                 "entity_ids": tuple(entity_ids),
-                "sensor_roles": {
-                    entity_id: source_role_by_entity[entity_id]
-                    for entity_id in entity_ids
-                    if entity_id in source_role_by_entity
-                },
+                "sensor_roles": dict(source_role_by_entity),
                 "name": _friendly_name_from_id(circuit_id),
                 "appliance_profile": profile,
                 "mode": mode,

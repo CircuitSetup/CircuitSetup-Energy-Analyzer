@@ -4045,6 +4045,51 @@ def test_assignment_review_does_not_offer_sensors_owned_by_other_appliances() ->
     ]
 
 
+def test_assignment_review_preserves_role_when_moving_unowned_sensor() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    saved_entity_id = "sensor.refrigerator_power"
+    moved_entity_id = "sensor.fridge_energy_consumption"
+    flow = SimpleNamespace(hass=None, async_show_form=lambda **kwargs: kwargs)
+
+    config_flow._start_assignment_review(
+        flow,
+        {CONF_SOURCE_ENTITIES: [saved_entity_id, moved_entity_id]},
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [
+                    {"entity_id": saved_entity_id, "role": "real_power"}
+                ],
+            }
+        ],
+        show_picker=True,
+        update_existing=True,
+    )
+    group = next(
+        group
+        for group in flow._assignment_groups
+        if group.get("circuit_id") == "refrigerator"
+    )
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "included_sensors": [saved_entity_id, moved_entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+        },
+    )
+
+    assert circuit is not None
+    assert {sensor["entity_id"]: sensor["role"] for sensor in circuit["sensors"]} == {
+        saved_entity_id: "real_power",
+        moved_entity_id: "energy",
+    }
+
+
 def test_removed_assignment_sensors_remain_available_as_candidates() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
