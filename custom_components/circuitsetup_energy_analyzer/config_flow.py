@@ -2665,6 +2665,13 @@ def assignment_groups_from_sources(
                 ),
                 "saved_mode": str(saved_circuit.get("mode") or ""),
                 "saved_entity_ids": tuple(saved_sensor_entities),
+                "sensor_roles": {
+                    str(sensor["entity_id"]): str(sensor["role"])
+                    for sensor in saved_circuit.get("sensors", ())
+                    if isinstance(sensor, Mapping)
+                    and sensor.get("entity_id")
+                    and sensor.get("role")
+                },
                 "power_flow": _normalize_power_flow(
                     str(saved_circuit.get("power_flow") or "")
                 ),
