@@ -261,18 +261,6 @@ def normalize_rain_intensity_per_hour(
     return None, (RAIN_INTENSITY_UNIT_UNSUPPORTED,)
 
 
-def rain_intensity_bin(
-    intensity_per_hour: float | None,
-    *,
-    unit: str | None = DEFAULT_RAIN_INTENSITY_UNIT,
-) -> str:
-    intensity, _issues = normalize_rain_intensity_per_hour(
-        intensity_per_hour,
-        unit=unit,
-    )
-    return _rain_intensity_bin_from_mm(intensity)
-
-
 def rain_state(
     active: bool | None,
     intensity_per_hour: float | None,

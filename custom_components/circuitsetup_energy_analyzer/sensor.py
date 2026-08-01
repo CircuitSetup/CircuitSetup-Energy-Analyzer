@@ -110,7 +110,6 @@ try:
         PERCENTAGE,
         UnitOfEnergy,
         UnitOfPower,
-        UnitOfTemperature,
     )
 except ModuleNotFoundError:
     PERCENTAGE = "%"
@@ -124,12 +123,6 @@ except ModuleNotFoundError:
         """Fallback power unit constants."""
 
         WATT = "W"
-
-    class UnitOfTemperature:
-        """Fallback temperature unit constants."""
-
-        FAHRENHEIT = "°F"
-        CELSIUS = "°C"
 
     class SensorEntity:
         """Fallback sensor base for tests without Home Assistant."""
@@ -865,11 +858,6 @@ def _operating_state_snapshot(state: Any, circuit_id: str) -> dict[str, Any] | N
         return None
     snapshot = snapshots.get(circuit_id)
     return snapshot if isinstance(snapshot, dict) else None
-
-
-def electrical_health_value(state: Any, circuit_id: str) -> str:
-    """Return a user-facing electrical-health rollup."""
-    return _electrical_health_summary(state, circuit_id)[0]
 
 
 def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:

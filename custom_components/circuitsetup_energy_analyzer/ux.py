@@ -47,14 +47,6 @@ SENSITIVITY_LABELS = {
     key: _ux_text("sensitivity_labels", key)
     for key in ("quiet", "balanced", "sensitive")
 }
-POWER_QUALITY_RELATIONSHIP_METRICS = (
-    "reactive_to_real_ratio",
-    "reactive_power",
-    "power_factor_deficit",
-    "power_factor",
-    "apparent_to_real_ratio",
-    "apparent_power",
-)
 MAX_CONTRIBUTING_METRICS = 5
 MAX_ALERT_SOURCE_ENTITIES = 5
 MAX_QUALITY_ISSUES = 5

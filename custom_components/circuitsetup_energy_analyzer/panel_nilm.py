@@ -33,7 +33,6 @@ from .services import (
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
-    ATTR_GROUND_TRUTH_ENTITY_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
@@ -49,7 +48,6 @@ from .services import (
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
     SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
-    SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
@@ -621,43 +619,6 @@ def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
         "requires": [ATTR_START, ATTR_END, ATTR_LABEL, ATTR_APPLIANCE_PROFILE],
         "profile_options": _nilm_appliance_profile_options(),
     }
-
-
-def _nilm_sensor_label_interval_action(
-    config: CircuitConfig,
-    known_load_overlays: Iterable[Mapping[str, Any]] = (),
-) -> dict[str, Any]:
-    action = _nilm_label_interval_action(config)
-    action["service"] = SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS
-    action["requires"] = [
-        ATTR_START,
-        ATTR_END,
-        ATTR_LABEL,
-        ATTR_GROUND_TRUTH_ENTITY_ID,
-    ]
-    ground_truth_options = []
-    seen_circuits: set[str] = set()
-    for overlay in known_load_overlays:
-        label = str(overlay.get("name") or overlay.get("circuit_id") or "").strip()
-        circuit_id = str(overlay.get("circuit_id") or "").strip()
-        entity_text = next(
-            (
-                str(entity_id or "").strip()
-                for entity_id in _iter_items(overlay.get("entity_ids"))
-                if str(entity_id or "").strip()
-            ),
-            "",
-        )
-        key = circuit_id or entity_text
-        if not key or key in seen_circuits or not entity_text:
-            continue
-        seen_circuits.add(key)
-        ground_truth_options.append(
-            {"value": entity_text, "label": label or entity_text},
-        )
-    if ground_truth_options:
-        action["ground_truth_options"] = ground_truth_options
-    return action
 
 
 def _nilm_assignments_for_circuit(
