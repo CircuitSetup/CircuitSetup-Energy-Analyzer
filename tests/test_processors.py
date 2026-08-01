@@ -6400,6 +6400,83 @@ def test_solar_flow_processor_updates_flow_and_load_shift_state() -> None:
     ]
 
 
+def test_solar_flow_processor_ignores_mixed_flexible_loads() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        power_flow=PowerFlowMode.MAINS_NET,
+    )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+    )
+    mixed_pool = CircuitConfig(
+        circuit_id="pool",
+        name="Pool Pump",
+        appliance_profile=ApplianceProfile.POOL_PUMP,
+        mode=CircuitMode.MIXED,
+    )
+
+    def sample(circuit_id: str, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id=circuit_id,
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    result = processors.SolarFlowProcessor(
+        settings_for_circuit=lambda _circuit_id: {}
+    ).process(
+        [
+            (mains, sample("mains", -500.0)),
+            (solar, sample("solar", 2000.0)),
+            (mixed_pool, sample("pool", 800.0)),
+        ],
+        context,
+    )
+
+    updates = {update.path: update.value for update in result.state_updates}
+    assert updates[("solar_flexible_load_power_w_by_circuit", "mains")] == 0.0
+    assert (
+        updates[("solar_load_shift_status_by_circuit", "mains")]
+        == "no_flexible_loads"
+    )
+    assert updates[("solar_load_shift_evidence_by_circuit", "mains")][
+        "candidate_loads"
+    ] == []
+
+
 def test_solar_flow_processor_ignores_batches_without_mains() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
