@@ -94,6 +94,8 @@ def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole |
         return SensorRole.APPARENT_POWER
     if "power factor" in text:
         return SensorRole.POWER_FACTOR
+    if re.search(r"\b(?:active|real)\s+power\b|\bwatts?\b", text):
+        return SensorRole.REAL_POWER
     if re.search(r"\bpeak\s+(?:current|amps?|a)\b", text):
         return SensorRole.PEAK_CURRENT
     if "voltage" in text:

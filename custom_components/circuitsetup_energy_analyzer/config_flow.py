@@ -190,6 +190,7 @@ from .discovery import (
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
     friendly_source_name,
+    infer_sensor_role,
 )
 from .entity import (
     normalize_entity_detail_level,
@@ -2566,6 +2567,17 @@ def assignment_groups_from_sources(
     """Build guided assignment groups with automatic or saved classification."""
     source_entity_list = list(dict.fromkeys(source_entities))
     source_name_by_entity = source_names or {}
+    source_role_by_entity = {
+        entity_id: role.value
+        for entity_id in source_entity_list
+        if (
+            role := infer_sensor_role(
+                entity_id,
+                source_name_by_entity.get(entity_id),
+            )
+        )
+        is not None
+    }
     mains_entities = set(mains_source_entities)
     non_mains_entities = [
         entity_id for entity_id in source_entity_list if entity_id not in mains_entities
@@ -2694,6 +2706,11 @@ def assignment_groups_from_sources(
             {
                 "group_id": circuit_id,
                 "entity_ids": tuple(entity_ids),
+                "sensor_roles": {
+                    entity_id: source_role_by_entity[entity_id]
+                    for entity_id in entity_ids
+                    if entity_id in source_role_by_entity
+                },
                 "name": _friendly_name_from_id(circuit_id),
                 "appliance_profile": profile,
                 "mode": mode,
@@ -2708,7 +2725,7 @@ def _automatic_assignment_sensor_excluded(
 ) -> bool:
     tokens = set(_slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_"))
     return (
-        "total" in tokens
+        bool(tokens & {"harmonic", "total"})
         or untyped_source_entity_excluded(entity_id)
         or untyped_source_entity_excluded(source_name)
     )
@@ -3058,7 +3075,10 @@ def _circuit_from_assignment_group(
     sensors = [
         {
             "entity_id": entity_id,
-            "role": _assignment_sensor_role(entity_id).value,
+            "role": _assignment_sensor_role(
+                entity_id,
+                group.get("sensor_roles"),
+            ).value,
             "leg": _assignment_leg_hint(entity_id),
         }
         for entity_id in entity_ids
@@ -3359,7 +3379,14 @@ def _normalize_retention_mode(raw_retention_mode: str) -> str:
     return value
 
 
-def _assignment_sensor_role(entity_id: str) -> SensorRole:
+def _assignment_sensor_role(
+    entity_id: str,
+    sensor_roles: Mapping[str, Any] | None = None,
+) -> SensorRole:
+    try:
+        return SensorRole((sensor_roles or {}).get(entity_id))
+    except (TypeError, ValueError):
+        pass
     return sensor_role_from_entity_id(entity_id)
 
 

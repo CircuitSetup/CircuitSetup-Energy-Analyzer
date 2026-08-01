@@ -3775,6 +3775,19 @@ def test_assignment_groups_exclude_harmonic_friendly_name() -> None:
     )
 
 
+def test_assignment_groups_exclude_collision_qualified_harmonic_distortion() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    assert (
+        assignment_groups_from_sources(
+            ["sensor.mains_harmonic_distortion_2"],
+        )
+        == []
+    )
+
+
 def test_options_source_merge_excludes_reactive_energy() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
@@ -3852,6 +3865,28 @@ def test_guided_assignment_uses_terminal_metric_role(
 
     assert circuit is not None
     assert circuit["sensors"][0]["role"] == expected_role
+
+
+def test_guided_assignment_preserves_discovered_energy_role() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entity_id = "sensor.fridge_energy_consumption"
+    group = config_flow.assignment_groups_from_sources(
+        [entity_id],
+        source_names={entity_id: "Fridge Energy Consumption"},
+    )[0]
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "included_sensors": [entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "mixed",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == "energy"
 
 
 def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:

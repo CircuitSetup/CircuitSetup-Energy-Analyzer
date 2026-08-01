@@ -57,6 +57,16 @@ def test_infer_sensor_role_from_entity_id_and_friendly_name() -> None:
             "Power Factor 1",
             SensorRole.POWER_FACTOR,
         ),
+        (
+            "sensor.high_voltage_panel_active_power",
+            "High Voltage Panel Active Power",
+            SensorRole.REAL_POWER,
+        ),
+        (
+            "sensor.current_pump_real_power",
+            "Current Pump Real Power",
+            SensorRole.REAL_POWER,
+        ),
     ]
 
     for entity_id, friendly_name, role in cases:
