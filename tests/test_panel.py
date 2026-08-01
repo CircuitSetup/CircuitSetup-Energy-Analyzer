@@ -448,12 +448,12 @@ def test_mixed_circuit_action_only_for_dedicated_single_phase_loads(
         assert "mark_circuit_mixed" not in actions
 
 
-def test_panel_module_version_follows_401_frontend() -> None:
+def test_panel_module_version_advances_combined_frontend() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260731-5"
+    assert PANEL_MODULE_VERSION == "20260731-13"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
