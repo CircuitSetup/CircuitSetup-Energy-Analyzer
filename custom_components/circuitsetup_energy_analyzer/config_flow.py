@@ -2707,7 +2707,11 @@ def _automatic_assignment_sensor_excluded(
     source_name: str = "",
 ) -> bool:
     tokens = set(_slugify(f"{str(entity_id).split('.')[-1]} {source_name}").split("_"))
-    return "total" in tokens or untyped_source_entity_excluded(entity_id)
+    return (
+        "total" in tokens
+        or untyped_source_entity_excluded(entity_id)
+        or untyped_source_entity_excluded(source_name)
+    )
 
 
 def _sensor_entity_ids_from_circuit(circuit: Mapping[str, Any]) -> tuple[str, ...]:
@@ -5444,7 +5448,11 @@ def _circuits_with_merged_source_circuit_sensors(
         config.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
     ):
-        if entity_id in mains_source_entities or entity_id in assigned_source_entities:
+        if (
+            entity_id in mains_source_entities
+            or entity_id in assigned_source_entities
+            or untyped_source_entity_excluded(entity_id)
+        ):
             continue
         circuit_index_value = circuit_index.get(
             _assignment_circuit_id_from_entity_id(entity_id)

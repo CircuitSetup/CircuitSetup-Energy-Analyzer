@@ -212,7 +212,7 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 
 def untyped_source_entity_excluded(entity_id: str) -> bool:
-    object_id = _entity_object_id(entity_id)
+    object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
     harmonic_object_id = re.sub(
         r"_\d+$", "", _strip_trailing_leg_token(object_id)
     )

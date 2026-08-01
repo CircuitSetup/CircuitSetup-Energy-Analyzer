@@ -3759,6 +3759,49 @@ def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
     assert groups[0]["entity_ids"] == ("sensor.pump_power",)
 
 
+def test_assignment_groups_exclude_harmonic_friendly_name() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    source = "sensor.channel_1"
+
+    assert (
+        assignment_groups_from_sources(
+            [source],
+            source_names={source: "Mains Harmonic Active Power"},
+        )
+        == []
+    )
+
+
+def test_options_source_merge_excludes_reactive_energy() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuits = [
+        {
+            "circuit_id": "refrigerator",
+            "name": "Refrigerator",
+            "sensors": [
+                {"entity_id": "sensor.refrigerator_power", "role": "real_power"}
+            ],
+        }
+    ]
+
+    assert (
+        config_flow._circuits_with_merged_source_circuit_sensors(
+            {
+                CONF_SOURCE_ENTITIES: [
+                    "sensor.refrigerator_power",
+                    "sensor.refrigerator_kvarh",
+                ]
+            },
+            circuits,
+        )
+        is None
+    )
+
+
 def test_guided_assignment_uses_terminal_metric_role() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
