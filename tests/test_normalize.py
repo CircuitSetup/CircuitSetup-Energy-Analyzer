@@ -54,7 +54,16 @@ def test_build_circuit_sample_converts_kw_to_watts(unit: str) -> None:
     assert sample.quality_issues == ()
 
 
-def test_build_circuit_sample_normalizes_scaled_measurements() -> None:
+@pytest.mark.parametrize(
+    "units",
+    (
+        ("MW", "mA", "kV", "kVA", "kVAR"),
+        ("mw", "ma", "kv", "kva", "kvar"),
+    ),
+)
+def test_build_circuit_sample_normalizes_scaled_measurements(
+    units: tuple[str, ...],
+) -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     sensors = (
         SensorRef("sensor.power", SensorRole.REAL_POWER),
@@ -75,7 +84,7 @@ def test_build_circuit_sample_normalizes_scaled_measurements() -> None:
         for sensor, state, unit in zip(
             sensors,
             ("0.001", "500", "0.24", "2", "3"),
-            ("MW", "mA", "kV", "kVA", "kVAR"),
+            units,
             strict=True,
         )
     }

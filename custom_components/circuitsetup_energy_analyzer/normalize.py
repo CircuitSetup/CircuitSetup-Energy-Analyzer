@@ -18,11 +18,32 @@ _UNIT_SCALE_BY_ROLE = {
         "KW": 1_000.0,
         "Kw": 1_000.0,
         "MW": 1_000_000.0,
+        "mw": 1_000_000.0,
     },
-    SensorRole.REACTIVE_POWER: {"kVAR": 1_000.0, "MVAR": 1_000_000.0},
-    SensorRole.APPARENT_POWER: {"kVA": 1_000.0, "MVA": 1_000_000.0},
-    SensorRole.CURRENT: {"kA": 1_000.0, "mA": 0.001},
-    SensorRole.VOLTAGE: {"kV": 1_000.0, "mV": 0.001},
+    SensorRole.REACTIVE_POWER: {
+        "kVAR": 1_000.0,
+        "kvar": 1_000.0,
+        "MVAR": 1_000_000.0,
+        "mvar": 1_000_000.0,
+    },
+    SensorRole.APPARENT_POWER: {
+        "kVA": 1_000.0,
+        "kva": 1_000.0,
+        "MVA": 1_000_000.0,
+        "mva": 1_000_000.0,
+    },
+    SensorRole.CURRENT: {
+        "kA": 1_000.0,
+        "ka": 1_000.0,
+        "mA": 0.001,
+        "ma": 0.001,
+    },
+    SensorRole.VOLTAGE: {
+        "kV": 1_000.0,
+        "kv": 1_000.0,
+        "mV": 0.001,
+        "mv": 0.001,
+    },
 }
 
 

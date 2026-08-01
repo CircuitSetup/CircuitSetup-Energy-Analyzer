@@ -176,6 +176,7 @@ def _source_entity_configs_from_sources(
         if (
             entity_id in mains_entities
             or _automatic_source_entity_excluded(entity_id)
+            or _untyped_source_entity_excluded(entity_id)
         ):
             continue
         circuit_id = _source_circuit_id_from_entity_id(entity_id)
@@ -214,7 +215,7 @@ def _untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = _entity_object_id(entity_id)
     return "harmonic" in set(object_id.split("_")) or _has_metric_suffix(
         object_id,
-        ("kvarh", "varh"),
+        ("reactive_energy", "kvarh", "varh"),
     )
 
 

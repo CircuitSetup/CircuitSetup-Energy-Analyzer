@@ -78,6 +78,7 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.voltage_panel_ka"},
                         {"entity_id": "sensor.current_pump_kv"},
                         {"entity_id": "sensor.current_pump_kvarh"},
+                        {"entity_id": "sensor.mains_reactive_energy"},
                     ],
                 }
             ]
@@ -169,11 +170,15 @@ def test_config_parser_excludes_harmonic_and_total_automatic_configs() -> None:
                 "sensor.refrigerator_power",
                 "sensor.car_charger_l1_harmonic_power",
                 "sensor.house_total_power",
+                "sensor.refrigerator_reactive_energy",
             ]
         }
     )
 
     assert [config.circuit_id for config in configs] == ["refrigerator"]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.refrigerator_power"
+    ]
 
 
 def test_config_parser_creates_mains_config_without_experimental_nilm() -> None:
