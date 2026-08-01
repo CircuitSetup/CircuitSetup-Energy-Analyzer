@@ -467,6 +467,10 @@ def test_state_reducer_clears_only_direct_appliance_state() -> None:
         "fridge": {"streams": {"climate.kitchen": {}}},
         "washer": {"streams": {"climate.laundry": {}}},
     }
+    state.expected_schedule_by_appliance = {
+        "circuit:fridge": {"status": "due"},
+        "circuit:washer": {"status": "normal"},
+    }
 
     reducer = StateReducer()
     assert reducer.clear_direct_appliance_state(state, "fridge")
@@ -490,6 +494,9 @@ def test_state_reducer_clears_only_direct_appliance_state() -> None:
     }
     assert state.hvac_efficiency_by_circuit == {
         "washer": {"streams": {"climate.laundry": {}}}
+    }
+    assert state.expected_schedule_by_appliance == {
+        "circuit:washer": {"status": "normal"}
     }
     assert state.hvac_association_revision_by_circuit == {"fridge": 1}
 

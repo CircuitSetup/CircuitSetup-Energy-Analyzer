@@ -196,6 +196,8 @@ class StorePersistenceManager:
             "appliance_schedule_evidence",
         ):
             pop(getattr(store, name))
+        for name in ("appliance_schedule_settings", "appliance_schedule_evidence"):
+            pop(getattr(store, name), f"circuit:{circuit_id}")
         direct_metrics = {
             "run_cycle_duration_s",
             "run_cycle_daily_start_count",

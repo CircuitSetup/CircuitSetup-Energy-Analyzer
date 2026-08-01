@@ -140,6 +140,10 @@ class StateReducer:
             "always_on_limit_usage_by_circuit", "standby_evidence_by_circuit",
         )
         removed |= _pop_circuit_state(state, circuit_id, roots)
+        schedule_key = f"circuit:{circuit_id}"
+        if schedule_key in state.expected_schedule_by_appliance:
+            state.expected_schedule_by_appliance.pop(schedule_key)
+            removed = True
         if circuit_id in state.hvac_efficiency_by_circuit:
             clear_hvac_efficiency(state, circuit_id)
             removed = True

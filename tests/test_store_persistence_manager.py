@@ -198,8 +198,18 @@ def test_store_persistence_clears_direct_state_idempotently() -> None:
         water_context_history_by_circuit={"fridge": [{}], "washer": [{}]},
         operating_detection_settings_by_circuit={"fridge": {}, "washer": {}},
         activity_alert_settings_by_circuit={"fridge": {}, "washer": {}},
-        appliance_schedule_settings={"fridge": {}, "washer": {}},
-        appliance_schedule_evidence={"fridge": {}, "washer": {}},
+        appliance_schedule_settings={
+            "fridge": {},
+            "circuit:fridge": {"start": "08:00"},
+            "washer": {},
+            "circuit:washer": {"start": "09:00"},
+        },
+        appliance_schedule_evidence={
+            "fridge": {},
+            "circuit:fridge": {"status": "due"},
+            "washer": {},
+            "circuit:washer": {"status": "normal"},
+        },
         settings_recommendations=recommendations,
         energy_usage_by_circuit={"fridge": {"days": [{"date": "2026-07-31"}]}},
         billing_by_circuit={"fridge": {"usage": 1}},
@@ -237,7 +247,12 @@ def test_store_persistence_clears_direct_state_idempotently() -> None:
         "operating_detection_settings_by_circuit", "activity_alert_settings_by_circuit",
         "appliance_schedule_settings", "appliance_schedule_evidence",
     ):
-        assert set(getattr(store_data, name)) == {"washer"}
+        expected = (
+            {"washer", "circuit:washer"}
+            if name.startswith("appliance_schedule_")
+            else {"washer"}
+        )
+        assert set(getattr(store_data, name)) == expected
     statuses = {
         key: recommendation.status
         for key, recommendation in store_data.settings_recommendations.items()
