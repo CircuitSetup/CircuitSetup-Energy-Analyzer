@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -849,10 +849,16 @@ def _compact_circuit_response_history(
             ) is not None
         ]
         decoded_by_stream[stream_id] = decoded
-        dates_by_mode[parts[-1]].update(
-            local_date(episode.started_at, context.time_zone)
-            for _raw, episode in decoded
-        )
+        for _raw, episode in decoded:
+            started = local_date(episode.started_at, context.time_zone)
+            ended = local_date(
+                episode.ended_at or episode.started_at,
+                context.time_zone,
+            )
+            dates_by_mode[parts[-1]].update(
+                started + timedelta(days=offset)
+                for offset in range(max(0, (ended - started).days) + 1)
+            )
 
     changed = False
     current_date = local_date(context.now, context.time_zone)

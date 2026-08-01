@@ -1492,12 +1492,16 @@ def test_hvac_mixed_mode_markers_survive_until_local_day_closes() -> None:
     heating_stream = f"heat_pump|{thermostat}|heating"
     cooling = _hvac_response_history(cooling_stream, count=1)[0]
     heating = _hvac_response_history(heating_stream, count=1)[0]
-    for index, raw in enumerate((cooling, heating), start=1):
-        started = context.now - timedelta(hours=index)
-        raw.update(
-            started_at=started.isoformat(),
-            ended_at=(started + timedelta(minutes=40)).isoformat(),
-        )
+    cooling_started = context.now - timedelta(hours=13)
+    cooling.update(
+        started_at=cooling_started.isoformat(),
+        ended_at=(cooling_started + timedelta(hours=2)).isoformat(),
+    )
+    heating_started = context.now - timedelta(hours=2)
+    heating.update(
+        started_at=heating_started.isoformat(),
+        ended_at=(heating_started + timedelta(minutes=40)).isoformat(),
+    )
     context.store_data.hvac_response_history_by_stream.update(
         {cooling_stream: [cooling], heating_stream: [heating]}
     )

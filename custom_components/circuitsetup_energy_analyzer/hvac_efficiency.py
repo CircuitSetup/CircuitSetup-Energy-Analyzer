@@ -675,7 +675,8 @@ def compact_completed_core_days(
     )
     for episode in episodes:
         day = local_date(episode.started_at, time_zone)
-        if day >= current_date:
+        end_day = local_date(episode.ended_at or episode.started_at, time_zone)
+        if max(day, end_day) >= current_date:
             pending.append(episode)
         elif (
             episode.model_version >= _MODEL_VERSION
