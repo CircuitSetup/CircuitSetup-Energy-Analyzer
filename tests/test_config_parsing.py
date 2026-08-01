@@ -274,6 +274,7 @@ def test_config_parser_creates_mains_config_without_experimental_nilm() -> None:
             CONF_MAINS_SOURCE_ENTITIES: [
                 "sensor.mains_power",
                 "sensor.mains_l1_harmonic_power",
+                "sensor.mains_harmonic_distortion_2",
             ]
         }
     )
