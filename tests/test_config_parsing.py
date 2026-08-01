@@ -60,6 +60,23 @@ def test_config_parser_preserves_metric_like_circuit_basename() -> None:
     assert configs[0].circuit_id == "solar_kw"
 
 
+def test_config_parser_preserves_numbered_channel_basename() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.hvac_1_power",
+                "sensor.hvac_2_power",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["hvac_1", "hvac_2"]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

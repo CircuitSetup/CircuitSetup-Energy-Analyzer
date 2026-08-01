@@ -641,7 +641,9 @@ def strip_trailing_source_detail_tokens(object_id: str) -> str:
         if stripped.endswith(suffix):
             stripped = stripped[: -len(suffix)]
             break
-    return _strip_trailing_source_qualifiers(stripped) or object_id
+    while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
+        stripped = without_leg
+    return stripped or object_id
 
 
 def _strip_trailing_leg_token(object_id: str) -> str:
