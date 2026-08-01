@@ -2589,15 +2589,23 @@ def assignment_groups_from_sources(
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
-    existing_sensor_entities = {
+    retained_existing_sensor_entities = {
         entity_id
         for circuit in existing_circuit_list
-        for entity_id in _sensor_entity_ids_from_circuit(circuit)
+        for sensor in circuit.get("sensors", ())
+        if (entity_id := _sensor_entity_id_from_raw(sensor))
+        if (
+            (isinstance(sensor, Mapping) and sensor.get("role"))
+            or not _automatic_assignment_sensor_excluded(
+                entity_id,
+                source_name_by_entity.get(entity_id, ""),
+            )
+        )
     }
     grouped_entities = [
         entity_id
         for entity_id in non_mains_entities
-        if entity_id in existing_sensor_entities
+        if entity_id in retained_existing_sensor_entities
         or not _automatic_assignment_sensor_excluded(
             entity_id,
             source_name_by_entity.get(entity_id, ""),
@@ -2633,7 +2641,8 @@ def assignment_groups_from_sources(
         entity_ids.extend(
             entity_id
             for entity_id in saved_sensor_entities
-            if owners_by_entity.get(entity_id) == {index}
+            if entity_id in retained_existing_sensor_entities
+            and owners_by_entity.get(entity_id) == {index}
             and entity_id not in entity_ids
         )
         claimed_entities.update(entity_ids)

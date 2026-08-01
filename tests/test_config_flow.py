@@ -3759,6 +3759,37 @@ def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
     assert groups[0]["entity_ids"] == ("sensor.pump_power",)
 
 
+def test_assignment_groups_exclude_unsupported_roleless_saved_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    source_entities = [
+        "sensor.fridge_power",
+        "sensor.fridge_kvarh",
+        "sensor.fridge_harmonic_current",
+        "sensor.fridge_harmonic_voltage",
+    ]
+    groups = assignment_groups_from_sources(
+        source_entities,
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "sensors": [
+                    {"entity_id": source_entities[0]},
+                    {"entity_id": source_entities[1]},
+                    {"entity_id": source_entities[2]},
+                    {"entity_id": source_entities[3], "role": "voltage"},
+                ],
+            }
+        ],
+    )
+
+    assert groups[0]["entity_ids"] == (source_entities[0], source_entities[3])
+    assert groups[0]["sensor_roles"][source_entities[3]] == "voltage"
+
+
 def test_assignment_groups_exclude_harmonic_friendly_name() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
