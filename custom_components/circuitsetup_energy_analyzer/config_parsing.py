@@ -559,7 +559,7 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         return SensorRole.ENERGY
     if _has_metric_suffix(
         object_id,
-        ("active_power", "real_power", "power", "watts", "w"),
+        ("active_power", "real_power", "power", "watts", "watt", "w"),
     ):
         return SensorRole.REAL_POWER
     return infer_sensor_role(entity_id, None) or SensorRole.REAL_POWER
