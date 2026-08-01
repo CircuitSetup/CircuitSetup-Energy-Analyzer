@@ -312,7 +312,9 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         descriptions = tuple(
             description
             for description in BINARY_SENSOR_DESCRIPTIONS
-            if binary_sensor_description_applies(description, circuit, coordinator)
+            if binary_sensor_description_applies(
+                description, raw_circuit, coordinator
+            )
         )
         descriptions = compact_descriptions_for_setup(
             "binary_sensor",

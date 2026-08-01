@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -5946,10 +5947,22 @@ async def test_binary_sensor_setup_entry_requires_water_flow_input_for_mismatch(
             entry_data={},
         ),
     )
+    mixed_with_flow = await entity_keys_for(
+        SimpleNamespace(
+            data=AnalyzerState(),
+            circuit_configs=(replace(washer, mode=CircuitMode.MIXED),),
+            options={
+                CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
+                CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.water_flow_rate"],
+            },
+            entry_data={},
+        ),
+    )
 
     assert "entry-1_washer_water_flow_mismatch" not in without_flow
     assert "entry-1_washer_water_flow_mismatch" in with_flow
     assert "entry-1_washer_water_flow_mismatch" in with_linked_flow
+    assert "entry-1_washer_water_flow_mismatch" not in mixed_with_flow
 
 
 @pytest.mark.asyncio
