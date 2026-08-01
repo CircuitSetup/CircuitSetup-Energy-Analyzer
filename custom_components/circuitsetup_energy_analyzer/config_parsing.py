@@ -213,18 +213,26 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
-    harmonic_object_id = _strip_terminal_phase_letter(
-        _strip_trailing_source_qualifiers(object_id)
+    harmonic_object_id = _strip_trailing_source_qualifiers(object_id)
+    harmonic_pattern = (
+        r"(?:^|_)(?:total_)?harmonic(?:_\d+)?(?:_(?:"
+        r"(?:active|reactive|apparent|real)_power"
+        r"|peak_(?:current|amps?|a)|power_factor|line_frequency"
+        r"|distortion|energy|frequency|current|voltage|power"
+        r"|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$"
     )
-    harmonic_measurement = re.search(
-        r"(?:^|_)(?:total_)?harmonic(?:_\d+)?(?:_(?:(?:active|reactive|apparent|real)_power|peak_(?:current|amps?|a)|power_factor|line_frequency|distortion|energy|frequency|current|voltage|power|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$",
-        harmonic_object_id,
+    harmonic_measurement = any(
+        re.search(harmonic_pattern, candidate) is not None
+        for candidate in (
+            harmonic_object_id,
+            re.sub(r"_[ab]$", "", harmonic_object_id),
+        )
     )
     reactive_energy_measurement = (
         re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
         or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
     )
-    return harmonic_measurement is not None or (
+    return harmonic_measurement or (
         reactive_energy_measurement
         and not _has_metric_suffix(object_id, _NON_REACTIVE_ENERGY_METRIC_SUFFIXES)
     )
