@@ -1392,7 +1392,10 @@ def _actions_for_context(
             actions["mark_circuit_mixed"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_MARK_CIRCUIT_MIXED,
-                "data": circuit_data,
+                "data": {
+                    ATTR_ENTRY_ID: coordinator.entry_id,
+                    ATTR_CIRCUIT_ID: circuit_id,
+                },
             }
 
     recommendations = _setting_recommendations_for_circuit(

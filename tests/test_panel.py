@@ -431,8 +431,10 @@ def test_mixed_circuit_action_only_for_dedicated_single_phase_loads(
         mode=mode,
         sensors=(),
     )
+    coordinator = _coordinator(config=config)
+    coordinator.entry_id = "entry-1"
     actions = _actions_for_context(
-        _coordinator(config=config),
+        coordinator,
         config=config,
         alert_id=None,
         circuit_id="fridge",
@@ -442,7 +444,7 @@ def test_mixed_circuit_action_only_for_dedicated_single_phase_loads(
         assert actions["mark_circuit_mixed"] == {
             "domain": DOMAIN,
             "service": "mark_circuit_mixed",
-            "data": {"circuit_id": "fridge"},
+            "data": {"entry_id": "entry-1", "circuit_id": "fridge"},
         }
     else:
         assert "mark_circuit_mixed" not in actions

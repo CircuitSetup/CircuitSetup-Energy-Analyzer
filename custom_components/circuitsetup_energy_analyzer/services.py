@@ -198,6 +198,9 @@ def _boolean_value(value: Any) -> bool:
 
 
 CIRCUIT_SERVICE_SCHEMA = _circuit_schema()
+MARK_CIRCUIT_MIXED_SERVICE_SCHEMA = _schema(
+    required=(ATTR_CIRCUIT_ID,), optional=(ATTR_ENTRY_ID,)
+)
 SENSITIVITY_SERVICE_SCHEMA = _schema(
     required=(ATTR_PRESET,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -454,7 +457,7 @@ RECOMMENDATION_ACTION_SERVICE_SCHEMA = _recommendation_action_schema()
 
 _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RELEARN_BASELINE: CIRCUIT_SERVICE_SCHEMA,
-    SERVICE_MARK_CIRCUIT_MIXED: CIRCUIT_SERVICE_SCHEMA,
+    SERVICE_MARK_CIRCUIT_MIXED: MARK_CIRCUIT_MIXED_SERVICE_SCHEMA,
     SERVICE_PAUSE_ALERTS: _circuit_schema(ATTR_DURATION),
     SERVICE_ACKNOWLEDGE_ALERT: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_EXPORT_DIAGNOSTICS: CIRCUIT_SERVICE_SCHEMA,
@@ -1053,7 +1056,12 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         return
 
     circuit_id = _service_circuit_id(hass, data)
-    for coordinator in _target_coordinators(hass, circuit_id):
+    coordinators = (
+        _target_entry_circuit_coordinator(hass, data.get(ATTR_ENTRY_ID), circuit_id)
+        if service == SERVICE_MARK_CIRCUIT_MIXED and data.get(ATTR_ENTRY_ID)
+        else _target_coordinators(hass, circuit_id)
+    )
+    for coordinator in coordinators:
         if service == SERVICE_RELEARN_BASELINE:
             await _call_if_present(coordinator, "async_relearn_baseline", circuit_id)
         elif service == SERVICE_MARK_CIRCUIT_MIXED:
@@ -1394,6 +1402,26 @@ def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
     if matched:
         return matched
     raise HomeAssistantError(_unknown_circuit_message(circuit_id, coordinators))
+
+
+def _target_entry_circuit_coordinator(
+    hass: Any, entry_id: str, circuit_id: str
+) -> list[Any]:
+    domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
+    coordinator = domain_data.get(entry_id) if isinstance(domain_data, dict) else None
+    if coordinator is None or not hasattr(coordinator, "async_set_updated_data"):
+        raise HomeAssistantError(f"Unknown entry_id '{entry_id}'.")
+    known_circuit_ids = _known_circuit_ids(coordinator)
+    has_circuit = getattr(coordinator, "has_circuit", None)
+    if not (
+        (callable(has_circuit) and has_circuit(circuit_id))
+        or circuit_id in known_circuit_ids
+        or (not callable(has_circuit) and not known_circuit_ids)
+    ):
+        raise HomeAssistantError(
+            f"Unknown circuit_id '{circuit_id}' for entry_id '{entry_id}'."
+        )
+    return [coordinator]
 
 
 def _unknown_circuit_message(circuit_id: str, coordinators: list[Any]) -> str:

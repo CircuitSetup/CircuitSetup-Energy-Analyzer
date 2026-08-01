@@ -8,6 +8,12 @@ mark_circuit_mixed:
       required: true
       selector:
         text:
+    entry_id:
+      name: Entry ID
+      description: Optional analyzer config entry to target when circuit IDs are duplicated. Panel actions include this automatically.
+      required: false
+      selector:
+        text:
 
 relearn_baseline:
   name: Relearn baseline
