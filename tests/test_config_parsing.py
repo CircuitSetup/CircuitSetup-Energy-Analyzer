@@ -70,6 +70,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.high_voltage_panel_active_power"},
                         {"entity_id": "sensor.current_pump_active_power"},
                         {"entity_id": "sensor.current_pump_watt"},
+                        {"entity_id": "sensor.current_pump_kw"},
+                        {"entity_id": "sensor.voltage_panel_mw"},
                     ],
                 }
             ]
@@ -84,6 +86,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.high_voltage_panel_active_power", SensorRole.REAL_POWER),
         ("sensor.current_pump_active_power", SensorRole.REAL_POWER),
         ("sensor.current_pump_watt", SensorRole.REAL_POWER),
+        ("sensor.current_pump_kw", SensorRole.REAL_POWER),
+        ("sensor.voltage_panel_mw", SensorRole.REAL_POWER),
     ]
 
 
