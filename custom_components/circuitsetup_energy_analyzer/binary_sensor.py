@@ -372,7 +372,11 @@ def binary_sensor_description_applies(
     if description.key == "water_flow_mismatch":
         return (
             supports_direct_appliance_analysis(circuit)
-            and _appliance_profile(getattr(circuit, "appliance_profile", None))
+            and _appliance_profile(
+                circuit.get("appliance_profile")
+                if isinstance(circuit, Mapping)
+                else getattr(circuit, "appliance_profile", None)
+            )
             in {
                 ApplianceProfile.WATER_PUMP,
                 ApplianceProfile.WELL_PUMP,
