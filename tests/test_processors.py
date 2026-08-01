@@ -1337,7 +1337,10 @@ def _set_hvac_history_multiplier(
         )
 
 
-def test_hvac_response_change_emits_mature_slower_alert() -> None:
+@pytest.mark.parametrize("handoff_complete", [True, False])
+def test_hvac_response_change_emits_mature_slower_alert(
+    handoff_complete: bool,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
         ConservativeAlertPolicy,
     )
@@ -1411,6 +1414,8 @@ def test_hvac_response_change_emits_mature_slower_alert() -> None:
         elapsed_minutes=10.0,
         active_minutes=10.0,
         outdoor_temperature_minutes=10.0,
+        complete=handoff_complete,
+        excluded_from_baseline=not handoff_complete,
     )
     context.store_data.hvac_response_history_by_stream[stream_id].append(
         changed_context
@@ -2064,8 +2069,20 @@ def test_hvac_compaction_discards_obsolete_baseline_eras() -> None:
     )
     stream_id = f"heat_pump|{thermostat}|cooling"
     history = _hvac_response_history(stream_id)
+    obsolete = []
+    for raw in history:
+        started = datetime.fromisoformat(str(raw["started_at"])) - timedelta(days=90)
+        ended = datetime.fromisoformat(str(raw["ended_at"])) - timedelta(days=90)
+        obsolete.append(
+            {
+                **raw,
+                "baseline_era": "initial",
+                "started_at": started.isoformat(),
+                "ended_at": ended.isoformat(),
+            }
+        )
     context.store_data.hvac_response_history_by_stream[stream_id] = [
-        *[{**raw, "baseline_era": "initial"} for raw in history],
+        *obsolete,
         *[{**raw, "baseline_era": "era-2"} for raw in history],
     ]
     context.store_data.hvac_baseline_era_by_stream[stream_id] = "era-2"
@@ -2077,7 +2094,10 @@ def test_hvac_compaction_discards_obsolete_baseline_eras() -> None:
     assert {raw["baseline_era"] for raw in retained} == {"era-2"}
 
 
-def test_hvac_prior_era_same_mode_call_disqualifies_core_day() -> None:
+@pytest.mark.parametrize("prior_complete", [False, True])
+def test_hvac_prior_era_same_mode_call_disqualifies_core_day(
+    prior_complete: bool,
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
     )
@@ -2121,8 +2141,8 @@ def test_hvac_prior_era_same_mode_call_disqualifies_core_day() -> None:
         "baseline_era": "initial",
         "started_at": (context.now - timedelta(days=1, hours=1)).isoformat(),
         "ended_at": (context.now - timedelta(days=1, minutes=50)).isoformat(),
-        "complete": False,
-        "excluded_from_baseline": True,
+        "complete": prior_complete,
+        "excluded_from_baseline": not prior_complete,
     }
     context.store_data.hvac_response_history_by_stream[stream_id] = [
         prior_era,

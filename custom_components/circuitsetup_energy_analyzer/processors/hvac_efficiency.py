@@ -1035,10 +1035,7 @@ def _compact_circuit_response_history(
         )
         prior_era_disqualified_dates: set[Any] = set()
         for raw, episode in decoded:
-            if (
-                str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era
-                or (episode.complete and not episode.excluded_from_baseline)
-            ):
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era:
                 continue
             started = local_date(episode.started_at, context.time_zone)
             ended = local_date(
@@ -1285,14 +1282,21 @@ def _circuit_efficiency_payload(
             stream_id,
             {},
         )
-        selected_context = str(
-            response_context.get("observed") or response_context.get("selected") or ""
+        observed_context = str(response_context.get("observed") or "")
+        selected_context = str(response_context.get("selected") or "")
+        fingerprint_context = observed_context or selected_context
+        evaluation_episodes = (
+            []
+            if observed_context
+            and selected_context
+            and observed_context != selected_context
+            else episodes
         )
         configured_temperature = thermostat_mappings[stream_id.split("|")[1]] or ""
         evaluations[stream_id] = {
             **_evaluation_to_dict(
                 evaluate_efficiency(
-                    episodes,
+                    evaluation_episodes,
                     threshold_pct=threshold,
                     time_zone=context.time_zone,
                     excluded_dates=dates_by_mode[opposing_mode],
@@ -1303,7 +1307,7 @@ def _circuit_efficiency_payload(
             "baseline_era": baseline_eras[stream_id],
             "response_context_fingerprint": hashlib.sha256(
                 (
-                    f"{config.appliance_profile.value}\0{selected_context}"
+                    f"{config.appliance_profile.value}\0{fingerprint_context}"
                     f"\0{configured_temperature}"
                 ).encode()
             ).hexdigest(),
