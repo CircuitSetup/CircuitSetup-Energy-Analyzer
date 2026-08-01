@@ -215,7 +215,7 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
     harmonic_object_id = _strip_trailing_source_qualifiers(object_id)
     harmonic_measurement = re.search(
-        r"(?:^|_)(?:total_)?harmonic(?:_(?:(?:active|reactive|apparent|real)_power|distortion|power|watts?|[km]?w|[km]?(?:var|va)))?$",
+        r"(?:^|_)(?:total_)?harmonic(?:_(?:(?:active|reactive|apparent|real)_power|peak_(?:current|amps?|a)|power_factor|line_frequency|distortion|energy|frequency|current|voltage|power|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$",
         harmonic_object_id,
     )
     reactive_energy_measurement = (
@@ -558,7 +558,16 @@ _NON_REACTIVE_ENERGY_METRIC_SUFFIXES = (
     "mwh",
     "wh",
 )
-_SOURCE_VALUE_QUALIFIER_SUFFIXES = ("_rms", "_average", "_avg", "_mean")
+_SOURCE_VALUE_QUALIFIER_SUFFIXES = (
+    "_rms",
+    "_average",
+    "_avg",
+    "_mean",
+    "_minimum",
+    "_maximum",
+    "_min",
+    "_max",
+)
 _SOURCE_LEG_SUFFIXES = (
     "_leg_a",
     "_leg_b",
