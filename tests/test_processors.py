@@ -1465,6 +1465,68 @@ def test_hvac_incomplete_opposing_call_excludes_mixed_mode_day() -> None:
     assert cooling["recent_count"] == 4
 
 
+def test_hvac_mixed_mode_markers_survive_until_local_day_closes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "heat_cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    cooling_stream = f"heat_pump|{thermostat}|cooling"
+    heating_stream = f"heat_pump|{thermostat}|heating"
+    cooling = _hvac_response_history(cooling_stream, count=1)[0]
+    heating = _hvac_response_history(heating_stream, count=1)[0]
+    for index, raw in enumerate((cooling, heating), start=1):
+        started = context.now - timedelta(hours=index)
+        raw.update(
+            started_at=started.isoformat(),
+            ended_at=(started + timedelta(minutes=40)).isoformat(),
+        )
+    context.store_data.hvac_response_history_by_stream.update(
+        {cooling_stream: [cooling], heating_stream: [heating]}
+    )
+    processor = HvacEfficiencyProcessor()
+
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert len(context.store_data.hvac_response_history_by_stream[cooling_stream]) == 1
+    assert len(context.store_data.hvac_response_history_by_stream[heating_stream]) == 1
+
+    later_cooling = {**cooling}
+    later_started = context.now + timedelta(hours=1)
+    later_cooling.update(
+        started_at=later_started.isoformat(),
+        ended_at=(later_started + timedelta(minutes=40)).isoformat(),
+    )
+    context.store_data.hvac_response_history_by_stream[cooling_stream].append(
+        later_cooling
+    )
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert len(context.store_data.hvac_response_history_by_stream[cooling_stream]) == 2
+    context = replace(context, now=context.now + timedelta(days=1))
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert context.store_data.hvac_response_history_by_stream[cooling_stream] == []
+    assert context.store_data.hvac_response_history_by_stream[heating_stream] == []
+
+
 def test_hvac_compaction_discards_obsolete_baseline_eras() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,

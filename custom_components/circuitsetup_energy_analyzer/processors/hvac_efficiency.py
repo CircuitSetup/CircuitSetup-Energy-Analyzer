@@ -855,6 +855,7 @@ def _compact_circuit_response_history(
         )
 
     changed = False
+    current_date = local_date(context.now, context.time_zone)
     for stream_id, decoded in decoded_by_stream.items():
         mode = stream_id.rsplit("|", 1)[-1]
         opposing_mode = "heating" if mode == "cooling" else "cooling"
@@ -866,14 +867,17 @@ def _compact_circuit_response_history(
             episode
             for raw, episode in decoded
             if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era
-            and local_date(episode.started_at, context.time_zone)
-            not in dates_by_mode[opposing_mode]
+            and (
+                local_date(episode.started_at, context.time_zone) >= current_date
+                or local_date(episode.started_at, context.time_zone)
+                not in dates_by_mode[opposing_mode]
+            )
         ]
         compacted = []
         for episode in compact_completed_core_days(
             episodes,
             time_zone=context.time_zone,
-            current_date=local_date(context.now, context.time_zone),
+            current_date=current_date,
             retention_days=retention_days,
         ):
             raw = episode_to_dict(episode, allow_incomplete=True)
