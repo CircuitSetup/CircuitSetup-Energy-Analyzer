@@ -2744,7 +2744,10 @@ def _automatic_assignment_sensor_excluded(
     return (
         bool(tokens & {"harmonic", "total"})
         or untyped_source_entity_excluded(entity_id)
-        or untyped_source_entity_excluded(source_name)
+        or (
+            explicit_sensor_role_from_entity_id(entity_id) is None
+            and untyped_source_entity_excluded(source_name)
+        )
     )
 
 

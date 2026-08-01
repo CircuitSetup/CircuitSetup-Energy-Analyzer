@@ -3806,6 +3806,23 @@ def test_assignment_groups_exclude_harmonic_friendly_name() -> None:
     )
 
 
+def test_assignment_groups_prefer_explicit_metric_over_friendly_name_exclusion() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    entity_id = "sensor.channel_1_power"
+    groups = assignment_groups_from_sources(
+        [entity_id],
+        source_names={entity_id: "Reactive Energy Monitor"},
+    )
+
+    assert groups[0]["entity_ids"] == (entity_id,)
+    assert groups[0]["sensor_roles"][entity_id] == "real_power"
+
+
 def test_assignment_groups_exclude_collision_qualified_harmonic_distortion() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
