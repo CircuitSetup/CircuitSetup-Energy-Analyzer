@@ -5323,6 +5323,28 @@ for (const expected of [
     )
 
 
+def test_no_evidence_fallback_renders_mixed_circuit_action() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._loading = false;
+panel._payload = {
+  status: "circuit_found_no_evidence",
+  actions: {
+    mark_circuit_mixed: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "mark_circuit_mixed",
+      data: { circuit_id: "fridge" },
+    },
+  },
+};
+const html = panel._renderNotFound();
+assert.match(html, /id="mark_circuit_mixed"/);
+assert.match(html, />This circuit powers other loads</);
+"""
+    )
+
+
 def test_mark_circuit_mixed_requires_confirmation_and_reports_result() -> None:
     _run_panel_node_script(
         r"""

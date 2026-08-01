@@ -1072,6 +1072,7 @@ export function createEvidenceViewMethods({
         ${this._renderActionGroup(this._panelText("actions.groups.tune_title"), this._panelText("actions.groups.tune_description"), [
           this._actionButton("open_appliance_detail", this._panelText("actions.labels.open_appliance_detail"), true),
           this._actionButton("relearn_baseline", this._panelText("actions.labels.relearn_baseline"), true),
+          this._actionButton("mark_circuit_mixed", this._panelText("actions.labels.mark_circuit_mixed"), true),
           this._actionButton("open_advanced_circuit_settings", this._panelText("actions.labels.open_advanced_circuit_settings"), true),
         ])}
       </section>
