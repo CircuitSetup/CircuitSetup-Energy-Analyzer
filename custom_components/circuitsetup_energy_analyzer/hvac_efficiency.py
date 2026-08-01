@@ -156,10 +156,12 @@ def advance_episode(
             return None, None
         gap = _directional_gap(mode, actual=actual, target=target)
         episode_kind = "setpoint_response"
+        rejected_call = False
         if not _meets_minimum(gap, _MINIMUM_START_GAP_F):
-            if not action_active or not _meets_minimum(gap, _MINIMUM_CALL_GAP_F):
+            if not action_active:
                 return None, None
             episode_kind = "thermostat_call"
+            rejected_call = not _meets_minimum(gap, _MINIMUM_CALL_GAP_F)
         outdoor_temperature = _finite_float(
             environmental_context.get("outdoor_temperature_f")
         )
@@ -199,6 +201,12 @@ def advance_episode(
                 else 0.0
             ),
         )
+        if rejected_call:
+            return None, replace(
+                episode,
+                ended_at=now,
+                excluded_from_baseline=True,
+            )
         return episode, None
 
     elapsed = _elapsed_minutes(current.started_at, now)

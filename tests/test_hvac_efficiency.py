@@ -219,6 +219,19 @@ def test_exact_tenth_degree_thermostat_call_starts() -> None:
     assert completed is None
 
 
+def test_subtenth_active_call_creates_excluded_date_marker() -> None:
+    current, marker = _advance(
+        None,
+        _observation(actual=75.25, target=75.2),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.complete is False
+    assert marker.excluded_from_baseline is True
+
+
 def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
     current, completed = _advance(
         None,
