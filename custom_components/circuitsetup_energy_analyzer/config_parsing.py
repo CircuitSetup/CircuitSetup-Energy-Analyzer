@@ -617,7 +617,11 @@ def _entity_object_id(entity_id: str) -> str:
 
 
 def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
-    normalized = _strip_trailing_leg_token(object_id.strip().lower())
+    normalized = re.sub(
+        r"_\d+$",
+        "",
+        _strip_trailing_leg_token(object_id.strip().lower()),
+    )
     return any(
         normalized == suffix or normalized.endswith(f"_{suffix}")
         for suffix in metric_suffixes
