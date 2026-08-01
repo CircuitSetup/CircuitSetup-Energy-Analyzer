@@ -254,14 +254,17 @@ class HvacEfficiencyProcessor:
                             value={},
                         )
                     )
-                if finalized is not None and finalized.complete:
+                if finalized is not None:
                     history = (
                         context.store_data.hvac_response_history_by_stream.setdefault(
                             stream_id,
                             [],
                         )
                     )
-                    stored_episode = episode_to_dict(finalized)
+                    stored_episode = episode_to_dict(
+                        finalized,
+                        allow_incomplete=True,
+                    )
                     stored_episode["baseline_era"] = (
                         context.store_data.hvac_baseline_era_by_stream.get(
                             stream_id,
@@ -841,7 +844,9 @@ def _compact_circuit_response_history(
         decoded = [
             (raw, episode)
             for raw in raw_history
-            if (episode := episode_from_dict(raw)) is not None
+            if (
+                episode := episode_from_dict(raw, allow_incomplete=True)
+            ) is not None
         ]
         decoded_by_stream[stream_id] = decoded
         dates_by_mode[parts[-1]].update(
@@ -871,7 +876,7 @@ def _compact_circuit_response_history(
             current_date=local_date(context.now, context.time_zone),
             retention_days=retention_days,
         ):
-            raw = episode_to_dict(episode)
+            raw = episode_to_dict(episode, allow_incomplete=True)
             raw["baseline_era"] = current_era
             compacted.append(raw)
         if compacted != history_by_stream[stream_id]:

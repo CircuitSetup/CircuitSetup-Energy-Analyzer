@@ -520,6 +520,56 @@ def test_hvac_efficiency_stores_completed_subdegree_thermostat_call() -> None:
     assert payload["streams"][stream_id]["status"] == "ready"
 
 
+def test_hvac_efficiency_retains_excluded_call_as_same_day_marker() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    starting = ThermostatObservation(
+        thermostat,
+        None,
+        78.0,
+        72.0,
+        "cool",
+        "cooling",
+        ("current_temperature", "temperature", "hvac_action"),
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=starting,
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+    processor = HvacEfficiencyProcessor()
+    started = processor.process([(heat_pump, SimpleNamespace())], context)
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.state.hvac_current_episode_by_stream[stream_id] = (
+        _state_update_values(started, "hvac_current_episode_by_stream")[stream_id]
+    )
+    context = replace(
+        context,
+        now=context.now + timedelta(minutes=5),
+        thermostat_observations=MappingProxyType(
+            {
+                f"heat_pump|{thermostat}": replace(
+                    starting,
+                    target_temperature_f=70.0,
+                )
+            }
+        ),
+    )
+
+    processor.process([(heat_pump, SimpleNamespace())], context)
+    marker = context.store_data.hvac_response_history_by_stream[stream_id][0]
+
+    assert marker["complete"] is False
+    assert marker["excluded_from_baseline"] is True
+
+
 def test_hvac_efficiency_finalizes_call_when_action_changes_direction() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
@@ -1367,6 +1417,52 @@ def test_hvac_mixed_mode_dates_stay_excluded_after_one_mode_relearns() -> None:
     assert evidence["streams"][cooling_stream]["status"] == "provisional"
     assert evidence["streams"][cooling_stream]["recent_count"] == 4
     assert context.store_data.hvac_response_history_by_stream[heating_stream] == []
+
+
+def test_hvac_incomplete_opposing_call_excludes_mixed_mode_day() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            72.0,
+            72.0,
+            "heat_cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids=set(),
+    )
+    cooling_stream = f"heat_pump|{thermostat}|cooling"
+    heating_stream = f"heat_pump|{thermostat}|heating"
+    context.store_data.hvac_response_history_by_stream[cooling_stream] = (
+        _hvac_response_history(cooling_stream)
+    )
+    incomplete_heating = _hvac_response_history(heating_stream, count=1)[0]
+    incomplete_heating.update(complete=False, excluded_from_baseline=True)
+    context.store_data.hvac_response_history_by_stream[heating_stream] = [
+        incomplete_heating
+    ]
+
+    result = HvacEfficiencyProcessor().process(
+        [(heat_pump, SimpleNamespace())],
+        context,
+    )
+    cooling = _state_update_values(result, "hvac_efficiency_by_circuit")[
+        "heat_pump"
+    ]["streams"][cooling_stream]
+
+    assert cooling["status"] == "provisional"
+    assert cooling["recent_count"] == 4
 
 
 def test_hvac_compaction_discards_obsolete_baseline_eras() -> None:
