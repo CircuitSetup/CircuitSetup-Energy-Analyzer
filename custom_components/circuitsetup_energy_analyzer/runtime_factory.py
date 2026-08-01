@@ -277,8 +277,11 @@ def initialize_runtime(
     )
     self._hvac_efficiency_processor = HvacEfficiencyProcessor(
         alert_policy_for_circuit=(
-            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
-        )
+            self.alert_policies.hvac_efficiency_alert_policy_for_circuit
+        ),
+        retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
+            self._retention_mode_for_circuit(circuit_id)
+        ].days,
     )
     self.pipeline.configure_processors(
         event_processor=self._event_processor,

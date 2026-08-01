@@ -422,6 +422,12 @@ def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None
     }
     data = FeatureStoreData(
         hvac_response_history_by_stream=history,
+        hvac_response_context_by_stream={
+            "heat_pump|climate.downstairs|heating": {
+                "selected": "context-2",
+                "known": ["context-1", "context-2"],
+            }
+        },
         hvac_baseline_era_by_stream={
             "heat_pump|climate.downstairs|heating": "era-2"
         },
@@ -432,6 +438,12 @@ def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None
 
     assert payload["schema_version"] == 9
     assert restored.hvac_response_history_by_stream == history
+    assert restored.hvac_response_context_by_stream == {
+        "heat_pump|climate.downstairs|heating": {
+            "selected": "context-2",
+            "known": ["context-1", "context-2"],
+        }
+    }
     assert restored.hvac_baseline_era_by_stream == {
         "heat_pump|climate.downstairs|heating": "era-2"
     }
@@ -470,6 +482,7 @@ def test_feature_store_schema_eight_loads_with_empty_hvac_history() -> None:
 
     assert restored.sensitivity_by_circuit == {"fridge": "quiet"}
     assert restored.hvac_response_history_by_stream == {}
+    assert restored.hvac_response_context_by_stream == {}
     assert restored.hvac_baseline_era_by_stream == {}
 
 

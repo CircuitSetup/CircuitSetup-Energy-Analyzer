@@ -726,6 +726,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
         now = self._now_fn()
+        hvac_prefix = f"{circuit_id}|"
+        active_hvac_markers = {
+            stream_id: {
+                **raw,
+                "ended_at": now.isoformat(),
+                "complete": False,
+                "excluded_from_baseline": True,
+                "inactive_since": None,
+                "baseline_era": self.store_data.hvac_baseline_era_by_stream.get(
+                    stream_id,
+                    "initial",
+                ),
+            }
+            for stream_id, raw in self.state.hvac_current_episode_by_stream.items()
+            if stream_id.startswith(hvac_prefix) and isinstance(raw, Mapping) and raw
+        }
         await self.notification_controller.async_dismiss_circuit_alert_notifications(
             circuit_id
         )
@@ -734,6 +750,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._baseline_values,
             now,
         )
+        for stream_id, marker in active_hvac_markers.items():
+            self.store_data.hvac_response_history_by_stream.setdefault(
+                stream_id,
+                [],
+            ).append(marker)
         self._run_cycle_processor.reset_cold_storage_state(circuit_id)
         self.settings_controller.clear_cycle_alert_policies(circuit_id)
         self.state_reducer.reset_learning_state(self.state, circuit_id)

@@ -54,6 +54,7 @@ _ALERT_VALUE_FORMATS = {
     "starts_per_runtime_hour": ("starts_per_hour", "number"),
     "session_duration_seconds": ("seconds", "number"),
     "minutes_per_degree": ("minutes_per_degree", "number"),
+    "weather_normalized_runtime_minutes": ("minutes", "number"),
     "nilm_appliance_unusual_energy": ("energy", "number"),
     "nilm_appliance_confidence": ("percent", "percentage"),
     "nilm_appliance_unusual_runtime": ("minutes", "number"),

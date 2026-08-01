@@ -596,7 +596,6 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
         call.get("observed_at") == duplicate_observed_at
         for call in history["hvac_correlation_calls"]
     ) == 1
-    assert len(history["hvac_response_episodes"]) == 256
     call = history["hvac_correlation_calls"][0]
     assert call["thermostat_entity_id"] == "climate.downstairs"
     assert call["temperature_entity_id"] == "sensor.downstairs_temperature"
@@ -606,22 +605,7 @@ def test_settings_controller_builds_bounded_hvac_advisor_history() -> None:
         call["thermostat_entity_id"] == "climate.downstairs"
         for call in history["hvac_correlation_calls"]
     )
-    assert history["hvac_response_episodes"][0]["alerted"] is True
-    episode = next(
-        item for item in history["hvac_response_episodes"] if not item["alerted"]
-    )
-    assert episode["complete"] is True
-    assert episode["alerted"] is False
-    assert episode["context_key"] == (
-        "heat_pump|heat_pump|climate.downstairs|sensor.downstairs_temperature|"
-        "cooling|setpoint_response|very_hot|summer|cooling|4-6F|heat_pump|"
-    )
-    assert episode["minutes_per_degree"] == 10.0
-    assert episode["absolute_deviation_percent"] == 0.0
-    assert all(
-        "climate.retired" not in item["context_key"]
-        for item in history["hvac_response_episodes"]
-    )
+    assert "hvac_response_episodes" not in history
 
 
 def test_settings_controller_uses_hvac_correlation_without_response_episodes() -> None:
@@ -663,7 +647,7 @@ def test_settings_controller_uses_hvac_correlation_without_response_episodes() -
         coordinator
     ).advisor_feature_history_for_circuit(config, coordinator.now)
 
-    assert history["hvac_response_episodes"] == []
+    assert "hvac_response_episodes" not in history
     assert history["hvac_correlation_calls"] == calls
     recommendations = advisor.build_settings_recommendations(
         advisor.AdvisorInputs(
@@ -1377,6 +1361,7 @@ def test_settings_controller_builds_feature_alert_policies() -> None:
     short_cycle_policy = (
         controller.appliance_health_short_cycle_alert_policy_for_circuit("fridge")
     )
+    hvac_policy = controller.hvac_efficiency_alert_policy_for_circuit("fridge")
     water_policy = controller.water_context_alert_policy_for_circuit(
         "fridge",
         "pump_without_flow",
@@ -1387,6 +1372,10 @@ def test_settings_controller_builds_feature_alert_policies() -> None:
     assert cycle_policy.min_total_score == pytest.approx(6.0)
     assert short_cycle_policy.min_repeated == 1
     assert short_cycle_policy.min_total_score == pytest.approx(1.5)
+    assert hvac_policy.min_repeated == 1
+    assert hvac_policy.min_total_score == pytest.approx(1.0)
+    assert hvac_policy.min_baseline_confidence == pytest.approx(1.0)
+    assert hvac_policy is not short_cycle_policy
     assert water_policy.min_baseline_confidence == pytest.approx(0.7)
 
 

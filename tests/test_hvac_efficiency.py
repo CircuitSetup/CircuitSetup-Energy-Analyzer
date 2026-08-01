@@ -9,6 +9,7 @@ from custom_components.circuitsetup_energy_analyzer.hvac_efficiency import (
     HvacResponseEpisode,
     ThermostatObservation,
     advance_episode,
+    compact_completed_core_days,
     episode_from_dict,
     episode_to_dict,
     evaluate_efficiency,
@@ -104,6 +105,43 @@ def _completed_episode(
     )
 
 
+def _core_day_episode(
+    index: int,
+    *,
+    outdoor_temperature_f: float | None,
+    runtime_minutes: float,
+    mode: str = "cooling",
+    episode_kind: str = "setpoint_response",
+    model_version: int = 2,
+) -> HvacResponseEpisode:
+    episode = _completed_episode(
+        index,
+        minutes_per_degree=runtime_minutes / 5.0,
+        mode=mode,
+    )
+    changes = {
+        "elapsed_minutes": runtime_minutes,
+        "active_minutes": runtime_minutes,
+        "outdoor_temperature_f": outdoor_temperature_f,
+        "outdoor_temperature_minutes": (
+            runtime_minutes if outdoor_temperature_f is not None else 0.0
+        ),
+        "episode_kind": episode_kind,
+        "model_version": model_version,
+    }
+    if episode_kind == "thermostat_call":
+        changes.update(
+            start_temperature_f=75.8,
+            target_temperature_f=75.2,
+            latest_temperature_f=75.3,
+            gap_bin="0-1F",
+        )
+    return replace(
+        episode,
+        **changes,
+    )
+
+
 def test_setpoint_episode_starts_with_capable_active_driver_and_one_degree_gap(
 ) -> None:
     current, completed = _advance(
@@ -179,6 +217,62 @@ def test_exact_tenth_degree_thermostat_call_starts() -> None:
     assert current is not None
     assert current.episode_kind == "thermostat_call"
     assert completed is None
+
+
+def test_subtenth_active_call_creates_excluded_date_marker() -> None:
+    current, marker = _advance(
+        None,
+        _observation(actual=75.25, target=75.2),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.complete is False
+    assert marker.excluded_from_baseline is True
+    assert episode_from_dict(
+        episode_to_dict(marker, allow_incomplete=True),
+        allow_incomplete=True,
+    ) == marker
+
+
+@pytest.mark.parametrize(
+    ("actual", "target"),
+    [(None, 72.0), (78.0, None), (None, None)],
+)
+def test_active_call_missing_temperature_creates_excluded_date_marker(
+    actual: float | None,
+    target: float | None,
+) -> None:
+    current, marker = _advance(
+        None,
+        _observation(actual=actual, target=target),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.complete is False
+    assert marker.excluded_from_baseline is True
+    assert episode_from_dict(
+        episode_to_dict(marker, allow_incomplete=True),
+        allow_incomplete=True,
+    ) == marker
+
+
+def test_running_call_without_hvac_action_missing_temperature_creates_marker() -> None:
+    current, marker = _advance(
+        None,
+        replace(
+            _observation(actual=None, target=72.0, action=None),
+            available_capabilities=("current_temperature", "temperature"),
+        ),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.excluded_from_baseline is True
 
 
 def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
@@ -340,6 +434,31 @@ def test_first_driver_off_interval_counts_toward_completed_episode() -> None:
     assert episode_to_dict(completed)["active_minutes"] == 20.0
 
 
+def test_episode_tracks_active_runtime_weighted_outdoor_temperature() -> None:
+    current, _ = _advance(
+        None,
+        _observation(actual=78.0, target=72.0),
+        active_minutes_delta=10.0,
+    )
+
+    updated, _ = advance_episode(
+        current,
+        _observation(actual=77.0, target=72.0),
+        now=START + timedelta(minutes=30),
+        circuit_id="heat_pump",
+        appliance_profile="heat_pump",
+        driver_active=True,
+        active_minutes_delta=20.0,
+        participant_signature=("heat_pump",),
+        supporting_blower_ids=("blower",),
+        environmental_context={**HOT_CONTEXT, "outdoor_temperature_f": 80.0},
+    )
+
+    assert updated is not None
+    assert updated.outdoor_temperature_minutes == 30.0
+    assert updated.outdoor_temperature_f == pytest.approx(84.0)
+
+
 def test_actionless_range_thermostat_completes_at_active_boundary() -> None:
     range_capabilities = (
         "current_temperature",
@@ -458,10 +577,13 @@ def test_episode_serialization_round_trip_rejects_invalid_records() -> None:
     excluded = replace(episode, excluded_from_baseline=True)
     legacy_payload = episode_to_dict(episode)
     legacy_payload.pop("episode_kind")
+    previous_model_payload = episode_to_dict(episode)
+    previous_model_payload.pop("model_version")
 
     assert episode_from_dict(episode_to_dict(episode)) == episode
     assert episode_from_dict(episode_to_dict(excluded)) == excluded
     assert episode_from_dict(legacy_payload) == episode
+    assert episode_from_dict(previous_model_payload).model_version == 1
     assert episode_from_dict({**episode_to_dict(episode), "complete": False}) is None
     assert (
         episode_from_dict(
@@ -471,172 +593,415 @@ def test_episode_serialization_round_trip_rejects_invalid_records() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("recent_minutes_per_degree", "finding", "score", "change"),
-    [
-        (12.5, "slower", 80.0, 0.25),
-        (7.5, "faster", 133.33333333333334, -0.25),
-    ],
-)
-def test_efficiency_reports_exact_25_percent_boundaries(
-    recent_minutes_per_degree: float,
-    finding: str,
-    score: float,
-    change: float,
-) -> None:
-    evaluation = evaluate_efficiency(
-        [
-            *[
-                _completed_episode(index, minutes_per_degree=10.0)
-                for index in range(9)
-            ],
-            *[
-                _completed_episode(
-                    index,
-                    minutes_per_degree=recent_minutes_per_degree,
-                )
-                for index in range(9, 12)
-            ],
-        ],
-        threshold_pct=25.0,
-    )
-
-    assert evaluation.status == "ready"
-    assert evaluation.finding == finding
-    assert evaluation.change_ratio == pytest.approx(change)
-    assert evaluation.score == pytest.approx(score)
-    assert evaluation.reference_count == 9
-    assert evaluation.recent_count == 3
-
-
-def test_efficiency_uses_comparable_medians_and_ignores_excluded_records() -> None:
+def test_efficiency_aggregates_calls_by_local_day_before_learning() -> None:
     episodes = [
-        *[_completed_episode(index, minutes_per_degree=10.0) for index in range(9)],
         replace(
-            _completed_episode(9, minutes_per_degree=99.0),
-            excluded_from_baseline=True,
-        ),
-        _completed_episode(10, minutes_per_degree=12.0),
-        _completed_episode(11, minutes_per_degree=12.0),
-        _completed_episode(12, minutes_per_degree=120.0),
-        _completed_episode(
-            13,
-            minutes_per_degree=1.0,
-            thermostat="climate.upstairs",
-        ),
-        _completed_episode(14, minutes_per_degree=1.0, mode="heating"),
-        _completed_episode(
-            15,
-            minutes_per_degree=1.0,
-            temperature_bin="mild",
-        ),
-        _completed_episode(16, minutes_per_degree=1.0, gap_bin="6-8F"),
-        _completed_episode(
-            17,
-            minutes_per_degree=1.0,
-            participants=("heat_pump", "electric_heat"),
-        ),
-        *[
-            replace(
-                _completed_episode(index, minutes_per_degree=1.0),
-                supporting_blower_ids=(),
-            )
-            for index in range(19, 22)
-        ],
-        replace(
-            _completed_episode(18, minutes_per_degree=1.0),
-            complete=False,
-        ),
-    ]
-
-    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
-
-    assert evaluation.status == "ready"
-    assert evaluation.recent_minutes_per_degree == pytest.approx(12.0)
-    assert evaluation.baseline_minutes_per_degree == pytest.approx(10.0)
-    assert evaluation.finding is None
-    assert evaluation.context["thermostat_entity_id"] == "climate.downstairs"
-
-
-def test_efficiency_uses_the_latest_mature_weather_context() -> None:
-    summer = [
-        _completed_episode(index, minutes_per_degree=10.0)
-        for index in range(20)
-    ]
-    winter = [
-        replace(
-            _completed_episode(
+            _core_day_episode(
                 index,
-                minutes_per_degree=10.0 if index < 29 else 15.0,
+                outdoor_temperature_f=80.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
             ),
-            outdoor_temperature_f=28.0,
-            season="winter",
-            temperature_bin="cold",
+            started_at=START + timedelta(days=index, hours=hour),
+            ended_at=START + timedelta(days=index, hours=hour, minutes=10),
         )
-        for index in range(20, 32)
+        for index in range(30)
+        for hour in (0, 4, 8)
     ]
 
     evaluation = evaluate_efficiency(
-        [*summer, *winter],
+        episodes,
         threshold_pct=25.0,
+        time_zone="America/New_York",
     )
 
-    assert evaluation.status == "ready"
-    assert evaluation.finding == "slower"
-    assert evaluation.baseline_minutes_per_degree == pytest.approx(10.0)
-    assert evaluation.recent_minutes_per_degree == pytest.approx(15.0)
-    assert evaluation.context["season"] == "winter"
-    assert evaluation.context["temperature_bin"] == "cold"
+    assert evaluation.status == "provisional"
+    assert evaluation.reference_count == 30
+    assert evaluation.recent_count == 0
+    assert evaluation.score is None
+    assert evaluation.finding is None
 
 
-def test_efficiency_returns_bounded_score_and_learning_status() -> None:
-    learning = evaluate_efficiency(
-        [_completed_episode(0, minutes_per_degree=10.0)],
-        threshold_pct=25.0,
-    )
-    assert learning.status == "learning"
-    assert learning.score is None
-
-    ready = evaluate_efficiency(
-        [
-            *[_completed_episode(index, minutes_per_degree=10.0) for index in range(9)],
-            *[
-                _completed_episode(index, minutes_per_degree=1.0)
-                for index in range(9, 12)
-            ],
-        ],
-        threshold_pct=25.0,
-    )
-    assert ready.score == 200.0
-
-
-def test_learning_efficiency_exposes_observed_minutes_per_degree() -> None:
+def test_efficiency_requires_complete_outdoor_temperature_coverage() -> None:
     episodes = [
-        _completed_episode(0, minutes_per_degree=10.0),
-        _completed_episode(1, minutes_per_degree=12.0),
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=None,
+            runtime_minutes=45.0,
+        )
+        for index in range(60)
     ]
 
     evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
 
-    assert evaluation.status == "learning"
+    assert evaluation.status == "no_weather_data"
     assert evaluation.score is None
-    assert evaluation.baseline_minutes_per_degree is None
-    assert evaluation.recent_minutes_per_degree == 11.0
+    assert evaluation.finding is None
 
 
-def test_persistent_response_change_does_not_age_into_reference_baseline() -> None:
-    evaluation = evaluate_efficiency(
-        [
-            *[_completed_episode(index, minutes_per_degree=10.0) for index in range(9)],
-            *[
-                _completed_episode(index, minutes_per_degree=12.5)
-                for index in range(9, 21)
-            ],
-        ],
+def test_efficiency_rejects_partially_covered_weather_days() -> None:
+    episodes = _weather_normalized_history()
+    episodes[0] = replace(
+        episodes[0],
+        outdoor_temperature_minutes=episodes[0].active_minutes - 1.0,
+    )
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "provisional"
+    assert evaluation.reference_count == 50
+    assert evaluation.recent_count == 4
+
+
+def test_efficiency_ignores_legacy_episode_model_records() -> None:
+    episodes = [
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=75.0 + 5.0 * (index % 5),
+            runtime_minutes=30.0 + 10.0 * (index % 5),
+            model_version=1,
+        )
+        for index in range(60)
+    ]
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "no_data"
+    assert evaluation.reference_count == 0
+
+
+def _weather_normalized_history(
+    recent_multipliers: tuple[float, ...] = (1.0, 1.0, 1.0, 1.0, 1.0),
+) -> list[HvacResponseEpisode]:
+    episodes = []
+    for index in range(55):
+        outdoor = 75.0 + 5.0 * (index % 5)
+        expected_runtime = 30.0 + 2.0 * (outdoor - 75.0)
+        multiplier = recent_multipliers[index - 50] if index >= 50 else 1.0
+        episodes.append(
+            _core_day_episode(
+                index,
+                outdoor_temperature_f=outdoor,
+                runtime_minutes=expected_runtime * multiplier,
+            )
+        )
+    return episodes
+
+
+def test_weather_normalization_does_not_flag_hotter_normal_days() -> None:
+    episodes = _weather_normalized_history()
+    episodes[-5:] = [
+        replace(
+            episode,
+            outdoor_temperature_f=95.0,
+            outdoor_temperature_minutes=70.0,
+            elapsed_minutes=70.0,
+            active_minutes=70.0,
+            ended_at=episode.started_at + timedelta(minutes=70),
+        )
+        for episode in episodes[-5:]
+    ]
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "ready"
+    assert evaluation.finding is None
+    assert evaluation.score == pytest.approx(100.0)
+    assert evaluation.reference_count == 50
+    assert evaluation.recent_count == 5
+    assert evaluation.baseline_runtime_minutes == pytest.approx(70.0)
+    assert evaluation.recent_runtime_minutes == pytest.approx(70.0)
+
+
+def test_efficiency_rejects_weather_extrapolation_beyond_reference_loads() -> None:
+    episodes = _weather_normalized_history()
+    episodes[-5:] = [
+        replace(
+            episode,
+            outdoor_temperature_f=70.0,
+            outdoor_temperature_minutes=30.0,
+            elapsed_minutes=30.0,
+            active_minutes=30.0,
+            ended_at=episode.started_at + timedelta(minutes=30),
+        )
+        for episode in episodes[-5:]
+    ]
+
+    evaluation = evaluate_efficiency(episodes, threshold_pct=25.0)
+
+    assert evaluation.status == "provisional"
+    assert evaluation.finding is None
+
+
+def test_efficiency_requires_three_abnormal_days_in_recent_five() -> None:
+    two_slow = evaluate_efficiency(
+        _weather_normalized_history((1.3, 1.3, 1.0, 1.0, 1.0)),
+        threshold_pct=25.0,
+    )
+    three_slow = evaluate_efficiency(
+        _weather_normalized_history((1.3, 1.3, 1.3, 1.0, 1.0)),
         threshold_pct=25.0,
     )
 
-    assert evaluation.reference_count == 9
-    assert evaluation.baseline_minutes_per_degree == pytest.approx(10.0)
-    assert evaluation.recent_minutes_per_degree == pytest.approx(12.5)
-    assert evaluation.finding == "slower"
+    assert two_slow.finding is None
+    assert three_slow.finding == "slower"
+    assert three_slow.context["abnormal_recent_days"] == 3
+    assert three_slow.context["normal_streak"] == 2
+
+
+def test_late_weather_diversity_can_complete_the_reference_window() -> None:
+    episodes = [
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=(
+                75.0 if index < 50 else 80.0 + 5.0 * (index % 3)
+            ),
+            runtime_minutes=(
+                30.0
+                if index < 50
+                else 30.0 + 2.0 * (5.0 + 5.0 * (index % 3))
+            ),
+        )
+        for index in range(60)
+    ]
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=61)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert evaluation.status == "ready"
+    assert evaluation.context["outdoor_temperature_bin_count"] >= 3
+
+
+def test_lightweight_retention_uses_twelve_reference_core_days() -> None:
+    episodes = _weather_normalized_history()[:17]
+
+    evaluation = evaluate_efficiency(
+        episodes,
+        threshold_pct=25.0,
+        retention_days=18,
+    )
+
+    assert evaluation.status == "ready"
+    assert evaluation.reference_count == 12
+    assert evaluation.recent_count == 5
+    assert evaluation.required_reference_count == 12
+    assert evaluation.finding is None
+
+
+def test_efficiency_excludes_the_current_local_day() -> None:
+    episodes = _weather_normalized_history()
+
+    evaluation = evaluate_efficiency(
+        episodes,
+        threshold_pct=25.0,
+        current_date=episodes[-1].started_at.date(),
+    )
+
+    assert evaluation.status == "provisional"
+    assert evaluation.reference_count == 50
+    assert evaluation.recent_count == 4
+
+
+def test_completed_calls_compact_to_one_record_per_core_day() -> None:
+    calls = [
+        replace(
+            _core_day_episode(
+                day,
+                outdoor_temperature_f=75.0 + 5.0 * (day % 5),
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(days=day, hours=hour),
+            ended_at=START + timedelta(days=day, hours=hour, minutes=10),
+        )
+        for day in range(56)
+        for hour in (0, 2, 4, 6, 8)
+    ]
+
+    compacted = compact_completed_core_days(
+        calls,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 55
+    assert all(episode.episode_kind == "core_day" for episode in compacted)
+    assert compacted[:50] == sorted(compacted, key=lambda item: item.started_at)[:50]
+    assert compacted[-1].started_at == calls[-5].started_at
+    assert compact_completed_core_days(
+        compacted,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    ) == compacted
+
+    lightweight = compact_completed_core_days(
+        calls,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=18,
+    )
+    assert len(lightweight) == 17
+    assert lightweight[-5:] == compacted[-5:]
+
+
+@pytest.mark.parametrize(
+    ("outdoor_temperature_f", "outdoor_temperature_minutes"),
+    ((None, 0.0), (85.0, 29.0)),
+)
+def test_compaction_retains_weather_outage_and_suspends_mature_evaluation(
+    outdoor_temperature_f: float | None,
+    outdoor_temperature_minutes: float,
+) -> None:
+    missing_weather = replace(
+        _core_day_episode(
+            55,
+            outdoor_temperature_f=outdoor_temperature_f,
+            runtime_minutes=30.0,
+            episode_kind="thermostat_call",
+        ),
+        outdoor_temperature_minutes=outdoor_temperature_minutes,
+    )
+
+    compacted = compact_completed_core_days(
+        [*_weather_normalized_history(), missing_weather],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert compacted[-1].episode_kind == "core_day"
+    assert compacted[-1].outdoor_temperature_minutes == (
+        outdoor_temperature_minutes
+    )
+    assert evaluation.status == "no_weather_data"
+    assert evaluation.score is None
+
+
+def test_compaction_rotates_weather_outage_out_of_reference_window() -> None:
+    episodes = _weather_normalized_history()
+    episodes[10] = replace(
+        episodes[10],
+        outdoor_temperature_f=None,
+        outdoor_temperature_minutes=0.0,
+    )
+    episodes.extend(
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=(outdoor := 75.0 + 5.0 * (index % 5)),
+            runtime_minutes=30.0 + 2.0 * (outdoor - 75.0),
+        )
+        for index in range(55, 61)
+    )
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=62)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert all(episode.outdoor_temperature_f is not None for episode in compacted)
+    assert evaluation.status == "ready"
+
+
+def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
+    calls = [
+        replace(
+            _core_day_episode(
+                0,
+                outdoor_temperature_f=90.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(hours=hour),
+            ended_at=START + timedelta(hours=hour, minutes=10),
+        )
+        for hour in (0, 2, 4, 6)
+    ]
+    incomplete = replace(
+        calls[-1],
+        started_at=START + timedelta(hours=8),
+        ended_at=START + timedelta(hours=8, minutes=10),
+        complete=False,
+        excluded_from_baseline=True,
+    )
+
+    compacted = compact_completed_core_days(
+        [*calls, incomplete],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=1)).date(),
+        retention_days=45,
+    )
+
+    assert compacted == []
+
+
+def test_compaction_bounds_multiple_equipment_contexts_per_stream() -> None:
+    episodes = [
+        replace(
+            _core_day_episode(
+                index,
+                outdoor_temperature_f=75.0 + 5.0 * (index % 5),
+                runtime_minutes=40.0,
+            ),
+            participant_signature=("heat_pump", ("old", "new")[index % 2]),
+        )
+        for index in range(112)
+    ]
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=117)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 55
+    assert {episode.participant_signature for episode in compacted} == {
+        ("heat_pump", "new")
+    }
+
+
+def test_cross_midnight_call_disqualifies_every_touched_date() -> None:
+    ending_day_calls = [
+        replace(
+            _core_day_episode(
+                1,
+                outdoor_temperature_f=90.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(days=1, hours=hour),
+            ended_at=START + timedelta(days=1, hours=hour, minutes=10),
+        )
+        for hour in (2, 4, 6, 8)
+    ]
+    spanning = replace(
+        ending_day_calls[0],
+        started_at=START.replace(hour=23, minute=30),
+        ended_at=(START + timedelta(days=1)).replace(hour=0, minute=10),
+        elapsed_minutes=40.0,
+        active_minutes=40.0,
+        outdoor_temperature_minutes=40.0,
+    )
+
+    compacted = compact_completed_core_days(
+        [spanning, *ending_day_calls],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=2)).date(),
+        retention_days=45,
+    )
+
+    assert compacted == []
