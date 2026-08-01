@@ -79,6 +79,7 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.current_pump_kv"},
                         {"entity_id": "sensor.current_pump_kvarh"},
                         {"entity_id": "sensor.mains_reactive_energy"},
+                        {"entity_id": "sensor.mains_reactive_energy_import"},
                     ],
                 }
             ]

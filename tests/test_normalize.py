@@ -59,6 +59,7 @@ def test_build_circuit_sample_converts_kw_to_watts(unit: str) -> None:
     (
         ("MW", "mA", "kV", "kVA", "kVAR"),
         ("mw", "ma", "kv", "kva", "kvar"),
+        ("MW", "mA", "KV", "KVA", "KVAR"),
     ),
 )
 def test_build_circuit_sample_normalizes_scaled_measurements(

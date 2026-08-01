@@ -12,38 +12,11 @@ UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
 _UNIT_SCALE_BY_ROLE = {
-    SensorRole.REAL_POWER: {
-        "kW": 1_000.0,
-        "kw": 1_000.0,
-        "KW": 1_000.0,
-        "Kw": 1_000.0,
-        "MW": 1_000_000.0,
-        "mw": 1_000_000.0,
-    },
-    SensorRole.REACTIVE_POWER: {
-        "kVAR": 1_000.0,
-        "kvar": 1_000.0,
-        "MVAR": 1_000_000.0,
-        "mvar": 1_000_000.0,
-    },
-    SensorRole.APPARENT_POWER: {
-        "kVA": 1_000.0,
-        "kva": 1_000.0,
-        "MVA": 1_000_000.0,
-        "mva": 1_000_000.0,
-    },
-    SensorRole.CURRENT: {
-        "kA": 1_000.0,
-        "ka": 1_000.0,
-        "mA": 0.001,
-        "ma": 0.001,
-    },
-    SensorRole.VOLTAGE: {
-        "kV": 1_000.0,
-        "kv": 1_000.0,
-        "mV": 0.001,
-        "mv": 0.001,
-    },
+    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 1_000_000.0},
+    SensorRole.REACTIVE_POWER: {"kvar": 1_000.0, "mvar": 1_000_000.0},
+    SensorRole.APPARENT_POWER: {"kva": 1_000.0, "mva": 1_000_000.0},
+    SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001},
+    SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001},
 }
 
 
@@ -141,7 +114,7 @@ def build_circuit_sample(
             value = _normalize_energy_kwh(value, source.unit)
         elif source.unit is not None:
             value *= _UNIT_SCALE_BY_ROLE.get(sensor.role, {}).get(
-                source.unit.strip(),
+                source.unit.strip().lower(),
                 1.0,
             )
         if not math.isfinite(value):

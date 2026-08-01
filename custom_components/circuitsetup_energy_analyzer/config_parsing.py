@@ -213,9 +213,10 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def _untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = _entity_object_id(entity_id)
-    return "harmonic" in set(object_id.split("_")) or _has_metric_suffix(
-        object_id,
-        ("reactive_energy", "kvarh", "varh"),
+    return (
+        "harmonic" in set(object_id.split("_"))
+        or re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
+        or _has_metric_suffix(object_id, ("kvarh", "varh"))
     )
 
 
