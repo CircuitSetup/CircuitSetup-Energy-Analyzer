@@ -75,6 +75,7 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                     "mode": "mains_nilm",
                     "sensors": [
                         {"entity_id": "sensor.energy_meter_mains_l1_harmonic"},
+                        {"entity_id": "sensor.mains_harmonic_active_power"},
                         {"entity_id": "sensor.energy_meter_mains_l1_watts"},
                         {"entity_id": "sensor.energy_meter_frequency_1"},
                         {"entity_id": "sensor.energy_meter_voltage_1"},

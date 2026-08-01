@@ -218,7 +218,7 @@ def _untyped_source_entity_excluded(entity_id: str) -> bool:
     )
     return (
         re.search(
-            r"(?:^|_)harmonic(?:_(?:power|watts?|[km]?w))?$",
+            r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w))?$",
             harmonic_object_id,
         )
         is not None
