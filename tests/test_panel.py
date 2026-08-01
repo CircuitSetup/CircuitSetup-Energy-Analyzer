@@ -135,7 +135,7 @@ def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> Non
             "score": 92.0,
             "finding": "slower",
             "change_ratio": 0.087,
-            "recent_minutes_per_degree": 10.87,
+            "recent_runtime_minutes": 10.87,
             "context": {
                 "mode": "heating",
                 "thermostat_entity_id": "climate.downstairs",
@@ -145,7 +145,7 @@ def test_hvac_associations_payload_keeps_thermostats_and_modes_separate() -> Non
             "status": "ready",
             "score": 108.0,
             "finding": "faster",
-            "recent_minutes_per_degree": 7.5,
+            "recent_runtime_minutes": 7.5,
             "context": {
                 "mode": "cooling",
                 "thermostat_entity_id": "climate.downstairs",
@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260731-13"
+    assert PANEL_MODULE_VERSION == "20260801-14"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:

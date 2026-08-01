@@ -186,6 +186,16 @@ class AlertPolicyManager:
             )
         )
 
+    def hvac_efficiency_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> FeedbackAwareAlertPolicy:
+        return self.feedback_aware_alert_policy(
+            self._coordinator.settings_controller.hvac_efficiency_alert_policy_for_circuit(
+                circuit_id
+            )
+        )
+
     def activity_alert_policy_for_circuit(
         self,
         circuit_id: str,

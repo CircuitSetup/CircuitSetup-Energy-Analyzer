@@ -1875,14 +1875,20 @@ def _hvac_efficiency_detail(
                     "score": _rounded_number(raw.get("score")),
                     "trend": str(raw.get("finding") or "") or None,
                     "change_percent": _rounded_percent(raw.get("change_ratio")),
-                    "baseline_minutes_per_degree": _rounded_number(
-                        raw.get("baseline_minutes_per_degree")
+                    "baseline_runtime_minutes": _rounded_number(
+                        raw.get("baseline_runtime_minutes")
                     ),
-                    "recent_minutes_per_degree": _rounded_number(
-                        raw.get("recent_minutes_per_degree")
+                    "recent_runtime_minutes": _rounded_number(
+                        raw.get("recent_runtime_minutes")
                     ),
                     "reference_count": int(raw.get("reference_count") or 0),
                     "recent_count": int(raw.get("recent_count") or 0),
+                    "required_reference_count": int(
+                        raw.get("required_reference_count") or 50
+                    ),
+                    "required_recent_count": int(
+                        raw.get("required_recent_count") or 5
+                    ),
                     "outdoor_temperature_f": _rounded_number(
                         context.get("outdoor_temperature_f")
                     ),
@@ -1915,6 +1921,14 @@ def _hvac_efficiency_detail(
     for rows in modes.values():
         rows.sort(key=lambda row: row["thermostat_entity_id"])
     all_rows = [*modes["heating"], *modes["cooling"]]
+    required_reference = max(
+        (row.pop("required_reference_count") for row in all_rows),
+        default=50,
+    )
+    required_recent = max(
+        (row.pop("required_recent_count") for row in all_rows),
+        default=5,
+    )
     score = _rounded_number(retained.get("score"))
     return {
         "status": str(retained.get("status") or "learning"),
@@ -1936,8 +1950,8 @@ def _hvac_efficiency_detail(
                 (row["recent_count"] for row in all_rows),
                 default=0,
             ),
-            "required_reference": 9,
-            "required_recent": 3,
+            "required_reference": required_reference,
+            "required_recent": required_recent,
         },
     }
 

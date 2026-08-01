@@ -1276,9 +1276,6 @@ export function createApplianceViewMethods({
     const temperatureValue = (value) => celsius
       ? (Number(value) - 32) / 1.8
       : Number(value);
-    const responseValue = (value) => celsius
-      ? Number(value) * 1.8
-      : Number(value);
     const status = String(efficiency.status || "learning");
     const statusLabel = this._panelText(`appliance_detail.hvac_efficiency_status.${status}`)
       || this._panelText("appliance_detail.hvac_efficiency_status.learning");
@@ -1304,11 +1301,11 @@ export function createApplianceViewMethods({
             finite(row.score)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_score"), `${this._formatNumber(row.score)} / 100`, "mdi:gauge")
               : "",
-            finite(row.baseline_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(responseValue(row.baseline_minutes_per_degree))} min/${temperatureUnit}`, "mdi:database-clock-outline")
+            finite(row.baseline_runtime_minutes)
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_baseline"), `${this._formatNumber(row.baseline_runtime_minutes)} min`, "mdi:database-clock-outline")
               : "",
-            finite(row.recent_minutes_per_degree)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(responseValue(row.recent_minutes_per_degree))} min/${temperatureUnit}`, "mdi:history")
+            finite(row.recent_runtime_minutes)
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent"), `${this._formatNumber(row.recent_runtime_minutes)} min`, "mdi:history")
               : "",
             finite(row.outdoor_temperature_f)
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_outdoor_temperature"), `${this._formatNumber(temperatureValue(row.outdoor_temperature_f))}${temperatureUnit}`, "mdi:weather-sunny")
@@ -1323,10 +1320,10 @@ export function createApplianceViewMethods({
               ? this._metric(this._panelText("appliance_detail.hvac_efficiency_attribution_label"), attribution, "mdi:account-check-outline")
               : "",
             finite(row.reference_count)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${row.reference_count} of ${Number(learning.required_reference || 9)} reference episodes`, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${row.reference_count} of ${Number(learning.required_reference || 50)} reference core days`, "mdi:counter")
               : "",
             finite(row.recent_count)
-              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${row.recent_count} of ${Number(learning.required_recent || 3)} recent episodes`, "mdi:counter")
+              ? this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${row.recent_count} of ${Number(learning.required_recent || 5)} recent core days`, "mdi:counter")
               : "",
           ].filter(Boolean);
           return `<article class="hvac-efficiency-row">
@@ -1344,8 +1341,8 @@ export function createApplianceViewMethods({
       ? `<div class="hvac-efficiency-gauge" role="img" aria-label="${this._escape(`${this._panelText("appliance_detail.hvac_efficiency_score")}: ${this._formatNumber(score)} / 100`)}" style="--hvac-score:${Math.max(0, Math.min(200, score)) / 4}%"><strong>${this._escape(this._formatNumber(score))}</strong></div>`
       : `<div class="hvac-efficiency-gauge learning" data-hvac-learning="true" role="status" aria-label="${this._escape(statusLabel)}"><strong>—</strong></div>`;
     const learningProgress = `<div class="summary appliance-health-metrics hvac-learning-progress">
-      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${Number(learning.reference_count || 0)} / ${Number(learning.required_reference || 9)}`, "mdi:database-clock-outline")}
-      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${Number(learning.recent_count || 0)} / ${Number(learning.required_recent || 3)}`, "mdi:history")}
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_reference_episodes"), `${Number(learning.reference_count || 0)} / ${Number(learning.required_reference || 50)}`, "mdi:database-clock-outline")}
+      ${this._metric(this._panelText("appliance_detail.hvac_efficiency_recent_episodes"), `${Number(learning.recent_count || 0)} / ${Number(learning.required_recent || 5)}`, "mdi:history")}
     </div>`;
     return `<section class="panel" data-hvac-efficiency>
       <div class="appliance-section-heading"><h2>${this._escape(this._panelText("appliance_detail.hvac_efficiency"))}</h2><span class="status">${this._escape(trendLabel || statusLabel)}</span></div>

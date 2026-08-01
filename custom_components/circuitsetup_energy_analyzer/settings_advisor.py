@@ -1027,9 +1027,6 @@ def _hvac_efficiency_recommendations(
             )
         )
 
-    threshold = _hvac_threshold_recommendation(inputs)
-    if threshold is not None:
-        recommendations.append(threshold)
     return recommendations
 
 
@@ -1145,76 +1142,6 @@ def _qualified_gas_heat_calls(
         "weather_mode": latest.get("weather_mode"),
         "temperature_bin": latest.get("temperature_bin"),
     }
-
-
-def _hvac_threshold_recommendation(
-    inputs: AdvisorInputs,
-) -> SettingRecommendation | None:
-    episodes = [
-        dict(episode)
-        for episode in inputs.feature_history.get("hvac_response_episodes", ())
-        if isinstance(episode, Mapping)
-        and bool(episode.get("complete"))
-        and not bool(episode.get("excluded_from_baseline"))
-        and not bool(episode.get("alerted"))
-    ]
-    if len(episodes) < 20:
-        return None
-    groups: dict[str, list[dict[str, Any]]] = {}
-    for episode in episodes:
-        context_key = str(episode.get("context_key") or "")
-        if context_key:
-            groups.setdefault(context_key, []).append(episode)
-    if not groups:
-        return None
-    context_key, comparable = max(groups.items(), key=lambda item: len(item[1]))
-    if len(comparable) < 20:
-        return None
-    deviations = [
-        _finite_number(episode.get("absolute_deviation_percent"))
-        for episode in comparable
-    ]
-    if any(value < 0.0 for value in deviations):
-        return None
-    p95 = _nearest_rank_percentile(deviations, 0.95)
-    suggested = float(
-        min(50, max(10, math.ceil((p95 + 5.0) / 5.0) * 5))
-    )
-    current = _optional_float_setting(
-        inputs.context.advanced_settings,
-        "hvac_efficiency_change_threshold_pct",
-    )
-    current = 25.0 if current is None else current
-    if abs(suggested - current) < 5.0:
-        return None
-    return _make_recommendation(
-        inputs,
-        setting_key="hvac_efficiency_change_threshold_pct",
-        current_value=current,
-        suggested_value=suggested,
-        unit=_advisor_unit("percent"),
-        feature="hvac_efficiency_threshold",
-        group=_advisor_text("groups", "hvac_efficiency"),
-        confidence=min(1.0, len(comparable) / 20.0),
-        reason=_advisor_text(
-            "reasons",
-            "hvac_threshold",
-            episode_count=len(comparable),
-            p95=p95,
-        ),
-        evidence={
-            "eligible_episode_count": len(comparable),
-            "p95_absolute_deviation_pct": p95,
-            "weather_context": context_key,
-            "confidence": min(1.0, len(comparable) / 20.0),
-        },
-    )
-
-
-def _nearest_rank_percentile(values: list[float], percentile: float) -> float:
-    ordered = sorted(values)
-    rank = max(1, math.ceil(percentile * len(ordered)))
-    return ordered[rank - 1]
 
 
 def _string_list(value: Any) -> list[str]:
@@ -1507,10 +1434,5 @@ def _evidence_fingerprint(
             f"mode={evidence.get('mode')}"
         )
     if feature == "hvac_efficiency_threshold":
-        return (
-            "hvac_efficiency_threshold:"
-            f"episodes={evidence.get('eligible_episode_count')};"
-            f"p95={evidence.get('p95_absolute_deviation_pct')};"
-            f"context={evidence.get('weather_context')}"
-        )
+        return "legacy_hvac_efficiency_threshold"
     return feature

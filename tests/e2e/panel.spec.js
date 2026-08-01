@@ -198,14 +198,14 @@ test("HVAC associations render ready and learning thermostat gauges", async ({ p
   await expect(card.locator("[data-hvac-association]")).toHaveCount(3);
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"]')).toContainText("92%");
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="cooling"]')).toContainText("108%");
-  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("9 min/°C");
+  await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"]')).toContainText("25 min");
   await expect(card.locator('[data-thermostat="climate.upstairs"] [data-mode="heating"] .gauge-value')).toHaveCount(0);
   await expect(card.locator('[data-thermostat="climate.downstairs"] [data-mode="heating"] .trend')).toHaveText("Slower");
   await expect(card.locator('[data-thermostat="climate.bedroom"] [data-mode="cooling"]')).toHaveCount(0);
   for (const mode of ["heating", "cooling"]) {
     await expect(card.locator(`[data-thermostat="climate.downstairs"] [data-mode="${mode}"] svg`)).toHaveAttribute(
       "aria-label",
-      new RegExp(`Heat Pump.*Downstairs.*${mode}.*(?:92|108)%.*(?:9|11) min/°F`, "i"),
+      new RegExp(`Heat Pump.*Downstairs.*${mode}.*(?:92|108)%.*(?:45|55) min`, "i"),
     );
   }
 });
@@ -223,7 +223,7 @@ test("HVAC associations show learning, attribution, native detail links, and fit
     },
   );
   const upstairs = card.locator('[data-thermostat="climate.upstairs"]');
-  await expect(upstairs.locator('[data-mode="heating"]')).toContainText("Learning");
+  await expect(upstairs.locator('[data-mode="heating"]')).toContainText("Building weather baseline");
   await expect(upstairs.locator('[data-mode="cooling"]')).toContainText("—");
   await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Needs attention");
   await expect(card.locator('[data-thermostat="climate.bedroom"]')).toContainText("Gas heat: supporting blower attribution.");
@@ -5404,18 +5404,18 @@ test("Appliance Detail omits unavailable water flow context metrics", async ({
   ]);
 });
 
-test("Appliance Detail shows weather-adjusted HVAC efficiency", async ({ page }) => {
+test("Appliance Detail shows weather-normalized HVAC response", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
   const efficiency = panel.locator("[data-hvac-efficiency]");
 
   await expect(efficiency).toBeVisible();
   await expect(efficiency).toContainText("80 / 100");
-  await expect(efficiency).toContainText("100 is the learned baseline");
+  await expect(efficiency).toContainText("learned weather-normalized baseline");
   await expect(efficiency).toContainText("Upstairs");
   await expect(efficiency).toContainText("Downstairs");
-  await expect(efficiency).toContainText("10 min/°F");
-  await expect(efficiency).toContainText("12.5 min/°F");
+  await expect(efficiency).toContainText("50 min");
+  await expect(efficiency).toContainText("62.5 min");
   await expect(efficiency).toContainText("Outdoor temperature");
   await expect(efficiency).toContainText("95°F");
   await expect(efficiency).toContainText("Gas-furnace blower proxy");
@@ -5709,7 +5709,7 @@ test("Sump Pump rain calculation converts inches and keeps partial history unkno
   });
 });
 
-test("Appliance Detail uses Home Assistant temperature units for HVAC efficiency", async ({ page }) => {
+test("Appliance Detail keeps HVAC runtime independent of temperature units", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
   await page.evaluate(() => {
@@ -5718,8 +5718,8 @@ test("Appliance Detail uses Home Assistant temperature units for HVAC efficiency
   });
   const efficiency = panel.locator("[data-hvac-efficiency]");
 
-  await expect(efficiency).toContainText("18 min/°C");
-  await expect(efficiency).toContainText("22.5 min/°C");
+  await expect(efficiency).toContainText("50 min");
+  await expect(efficiency).toContainText("62.5 min");
   await expect(efficiency).toContainText("35°C");
   await expect(efficiency).not.toContainText("°F");
 });
@@ -5736,16 +5736,16 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
       learning: {
         reference_count: 2,
         recent_count: 0,
-        required_reference: 9,
-        required_recent: 3,
+        required_reference: 50,
+        required_recent: 5,
       },
       heating: [{
         thermostat_entity_id: "climate.upstairs",
         thermostat_name: "Upstairs",
         status: "learning",
         score: null,
-        baseline_minutes_per_degree: null,
-        recent_minutes_per_degree: null,
+        baseline_runtime_minutes: null,
+        recent_runtime_minutes: null,
         outdoor_temperature_f: null,
         attribution: "direct",
         supporting_blower_ids: [],
@@ -5759,7 +5759,7 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
   const efficiency = panel.locator("[data-hvac-efficiency]");
 
   await expect(efficiency).toContainText("Upstairs");
-  await expect(efficiency).not.toContainText("2 of 9 reference episodes · 0 of 3 recent episodes");
+  await expect(efficiency).not.toContainText("2 of 50 reference core days · 0 of 5 recent core days");
   await expect(efficiency).not.toContainText("0 / 100");
   await expect(efficiency).not.toContainText("0 min/°F");
   await expect(efficiency).not.toContainText("Outdoor: 0°F");

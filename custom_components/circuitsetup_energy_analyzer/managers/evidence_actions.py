@@ -20,6 +20,7 @@ from ..alerting import (
     alert_feedback_fingerprint_candidates,
     alert_feedback_fingerprint_candidates_for_observation,
 )
+from ..hvac_efficiency import episode_from_dict
 from ..models import AlertEvidence
 from .state_reducer import clear_hvac_efficiency
 
@@ -287,12 +288,33 @@ class EvidenceActionController:
             return
         store_data = self._coordinator.store_data
         if action == "expected":
-            store_data.hvac_baseline_era_by_stream[stream_id] = now.isoformat()
-            state = self._coordinator.state
-            getattr(state, "hvac_current_episode_by_stream", {}).pop(
+            getattr(store_data, "hvac_response_context_by_stream", {}).pop(
                 stream_id,
                 None,
             )
+            state = self._coordinator.state
+            current = getattr(state, "hvac_current_episode_by_stream", {}).pop(
+                stream_id,
+                None,
+            )
+            if isinstance(current, Mapping):
+                marker = dict(current)
+                marker.update(
+                    ended_at=now.isoformat(),
+                    complete=False,
+                    excluded_from_baseline=True,
+                    inactive_since=None,
+                    baseline_era=store_data.hvac_baseline_era_by_stream.get(
+                        stream_id,
+                        "initial",
+                    ),
+                )
+                if episode_from_dict(marker, allow_incomplete=True) is not None:
+                    store_data.hvac_response_history_by_stream.setdefault(
+                        stream_id,
+                        [],
+                    ).append(marker)
+            store_data.hvac_baseline_era_by_stream[stream_id] = now.isoformat()
             clear_hvac_efficiency(state, alert.circuit_id)
             return
         if action != "confirmed":

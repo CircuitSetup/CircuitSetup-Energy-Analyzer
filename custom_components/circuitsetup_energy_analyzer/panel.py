@@ -1618,8 +1618,8 @@ def _hvac_association_mode(
         "score": raw.get("score"),
         "trend": str(raw.get("finding") or "") or None,
         "change_percent": change_percent,
-        "baseline_minutes_per_degree_f": raw.get("baseline_minutes_per_degree"),
-        "recent_minutes_per_degree_f": raw.get("recent_minutes_per_degree"),
+        "baseline_runtime_minutes": raw.get("baseline_runtime_minutes"),
+        "recent_runtime_minutes": raw.get("recent_runtime_minutes"),
         "reference_count": int(raw.get("reference_count") or 0),
         "recent_count": int(raw.get("recent_count") or 0),
         "supporting_blower_ids": sorted(

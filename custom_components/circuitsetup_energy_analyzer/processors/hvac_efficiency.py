@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 from typing import Any
 
@@ -24,12 +25,15 @@ from ..hvac_efficiency import (
     HvacResponseEpisode,
     ThermostatObservation,
     advance_episode,
+    compact_completed_core_days,
     episode_from_dict,
     episode_to_dict,
     evaluate_efficiency,
     observation_response_mode,
+    response_comparison_token,
 )
-from ..models import AlertEvidence, ApplianceProfile, Severity
+from ..local_time import local_date
+from ..models import AlertEvidence, ApplianceProfile
 from ..operating_detection import operating_state_is_running
 from ..profiles import supports_direct_appliance_analysis
 from .base import FeatureResult, ProcessingContext, StateUpdate
@@ -50,12 +54,14 @@ _HEATING_DRIVER_PROFILES = frozenset(
         ApplianceProfile.ELECTRIC_HEAT,
     }
 )
-_HISTORY_LIMIT = 256
+_CORRELATION_HISTORY_LIMIT = 256
 _SETUP_ISSUE_LIMIT = 8
 HVAC_EFFICIENCY_FEATURE = "hvac_thermostat_efficiency"
 _INITIAL_BASELINE_ERA = "initial"
+_CONTEXT_SWITCH_DAYS = 3
 
 type HvacAlertPolicyProvider = Callable[[str], Any]
+type RetentionDaysProvider = Callable[[str], int]
 
 
 class HvacEfficiencyProcessor:
@@ -65,8 +71,12 @@ class HvacEfficiencyProcessor:
         self,
         *,
         alert_policy_for_circuit: HvacAlertPolicyProvider | None = None,
+        retention_days_for_circuit: RetentionDaysProvider | None = None,
     ) -> None:
         self._alert_policy_for_circuit = alert_policy_for_circuit
+        self._retention_days_for_circuit = retention_days_for_circuit or (
+            lambda _circuit_id: 180
+        )
 
     def process(
         self,
@@ -132,50 +142,29 @@ class HvacEfficiencyProcessor:
                 for config in linked_configs
                 if _circuit_running(context, config.circuit_id)
             }
-            direct_profiles = (
-                _COOLING_DRIVER_PROFILES
-                if mode == "cooling"
-                else _HEATING_DRIVER_PROFILES
-            )
-            drivers = {
-                config.circuit_id
-                for config in linked_configs
-                if config.appliance_profile in direct_profiles
-                and config.circuit_id in active_ids
-            }
-            gas_blower_ids: set[str] = set()
-            if mode == "heating" and not drivers:
-                gas_blower_ids = {
-                    config.circuit_id
-                    for config in linked_configs
-                    if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
-                    and bool(
-                        advanced_by_circuit.get(config.circuit_id, {}).get(
-                            CONF_BLOWER_REPRESENTS_GAS_HEAT,
-                            False,
-                        )
-                    )
-                    and (
-                        config.circuit_id in active_ids
-                        or _current_episode(
-                            context,
-                            (
-                                f"{config.circuit_id}|{thermostat_id}|"
-                                "heating"
-                            ),
-                        )
-                        is not None
-                    )
-                }
-                drivers.update(gas_blower_ids & active_ids)
-            supporting_blower_ids = tuple(
-                sorted(
-                    config.circuit_id
-                    for config in linked_configs
-                    if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
-                    and config.circuit_id in active_ids
-                    and config.circuit_id not in gas_blower_ids
+            if mode is None:
+                _store_unresolved_active_call_markers(
+                    result,
+                    context,
+                    linked_configs,
+                    thermostat_id,
+                    observation,
+                    active_ids,
+                    advanced_by_circuit,
                 )
+                continue
+            (
+                direct_profiles,
+                drivers,
+                gas_blower_ids,
+                supporting_blower_ids,
+            ) = _active_response_equipment(
+                context,
+                linked_configs,
+                thermostat_id,
+                mode,
+                active_ids,
+                advanced_by_circuit,
             )
             participant_signature = tuple(sorted(drivers))
 
@@ -248,32 +237,8 @@ class HvacEfficiencyProcessor:
                             value={},
                         )
                     )
-                if finalized is not None and finalized.complete:
-                    history = (
-                        context.store_data.hvac_response_history_by_stream.setdefault(
-                            stream_id,
-                            [],
-                        )
-                    )
-                    stored_episode = episode_to_dict(finalized)
-                    stored_episode["baseline_era"] = (
-                        context.store_data.hvac_baseline_era_by_stream.get(
-                            stream_id,
-                            _INITIAL_BASELINE_ERA,
-                        )
-                    )
-                    history.append(stored_episode)
-                    matching_indexes = [
-                        index
-                        for index, raw in enumerate(history)
-                        if str(
-                            raw.get("episode_kind", "setpoint_response")
-                        )
-                        == finalized.episode_kind
-                    ]
-                    if len(matching_indexes) > _HISTORY_LIMIT:
-                        del history[matching_indexes[0]]
-                    result.store_dirty = True
+                if finalized is not None:
+                    _store_finalized_episode(result, context, finalized)
 
         for stream_id, raw in getattr(
             context.state,
@@ -285,6 +250,25 @@ class HvacEfficiencyProcessor:
                 and stream_id not in processed_streams
                 and stream_id.split("|", 1)[0] in configs
             ):
+                marker = dict(raw)
+                marker.update(
+                    ended_at=context.now.isoformat(),
+                    complete=False,
+                    excluded_from_baseline=True,
+                    inactive_since=None,
+                    baseline_era=(
+                        context.store_data.hvac_baseline_era_by_stream.get(
+                            stream_id,
+                            _INITIAL_BASELINE_ERA,
+                        )
+                    ),
+                )
+                if episode_from_dict(marker, allow_incomplete=True) is not None:
+                    context.store_data.hvac_response_history_by_stream.setdefault(
+                        stream_id,
+                        [],
+                    ).append(marker)
+                    result.store_dirty = True
                 result.state_updates.append(
                     StateUpdate(
                         path=("hvac_current_episode_by_stream", stream_id),
@@ -292,12 +276,27 @@ class HvacEfficiencyProcessor:
                     )
                 )
 
+        date_history_snapshot = {
+            stream_id: tuple(history)
+            for stream_id, history in (
+                context.store_data.hvac_response_history_by_stream.items()
+            )
+        }
         for circuit_id in configs:
+            retention_days = self._retention_days_for_circuit(circuit_id)
+            if _compact_circuit_response_history(
+                context,
+                circuit_id,
+                retention_days=retention_days,
+                date_history_by_stream=date_history_snapshot,
+            ):
+                result.store_dirty = True
             payload = _circuit_efficiency_payload(
                 context,
                 configs[circuit_id],
                 circuit_streams.get(circuit_id, {}),
                 advanced_by_circuit.get(circuit_id, {}),
+                retention_days=retention_days,
             )
             result.state_updates.append(
                 StateUpdate(
@@ -313,6 +312,171 @@ class HvacEfficiencyProcessor:
                 self._alert_policy_for_circuit,
             )
         return result
+
+
+def _active_response_equipment(
+    context: ProcessingContext,
+    linked_configs: list[Any],
+    thermostat_id: str,
+    mode: str,
+    active_ids: set[str],
+    advanced_by_circuit: Mapping[str, Mapping[str, Any]],
+) -> tuple[frozenset[ApplianceProfile], set[str], set[str], tuple[str, ...]]:
+    direct_profiles = (
+        _COOLING_DRIVER_PROFILES if mode == "cooling" else _HEATING_DRIVER_PROFILES
+    )
+    drivers = {
+        config.circuit_id
+        for config in linked_configs
+        if config.appliance_profile in direct_profiles
+        and config.circuit_id in active_ids
+    }
+    gas_blower_ids: set[str] = set()
+    if mode == "heating" and not drivers:
+        gas_blower_ids = {
+            config.circuit_id
+            for config in linked_configs
+            if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and bool(
+                advanced_by_circuit.get(config.circuit_id, {}).get(
+                    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+                    False,
+                )
+            )
+            and (
+                config.circuit_id in active_ids
+                or _current_episode(
+                    context,
+                    f"{config.circuit_id}|{thermostat_id}|heating",
+                )
+                is not None
+            )
+        }
+        drivers.update(gas_blower_ids & active_ids)
+    supporting_blower_ids = tuple(
+        sorted(
+            config.circuit_id
+            for config in linked_configs
+            if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and config.circuit_id in active_ids
+            and config.circuit_id not in gas_blower_ids
+        )
+    )
+    return direct_profiles, drivers, gas_blower_ids, supporting_blower_ids
+
+
+def _store_unresolved_active_call_markers(
+    result: FeatureResult,
+    context: ProcessingContext,
+    linked_configs: list[Any],
+    thermostat_id: str,
+    observation: ThermostatObservation,
+    active_ids: set[str],
+    advanced_by_circuit: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if observation.action or "hvac_action" in observation.available_capabilities:
+        return
+    for config in linked_configs:
+        if config.circuit_id not in active_ids:
+            continue
+        modes: list[str] = []
+        if config.appliance_profile in _COOLING_DRIVER_PROFILES:
+            modes.append("cooling")
+        if config.appliance_profile in _HEATING_DRIVER_PROFILES or (
+            config.appliance_profile is ApplianceProfile.HVAC_BLOWER
+            and bool(
+                advanced_by_circuit.get(config.circuit_id, {}).get(
+                    CONF_BLOWER_REPRESENTS_GAS_HEAT,
+                    False,
+                )
+            )
+        ):
+            modes.append("heating")
+        for mode in modes:
+            direct_profiles, drivers, gas_blower_ids, supporting_blower_ids = (
+                _active_response_equipment(
+                    context,
+                    linked_configs,
+                    thermostat_id,
+                    mode,
+                    active_ids,
+                    advanced_by_circuit,
+                )
+            )
+            if (
+                config.appliance_profile not in direct_profiles
+                and config.circuit_id not in gas_blower_ids
+            ):
+                continue
+            current_observation = _observation_for(
+                context,
+                config.circuit_id,
+                thermostat_id,
+            ) or observation
+            _current, marker = advance_episode(
+                None,
+                replace(
+                    current_observation,
+                    mode="cool" if mode == "cooling" else "heat",
+                    action=None,
+                ),
+                now=context.now,
+                circuit_id=config.circuit_id,
+                appliance_profile=config.appliance_profile.value,
+                driver_active=True,
+                active_minutes_delta=0.0,
+                participant_signature=tuple(sorted(drivers)),
+                supporting_blower_ids=supporting_blower_ids,
+                environmental_context=_environmental_context(
+                    context,
+                    config.circuit_id,
+                ),
+            )
+            if marker is not None:
+                _store_finalized_episode(result, context, marker)
+
+
+def _store_finalized_episode(
+    result: FeatureResult,
+    context: ProcessingContext,
+    finalized: HvacResponseEpisode,
+) -> None:
+    stream_id = finalized.stream_id
+    history = context.store_data.hvac_response_history_by_stream.setdefault(
+        stream_id,
+        [],
+    )
+    stored_episode = episode_to_dict(finalized, allow_incomplete=True)
+    stored_episode["baseline_era"] = (
+        context.store_data.hvac_baseline_era_by_stream.get(
+            stream_id,
+            _INITIAL_BASELINE_ERA,
+        )
+    )
+    instant_excluded = (
+        finalized.excluded_from_baseline
+        and not finalized.complete
+        and finalized.ended_at == finalized.started_at
+    )
+    already_marked = instant_excluded and any(
+        episode.excluded_from_baseline
+        and local_date(episode.started_at, context.time_zone)
+        == local_date(finalized.started_at, context.time_zone)
+        for raw in history
+        if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
+        == stored_episode["baseline_era"]
+        if (
+            episode := episode_from_dict(
+                raw,
+                allow_incomplete=True,
+            )
+        )
+        is not None
+        if response_comparison_token(episode) == response_comparison_token(finalized)
+    )
+    if not already_marked:
+        history.append(stored_episode)
+        result.store_dirty = True
 
 
 def _collect_hvac_correlation(
@@ -544,7 +708,7 @@ def _finalize_hvac_correlation(
             "temperature_bin": current.get("temperature_bin"),
         }
     )
-    del history[:-_HISTORY_LIMIT]
+    del history[:-_CORRELATION_HISTORY_LIMIT]
     result.store_dirty = True
 
 
@@ -814,11 +978,282 @@ def _environmental_context(
     }
 
 
+def _compact_circuit_response_history(
+    context: ProcessingContext,
+    circuit_id: str,
+    *,
+    retention_days: int,
+    date_history_by_stream: Mapping[str, Any] | None = None,
+) -> bool:
+    history_by_stream = context.store_data.hvac_response_history_by_stream
+    date_histories = date_history_by_stream or history_by_stream
+    decoded_by_stream: dict[
+        str,
+        list[tuple[Mapping[str, Any], HvacResponseEpisode]],
+    ] = {}
+    dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
+    target_thermostats = {
+        parts[1]
+        for stream_id in date_histories
+        if len(parts := stream_id.split("|")) == 3 and parts[0] == circuit_id
+    }
+    for stream_id, raw_history in history_by_stream.items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[0] != circuit_id
+            or parts[-1] not in dates_by_mode
+        ):
+            continue
+        decoded = [
+            (raw, episode)
+            for raw in raw_history
+            if (
+                episode := episode_from_dict(raw, allow_incomplete=True)
+            ) is not None
+        ]
+        decoded_by_stream[stream_id] = decoded
+
+    for stream_id, raw_history in date_histories.items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[1] not in target_thermostats
+            or parts[-1] not in dates_by_mode
+        ):
+            continue
+        for raw in raw_history:
+            episode = episode_from_dict(raw, allow_incomplete=True)
+            if episode is None:
+                continue
+            started = local_date(episode.started_at, context.time_zone)
+            ended = local_date(
+                episode.ended_at or episode.started_at,
+                context.time_zone,
+            )
+            dates_by_mode[parts[-1]].update(
+                started + timedelta(days=offset)
+                for offset in range(max(0, (ended - started).days) + 1)
+            )
+
+    changed = False
+    current_date = local_date(context.now, context.time_zone)
+    active_dates: set[Any] = set()
+    for stream_id, raw in getattr(
+        context.state,
+        "hvac_current_episode_by_stream",
+        {},
+    ).items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[1] not in target_thermostats
+            or parts[-1] not in dates_by_mode
+            or not isinstance(raw, Mapping)
+            or (episode := episode_from_dict(raw, allow_incomplete=True)) is None
+        ):
+            continue
+        started = local_date(episode.started_at, context.time_zone)
+        touched = {
+            started + timedelta(days=offset)
+            for offset in range(max(0, (current_date - started).days) + 1)
+        }
+        dates_by_mode[parts[-1]].update(touched)
+        active_dates.update(touched)
+    for stream_id, decoded in decoded_by_stream.items():
+        mode = stream_id.rsplit("|", 1)[-1]
+        opposing_mode = "heating" if mode == "cooling" else "cooling"
+        current_era = context.store_data.hvac_baseline_era_by_stream.get(
+            stream_id,
+            _INITIAL_BASELINE_ERA,
+        )
+        prior_era_disqualified_dates: set[Any] = set()
+        for raw, episode in decoded:
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era:
+                continue
+            started = local_date(episode.started_at, context.time_zone)
+            ended = local_date(
+                episode.ended_at or episode.started_at,
+                context.time_zone,
+            )
+            prior_era_disqualified_dates.update(
+                started + timedelta(days=offset)
+                for offset in range(max(0, (ended - started).days) + 1)
+            )
+        pending_old_era = [
+            (raw, episode)
+            for raw, episode in decoded
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) != current_era
+            and max(
+                local_date(episode.started_at, context.time_zone),
+                local_date(
+                    episode.ended_at or episode.started_at,
+                    context.time_zone,
+                ),
+            )
+            >= current_date
+        ]
+        episodes = [
+            episode
+            for raw, episode in decoded
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era
+            and (
+                local_date(episode.started_at, context.time_zone) >= current_date
+                or local_date(episode.started_at, context.time_zone)
+                not in dates_by_mode[opposing_mode]
+            )
+        ]
+        contexts: dict[str, list[HvacResponseEpisode]] = {}
+        for episode in episodes:
+            if episode.complete and not episode.excluded_from_baseline:
+                contexts.setdefault(response_comparison_token(episode), []).append(
+                    episode
+                )
+        context_by_stream = context.store_data.hvac_response_context_by_stream
+        raw_context = context_by_stream.get(stream_id, {})
+        observed = str(raw_context.get("observed") or "")
+        observed_at = str(raw_context.get("observed_at") or "")
+        try:
+            previous_observed_at = datetime.fromisoformat(observed_at)
+        except ValueError:
+            previous_observed_at = None
+        latest_observed = max(
+            episodes,
+            key=lambda episode: episode.ended_at or episode.started_at,
+            default=None,
+        )
+        if latest_observed is not None and (
+            previous_observed_at is None
+            or previous_observed_at.tzinfo is None
+            or (latest_observed.ended_at or latest_observed.started_at)
+            > previous_observed_at
+        ):
+            observed = response_comparison_token(latest_observed)
+            observed_at = (
+                latest_observed.ended_at or latest_observed.started_at
+            ).isoformat()
+        if contexts:
+            selected = str(raw_context.get("selected") or "")
+            known = {
+                str(token)
+                for token in raw_context.get("known", ())
+                if str(token)
+            }
+            new_contexts = set(contexts) - known
+            latest_context = max(
+                contexts,
+                key=lambda token: max(
+                    episode.ended_at or episode.started_at
+                    for episode in contexts[token]
+                ),
+            )
+            candidate = str(raw_context.get("candidate") or "")
+            candidate_dates = {
+                str(day)
+                for day in raw_context.get("candidate_dates", ())
+                if str(day)
+            }
+            if new_contexts:
+                selected = max(
+                    new_contexts,
+                    key=lambda token: max(
+                        episode.ended_at or episode.started_at
+                        for episode in contexts[token]
+                    ),
+                )
+                candidate = ""
+                candidate_dates.clear()
+            elif selected not in contexts:
+                selected = latest_context
+                candidate = ""
+                candidate_dates.clear()
+            elif latest_context != selected:
+                if candidate != latest_context:
+                    candidate = latest_context
+                    candidate_dates.clear()
+                candidate_dates.update(
+                    local_date(episode.started_at, context.time_zone).isoformat()
+                    for episode in contexts[latest_context]
+                )
+                if len(candidate_dates) >= _CONTEXT_SWITCH_DAYS:
+                    selected = latest_context
+                    candidate = ""
+                    candidate_dates.clear()
+            elif candidate and max(
+                local_date(episode.started_at, context.time_zone).isoformat()
+                for episode in contexts[selected]
+            ) > max(candidate_dates, default=""):
+                candidate = ""
+                candidate_dates.clear()
+            updated_context = {
+                "selected": selected,
+                "known": sorted(known | set(contexts)),
+            }
+            if observed:
+                updated_context["observed"] = observed
+                updated_context["observed_at"] = observed_at
+            if candidate:
+                updated_context.update(
+                    candidate=candidate,
+                    candidate_dates=sorted(candidate_dates),
+                )
+            if updated_context != raw_context:
+                context_by_stream[stream_id] = updated_context
+                changed = True
+            episodes = [
+                (
+                    episode
+                    if response_comparison_token(episode) == selected
+                    else replace(
+                        episode,
+                        complete=False,
+                        excluded_from_baseline=True,
+                    )
+                )
+                for episode in episodes
+            ]
+        elif observed and (
+            raw_context.get("observed") != observed
+            or raw_context.get("observed_at") != observed_at
+        ):
+            context_by_stream[stream_id] = {
+                **raw_context,
+                "observed": observed,
+                "observed_at": observed_at,
+            }
+            changed = True
+        compacted = pending_old_era
+        for episode in compact_completed_core_days(
+            episodes,
+            time_zone=context.time_zone,
+            current_date=current_date,
+            retention_days=retention_days,
+            disqualified_dates=prior_era_disqualified_dates
+            | {day for day in active_dates if day < current_date},
+        ):
+            raw = episode_to_dict(episode, allow_incomplete=True)
+            raw["baseline_era"] = current_era
+            compacted.append((raw, episode))
+        retained = [
+            raw
+            for raw, _episode in sorted(
+                compacted,
+                key=lambda item: item[1].started_at,
+            )
+        ]
+        if retained != history_by_stream[stream_id]:
+            history_by_stream[stream_id] = retained
+            changed = True
+    return changed
+
+
 def _circuit_efficiency_payload(
     context: ProcessingContext,
     config: Any,
     current_streams: Mapping[str, dict[str, Any]],
     settings: Mapping[str, Any],
+    *,
+    retention_days: int,
 ) -> dict[str, Any]:
     circuit_id = config.circuit_id
     threshold = _response_change_threshold(settings)
@@ -833,6 +1268,8 @@ def _circuit_efficiency_payload(
         context.options,
         settings,
     )
+    episodes_by_stream: dict[str, list[HvacResponseEpisode]] = {}
+    baseline_eras: dict[str, str] = {}
     for stream_id, raw_history in history_by_stream.items():
         stream_parts = stream_id.split("|")
         if (
@@ -842,6 +1279,8 @@ def _circuit_efficiency_payload(
         ):
             continue
         mode = stream_parts[-1]
+        if mode not in {"heating", "cooling"}:
+            continue
         if config.appliance_profile is ApplianceProfile.HVAC_BLOWER and (
             mode == "cooling"
             or not bool(settings.get(CONF_BLOWER_REPRESENTS_GAS_HEAT, False))
@@ -862,11 +1301,50 @@ def _circuit_efficiency_payload(
             == thermostat_mappings[stream_parts[1]]
             if (episode := episode_from_dict(raw)) is not None
         ]
+        episodes_by_stream[stream_id] = episodes
+        baseline_eras[stream_id] = baseline_era
+    dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
+    for stream_id, episodes in episodes_by_stream.items():
+        dates_by_mode[stream_id.rsplit("|", 1)[-1]].update(
+            local_date(episode.started_at, context.time_zone)
+            for episode in episodes
+        )
+    for stream_id, episodes in episodes_by_stream.items():
+        mode = stream_id.rsplit("|", 1)[-1]
+        opposing_mode = "heating" if mode == "cooling" else "cooling"
+        response_context = context.store_data.hvac_response_context_by_stream.get(
+            stream_id,
+            {},
+        )
+        observed_context = str(response_context.get("observed") or "")
+        selected_context = str(response_context.get("selected") or "")
+        fingerprint_context = observed_context or selected_context
+        evaluation_episodes = (
+            []
+            if observed_context
+            and selected_context
+            and observed_context != selected_context
+            else episodes
+        )
+        configured_temperature = thermostat_mappings[stream_id.split("|")[1]] or ""
         evaluations[stream_id] = {
             **_evaluation_to_dict(
-                evaluate_efficiency(episodes, threshold_pct=threshold)
+                evaluate_efficiency(
+                    evaluation_episodes,
+                    threshold_pct=threshold,
+                    time_zone=context.time_zone,
+                    excluded_dates=dates_by_mode[opposing_mode],
+                    current_date=local_date(context.now, context.time_zone),
+                    retention_days=retention_days,
+                )
             ),
-            "baseline_era": baseline_era,
+            "baseline_era": baseline_eras[stream_id],
+            "response_context_fingerprint": hashlib.sha256(
+                (
+                    f"{config.appliance_profile.value}\0{fingerprint_context}"
+                    f"\0{configured_temperature}"
+                ).encode()
+            ).hexdigest(),
         }
     ready_scores = [
         float(evaluation["score"])
@@ -881,11 +1359,23 @@ def _circuit_efficiency_payload(
     finding = "slower" if "slower" in findings else (
         "faster" if "faster" in findings else None
     )
+    stream_statuses = {
+        str(evaluation.get("status") or "learning")
+        for evaluation in evaluations.values()
+    }
+    learning_status = next(
+        (
+            status
+            for status in ("provisional", "no_weather_data", "no_data")
+            if status in stream_statuses
+        ),
+        "tracking" if current_streams else "learning",
+    )
     return {
         "status": (
             "ready"
             if ready_scores
-            else ("tracking" if current_streams else "learning")
+            else learning_status
         ),
         "score": median(ready_scores) if ready_scores else None,
         "finding": finding,
@@ -924,7 +1414,46 @@ def _append_evaluation_alerts(
     threshold = float(payload["threshold_pct"])
     for stream_id, evaluation in payload["streams"].items():
         finding = evaluation.get("finding")
-        if finding not in {"slower", "faster"}:
+        if finding != "slower":
+            active_alert = _matching_active_alert_for_stream(
+                context,
+                config.circuit_id,
+                "hvac_response_slower",
+                stream_id,
+            )
+            normal_streak = int(
+                dict(evaluation.get("context", {})).get("normal_streak", 0)
+            )
+            evaluation_context = dict(evaluation.get("context", {}))
+            selected_context = str(
+                evaluation.get("response_context_fingerprint") or ""
+            )
+            alert_context = str(
+                active_alert.features.get("response_context_fingerprint")
+                if active_alert is not None
+                else ""
+            )
+            context_changed = (
+                bool(selected_context and alert_context)
+                and selected_context != alert_context
+            ) or any(
+                key in evaluation_context
+                and active_alert is not None
+                and active_alert.features.get(key) != evaluation_context[key]
+                for key in (
+                    "appliance_profile",
+                    "temperature_entity_id",
+                    "participant_signature",
+                    "supporting_blower_ids",
+                )
+            )
+            if active_alert is not None and (
+                not context_changed
+                and (
+                    evaluation.get("status") != "ready" or normal_streak < 3
+                )
+            ):
+                result.preserved_alerts.append(active_alert)
             continue
         feature = f"hvac_response_{finding}"
         evaluation_context = dict(evaluation.get("context", {}))
@@ -934,7 +1463,7 @@ def _append_evaluation_alerts(
             feature=feature,
             score=max(
                 abs(float(evaluation["change_ratio"])) / (threshold / 100.0),
-                1.5,
+                1.0,
             ),
             baseline_confidence=min(
                 1.0,
@@ -942,12 +1471,15 @@ def _append_evaluation_alerts(
                     int(evaluation["reference_count"])
                     + int(evaluation["recent_count"])
                 )
-                / 12.0,
+                / (
+                    int(evaluation["required_reference_count"])
+                    + int(evaluation["required_recent_count"])
+                ),
             ),
             observed_at=context.now,
-            observed_value=float(evaluation["recent_minutes_per_degree"]),
-            baseline_value=float(evaluation["baseline_minutes_per_degree"]),
-            value_metric="minutes_per_degree",
+            observed_value=float(evaluation["recent_runtime_minutes"]),
+            baseline_value=float(evaluation["baseline_runtime_minutes"]),
+            value_metric="weather_normalized_runtime_minutes",
             message=_finding_message(config, finding, evaluation),
             observation_key=f"{feature}:{stream_id}:{','.join(recent_ids)}",
             features=_finding_features(
@@ -968,8 +1500,6 @@ def _append_evaluation_alerts(
             if active_alert is not None:
                 result.preserved_alerts.append(active_alert)
             continue
-        if finding == "faster":
-            alert = replace(alert, severity=Severity.INFO)
         result.alerts.append(alert)
         result.notifications.append(alert)
 
@@ -986,9 +1516,12 @@ def _finding_features(
         "health_feature": HVAC_EFFICIENCY_FEATURE,
         "health_evidence_key": recent_ids[-1] if recent_ids else stream_id,
         "stream_id": stream_id,
+        "response_context_fingerprint": evaluation.get(
+            "response_context_fingerprint"
+        ),
         "threshold_pct": threshold,
-        "reference_value": evaluation["baseline_minutes_per_degree"],
-        "recent_value": evaluation["recent_minutes_per_degree"],
+        "reference_value": evaluation["baseline_runtime_minutes"],
+        "recent_value": evaluation["recent_runtime_minutes"],
         "change_percent": float(evaluation["change_ratio"]) * 100.0,
         "confidence": min(
             1.0,
@@ -996,14 +1529,21 @@ def _finding_features(
                 int(evaluation["reference_count"])
                 + int(evaluation["recent_count"])
             )
-            / 12.0,
+            / (
+                int(evaluation["required_reference_count"])
+                + int(evaluation["required_recent_count"])
+            ),
         ),
-        "reference_episode_count": evaluation["reference_count"],
-        "recent_episode_count": evaluation["recent_count"],
-        "baseline_context": ", ".join(
-            f"{key}={value}"
-            for key, value in sorted(context.items())
-            if key not in {"reference_episode_ids", "recent_episode_ids"}
+        "reference_core_day_count": evaluation["reference_count"],
+        "recent_core_day_count": evaluation["recent_count"],
+        "required_reference_core_day_count": evaluation[
+            "required_reference_count"
+        ],
+        "required_recent_core_day_count": evaluation["required_recent_count"],
+        "baseline_context": (
+            f"{context.get('mode', 'HVAC')}, "
+            f"{context.get('thermostat_entity_id', 'thermostat')}, "
+            f"weather-normalized over {evaluation['reference_count']} core days"
         ),
         **context,
     }
@@ -1017,9 +1557,9 @@ def _finding_message(
     percent = round(abs(float(evaluation["change_ratio"])) * 100.0)
     direction = "longer" if finding == "slower" else "less"
     return (
-        f"{config.name} took {percent}% {direction} time per degree than its "
-        "weather-comparable learned response across three recent thermostat "
-        "episodes."
+        f"{config.name} took {percent}% {direction} runtime than its "
+        "weather-normalized response on at least three of five recent HVAC "
+        "core days."
     )
 
 
@@ -1042,6 +1582,25 @@ def _matching_active_alert(
     return None
 
 
+def _matching_active_alert_for_stream(
+    context: ProcessingContext,
+    circuit_id: str,
+    feature: str,
+    stream_id: str,
+) -> AlertEvidence | None:
+    for alert in getattr(
+        context.state,
+        "active_alerts_by_circuit",
+        {},
+    ).get(circuit_id, ()):
+        if (
+            alert.feature == feature
+            and alert.features.get("stream_id") == stream_id
+        ):
+            return alert
+    return None
+
+
 def _evaluation_to_dict(
     evaluation: HvacEfficiencyEvaluation,
 ) -> dict[str, Any]:
@@ -1049,12 +1608,12 @@ def _evaluation_to_dict(
         "status": evaluation.status,
         "score": evaluation.score,
         "change_ratio": evaluation.change_ratio,
-        "baseline_minutes_per_degree": (
-            evaluation.baseline_minutes_per_degree
-        ),
-        "recent_minutes_per_degree": evaluation.recent_minutes_per_degree,
+        "baseline_runtime_minutes": evaluation.baseline_runtime_minutes,
+        "recent_runtime_minutes": evaluation.recent_runtime_minutes,
         "reference_count": evaluation.reference_count,
         "recent_count": evaluation.recent_count,
+        "required_reference_count": evaluation.required_reference_count,
+        "required_recent_count": evaluation.required_recent_count,
         "finding": evaluation.finding,
         "context": dict(evaluation.context),
     }
