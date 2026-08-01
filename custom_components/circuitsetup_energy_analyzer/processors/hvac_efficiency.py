@@ -287,6 +287,25 @@ class HvacEfficiencyProcessor:
                 and stream_id not in processed_streams
                 and stream_id.split("|", 1)[0] in configs
             ):
+                marker = dict(raw)
+                marker.update(
+                    ended_at=context.now.isoformat(),
+                    complete=False,
+                    excluded_from_baseline=True,
+                    inactive_since=None,
+                    baseline_era=(
+                        context.store_data.hvac_baseline_era_by_stream.get(
+                            stream_id,
+                            _INITIAL_BASELINE_ERA,
+                        )
+                    ),
+                )
+                if episode_from_dict(marker, allow_incomplete=True) is not None:
+                    context.store_data.hvac_response_history_by_stream.setdefault(
+                        stream_id,
+                        [],
+                    ).append(marker)
+                    result.store_dirty = True
                 result.state_updates.append(
                     StateUpdate(
                         path=("hvac_current_episode_by_stream", stream_id),

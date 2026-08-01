@@ -570,6 +570,51 @@ def test_hvac_efficiency_retains_excluded_call_as_same_day_marker() -> None:
     assert marker["excluded_from_baseline"] is True
 
 
+def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    calling = ThermostatObservation(
+        thermostat,
+        None,
+        78.0,
+        72.0,
+        "cool",
+        "cooling",
+        ("current_temperature", "temperature", "hvac_action"),
+    )
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=calling,
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+    processor = HvacEfficiencyProcessor()
+    started = processor.process([(heat_pump, SimpleNamespace())], context)
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    context.state.hvac_current_episode_by_stream[stream_id] = (
+        _state_update_values(started, "hvac_current_episode_by_stream")[stream_id]
+    )
+    context = replace(
+        context,
+        now=context.now + timedelta(minutes=5),
+        thermostat_observations=MappingProxyType({}),
+    )
+
+    result = processor.process([(heat_pump, SimpleNamespace())], context)
+    marker = context.store_data.hvac_response_history_by_stream[stream_id][0]
+
+    assert result.store_dirty is True
+    assert marker["ended_at"] == context.now.isoformat()
+    assert marker["complete"] is False
+    assert marker["excluded_from_baseline"] is True
+
+
 def test_hvac_efficiency_finalizes_call_when_action_changes_direction() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
