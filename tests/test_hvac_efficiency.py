@@ -872,6 +872,35 @@ def test_compaction_retains_weather_outage_and_suspends_mature_evaluation(
     assert evaluation.score is None
 
 
+def test_compaction_rotates_weather_outage_out_of_reference_window() -> None:
+    episodes = _weather_normalized_history()
+    episodes[10] = replace(
+        episodes[10],
+        outdoor_temperature_f=None,
+        outdoor_temperature_minutes=0.0,
+    )
+    episodes.extend(
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=(outdoor := 75.0 + 5.0 * (index % 5)),
+            runtime_minutes=30.0 + 2.0 * (outdoor - 75.0),
+        )
+        for index in range(55, 61)
+    )
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=62)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert all(episode.outdoor_temperature_f is not None for episode in compacted)
+    assert evaluation.status == "ready"
+
+
 def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
     calls = [
         replace(

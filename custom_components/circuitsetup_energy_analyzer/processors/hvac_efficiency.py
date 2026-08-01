@@ -1197,7 +1197,7 @@ def _circuit_efficiency_payload(
         selected_context = str(
             response_context.get("observed") or response_context.get("selected") or ""
         )
-        configured_temperature = thermostat_mappings[stream_parts[1]] or ""
+        configured_temperature = thermostat_mappings[stream_id.split("|")[1]] or ""
         evaluations[stream_id] = {
             **_evaluation_to_dict(
                 evaluate_efficiency(

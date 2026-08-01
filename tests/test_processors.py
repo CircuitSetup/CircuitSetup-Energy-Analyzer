@@ -1349,6 +1349,9 @@ def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
     for raw in history:
         raw["temperature_entity_id"] = old_temperature
     context.store_data.hvac_response_history_by_stream[stream_id] = history
+    context.store_data.hvac_response_history_by_stream[
+        "other|climate.upstairs|cooling"
+    ] = []
     processor = HvacEfficiencyProcessor(
         alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(
             min_repeated=1,

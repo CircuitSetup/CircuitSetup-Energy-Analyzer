@@ -740,7 +740,15 @@ def compact_completed_core_days(
         ordered = sorted(group, key=_episode_sort_time)
         if len(ordered) > reference_required + _RECENT_CORE_DAY_COUNT:
             recent = ordered[-_RECENT_CORE_DAY_COUNT:]
-            candidate_pool = ordered[:-_RECENT_CORE_DAY_COUNT]
+            candidate_pool = [
+                episode
+                for episode in ordered[:-_RECENT_CORE_DAY_COUNT]
+                if episode.outdoor_temperature_f is not None
+                and _meets_minimum(
+                    episode.outdoor_temperature_minutes,
+                    episode.active_minutes,
+                )
+            ]
             reference = candidate_pool[:reference_required]
             if not _reference_window_ready(
                 _core_days(reference, time_zone=time_zone),
@@ -748,7 +756,7 @@ def compact_completed_core_days(
                     _MIN_REFERENCE_SPAN_DAYS,
                     reference_required - 1,
                 ),
-                mode=reference[0].mode,
+                mode=ordered[0].mode,
             ):
                 reference = candidate_pool[-reference_required:]
             ordered = [
