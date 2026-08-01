@@ -330,16 +330,11 @@ def evaluate_efficiency(
             "no_data",
             required_reference_count=reference_required,
         )
-    weather_ready = [
-        episode
-        for episode in current_model
-        if episode.outdoor_temperature_f is not None
-        and _meets_minimum(
-            episode.outdoor_temperature_minutes,
-            episode.active_minutes,
-        )
-    ]
-    if not weather_ready:
+    latest_model_episode = max(current_model, key=_episode_sort_time)
+    if latest_model_episode.outdoor_temperature_f is None or not _meets_minimum(
+        latest_model_episode.outdoor_temperature_minutes,
+        latest_model_episode.active_minutes,
+    ):
         return _empty_evaluation(
             "no_weather_data",
             required_reference_count=reference_required,
@@ -838,37 +833,49 @@ def _compact_core_day(
     time_zone: TimeZone,
 ) -> HvacResponseEpisode | None:
     days = _core_days(episodes, time_zone=time_zone)
-    if len(days) != 1:
+    runtime = sum(episode.active_minutes for episode in episodes)
+    if len(days) > 1 or runtime < _MIN_CORE_DAY_RUNTIME_MINUTES:
         return None
-    day = days[0]
     representative = max(episodes, key=_episode_sort_time)
     first = min(episodes, key=lambda item: item.started_at)
     last = max(episodes, key=_episode_sort_time)
-    indoor = day.indoor_temperature_f
-    if representative.mode == "cooling":
-        start_temperature, target_temperature = indoor + 1.0, indoor - 1.0
-    else:
-        start_temperature, target_temperature = indoor - 1.0, indoor + 1.0
-    return replace(
-        representative,
+    indoor = sum(
+        (episode.start_temperature_f + episode.latest_temperature_f)
+        / 2.0
+        * episode.active_minutes
+        for episode in episodes
+    ) / runtime
+    start_temperature, target_temperature = (
+        (indoor + 1.0, indoor - 1.0)
+        if representative.mode == "cooling"
+        else (indoor - 1.0, indoor + 1.0)
+    )
+    changes: dict[str, Any] = dict(
         started_at=first.started_at,
         ended_at=last.ended_at,
         start_temperature_f=start_temperature,
         target_temperature_f=target_temperature,
         latest_temperature_f=target_temperature,
         elapsed_minutes=max(
-            day.runtime_minutes,
+            runtime,
             _elapsed_minutes(first.started_at, last.ended_at or last.started_at),
         ),
-        active_minutes=day.runtime_minutes,
-        outdoor_temperature_f=day.outdoor_temperature_f,
-        outdoor_temperature_minutes=day.runtime_minutes,
+        active_minutes=runtime,
+        outdoor_temperature_minutes=sum(
+            episode.outdoor_temperature_minutes for episode in episodes
+        ),
         gap_bin="daily",
         complete=True,
         excluded_from_baseline=False,
         inactive_since=None,
         episode_kind="core_day",
     )
+    if days:
+        changes.update(
+            outdoor_temperature_f=days[0].outdoor_temperature_f,
+            outdoor_temperature_minutes=runtime,
+        )
+    return replace(representative, **changes)
 
 
 def _thermal_demand(day: _CoreDay, mode: str) -> float:

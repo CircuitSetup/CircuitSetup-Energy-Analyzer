@@ -1359,18 +1359,6 @@ def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
     )
     initial = processor.process([(heat_pump, SimpleNamespace())], context)
     context.state.active_alerts_by_circuit = {"heat_pump": initial.alerts}
-    replacement = _hvac_response_history(stream_id, count=56)[-1]
-    replacement_started = datetime.fromisoformat(str(replacement["started_at"]))
-    replacement.update(
-        temperature_entity_id=replacement_temperature,
-        ended_at=(replacement_started + timedelta(minutes=10)).isoformat(),
-        elapsed_minutes=10.0,
-        active_minutes=10.0,
-        outdoor_temperature_minutes=10.0,
-        complete=False,
-        excluded_from_baseline=True,
-    )
-    context.store_data.hvac_response_history_by_stream[stream_id].append(replacement)
     context = replace(
         context,
         options={
@@ -1384,6 +1372,28 @@ def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
             }
         },
     )
+    configuration_handoff = processor.process(
+        [(heat_pump, SimpleNamespace())], context
+    )
+    assert _state_update_values(
+        configuration_handoff,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]["streams"][stream_id]["status"] == "no_data"
+    assert configuration_handoff.preserved_alerts == []
+
+    context.state.active_alerts_by_circuit = {"heat_pump": initial.alerts}
+    replacement = _hvac_response_history(stream_id, count=56)[-1]
+    replacement_started = datetime.fromisoformat(str(replacement["started_at"]))
+    replacement.update(
+        temperature_entity_id=replacement_temperature,
+        ended_at=(replacement_started + timedelta(minutes=10)).isoformat(),
+        elapsed_minutes=10.0,
+        active_minutes=10.0,
+        outdoor_temperature_minutes=10.0,
+        complete=False,
+        excluded_from_baseline=True,
+    )
+    context.store_data.hvac_response_history_by_stream[stream_id].append(replacement)
 
     handoff = processor.process([(heat_pump, SimpleNamespace())], context)
 

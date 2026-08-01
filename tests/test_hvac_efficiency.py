@@ -837,6 +837,41 @@ def test_completed_calls_compact_to_one_record_per_core_day() -> None:
     assert lightweight[-5:] == compacted[-5:]
 
 
+@pytest.mark.parametrize(
+    ("outdoor_temperature_f", "outdoor_temperature_minutes"),
+    ((None, 0.0), (85.0, 29.0)),
+)
+def test_compaction_retains_weather_outage_and_suspends_mature_evaluation(
+    outdoor_temperature_f: float | None,
+    outdoor_temperature_minutes: float,
+) -> None:
+    missing_weather = replace(
+        _core_day_episode(
+            55,
+            outdoor_temperature_f=outdoor_temperature_f,
+            runtime_minutes=30.0,
+            episode_kind="thermostat_call",
+        ),
+        outdoor_temperature_minutes=outdoor_temperature_minutes,
+    )
+
+    compacted = compact_completed_core_days(
+        [*_weather_normalized_history(), missing_weather],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=57)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert compacted[-1].episode_kind == "core_day"
+    assert compacted[-1].outdoor_temperature_minutes == (
+        outdoor_temperature_minutes
+    )
+    assert evaluation.status == "no_weather_data"
+    assert evaluation.score is None
+
+
 def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
     calls = [
         replace(

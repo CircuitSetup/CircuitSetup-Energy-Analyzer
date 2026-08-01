@@ -1197,6 +1197,7 @@ def _circuit_efficiency_payload(
         selected_context = str(
             response_context.get("observed") or response_context.get("selected") or ""
         )
+        configured_temperature = thermostat_mappings[stream_parts[1]] or ""
         evaluations[stream_id] = {
             **_evaluation_to_dict(
                 evaluate_efficiency(
@@ -1210,8 +1211,10 @@ def _circuit_efficiency_payload(
             ),
             "baseline_era": baseline_eras[stream_id],
             "response_context_fingerprint": (
-                hashlib.sha256(selected_context.encode()).hexdigest()
-                if selected_context
+                hashlib.sha256(
+                    f"{selected_context}\0{configured_temperature}".encode()
+                ).hexdigest()
+                if selected_context or configured_temperature
                 else ""
             ),
         }
