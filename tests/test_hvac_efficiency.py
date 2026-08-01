@@ -832,14 +832,13 @@ def test_compaction_bounds_multiple_equipment_contexts_per_stream() -> None:
     episodes = [
         replace(
             _core_day_episode(
-                index + context_index * 60,
+                index,
                 outdoor_temperature_f=75.0 + 5.0 * (index % 5),
                 runtime_minutes=40.0,
             ),
-            participant_signature=("heat_pump", context),
+            participant_signature=("heat_pump", ("old", "new")[index % 2]),
         )
-        for context_index, context in enumerate(("old", "new"))
-        for index in range(56)
+        for index in range(112)
     ]
 
     compacted = compact_completed_core_days(
@@ -853,3 +852,36 @@ def test_compaction_bounds_multiple_equipment_contexts_per_stream() -> None:
     assert {episode.participant_signature for episode in compacted} == {
         ("heat_pump", "new")
     }
+
+
+def test_cross_midnight_call_disqualifies_every_touched_date() -> None:
+    ending_day_calls = [
+        replace(
+            _core_day_episode(
+                1,
+                outdoor_temperature_f=90.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(days=1, hours=hour),
+            ended_at=START + timedelta(days=1, hours=hour, minutes=10),
+        )
+        for hour in (2, 4, 6, 8)
+    ]
+    spanning = replace(
+        ending_day_calls[0],
+        started_at=START.replace(hour=23, minute=30),
+        ended_at=(START + timedelta(days=1)).replace(hour=0, minute=10),
+        elapsed_minutes=40.0,
+        active_minutes=40.0,
+        outdoor_temperature_minutes=40.0,
+    )
+
+    compacted = compact_completed_core_days(
+        [spanning, *ending_day_calls],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=2)).date(),
+        retention_days=45,
+    )
+
+    assert compacted == []

@@ -692,7 +692,8 @@ def compact_completed_core_days(
         if max(day, end_day) >= current_date:
             pending.append(episode)
         elif (
-            episode.model_version >= _MODEL_VERSION
+            end_day == day
+            and episode.model_version >= _MODEL_VERSION
             and _is_valid_completed_episode(episode)
             and not episode.excluded_from_baseline
         ):
@@ -710,7 +711,7 @@ def compact_completed_core_days(
         if (summary := _compact_core_day(group, time_zone=time_zone)) is not None
     ]
     reference_required = _reference_core_day_count(retention_days)
-    bounded: list[HvacResponseEpisode] = []
+    bounded_groups: list[list[HvacResponseEpisode]] = []
     by_comparison: dict[tuple[Any, ...], list[HvacResponseEpisode]] = defaultdict(
         list
     )
@@ -735,11 +736,20 @@ def compact_completed_core_days(
                 *reference,
                 *recent,
             ]
-        bounded.extend(ordered)
-    if len(bounded) > reference_required + _RECENT_CORE_DAY_COUNT:
-        bounded = sorted(bounded, key=_episode_sort_time)[
-            -(reference_required + _RECENT_CORE_DAY_COUNT) :
-        ]
+        bounded_groups.append(ordered)
+    limit = reference_required + _RECENT_CORE_DAY_COUNT
+    complete_groups = [group for group in bounded_groups if len(group) >= limit]
+    bounded = (
+        max(
+            complete_groups,
+            key=lambda group: _episode_sort_time(group[-1]),
+        )
+        if complete_groups
+        else sorted(
+            (episode for group in bounded_groups for episode in group),
+            key=_episode_sort_time,
+        )[-limit:]
+    )
     return sorted([*bounded, *pending], key=_episode_sort_time)
 
 
