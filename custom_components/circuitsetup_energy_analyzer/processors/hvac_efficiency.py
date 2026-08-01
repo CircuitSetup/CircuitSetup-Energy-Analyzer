@@ -825,28 +825,56 @@ def _compact_circuit_response_history(
     retention_days: int,
 ) -> bool:
     history_by_stream = context.store_data.hvac_response_history_by_stream
-    changed = False
-    for stream_id, raw_history in tuple(history_by_stream.items()):
-        if not stream_id.startswith(f"{circuit_id}|"):
+    decoded_by_stream: dict[
+        str,
+        list[tuple[Mapping[str, Any], HvacResponseEpisode]],
+    ] = {}
+    dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
+    for stream_id, raw_history in history_by_stream.items():
+        parts = stream_id.split("|")
+        if (
+            len(parts) != 3
+            or parts[0] != circuit_id
+            or parts[-1] not in dates_by_mode
+        ):
             continue
-        episodes_by_era: dict[str, list[HvacResponseEpisode]] = {}
-        for raw in raw_history:
-            episode = episode_from_dict(raw)
-            if episode is not None:
-                era = str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
-                episodes_by_era.setdefault(era, []).append(episode)
+        decoded = [
+            (raw, episode)
+            for raw in raw_history
+            if (episode := episode_from_dict(raw)) is not None
+        ]
+        decoded_by_stream[stream_id] = decoded
+        dates_by_mode[parts[-1]].update(
+            local_date(episode.started_at, context.time_zone)
+            for _raw, episode in decoded
+        )
+
+    changed = False
+    for stream_id, decoded in decoded_by_stream.items():
+        mode = stream_id.rsplit("|", 1)[-1]
+        opposing_mode = "heating" if mode == "cooling" else "cooling"
+        current_era = context.store_data.hvac_baseline_era_by_stream.get(
+            stream_id,
+            _INITIAL_BASELINE_ERA,
+        )
+        episodes = [
+            episode
+            for raw, episode in decoded
+            if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA)) == current_era
+            and local_date(episode.started_at, context.time_zone)
+            not in dates_by_mode[opposing_mode]
+        ]
         compacted = []
-        for era, episodes in episodes_by_era.items():
-            for episode in compact_completed_core_days(
-                episodes,
-                time_zone=context.time_zone,
-                current_date=local_date(context.now, context.time_zone),
-                retention_days=retention_days,
-            ):
-                raw = episode_to_dict(episode)
-                raw["baseline_era"] = era
-                compacted.append(raw)
-        if compacted != raw_history:
+        for episode in compact_completed_core_days(
+            episodes,
+            time_zone=context.time_zone,
+            current_date=local_date(context.now, context.time_zone),
+            retention_days=retention_days,
+        ):
+            raw = episode_to_dict(episode)
+            raw["baseline_era"] = current_era
+            compacted.append(raw)
+        if compacted != history_by_stream[stream_id]:
             history_by_stream[stream_id] = compacted
             changed = True
     return changed

@@ -362,14 +362,27 @@ def evaluate_efficiency(
         )
 
     reference = comparable[:reference_required]
+    if (
+        len(comparable) >= reference_required + _RECENT_CORE_DAY_COUNT
+        and not _reference_window_ready(
+            reference,
+            span_days=reference_span_required,
+            mode=latest_episode.mode,
+        )
+    ):
+        reference = comparable[
+            -(_RECENT_CORE_DAY_COUNT + reference_required) :
+            -_RECENT_CORE_DAY_COUNT
+        ]
     reference_span = (reference[-1].day - reference[0].day).days
     outdoor_bins = {
         math.floor(day.outdoor_temperature_f / _OUTDOOR_TEMPERATURE_BIN_F)
         for day in reference
     }
-    if (
-        reference_span < reference_span_required
-        or len(outdoor_bins) < _MIN_OUTDOOR_TEMPERATURE_BINS
+    if not _reference_window_ready(
+        reference,
+        span_days=reference_span_required,
+        mode=latest_episode.mode,
     ):
         context.update(
             {
@@ -686,9 +699,21 @@ def compact_completed_core_days(
     for group in by_comparison.values():
         ordered = sorted(group, key=_episode_sort_time)
         if len(ordered) > reference_required + _RECENT_CORE_DAY_COUNT:
+            recent = ordered[-_RECENT_CORE_DAY_COUNT:]
+            candidate_pool = ordered[:-_RECENT_CORE_DAY_COUNT]
+            reference = candidate_pool[:reference_required]
+            if not _reference_window_ready(
+                _core_days(reference, time_zone=time_zone),
+                span_days=min(
+                    _MIN_REFERENCE_SPAN_DAYS,
+                    reference_required - 1,
+                ),
+                mode=reference[0].mode,
+            ):
+                reference = candidate_pool[-reference_required:]
             ordered = [
-                *ordered[:reference_required],
-                *ordered[-_RECENT_CORE_DAY_COUNT:],
+                *reference,
+                *recent,
             ]
         bounded.extend(ordered)
     return sorted([*bounded, *pending], key=_episode_sort_time)
@@ -797,6 +822,33 @@ def _thermal_demand(day: _CoreDay, mode: str) -> float:
             else day.indoor_temperature_f - day.outdoor_temperature_f
         ),
     )
+
+
+def _reference_window_ready(
+    days: Sequence[_CoreDay],
+    *,
+    span_days: int,
+    mode: str,
+) -> bool:
+    if (
+        not days
+        or (days[-1].day - days[0].day).days < span_days
+        or len(
+            {
+                math.floor(
+                    day.outdoor_temperature_f / _OUTDOOR_TEMPERATURE_BIN_F
+                )
+                for day in days
+            }
+        )
+        < _MIN_OUTDOOR_TEMPERATURE_BINS
+    ):
+        return False
+    loads = [_thermal_demand(day, mode) for day in days]
+    return len(set(loads)) >= 2 and linear_regression(
+        loads,
+        [day.runtime_minutes for day in days],
+    ).slope > 0.0
 
 
 def _prediction_margins(

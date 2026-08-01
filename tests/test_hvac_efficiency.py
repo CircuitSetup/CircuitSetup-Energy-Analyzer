@@ -673,6 +673,35 @@ def test_efficiency_requires_three_abnormal_days_in_recent_five() -> None:
     assert three_slow.context["normal_streak"] == 2
 
 
+def test_late_weather_diversity_can_complete_the_reference_window() -> None:
+    episodes = [
+        _core_day_episode(
+            index,
+            outdoor_temperature_f=(
+                75.0 if index < 50 else 80.0 + 5.0 * (index % 3)
+            ),
+            runtime_minutes=(
+                30.0
+                if index < 50
+                else 30.0 + 2.0 * (5.0 + 5.0 * (index % 3))
+            ),
+        )
+        for index in range(60)
+    ]
+
+    compacted = compact_completed_core_days(
+        episodes,
+        time_zone="UTC",
+        current_date=(START + timedelta(days=61)).date(),
+        retention_days=45,
+    )
+    evaluation = evaluate_efficiency(compacted, threshold_pct=25.0)
+
+    assert len(compacted) == 55
+    assert evaluation.status == "ready"
+    assert evaluation.context["outdoor_temperature_bin_count"] >= 3
+
+
 def test_lightweight_retention_uses_twelve_reference_core_days() -> None:
     episodes = _weather_normalized_history()[:17]
 
@@ -744,5 +773,4 @@ def test_completed_calls_compact_to_one_record_per_core_day() -> None:
         retention_days=18,
     )
     assert len(lightweight) == 17
-    assert lightweight[:12] == compacted[:12]
     assert lightweight[-5:] == compacted[-5:]
