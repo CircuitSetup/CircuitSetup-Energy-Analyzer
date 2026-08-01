@@ -213,7 +213,9 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
-    harmonic_object_id = _strip_trailing_source_qualifiers(object_id)
+    harmonic_object_id = _strip_terminal_phase_letter(
+        _strip_trailing_source_qualifiers(object_id)
+    )
     harmonic_measurement = re.search(
         r"(?:^|_)(?:total_)?harmonic(?:_(?:(?:active|reactive|apparent|real)_power|peak_(?:current|amps?|a)|power_factor|line_frequency|distortion|energy|frequency|current|voltage|power|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$",
         harmonic_object_id,
@@ -567,6 +569,7 @@ _SOURCE_VALUE_QUALIFIER_SUFFIXES = (
     "_maximum",
     "_min",
     "_max",
+    "_today",
 )
 _SOURCE_LEG_SUFFIXES = (
     "_leg_a",
@@ -598,10 +601,7 @@ _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
 def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
-    object_id = _entity_object_id(entity_id)
-    without_phase = re.sub(r"_[ab]$", "", object_id)
-    if _source_metric_suffix_exposed(without_phase):
-        object_id = without_phase
+    object_id = _strip_terminal_phase_letter(_entity_object_id(entity_id))
     if _has_metric_suffix(
         object_id,
         ("peak_current", "peak_amps", "peak_amp", "peak_a"),
@@ -716,6 +716,15 @@ def _source_metric_suffix_exposed(object_id: str) -> bool:
                 for suffix in _SOURCE_METRIC_SUFFIXES
             )
         probe = normalized
+
+
+def _strip_terminal_phase_letter(object_id: str) -> str:
+    without_phase = re.sub(r"_[ab]$", "", object_id)
+    return (
+        without_phase
+        if _source_metric_suffix_exposed(without_phase)
+        else object_id
+    )
 
 
 def _entity_object_id(entity_id: str) -> str:
