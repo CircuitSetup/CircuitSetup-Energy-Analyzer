@@ -862,7 +862,12 @@ def test_hvac_correlation_history_learns_before_thermostat_link() -> None:
     calls = context.store_data.hvac_correlation_history_by_circuit["heat_pump"]
     call = calls[-1]
 
-    assert context.store_data.hvac_response_history_by_stream == {}
+    response_markers = context.store_data.hvac_response_history_by_stream[
+        f"heat_pump|{thermostat}|cooling"
+    ]
+    assert len(response_markers) == 1
+    assert response_markers[0]["complete"] is False
+    assert response_markers[0]["excluded_from_baseline"] is True
     assert completed.store_dirty is True
     assert len(calls) == 256
     assert calls[0]["marker"] == 1

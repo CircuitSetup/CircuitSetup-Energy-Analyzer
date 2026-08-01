@@ -275,8 +275,27 @@ class HvacEfficiencyProcessor:
                             _INITIAL_BASELINE_ERA,
                         )
                     )
-                    history.append(stored_episode)
-                    result.store_dirty = True
+                    instant_excluded = (
+                        finalized.excluded_from_baseline
+                        and not finalized.complete
+                        and finalized.ended_at == finalized.started_at
+                    )
+                    already_marked = instant_excluded and any(
+                        episode.excluded_from_baseline
+                        and local_date(episode.started_at, context.time_zone)
+                        == local_date(finalized.started_at, context.time_zone)
+                        for raw in history
+                        if (
+                            episode := episode_from_dict(
+                                raw,
+                                allow_incomplete=True,
+                            )
+                        )
+                        is not None
+                    )
+                    if not already_marked:
+                        history.append(stored_episode)
+                        result.store_dirty = True
 
         for stream_id, raw in getattr(
             context.state,

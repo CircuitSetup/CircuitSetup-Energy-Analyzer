@@ -236,6 +236,30 @@ def test_subtenth_active_call_creates_excluded_date_marker() -> None:
     ) == marker
 
 
+@pytest.mark.parametrize(
+    ("actual", "target"),
+    [(None, 72.0), (78.0, None), (None, None)],
+)
+def test_active_call_missing_temperature_creates_excluded_date_marker(
+    actual: float | None,
+    target: float | None,
+) -> None:
+    current, marker = _advance(
+        None,
+        _observation(actual=actual, target=target),
+    )
+
+    assert current is None
+    assert marker is not None
+    assert marker.ended_at == START
+    assert marker.complete is False
+    assert marker.excluded_from_baseline is True
+    assert episode_from_dict(
+        episode_to_dict(marker, allow_incomplete=True),
+        allow_incomplete=True,
+    ) == marker
+
+
 def test_nominal_one_degree_gap_starts_setpoint_response() -> None:
     current, completed = _advance(
         None,

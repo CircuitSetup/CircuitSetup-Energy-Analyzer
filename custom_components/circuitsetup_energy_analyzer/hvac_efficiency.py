@@ -152,16 +152,25 @@ def advance_episode(
         mode = current.mode
 
     if current is None:
-        if not driver_active or actual is None or target is None or mode is None:
+        if not driver_active or mode is None:
             return None, None
+        missing_temperature = actual is None or target is None
+        if missing_temperature:
+            if not action_active:
+                return None, None
+            actual = actual if actual is not None else target or 0.0
+            target = target if target is not None else actual
         gap = _directional_gap(mode, actual=actual, target=target)
         episode_kind = "setpoint_response"
-        rejected_call = False
+        rejected_call = missing_temperature
         if not _meets_minimum(gap, _MINIMUM_START_GAP_F):
             if not action_active:
                 return None, None
             episode_kind = "thermostat_call"
-            rejected_call = not _meets_minimum(gap, _MINIMUM_CALL_GAP_F)
+            rejected_call = rejected_call or not _meets_minimum(
+                gap,
+                _MINIMUM_CALL_GAP_F,
+            )
         outdoor_temperature = _finite_float(
             environmental_context.get("outdoor_temperature_f")
         )
