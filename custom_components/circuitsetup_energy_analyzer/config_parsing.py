@@ -224,7 +224,7 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
     )
     return harmonic_measurement is not None or (
         reactive_energy_measurement
-        and not _has_metric_suffix(object_id, _NON_ENERGY_METRIC_SUFFIXES)
+        and not _has_metric_suffix(object_id, _NON_REACTIVE_ENERGY_METRIC_SUFFIXES)
     )
 
 
@@ -551,6 +551,12 @@ _NON_ENERGY_METRIC_SUFFIXES = tuple(
     suffix.removeprefix("_")
     for suffix in _SOURCE_METRIC_SUFFIXES
     if suffix not in {"_energy", "_kvarh", "_kwh", "_mwh", "_varh", "_wh"}
+)
+_NON_REACTIVE_ENERGY_METRIC_SUFFIXES = (
+    *_NON_ENERGY_METRIC_SUFFIXES,
+    "kwh",
+    "mwh",
+    "wh",
 )
 _SOURCE_VALUE_QUALIFIER_SUFFIXES = ("_rms", "_average", "_avg", "_mean")
 _SOURCE_LEG_SUFFIXES = (
