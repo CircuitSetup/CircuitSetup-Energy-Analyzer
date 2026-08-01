@@ -1134,9 +1134,12 @@ def test_mixed_detail_omits_direct_run_comparisons(
         "detail"
     ]["today_vs_normal"]
 
-    assert {
-        comparison["metric_id"] for comparison in comparisons
-    }.isdisjoint({"runtime_today_seconds", "run_count_today", "current_power_w"})
+    metric_ids = {comparison["metric_id"] for comparison in comparisons}
+
+    assert "daily_energy_kwh" in metric_ids
+    assert metric_ids.isdisjoint(
+        {"runtime_today_seconds", "run_count_today", "current_power_w"}
+    )
 
 
 def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
