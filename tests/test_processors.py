@@ -7992,7 +7992,7 @@ def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> Non
     }
 
 
-def test_power_quality_processor_updates_state_and_returns_alert() -> None:
+def test_power_quality_processor_updates_generation_state_and_returns_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -8093,6 +8093,7 @@ def test_power_quality_processor_updates_state_and_returns_alert() -> None:
         name="Kitchen Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
     )
     sample = CircuitSample(
         timestamp=now,
@@ -8116,6 +8117,7 @@ def test_power_quality_processor_updates_state_and_returns_alert() -> None:
 
     result = processor.process(sample, config, context)
 
+    assert result.clear_power_quality_state is None
     assert result.store_dirty is False
     assert len(result.state_updates) == 6
     assert len(result.alerts) == 1

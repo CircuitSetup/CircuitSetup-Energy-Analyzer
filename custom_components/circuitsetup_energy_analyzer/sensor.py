@@ -90,7 +90,10 @@ from .nilm_virtual import (
 )
 from .notifications import POWER_QUALITY_ALERT_FEATURES
 from .operating_detection import operating_state_is_running
-from .profiles import supports_direct_appliance_analysis
+from .profiles import (
+    supports_direct_appliance_analysis,
+    supports_power_quality_analysis,
+)
 from .safety import with_electrical_safety_notice
 from .state import circuit_is_learning
 from .tariff import configured_electricity_rate, global_cost_settings
@@ -2264,6 +2267,7 @@ def sensor_description_applies(
     mode = _circuit_mode(circuit)
     is_mains = mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM
     supports_direct = supports_direct_appliance_analysis(circuit)
+    supports_power_quality = supports_power_quality_analysis(circuit)
     has_real_power = SensorRole.REAL_POWER in roles
     has_energy = SensorRole.ENERGY in roles
     has_energy_data = has_energy or has_real_power
@@ -2280,13 +2284,13 @@ def sensor_description_applies(
             or _stored_settings(coordinator, "energy_goal_settings_by_circuit", circuit)
         )
     if key in _POWER_QUALITY_SENSOR_KEYS:
-        return supports_direct and bool(roles & _POWER_QUALITY_ROLES)
+        return supports_power_quality and bool(roles & _POWER_QUALITY_ROLES)
     if key == "reactive_power_drift":
-        return supports_direct and SensorRole.REACTIVE_POWER in roles
+        return supports_power_quality and SensorRole.REACTIVE_POWER in roles
     if key == "apparent_power_drift":
-        return supports_direct and SensorRole.APPARENT_POWER in roles
+        return supports_power_quality and SensorRole.APPARENT_POWER in roles
     if key == "power_factor_drift":
-        return supports_direct and SensorRole.POWER_FACTOR in roles
+        return supports_power_quality and SensorRole.POWER_FACTOR in roles
     if key in _MAINS_NILM_SENSOR_KEYS:
         return is_mains
     if key in _RUN_CYCLE_SENSOR_KEYS:

@@ -29,6 +29,20 @@ def supports_direct_appliance_analysis(config: CircuitConfig) -> bool:
     )
 
 
+def supports_power_quality_analysis(config: CircuitConfig) -> bool:
+    """Return whether circuit topology supports power-quality analysis."""
+    if isinstance(config, dict):
+        mode = config.get("mode", CircuitMode.SINGLE_PHASE)
+        profile = config.get("appliance_profile", ApplianceProfile.MIXED)
+    else:
+        mode = getattr(config, "mode", CircuitMode.SINGLE_PHASE)
+        profile = config.appliance_profile
+    return mode not in {CircuitMode.MIXED, CircuitMode.MAINS_NILM} and profile not in {
+        ApplianceProfile.MIXED,
+        ApplianceProfile.MAINS_NILM,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileDefinition:
     """Static analysis requirements for an appliance profile."""

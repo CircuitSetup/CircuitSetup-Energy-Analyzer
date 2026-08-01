@@ -32,6 +32,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
     CircuitMode,
     EventType,
+    PowerFlowMode,
     SensorRef,
     SensorRole,
     Severity,
@@ -3334,6 +3335,37 @@ def test_specific_profile_mixed_mode_hides_direct_appliance_entities() -> None:
     assert not binary_sensor_description_applies(
         binary["water_flow_mismatch"], circuit, coordinator
     )
+
+
+def test_solar_generation_exposes_power_quality_entities() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        sensor_description_applies,
+    )
+
+    descriptions = {description.key: description for description in SENSOR_DESCRIPTIONS}
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar Inverter",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        power_flow=PowerFlowMode.GENERATION,
+        sensors=(
+            SensorRef("sensor.solar_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.solar_var", SensorRole.REACTIVE_POWER),
+            SensorRef("sensor.solar_va", SensorRole.APPARENT_POWER),
+            SensorRef("sensor.solar_pf", SensorRole.POWER_FACTOR),
+        ),
+    )
+
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    for key in (
+        "power_quality_score",
+        "reactive_power_drift",
+        "apparent_power_drift",
+        "power_factor_drift",
+    ):
+        assert sensor_description_applies(descriptions[key], solar, coordinator)
 
 
 def test_dishwasher_exposes_water_cycle_and_demand_behavior() -> None:
