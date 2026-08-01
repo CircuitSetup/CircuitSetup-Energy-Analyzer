@@ -2029,6 +2029,15 @@ def test_hvac_new_equipment_context_replaces_mature_context() -> None:
             returning
         )
         processor.process([(heat_pump, SimpleNamespace())], context)
+        if count < 62:
+            candidate = dict(
+                context.store_data.hvac_response_context_by_stream[stream_id]
+            )
+            processor.process([(heat_pump, SimpleNamespace())], context)
+            assert (
+                context.store_data.hvac_response_context_by_stream[stream_id]
+                == candidate
+            )
 
     retained = context.store_data.hvac_response_history_by_stream[stream_id]
     assert len(retained) == 1

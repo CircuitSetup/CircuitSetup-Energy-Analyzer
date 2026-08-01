@@ -1017,7 +1017,10 @@ def _compact_circuit_response_history(
                     selected = latest_context
                     candidate = ""
                     candidate_dates.clear()
-            else:
+            elif candidate and max(
+                local_date(episode.started_at, context.time_zone).isoformat()
+                for episode in contexts[selected]
+            ) > max(candidate_dates, default=""):
                 candidate = ""
                 candidate_dates.clear()
             updated_context = {
