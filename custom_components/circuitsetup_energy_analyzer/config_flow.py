@@ -126,6 +126,7 @@ from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .config_parsing import (
     explicit_sensor_role_from_entity_id,
     sensor_role_from_entity_id,
+    source_circuit_ids_from_entity_ids,
     strip_trailing_source_detail_tokens,
     untyped_source_entity_excluded,
 )
@@ -2611,6 +2612,7 @@ def assignment_groups_from_sources(
             source_name_by_entity.get(entity_id, ""),
         )
     ]
+    inferred_circuit_ids = source_circuit_ids_from_entity_ids(grouped_entities)
 
     owners_by_entity: dict[str, set[int]] = {}
     inferred_group_owners: dict[str, set[int]] = {}
@@ -2618,7 +2620,10 @@ def assignment_groups_from_sources(
         for entity_id in _sensor_entity_ids_from_circuit(circuit):
             owners_by_entity.setdefault(entity_id, set()).add(index)
             inferred_group_owners.setdefault(
-                _assignment_circuit_id_from_entity_id(entity_id),
+                inferred_circuit_ids.get(
+                    entity_id,
+                    _assignment_circuit_id_from_entity_id(entity_id),
+                ),
                 set(),
             ).add(index)
 
@@ -2633,7 +2638,7 @@ def assignment_groups_from_sources(
             or (
                 not owners_by_entity.get(entity_id)
                 and inferred_group_owners.get(
-                    _assignment_circuit_id_from_entity_id(entity_id)
+                    inferred_circuit_ids[entity_id]
                 )
                 == {index}
             )
@@ -2705,7 +2710,7 @@ def assignment_groups_from_sources(
     for entity_id in grouped_entities:
         if entity_id in claimed_entities or owners_by_entity.get(entity_id):
             continue
-        circuit_id = _assignment_circuit_id_from_entity_id(entity_id)
+        circuit_id = inferred_circuit_ids[entity_id]
         unowned_groups.setdefault(circuit_id, []).append(entity_id)
 
     for circuit_id, entity_ids in unowned_groups.items():

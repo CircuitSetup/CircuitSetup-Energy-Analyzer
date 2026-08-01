@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import replace
 from typing import Any
@@ -108,6 +109,7 @@ def _configs_with_merged_source_entity_refs(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
     config_index = _config_index_by_source_circuit_id(configs)
+    source_circuit_ids = source_circuit_ids_from_entity_ids(source_entities)
     existing_source_entities = {
         sensor.entity_id for config in configs for sensor in config.sensors
     }
@@ -118,9 +120,7 @@ def _configs_with_merged_source_entity_refs(
             or untyped_source_entity_excluded(entity_id)
         ):
             continue
-        config_index_value = config_index.get(
-            _source_circuit_id_from_entity_id(entity_id)
-        )
+        config_index_value = config_index.get(source_circuit_ids[entity_id])
         if config_index_value is None:
             continue
         config = configs[config_index_value]
@@ -171,15 +171,17 @@ def _source_entity_configs_from_sources(
     mains_entities = set(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
+    eligible_entities = [
+        entity_id
+        for entity_id in source_entities
+        if entity_id not in mains_entities
+        and not _automatic_source_entity_excluded(entity_id)
+        and not untyped_source_entity_excluded(entity_id)
+    ]
+    source_circuit_ids = source_circuit_ids_from_entity_ids(eligible_entities)
     sensors_by_circuit_id: dict[str, list[SensorRef]] = {}
-    for entity_id in source_entities:
-        if (
-            entity_id in mains_entities
-            or _automatic_source_entity_excluded(entity_id)
-            or untyped_source_entity_excluded(entity_id)
-        ):
-            continue
-        circuit_id = _source_circuit_id_from_entity_id(entity_id)
+    for entity_id in eligible_entities:
+        circuit_id = source_circuit_ids[entity_id]
         if not circuit_id:
             continue
         sensors_by_circuit_id.setdefault(circuit_id, []).append(
@@ -665,6 +667,31 @@ def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     )
 
 
+def source_circuit_ids_from_entity_ids(entity_ids: Iterable[str]) -> dict[str, str]:
+    """Return circuit IDs without collapsing duplicate role measurements."""
+    entity_id_list = list(dict.fromkeys(entity_ids))
+    circuit_ids = {
+        entity_id: _source_circuit_id_from_entity_id(entity_id)
+        for entity_id in entity_id_list
+    }
+    collision_keys = [
+        (
+            circuit_ids[entity_id],
+            sensor_role_from_entity_id(entity_id),
+            _entity_id_leg_hint(entity_id),
+        )
+        for entity_id in entity_id_list
+    ]
+    duplicate_keys = {
+        key for key, count in Counter(collision_keys).items() if count > 1
+    }
+    for entity_id, collision_key in zip(entity_id_list, collision_keys, strict=True):
+        qualifier = _source_value_qualifier_from_entity_id(entity_id)
+        if qualifier and collision_key in duplicate_keys:
+            circuit_ids[entity_id] = f"{circuit_ids[entity_id]}_{qualifier}"
+    return circuit_ids
+
+
 def _canonical_source_circuit_id(value: Any) -> str:
     circuit_id = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
     for preserved_prefix in _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES:
@@ -692,10 +719,10 @@ def strip_trailing_source_detail_tokens(object_id: str) -> str:
             break
     while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
         stripped = without_leg
-    if (
-        direction
-        and explicit_sensor_role_from_entity_id(object_id) is SensorRole.ENERGY
-    ):
+    if direction and explicit_sensor_role_from_entity_id(object_id) in {
+        SensorRole.ENERGY,
+        SensorRole.REAL_POWER,
+    }:
         stripped = f"{stripped}_{direction}"
     return stripped or object_id
 
@@ -736,6 +763,20 @@ def _strip_trailing_value_qualifier(object_id: str) -> str:
         if object_id.endswith(suffix):
             return object_id[: -len(suffix)]
     return object_id
+
+
+def _source_value_qualifier_from_entity_id(entity_id: str) -> str:
+    object_id = _entity_object_id(entity_id)
+    stripped = _strip_trailing_source_qualifiers(object_id)
+    removed_tokens = object_id.removeprefix(stripped).split("_")
+    return next(
+        (
+            suffix.removeprefix("_")
+            for suffix in _SOURCE_VALUE_QUALIFIER_SUFFIXES
+            if suffix.removeprefix("_") in removed_tokens
+        ),
+        "",
+    )
 
 
 def _source_metric_suffix_exposed(object_id: str) -> bool:

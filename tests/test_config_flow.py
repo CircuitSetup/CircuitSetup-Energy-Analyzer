@@ -3742,6 +3742,26 @@ def test_assignment_groups_share_scaled_metric_suffixes() -> None:
     )
 
 
+def test_assignment_groups_separate_duplicate_qualified_measurements() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        [
+            "sensor.panel_power",
+            "sensor.panel_voltage",
+            "sensor.panel_voltage_max",
+        ]
+    )
+
+    assert [group["group_id"] for group in groups] == ["panel", "panel_max"]
+    assert groups[0]["entity_ids"] == (
+        "sensor.panel_power",
+        "sensor.panel_voltage",
+    )
+
+
 def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,

@@ -115,6 +115,52 @@ def test_config_parser_keeps_directional_energy_counters_separate() -> None:
     ]
 
 
+def test_config_parser_keeps_directional_power_sensors_separate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.grid_power_import",
+                "sensor.grid_power_export",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["grid_import", "grid_export"]
+
+
+def test_config_parser_separates_duplicate_qualified_measurements() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage",
+                "sensor.panel_voltage_max",
+                "sensor.fridge_energy",
+                "sensor.fridge_energy_today",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == [
+        "panel",
+        "panel_max",
+        "fridge",
+        "fridge_today",
+    ]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.panel_power",
+        "sensor.panel_voltage",
+    ]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
