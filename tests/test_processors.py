@@ -7447,6 +7447,81 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     )
 
 
+def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        mode=CircuitMode.MIXED,
+    )
+    observed_matches = []
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, match, _context: observed_matches.append(match)
+        or [],
+    )
+
+    def sample(seconds: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=seconds),
+            circuit_id="mixed",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    known_event = CircuitEvent(
+        timestamp=now + timedelta(seconds=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 320.0},
+    )
+    processor.process(sample(0, 100.0), config, context, events=())
+    processor.process(sample(5, 420.0), config, context, events=(known_event,))
+    result = processor.process(sample(10, 420.0), config, context, events=())
+
+    assert observed_matches == []
+    assert result.alerts == []
+    assert processor.total_events_by_circuit["mixed"] == 1
+    assert len(processor.unmatched_edges_by_circuit["mixed"]) == 1
+    assert not any(
+        update.path[0].startswith("nilm_topology") for update in result.state_updates
+    )
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

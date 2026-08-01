@@ -5,8 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.circuitsetup_energy_analyzer.const import (
+    CONF_ENABLE_EXPERIMENTAL_NILM,
+)
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
     NilmController,
+)
+from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitMode,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import (
     FeatureStoreData,
@@ -16,10 +23,15 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 
 
 def test_nilm_controller_filters_known_load_events_from_registry() -> None:
+    mains_config = SimpleNamespace(
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+    )
     controller = _nilm_controller(
         SimpleNamespace(
             circuit_registry=SimpleNamespace(
                 known_load_circuit_ids=frozenset({"fridge"}),
+                config_for_circuit=lambda _circuit_id: mains_config,
             ),
         )
     )
@@ -32,6 +44,58 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+@pytest.mark.parametrize(
+    "config",
+    (
+        SimpleNamespace(
+            mode=CircuitMode.SINGLE_PHASE,
+            appliance_profile=ApplianceProfile.MIXED,
+        ),
+        SimpleNamespace(
+            mode=CircuitMode.MIXED,
+            appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        ),
+    ),
+)
+def test_nilm_controller_enables_mixed_sources_only_when_experimental(
+    config: SimpleNamespace,
+) -> None:
+    disabled = _nilm_controller(
+        SimpleNamespace(options={}, entry_data={})
+    )
+    enabled = _nilm_controller(
+        SimpleNamespace(
+            options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+            entry_data={},
+        )
+    )
+
+    assert disabled.enabled_for_config(config) is False
+    assert enabled.enabled_for_config(config) is True
+
+
+def test_nilm_controller_does_not_mask_known_loads_for_mixed_source() -> None:
+    mixed_config = SimpleNamespace(
+        mode=CircuitMode.MIXED,
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
+    )
+    controller = _nilm_controller(
+        SimpleNamespace(
+            circuit_registry=SimpleNamespace(
+                known_load_circuit_ids=frozenset({"fridge"}),
+                config_for_circuit=lambda _circuit_id: mixed_config,
+            ),
+        )
+    )
+
+    assert list(
+        controller.known_load_events(
+            "mixed",
+            [SimpleNamespace(circuit_id="fridge")],
+        )
+    ) == []
 
 
 def test_nilm_controller_builds_signature_payloads_with_public_current_time() -> None:
@@ -113,7 +177,7 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     store_data = FeatureStoreData(
         nilm_session_history_by_circuit={
-            "mains": [
+            "mixed": [
                 {
                     "session_id": "session-old",
                     "assignment_id": "assignment-dishwasher",
@@ -139,7 +203,7 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
         SimpleNamespace(current_time=lambda: now, store_data=store_data)
     )
     assignment = controller.upsert_assignment(
-        "mains",
+        "mixed",
         assignment_id="assignment-dishwasher",
         appliance_id="dishwasher",
         label="Kitchen Dishwasher",
@@ -159,11 +223,11 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
         SimpleNamespace(current_time=lambda: now, store_data=restored)
     )
     restored_assignment = restarted.assignment_for_id(
-        "mains",
+        "mixed",
         "assignment-dishwasher",
     )
     history = restarted.assignment_session_history(
-        "mains",
+        "mixed",
         "assignment-dishwasher",
     )
 
