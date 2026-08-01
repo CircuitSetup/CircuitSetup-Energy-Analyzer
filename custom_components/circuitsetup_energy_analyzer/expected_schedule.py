@@ -282,12 +282,26 @@ def refresh_expected_schedule_contexts(
     contexts: dict[str, dict[str, Any]] = {}
     alerts: list[AlertEvidence] = []
     changed = False
+    configs = {
+        config.circuit_id: config
+        for config in getattr(coordinator, "circuit_configs", ())
+    }
 
     for appliance_key, raw in raw_settings.items():
         key = str(appliance_key or "").strip()
         settings = schedule_settings_from_dict(raw, appliance_key=key)
         target = _schedule_target(store_data, key)
         circuit_id = target.circuit_id if target else None
+        config = configs.get(circuit_id)
+        if (
+            target is not None
+            and target.assignment_id is None
+            and config is not None
+            and not supports_direct_appliance_analysis(config)
+        ):
+            if raw_evidence.pop(key, None) is not None:
+                changed = True
+            continue
         is_running = _target_is_running(state, store_data, target, local_now)
         source_available = _target_source_available(
             coordinator,

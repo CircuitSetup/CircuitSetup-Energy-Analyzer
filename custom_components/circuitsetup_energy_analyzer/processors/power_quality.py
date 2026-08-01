@@ -9,7 +9,7 @@ from typing import Any
 
 from ..alerting import Observation
 from ..baseline import build_baseline
-from ..models import CircuitConfig
+from ..models import ApplianceProfile, CircuitConfig, CircuitMode
 from ..normalize import NormalizedCircuitSample
 from ..power_quality import (
     PowerQualityEvidence,
@@ -68,7 +68,17 @@ class PowerQualityProcessor:
         """Record power quality state and return repeated anomaly alerts."""
         circuit_id = circuit_config.circuit_id
         if not supports_power_quality_analysis(circuit_config):
-            return PowerQualityResult(clear_power_quality_state=circuit_id)
+            return PowerQualityResult(
+                state_updates=(
+                    [StateUpdate(("learning_by_circuit", circuit_id), False)]
+                    if (
+                        circuit_config.mode is CircuitMode.MIXED
+                        or circuit_config.appliance_profile is ApplianceProfile.MIXED
+                    )
+                    else []
+                ),
+                clear_power_quality_state=circuit_id,
+            )
         policy = self._alert_policy_for_circuit(circuit_id)
         features = extract_power_quality_features(sample)
         if not features:

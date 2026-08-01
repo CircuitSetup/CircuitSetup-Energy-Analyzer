@@ -8299,6 +8299,63 @@ def test_power_quality_processor_updates_generation_state_and_returns_alert() ->
     assert updates[("power_factor_drift_by_circuit", "fridge")] > 0.0
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    [
+        (ApplianceProfile.REFRIGERATOR, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ],
+)
+def test_power_quality_processor_marks_mixed_circuit_aggregate_ready(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    policy = _CaptureAlertPolicy()
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.PowerQualityProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+        learning_mature=lambda _config, _now: True,
+        seed_demo_event_history=lambda _config, _now: None,
+        seed_demo_power_quality_baselines=lambda _config, _features: None,
+    )
+
+    result = processor.process(
+        _sample(0, 120.0),
+        CircuitConfig(
+            circuit_id="fridge",
+            name="Kitchen Fridge",
+            appliance_profile=profile,
+            mode=mode,
+        ),
+        context,
+    )
+
+    assert result.clear_power_quality_state == "fridge"
+    assert [(update.path, update.value) for update in result.state_updates] == [
+        (("learning_by_circuit", "fridge"), False)
+    ]
+    assert result.alerts == []
+    assert policy.observations == []
+    assert context.store_data.baselines == {}
+
+
 def test_power_quality_processor_requests_clear_when_features_missing() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

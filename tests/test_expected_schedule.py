@@ -264,6 +264,30 @@ def _coordinator(
     )
 
 
+def test_refresh_discards_mixed_direct_circuit_schedule_context() -> None:
+    coordinator = _coordinator()
+    coordinator.circuit_configs = (
+        CircuitConfig(
+            circuit_id="pool_pump",
+            name="Shared Pool Circuit",
+            appliance_profile=ApplianceProfile.POOL_PUMP,
+            mode=CircuitMode.MIXED,
+        ),
+    )
+    coordinator.store_data.appliance_schedule_evidence["circuit:pool_pump"] = {
+        "missed_window_ids": ["stale"]
+    }
+
+    alerts = refresh_expected_schedule_contexts(
+        coordinator,
+        datetime(2026, 7, 13, 12, 0, tzinfo=TIME_ZONE),
+    )
+
+    assert alerts == []
+    assert coordinator.state.expected_schedule_by_appliance == {}
+    assert coordinator.store_data.appliance_schedule_evidence == {}
+
+
 def _nilm_coordinator(
     sessions: list[dict[str, object]],
     *,

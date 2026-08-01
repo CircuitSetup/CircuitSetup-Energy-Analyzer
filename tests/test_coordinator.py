@@ -14746,6 +14746,7 @@ async def test_runtime_mixed_circuit_tracks_power_quality_without_notification(
     assert notifications == []
     assert "mixed" not in coordinator.state.power_quality_score_by_circuit
     assert "mixed" not in coordinator.state.power_quality_evidence_by_circuit
+    assert coordinator.state.learning_by_circuit["mixed"] is False
 
 
 @pytest.mark.asyncio
