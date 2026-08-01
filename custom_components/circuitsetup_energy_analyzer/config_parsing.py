@@ -217,7 +217,7 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
         _strip_trailing_source_qualifiers(object_id)
     )
     harmonic_measurement = re.search(
-        r"(?:^|_)(?:total_)?harmonic(?:_(?:(?:active|reactive|apparent|real)_power|peak_(?:current|amps?|a)|power_factor|line_frequency|distortion|energy|frequency|current|voltage|power|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$",
+        r"(?:^|_)(?:total_)?harmonic(?:_\d+)?(?:_(?:(?:active|reactive|apparent|real)_power|peak_(?:current|amps?|a)|power_factor|line_frequency|distortion|energy|frequency|current|voltage|power|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$",
         harmonic_object_id,
     )
     reactive_energy_measurement = (

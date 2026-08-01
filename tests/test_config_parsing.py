@@ -121,6 +121,7 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.mains_harmonic_energy"},
                         {"entity_id": "sensor.mains_harmonic_peak_current"},
                         {"entity_id": "sensor.mains_harmonic_current_a"},
+                        {"entity_id": "sensor.mains_harmonic_3_active_power"},
                         {"entity_id": "sensor.energy_meter_mains_l1_watts"},
                         {"entity_id": "sensor.energy_meter_frequency_1"},
                         {"entity_id": "sensor.energy_meter_voltage_1"},
