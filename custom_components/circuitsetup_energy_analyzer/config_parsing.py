@@ -486,6 +486,11 @@ _SOURCE_METRIC_SUFFIXES = (
     "_peak_a",
     "_reactive_power",
     "_apparent_power",
+    "_kvarh",
+    "_kvar",
+    "_mvar",
+    "_kva",
+    "_mva",
     "_power_factor",
     "_line_frequency",
     "_real_power",
@@ -498,6 +503,10 @@ _SOURCE_METRIC_SUFFIXES = (
     "_watt",
     "_amps",
     "_amp",
+    "_ka",
+    "_ma",
+    "_kv",
+    "_mv",
     "_power",
     "_kw",
     "_mw",
@@ -505,6 +514,7 @@ _SOURCE_METRIC_SUFFIXES = (
     "_mwh",
     "_wh",
     "_var",
+    "_varh",
     "_va",
     "_pf",
     "_hz",
@@ -547,17 +557,29 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
         return SensorRole.PEAK_CURRENT
     if _has_metric_suffix(object_id, ("power_factor", "pf")):
         return SensorRole.POWER_FACTOR
-    if _has_metric_suffix(object_id, ("reactive_power", "reactive", "var")):
+    if _has_metric_suffix(
+        object_id,
+        ("reactive_power", "reactive", "kvar", "mvar", "var"),
+    ):
         return SensorRole.REACTIVE_POWER
-    if _has_metric_suffix(object_id, ("apparent_power", "apparent", "va")):
+    if _has_metric_suffix(
+        object_id,
+        ("apparent_power", "apparent", "kva", "mva", "va"),
+    ):
         return SensorRole.APPARENT_POWER
     if _has_metric_suffix(object_id, ("frequency", "line_frequency", "hz")):
         return SensorRole.FREQUENCY
-    if _has_metric_suffix(object_id, ("current", "amps", "amp", "a")):
+    if _has_metric_suffix(object_id, ("current", "amps", "amp", "ka", "ma", "a")):
         return SensorRole.CURRENT
-    if _has_metric_suffix(object_id, ("voltage", "volts", "volt", "v")):
+    if _has_metric_suffix(
+        object_id,
+        ("voltage", "volts", "volt", "kv", "mv", "v"),
+    ):
         return SensorRole.VOLTAGE
-    if _has_metric_suffix(object_id, ("energy", "kwh", "wh", "mwh")):
+    if _has_metric_suffix(
+        object_id,
+        ("energy", "kvarh", "varh", "kwh", "mwh", "wh"),
+    ):
         return SensorRole.ENERGY
     if _has_metric_suffix(
         object_id,
