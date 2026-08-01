@@ -24,8 +24,26 @@ _UNIT_SCALE_BY_ROLE = {
         "Mva": 1_000_000.0,
     },
     SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
+    SensorRole.PEAK_CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
     SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001, "Mv": 1_000_000.0},
 }
+
+
+def normalize_sensor_value(
+    value: float,
+    role: SensorRole,
+    unit: str | None,
+) -> float:
+    """Normalize a sensor value to the base unit used for its role."""
+    if role is SensorRole.ENERGY:
+        return _normalize_energy_kwh(value, unit)
+    if unit is None:
+        return value
+    normalized_unit = unit.strip()
+    normalized_unit = (
+        normalized_unit[:1].replace("K", "k") + normalized_unit[1:].lower()
+    )
+    return value * _UNIT_SCALE_BY_ROLE.get(role, {}).get(normalized_unit, 1.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,13 +136,7 @@ def build_circuit_sample(
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
-        if sensor.role is SensorRole.ENERGY:
-            value = _normalize_energy_kwh(value, source.unit)
-        elif source.unit is not None:
-            unit = source.unit.strip()
-            scales = _UNIT_SCALE_BY_ROLE.get(sensor.role, {})
-            normalized_unit = unit[:1].replace("K", "k") + unit[1:].lower()
-            value *= scales.get(normalized_unit, 1.0)
+        value = normalize_sensor_value(value, sensor.role, source.unit)
         if not math.isfinite(value):
             values[sensor.role] = None
             quality_issues.append(f"{sensor.entity_id} non_finite")

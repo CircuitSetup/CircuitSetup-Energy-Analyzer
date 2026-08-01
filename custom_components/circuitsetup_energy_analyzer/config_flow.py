@@ -123,6 +123,10 @@ except (ImportError, ModuleNotFoundError):
 
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
+from .config_parsing import (
+    sensor_role_from_entity_id,
+    strip_trailing_source_detail_tokens,
+)
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_BLOWER_REPRESENTS_GAS_HEAT,
@@ -185,7 +189,6 @@ from .discovery import (
     async_discover_utility_energy_entities,
     async_discover_utility_statistic_ids,
     friendly_source_name,
-    infer_sensor_role,
 )
 from .entity import (
     normalize_entity_detail_level,
@@ -304,50 +307,6 @@ FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
 _SELECTOR_NO_ITEMS_VALUE = "__no_items_available__"
-_SOURCE_METRIC_SUFFIXES = (
-    "_peak_current",
-    "_peak_amps",
-    "_peak_amp",
-    "_peak_a",
-    "_reactive_power",
-    "_apparent_power",
-    "_power_factor",
-    "_line_frequency",
-    "_real_power",
-    "_active_power",
-    "_frequency",
-    "_current",
-    "_voltage",
-    "_energy",
-    "_watts",
-    "_watt",
-    "_amps",
-    "_amp",
-    "_power",
-    "_kwh",
-    "_mwh",
-    "_wh",
-    "_var",
-    "_va",
-    "_pf",
-    "_hz",
-)
-_SOURCE_LEG_SUFFIXES = (
-    "_leg_a",
-    "_leg_b",
-    "_line_a",
-    "_line_b",
-    "_phase_a",
-    "_phase_b",
-    "_leg_1",
-    "_leg_2",
-    "_line_1",
-    "_line_2",
-    "_phase_1",
-    "_phase_2",
-    "_l1",
-    "_l2",
-)
 _ANALYZER_SOURCE_ENTITY_PREFIXES = (
     "circuitsetup_energy_analyzer_",
     "cs_energy_analyzer_",
@@ -3396,8 +3355,7 @@ def _normalize_retention_mode(raw_retention_mode: str) -> str:
 
 
 def _assignment_sensor_role(entity_id: str) -> SensorRole:
-    role = infer_sensor_role(entity_id, entity_id)
-    return role if role is not None else SensorRole.REAL_POWER
+    return sensor_role_from_entity_id(entity_id)
 
 
 def _assignment_leg_hint(entity_id: str) -> str | None:
@@ -3418,7 +3376,7 @@ def _assignment_leg_hint(entity_id: str) -> str | None:
 def _assignment_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = str(entity_id).split(".")[-1].strip().lower()
     return _canonical_assignment_circuit_id(
-        _strip_trailing_source_detail_tokens(object_id)
+        strip_trailing_source_detail_tokens(object_id)
     )
 
 
@@ -3431,17 +3389,6 @@ def _canonical_assignment_circuit_id(value: Any) -> str:
         if circuit_id.startswith(prefix):
             return circuit_id.removeprefix(prefix) or circuit_id
     return circuit_id
-
-
-def _strip_trailing_source_detail_tokens(object_id: str) -> str:
-    stripped = object_id
-    while True:
-        for suffix in (*_SOURCE_METRIC_SUFFIXES, *_SOURCE_LEG_SUFFIXES):
-            if stripped.endswith(suffix):
-                stripped = stripped[: -len(suffix)]
-                break
-        else:
-            return stripped or object_id
 
 
 def _suggest_assignment_profile_mode(

@@ -130,7 +130,7 @@ def _configs_with_merged_source_entity_refs(
                 *config.sensors,
                 SensorRef(
                     entity_id=entity_id,
-                    role=_sensor_role_from_entity_id(entity_id),
+                    role=sensor_role_from_entity_id(entity_id),
                     leg=_entity_id_leg_hint(entity_id),
                 ),
             ),
@@ -185,7 +185,7 @@ def _source_entity_configs_from_sources(
         sensors_by_circuit_id.setdefault(circuit_id, []).append(
             SensorRef(
                 entity_id=entity_id,
-                role=_sensor_role_from_entity_id(entity_id),
+                role=sensor_role_from_entity_id(entity_id),
                 leg=_entity_id_leg_hint(entity_id),
             )
         )
@@ -247,7 +247,7 @@ def mains_context_config_from_sources(
         sensors=tuple(
             SensorRef(
                 entity_id=entity_id,
-                role=_sensor_role_from_entity_id(entity_id),
+                role=sensor_role_from_entity_id(entity_id),
                 leg=_entity_id_leg_hint(entity_id),
             )
             for entity_id in mains_entities
@@ -469,7 +469,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
             return None
         return SensorRef(
             entity_id=raw_sensor,
-            role=_sensor_role_from_entity_id(raw_sensor),
+            role=sensor_role_from_entity_id(raw_sensor),
             leg=_entity_id_leg_hint(raw_sensor),
         )
     if not isinstance(raw_sensor, dict):
@@ -482,7 +482,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if raw_role is None:
         if _untyped_source_entity_excluded(str(entity_id)):
             return None
-        role = _sensor_role_from_entity_id(str(entity_id))
+        role = sensor_role_from_entity_id(str(entity_id))
     else:
         try:
             role = SensorRole(raw_role)
@@ -565,7 +565,7 @@ _ANALYZER_SOURCE_ENTITY_PREFIXES = (
 _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
-def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
+def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
     object_id = _entity_object_id(entity_id)
     if _has_metric_suffix(
         object_id,
@@ -618,7 +618,7 @@ def _sensor_role_from_entity_id(entity_id: str) -> SensorRole:
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = _entity_object_id(entity_id)
     return _canonical_source_circuit_id(
-        _strip_trailing_source_detail_tokens(object_id)
+        strip_trailing_source_detail_tokens(object_id)
     )
 
 
@@ -633,7 +633,7 @@ def _canonical_source_circuit_id(value: Any) -> str:
     return circuit_id
 
 
-def _strip_trailing_source_detail_tokens(object_id: str) -> str:
+def strip_trailing_source_detail_tokens(object_id: str) -> str:
     stripped = object_id
     while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
         stripped = without_leg

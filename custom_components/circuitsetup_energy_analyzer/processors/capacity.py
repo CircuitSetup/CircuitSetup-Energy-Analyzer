@@ -9,7 +9,7 @@ from typing import Any
 from ..alerting import Observation
 from ..capacity import CapacityResult, CapacitySettings, evaluate_circuit_capacity
 from ..models import AlertEvidence, CircuitConfig, CircuitMode, SensorRole
-from ..normalize import NormalizedCircuitSample, SourceState
+from ..normalize import NormalizedCircuitSample, SourceState, normalize_sensor_value
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type CapacitySettingsProvider = Callable[[str], CapacitySettings]
@@ -147,7 +147,11 @@ class CapacityProcessor:
             if source is None:
                 continue
             try:
-                value = float(source.state)
+                value = normalize_sensor_value(
+                    float(source.state),
+                    role,
+                    source.unit,
+                )
             except ValueError:
                 continue
             if value != 0.0:

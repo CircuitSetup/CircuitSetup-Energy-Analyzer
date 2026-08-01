@@ -3726,6 +3726,44 @@ def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
     )
 
 
+def test_assignment_groups_share_scaled_metric_suffixes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.pump_power", "sensor.pump_kva"]
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["entity_ids"] == (
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    )
+
+
+def test_guided_assignment_uses_terminal_metric_role() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entity_id = "sensor.high_voltage_panel_active_power"
+    circuit = config_flow._circuit_from_assignment_group(
+        {
+            "circuit_id": "high_voltage_panel",
+            "name": "High Voltage Panel",
+            "entity_ids": (entity_id,),
+        },
+        {
+            "include_circuit": True,
+            "included_sensors": [entity_id],
+            "circuit_name": "High Voltage Panel",
+            "appliance_profile": "mixed",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == "real_power"
+
+
 def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
