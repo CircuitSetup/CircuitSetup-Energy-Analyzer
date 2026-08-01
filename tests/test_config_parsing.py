@@ -94,6 +94,27 @@ def test_config_parser_preserves_metric_free_numbered_channels() -> None:
     assert [config.circuit_id for config in configs] == ["channel_1", "channel_2"]
 
 
+def test_config_parser_keeps_directional_energy_counters_separate() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.grid_energy_import",
+                "sensor.grid_energy_export",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["grid_import", "grid_export"]
+    assert [config.sensors[0].role for config in configs] == [
+        SensorRole.ENERGY,
+        SensorRole.ENERGY,
+    ]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

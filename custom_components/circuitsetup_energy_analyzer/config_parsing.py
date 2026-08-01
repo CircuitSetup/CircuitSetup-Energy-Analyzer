@@ -678,12 +678,25 @@ def _canonical_source_circuit_id(value: Any) -> str:
 
 def strip_trailing_source_detail_tokens(object_id: str) -> str:
     stripped = _strip_trailing_source_qualifiers(object_id)
+    direction = next(
+        (
+            token
+            for token in object_id.removeprefix(stripped).split("_")
+            if token in {"import", "export"}
+        ),
+        "",
+    )
     for suffix in _SOURCE_METRIC_SUFFIXES:
         if stripped.endswith(suffix):
             stripped = stripped[: -len(suffix)]
             break
     while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
         stripped = without_leg
+    if (
+        direction
+        and explicit_sensor_role_from_entity_id(object_id) is SensorRole.ENERGY
+    ):
+        stripped = f"{stripped}_{direction}"
     return stripped or object_id
 
 
