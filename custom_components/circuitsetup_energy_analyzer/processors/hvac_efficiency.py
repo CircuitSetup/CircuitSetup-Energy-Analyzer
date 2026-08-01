@@ -969,9 +969,30 @@ def _compact_circuit_response_history(
                 contexts.setdefault(response_comparison_token(episode), []).append(
                     episode
                 )
+        context_by_stream = context.store_data.hvac_response_context_by_stream
+        raw_context = context_by_stream.get(stream_id, {})
+        observed = str(raw_context.get("observed") or "")
+        observed_at = str(raw_context.get("observed_at") or "")
+        try:
+            previous_observed_at = datetime.fromisoformat(observed_at)
+        except ValueError:
+            previous_observed_at = None
+        latest_observed = max(
+            episodes,
+            key=lambda episode: episode.ended_at or episode.started_at,
+            default=None,
+        )
+        if latest_observed is not None and (
+            previous_observed_at is None
+            or previous_observed_at.tzinfo is None
+            or (latest_observed.ended_at or latest_observed.started_at)
+            > previous_observed_at
+        ):
+            observed = response_comparison_token(latest_observed)
+            observed_at = (
+                latest_observed.ended_at or latest_observed.started_at
+            ).isoformat()
         if contexts:
-            context_by_stream = context.store_data.hvac_response_context_by_stream
-            raw_context = context_by_stream.get(stream_id, {})
             selected = str(raw_context.get("selected") or "")
             known = {
                 str(token)
@@ -1028,6 +1049,9 @@ def _compact_circuit_response_history(
                 "selected": selected,
                 "known": sorted(known | set(contexts)),
             }
+            if observed:
+                updated_context["observed"] = observed
+                updated_context["observed_at"] = observed_at
             if candidate:
                 updated_context.update(
                     candidate=candidate,
@@ -1048,6 +1072,16 @@ def _compact_circuit_response_history(
                 )
                 for episode in episodes
             ]
+        elif observed and (
+            raw_context.get("observed") != observed
+            or raw_context.get("observed_at") != observed_at
+        ):
+            context_by_stream[stream_id] = {
+                **raw_context,
+                "observed": observed,
+                "observed_at": observed_at,
+            }
+            changed = True
         compacted = pending_old_era
         for episode in compact_completed_core_days(
             episodes,
@@ -1137,12 +1171,12 @@ def _circuit_efficiency_payload(
     for stream_id, episodes in episodes_by_stream.items():
         mode = stream_id.rsplit("|", 1)[-1]
         opposing_mode = "heating" if mode == "cooling" else "cooling"
+        response_context = context.store_data.hvac_response_context_by_stream.get(
+            stream_id,
+            {},
+        )
         selected_context = str(
-            context.store_data.hvac_response_context_by_stream.get(
-                stream_id,
-                {},
-            ).get("selected")
-            or ""
+            response_context.get("observed") or response_context.get("selected") or ""
         )
         evaluations[stream_id] = {
             **_evaluation_to_dict(

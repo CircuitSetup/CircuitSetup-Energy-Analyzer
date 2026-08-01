@@ -1307,6 +1307,88 @@ def test_hvac_response_change_emits_mature_slower_alert() -> None:
     assert handoff.preserved_alerts == []
 
 
+def test_hvac_incomplete_temperature_handoff_retires_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alerting import (
+        ConservativeAlertPolicy,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    old_temperature = "sensor.downstairs_temperature"
+    replacement_temperature = "sensor.replacement_downstairs_temperature"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    linked = {
+        CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat],
+        CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+            thermostat: old_temperature,
+        },
+    }
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            old_temperature,
+            72.0,
+            72.0,
+            "cool",
+            "idle",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={"heat_pump": linked},
+        running_circuit_ids=set(),
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    history = _hvac_response_history(stream_id, recent_rate=12.5)
+    for raw in history:
+        raw["temperature_entity_id"] = old_temperature
+    context.store_data.hvac_response_history_by_stream[stream_id] = history
+    processor = HvacEfficiencyProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: ConservativeAlertPolicy(
+            min_repeated=1,
+            min_total_score=1.0,
+            min_average_score=1.0,
+            min_baseline_confidence=0.0,
+        )
+    )
+    initial = processor.process([(heat_pump, SimpleNamespace())], context)
+    context.state.active_alerts_by_circuit = {"heat_pump": initial.alerts}
+    replacement = _hvac_response_history(stream_id, count=56)[-1]
+    replacement_started = datetime.fromisoformat(str(replacement["started_at"]))
+    replacement.update(
+        temperature_entity_id=replacement_temperature,
+        ended_at=(replacement_started + timedelta(minutes=10)).isoformat(),
+        elapsed_minutes=10.0,
+        active_minutes=10.0,
+        outdoor_temperature_minutes=10.0,
+        complete=False,
+        excluded_from_baseline=True,
+    )
+    context.store_data.hvac_response_history_by_stream[stream_id].append(replacement)
+    context = replace(
+        context,
+        options={
+            CONF_ADVANCED_SETTINGS: {
+                "heat_pump": {
+                    **linked,
+                    CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                        thermostat: replacement_temperature,
+                    },
+                }
+            }
+        },
+    )
+
+    handoff = processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert _state_update_values(
+        handoff,
+        "hvac_efficiency_by_circuit",
+    )["heat_pump"]["streams"][stream_id]["status"] == "no_data"
+    assert handoff.preserved_alerts == []
+
+
 def test_hvac_efficiency_matures_with_lightweight_retention() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
