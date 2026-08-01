@@ -570,6 +570,40 @@ def test_hvac_efficiency_retains_excluded_call_as_same_day_marker() -> None:
     assert marker["excluded_from_baseline"] is True
 
 
+def test_hvac_instant_marker_deduplication_is_scoped_to_baseline_era() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        HvacEfficiencyProcessor,
+    )
+
+    thermostat = "climate.downstairs"
+    heat_pump = _hvac_config("heat_pump", ApplianceProfile.HEAT_PUMP)
+    context = _hvac_context(
+        configs=(heat_pump,),
+        observation=ThermostatObservation(
+            thermostat,
+            None,
+            75.25,
+            75.2,
+            "cool",
+            "cooling",
+            ("current_temperature", "temperature", "hvac_action"),
+        ),
+        advanced_settings={
+            "heat_pump": {CONF_LINKED_THERMOSTAT_ENTITIES: [thermostat]}
+        },
+        running_circuit_ids={"heat_pump"},
+    )
+    stream_id = f"heat_pump|{thermostat}|cooling"
+    processor = HvacEfficiencyProcessor()
+
+    processor.process([(heat_pump, SimpleNamespace())], context)
+    context.store_data.hvac_baseline_era_by_stream[stream_id] = "era-2"
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    history = context.store_data.hvac_response_history_by_stream[stream_id]
+    assert [raw["baseline_era"] for raw in history] == ["initial", "era-2"]
+
+
 def test_hvac_efficiency_persists_orphaned_call_as_same_day_marker() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,

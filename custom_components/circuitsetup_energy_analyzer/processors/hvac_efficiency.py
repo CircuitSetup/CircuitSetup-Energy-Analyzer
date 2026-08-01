@@ -285,6 +285,8 @@ class HvacEfficiencyProcessor:
                         and local_date(episode.started_at, context.time_zone)
                         == local_date(finalized.started_at, context.time_zone)
                         for raw in history
+                        if str(raw.get("baseline_era", _INITIAL_BASELINE_ERA))
+                        == stored_episode["baseline_era"]
                         if (
                             episode := episode_from_dict(
                                 raw,
