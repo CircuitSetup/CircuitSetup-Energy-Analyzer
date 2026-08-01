@@ -68,7 +68,6 @@ _SETUP_HEALTH_ISSUE_OPTION_STEPS = {
     "missing_circuit_assignments": "assign",
     "missing_energy_source": "sources",
     "missing_temperature_source": "sources",
-    "circuit_mode_mismatch": "assign",
     "missing_electrical_metrics": "assign",
     "missing_mains_source": "mains",
     "check_ct_direction": "assign",
@@ -746,27 +745,6 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
                     circuit,
                     "Capacity tracking needs the circuit breaker or capacity value.",
                     issue="missing_capacity_setting",
-                )
-            )
-
-        if (
-            _setup_health_status(
-                state,
-                "leg_imbalance_status_by_circuit",
-                circuit_id,
-            )
-            == "not_dual_phase"
-        ):
-            issues.append(
-                _setup_health_issue(
-                    "Review circuit assignments",
-                    f"Review the circuit mode for {circuit.name}",
-                    circuit,
-                    (
-                        "A dual-phase check is running on a circuit that is not "
-                        "dual phase."
-                    ),
-                    issue="circuit_mode_mismatch",
                 )
             )
 
