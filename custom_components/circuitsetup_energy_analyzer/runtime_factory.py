@@ -277,7 +277,7 @@ def initialize_runtime(
     )
     self._hvac_efficiency_processor = HvacEfficiencyProcessor(
         alert_policy_for_circuit=(
-            self.alert_policies.appliance_health_short_cycle_alert_policy_for_circuit
+            self.alert_policies.hvac_efficiency_alert_policy_for_circuit
         )
     )
     self.pipeline.configure_processors(

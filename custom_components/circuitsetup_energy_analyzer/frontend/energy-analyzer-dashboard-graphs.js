@@ -2577,25 +2577,6 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       return changed;
     }
 
-    _temperatureUnit(thermostatEntityId) {
-      const stateUnit = String(
-        (this._state(thermostatEntityId) || {}).attributes?.temperature_unit || "",
-      ).trim();
-      if (stateUnit === "°C" || stateUnit.toUpperCase() === "C") return "°C";
-      if (stateUnit === "°F" || stateUnit.toUpperCase() === "F") return "°F";
-      const systemUnit = String(
-        this._hass?.config?.unit_system?.temperature || "",
-      ).trim();
-      return systemUnit === "°C" ? "°C" : "°F";
-    }
-
-    _displayResponse(value, unit) {
-      if (value === null || value === undefined || value === "") return null;
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed)) return null;
-      return unit === "°C" ? parsed * 1.8 : parsed;
-    }
-
     async _loadAssociations() {
       const apiPathWithEntryId = this._associationKey();
       if (!apiPathWithEntryId || this._associationRequest || this._associationLoadKey === apiPathWithEntryId) return;
@@ -2624,23 +2605,19 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._render();
     }
 
-    _responseText(value, unit) {
-      const displayed = this._displayResponse(value, unit);
-      if (displayed === null) return this._label("not_available", "—");
-      return this._labelFormat("minutes_per_degree", "{value} min/{unit}", {
-        value: new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(displayed),
-        unit,
-      });
+    _responseText(value) {
+      const displayed = Number(value);
+      if (!Number.isFinite(displayed)) return this._label("not_available", "—");
+      return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(displayed)} min`;
     }
 
     _modeTile(item, modeName, mode) {
-      const unit = this._temperatureUnit(item.thermostat_entity_id);
       const score = Number(mode.score);
       const ready = mode.status === "ready" && Number.isFinite(score);
       const clampedScore = Math.max(0, Math.min(200, score));
       const scoreText = ready ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(score)}%` : this._label("learning", "Learning");
-      const recent = this._responseText(mode.recent_minutes_per_degree_f, unit);
-      const baseline = this._responseText(mode.baseline_minutes_per_degree_f, unit);
+      const recent = this._responseText(mode.recent_runtime_minutes);
+      const baseline = this._responseText(mode.baseline_runtime_minutes);
       const modeLabel = this._label(modeName, modeName[0].toUpperCase() + modeName.slice(1));
       const ariaLabel = `${item.appliance_name}, ${item.thermostat_name || item.thermostat_entity_id}, ${modeLabel}, ${scoreText}, ${recent}`;
       const trend = String(mode.trend || "");

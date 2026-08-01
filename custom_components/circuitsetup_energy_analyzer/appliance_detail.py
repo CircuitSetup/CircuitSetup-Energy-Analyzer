@@ -1875,11 +1875,11 @@ def _hvac_efficiency_detail(
                     "score": _rounded_number(raw.get("score")),
                     "trend": str(raw.get("finding") or "") or None,
                     "change_percent": _rounded_percent(raw.get("change_ratio")),
-                    "baseline_minutes_per_degree": _rounded_number(
-                        raw.get("baseline_minutes_per_degree")
+                    "baseline_runtime_minutes": _rounded_number(
+                        raw.get("baseline_runtime_minutes")
                     ),
-                    "recent_minutes_per_degree": _rounded_number(
-                        raw.get("recent_minutes_per_degree")
+                    "recent_runtime_minutes": _rounded_number(
+                        raw.get("recent_runtime_minutes")
                     ),
                     "reference_count": int(raw.get("reference_count") or 0),
                     "recent_count": int(raw.get("recent_count") or 0),
@@ -1936,8 +1936,8 @@ def _hvac_efficiency_detail(
                 (row["recent_count"] for row in all_rows),
                 default=0,
             ),
-            "required_reference": 9,
-            "required_recent": 3,
+            "required_reference": 50,
+            "required_recent": 5,
         },
     }
 

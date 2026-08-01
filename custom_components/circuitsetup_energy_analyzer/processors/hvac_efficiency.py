@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from datetime import datetime
 from statistics import median
 from typing import Any
@@ -29,7 +28,8 @@ from ..hvac_efficiency import (
     evaluate_efficiency,
     observation_response_mode,
 )
-from ..models import AlertEvidence, ApplianceProfile, Severity
+from ..local_time import local_date
+from ..models import AlertEvidence, ApplianceProfile
 from ..operating_detection import operating_state_is_running
 from ..profiles import supports_direct_appliance_analysis
 from .base import FeatureResult, ProcessingContext, StateUpdate
@@ -833,6 +833,8 @@ def _circuit_efficiency_payload(
         context.options,
         settings,
     )
+    episodes_by_stream: dict[str, list[HvacResponseEpisode]] = {}
+    baseline_eras: dict[str, str] = {}
     for stream_id, raw_history in history_by_stream.items():
         stream_parts = stream_id.split("|")
         if (
@@ -842,6 +844,8 @@ def _circuit_efficiency_payload(
         ):
             continue
         mode = stream_parts[-1]
+        if mode not in {"heating", "cooling"}:
+            continue
         if config.appliance_profile is ApplianceProfile.HVAC_BLOWER and (
             mode == "cooling"
             or not bool(settings.get(CONF_BLOWER_REPRESENTS_GAS_HEAT, False))
@@ -862,11 +866,27 @@ def _circuit_efficiency_payload(
             == thermostat_mappings[stream_parts[1]]
             if (episode := episode_from_dict(raw)) is not None
         ]
+        episodes_by_stream[stream_id] = episodes
+        baseline_eras[stream_id] = baseline_era
+    dates_by_mode: dict[str, set[Any]] = {"heating": set(), "cooling": set()}
+    for stream_id, episodes in episodes_by_stream.items():
+        dates_by_mode[stream_id.rsplit("|", 1)[-1]].update(
+            local_date(episode.started_at, context.time_zone)
+            for episode in episodes
+        )
+    for stream_id, episodes in episodes_by_stream.items():
+        mode = stream_id.rsplit("|", 1)[-1]
+        opposing_mode = "heating" if mode == "cooling" else "cooling"
         evaluations[stream_id] = {
             **_evaluation_to_dict(
-                evaluate_efficiency(episodes, threshold_pct=threshold)
+                evaluate_efficiency(
+                    episodes,
+                    threshold_pct=threshold,
+                    time_zone=context.time_zone,
+                    excluded_dates=dates_by_mode[opposing_mode],
+                )
             ),
-            "baseline_era": baseline_era,
+            "baseline_era": baseline_eras[stream_id],
         }
     ready_scores = [
         float(evaluation["score"])
@@ -924,7 +944,20 @@ def _append_evaluation_alerts(
     threshold = float(payload["threshold_pct"])
     for stream_id, evaluation in payload["streams"].items():
         finding = evaluation.get("finding")
-        if finding not in {"slower", "faster"}:
+        if finding != "slower":
+            active_alert = _matching_active_alert_for_stream(
+                context,
+                config.circuit_id,
+                "hvac_response_slower",
+                stream_id,
+            )
+            normal_streak = int(
+                dict(evaluation.get("context", {})).get("normal_streak", 0)
+            )
+            if active_alert is not None and (
+                evaluation.get("status") != "ready" or normal_streak < 3
+            ):
+                result.preserved_alerts.append(active_alert)
             continue
         feature = f"hvac_response_{finding}"
         evaluation_context = dict(evaluation.get("context", {}))
@@ -934,7 +967,7 @@ def _append_evaluation_alerts(
             feature=feature,
             score=max(
                 abs(float(evaluation["change_ratio"])) / (threshold / 100.0),
-                1.5,
+                1.0,
             ),
             baseline_confidence=min(
                 1.0,
@@ -942,12 +975,12 @@ def _append_evaluation_alerts(
                     int(evaluation["reference_count"])
                     + int(evaluation["recent_count"])
                 )
-                / 12.0,
+                / 55.0,
             ),
             observed_at=context.now,
-            observed_value=float(evaluation["recent_minutes_per_degree"]),
-            baseline_value=float(evaluation["baseline_minutes_per_degree"]),
-            value_metric="minutes_per_degree",
+            observed_value=float(evaluation["recent_runtime_minutes"]),
+            baseline_value=float(evaluation["baseline_runtime_minutes"]),
+            value_metric="weather_normalized_runtime_minutes",
             message=_finding_message(config, finding, evaluation),
             observation_key=f"{feature}:{stream_id}:{','.join(recent_ids)}",
             features=_finding_features(
@@ -968,8 +1001,6 @@ def _append_evaluation_alerts(
             if active_alert is not None:
                 result.preserved_alerts.append(active_alert)
             continue
-        if finding == "faster":
-            alert = replace(alert, severity=Severity.INFO)
         result.alerts.append(alert)
         result.notifications.append(alert)
 
@@ -987,8 +1018,8 @@ def _finding_features(
         "health_evidence_key": recent_ids[-1] if recent_ids else stream_id,
         "stream_id": stream_id,
         "threshold_pct": threshold,
-        "reference_value": evaluation["baseline_minutes_per_degree"],
-        "recent_value": evaluation["recent_minutes_per_degree"],
+        "reference_value": evaluation["baseline_runtime_minutes"],
+        "recent_value": evaluation["recent_runtime_minutes"],
         "change_percent": float(evaluation["change_ratio"]) * 100.0,
         "confidence": min(
             1.0,
@@ -996,14 +1027,14 @@ def _finding_features(
                 int(evaluation["reference_count"])
                 + int(evaluation["recent_count"])
             )
-            / 12.0,
+            / 55.0,
         ),
-        "reference_episode_count": evaluation["reference_count"],
-        "recent_episode_count": evaluation["recent_count"],
-        "baseline_context": ", ".join(
-            f"{key}={value}"
-            for key, value in sorted(context.items())
-            if key not in {"reference_episode_ids", "recent_episode_ids"}
+        "reference_core_day_count": evaluation["reference_count"],
+        "recent_core_day_count": evaluation["recent_count"],
+        "baseline_context": (
+            f"{context.get('mode', 'HVAC')}, "
+            f"{context.get('thermostat_entity_id', 'thermostat')}, "
+            f"weather-normalized over {evaluation['reference_count']} core days"
         ),
         **context,
     }
@@ -1017,9 +1048,9 @@ def _finding_message(
     percent = round(abs(float(evaluation["change_ratio"])) * 100.0)
     direction = "longer" if finding == "slower" else "less"
     return (
-        f"{config.name} took {percent}% {direction} time per degree than its "
-        "weather-comparable learned response across three recent thermostat "
-        "episodes."
+        f"{config.name} took {percent}% {direction} runtime than its "
+        "weather-normalized response on at least three of five recent HVAC "
+        "core days."
     )
 
 
@@ -1042,6 +1073,25 @@ def _matching_active_alert(
     return None
 
 
+def _matching_active_alert_for_stream(
+    context: ProcessingContext,
+    circuit_id: str,
+    feature: str,
+    stream_id: str,
+) -> AlertEvidence | None:
+    for alert in getattr(
+        context.state,
+        "active_alerts_by_circuit",
+        {},
+    ).get(circuit_id, ()):
+        if (
+            alert.feature == feature
+            and alert.features.get("stream_id") == stream_id
+        ):
+            return alert
+    return None
+
+
 def _evaluation_to_dict(
     evaluation: HvacEfficiencyEvaluation,
 ) -> dict[str, Any]:
@@ -1049,10 +1099,8 @@ def _evaluation_to_dict(
         "status": evaluation.status,
         "score": evaluation.score,
         "change_ratio": evaluation.change_ratio,
-        "baseline_minutes_per_degree": (
-            evaluation.baseline_minutes_per_degree
-        ),
-        "recent_minutes_per_degree": evaluation.recent_minutes_per_degree,
+        "baseline_runtime_minutes": evaluation.baseline_runtime_minutes,
+        "recent_runtime_minutes": evaluation.recent_runtime_minutes,
         "reference_count": evaluation.reference_count,
         "recent_count": evaluation.recent_count,
         "finding": evaluation.finding,

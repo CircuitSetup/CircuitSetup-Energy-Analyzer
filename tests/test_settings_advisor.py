@@ -550,91 +550,50 @@ def test_hvac_candidate_temperature_and_gas_blower_suggestions() -> None:
     assert "thermostat_temperature_sensor_map" not in has_climate_temperature
 
 
-def test_hvac_efficiency_threshold_uses_nearest_rank_p95() -> None:
+def test_hvac_efficiency_threshold_is_not_auto_recommended() -> None:
     advisor = _advisor()
-    deviations = [10.0] * 18 + [15.0, 15.0]
-    episodes = [
-        {
-            "complete": True,
-            "excluded_from_baseline": False,
-            "alerted": False,
-            "context_key": "cooling|very_hot|summer",
-            "absolute_deviation_percent": deviation,
-        }
-        for deviation in deviations
-    ]
-    episodes.append({**episodes[0], "alerted": True})
-    recommendation = _only_setting(
+    keys = _setting_keys(
         advisor.build_settings_recommendations(
             _hvac_advisor_inputs(
                 advisor,
                 advanced_settings={"hvac_efficiency_change_threshold_pct": 25.0},
-                episodes=episodes,
+                episodes=[{"absolute_deviation_percent": 99.0}] * 100,
             )
-        ),
-        "hvac_efficiency_change_threshold_pct",
+        )
     )
 
-    assert recommendation.suggested_value == 20.0
-    assert recommendation.evidence["eligible_episode_count"] == 20
-    assert recommendation.evidence["p95_absolute_deviation_pct"] == 15.0
-    assert recommendation.evidence["weather_context"] == (
-        "cooling|very_hot|summer"
-    )
-    assert advisor.recommendation_evidence_fingerprint(recommendation) == (
-        "hvac_efficiency_threshold:"
-        "episodes=20;p95=15.0;context=cooling|very_hot|summer"
-    )
+    assert "hvac_efficiency_change_threshold_pct" not in keys
 
 
-@pytest.mark.parametrize(
-    "invalid_update",
-    [
-        {"complete": False},
-        {"excluded_from_baseline": True},
-        {"alerted": True},
-    ],
-)
-def test_hvac_efficiency_threshold_skips_invalid_or_near_current_evidence(
-    invalid_update: dict[str, bool],
-) -> None:
+def test_legacy_hvac_threshold_evidence_hides_internal_context_key() -> None:
     advisor = _advisor()
-    episodes = [
-        {
-            "complete": True,
-            "excluded_from_baseline": False,
-            "alerted": False,
-            "context_key": "cooling|very_hot|summer",
-            "absolute_deviation_percent": 15.0,
-        }
-        for _ in range(20)
-    ]
-    episodes[-1].update(invalid_update)
-    invalid_keys = _setting_keys(
-        advisor.build_settings_recommendations(
-            _hvac_advisor_inputs(advisor, episodes=episodes)
-        )
-    )
-    near_keys = _setting_keys(
-        advisor.build_settings_recommendations(
-            _hvac_advisor_inputs(
-                advisor,
-                advanced_settings={"hvac_efficiency_change_threshold_pct": 22.0},
-                episodes=[
-                    {
-                        **episode,
-                        "complete": True,
-                        "excluded_from_baseline": False,
-                        "alerted": False,
-                    }
-                    for episode in episodes
-                ],
+    recommendation = _recommendation(
+        advisor,
+        recommendation_id="legacy",
+        unique_key="ac2:hvac_efficiency_change_threshold_pct",
+        circuit_id="ac2",
+        setting_key="hvac_efficiency_change_threshold_pct",
+        setting_label="HVAC Slower Response Threshold",
+        current_value=25.0,
+        suggested_value=50.0,
+        unit="%",
+        feature="hvac_efficiency_threshold",
+        group="HVAC",
+        confidence=1.0,
+        reason="Legacy recommendation",
+        evidence={
+            "weather_context": (
+                "ac2|hvac_compressor|climate.upstairs||cooling|"
+                "thermostat_call|warm|summer|cooling|0-1F|ac2|hvac_2"
             )
-        )
+        },
+        apply_payload={"hvac_efficiency_change_threshold_pct": 50.0},
     )
 
-    assert "hvac_efficiency_change_threshold_pct" not in invalid_keys
-    assert "hvac_efficiency_change_threshold_pct" not in near_keys
+    fingerprint = advisor.recommendation_evidence_fingerprint(recommendation)
+
+    assert fingerprint == "legacy_hvac_efficiency_threshold"
+    assert "ac2|hvac_compressor" not in fingerprint
 
 
 def test_operating_detection_recommendations_use_idle_and_start_separation() -> None:
@@ -1197,7 +1156,7 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "linked_thermostat_entities": "thermostat zones",
         "thermostat_temperature_sensor_map": "indoor sensor",
         "blower_represents_gas_heat": "gas heat",
-        "hvac_efficiency_change_threshold_pct": "weather-adjusted",
+        "hvac_efficiency_change_threshold_pct": "weather-normalized",
     }
 
     for setting_key, default_value in expected_defaults.items():

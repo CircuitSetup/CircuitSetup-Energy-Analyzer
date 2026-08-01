@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
 from datetime import time as time_of_day
-from statistics import median
 from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings
@@ -33,7 +32,7 @@ from ..cycles import (
 )
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
-from ..hvac_efficiency import episode_from_dict, episode_minutes_per_degree
+from ..hvac_efficiency import episode_from_dict
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
 from ..metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -120,6 +119,10 @@ class SettingsController:
         ] = {}
         self._cycle_alert_policies: dict[tuple[str, str], ConservativeAlertPolicy] = {}
         self._appliance_health_short_cycle_alert_policies: dict[
+            tuple[str, str],
+            ConservativeAlertPolicy,
+        ] = {}
+        self._hvac_efficiency_alert_policies: dict[
             tuple[str, str],
             ConservativeAlertPolicy,
         ] = {}
@@ -266,7 +269,6 @@ class SettingsController:
             "negative_balance_w": [],
             "solar_export_w": [],
             "hvac_correlation_calls": [],
-            "hvac_response_episodes": [],
         }
 
         usage_history = coordinator.store_data.energy_usage_by_circuit.get(
@@ -744,6 +746,23 @@ class SettingsController:
             ),
         )
 
+    def hvac_efficiency_alert_policy_for_circuit(
+        self,
+        circuit_id: str,
+    ) -> ConservativeAlertPolicy:
+        """Return the policy for already-confirmed HVAC core-day findings."""
+        policy_name = self._alert_policy_name_for_circuit(circuit_id)
+        return self._cached_alert_policy(
+            self._hvac_efficiency_alert_policies,
+            (circuit_id, policy_name),
+            lambda: ConservativeAlertPolicy(
+                min_repeated=1,
+                min_total_score=1.0,
+                min_average_score=1.0,
+                min_baseline_confidence=1.0,
+            ),
+        )
+
     def activity_alert_policy_for_circuit(
         self,
         circuit_id: str,
@@ -792,6 +811,7 @@ class SettingsController:
         for policies in (
             self._cycle_alert_policies,
             self._appliance_health_short_cycle_alert_policies,
+            self._hvac_efficiency_alert_policies,
         ):
             for key in list(policies):
                 if key[0] == circuit_id:
@@ -2414,13 +2434,6 @@ def _hvac_advisor_history(
         None,
     )
     observations = observations_for() if callable(observations_for) else {}
-    alerted_episode_ids = {
-        str(episode_id)
-        for alert in getattr(coordinator.store_data, "alerts", ())
-        if alert.features.get("health_feature") == "hvac_thermostat_efficiency"
-        for episode_id in alert.features.get("recent_episode_ids", ())
-    }
-    episodes: list[dict[str, Any]] = []
     for raw in raw_episodes:
         episode = episode_from_dict(raw)
         if episode is None:
@@ -2472,62 +2485,8 @@ def _hvac_advisor_history(
                 }
             )
             call_identities.add(call_identity)
-        minutes_per_degree = episode_minutes_per_degree(episode)
-        if minutes_per_degree is None:
-            continue
-        context_key = "|".join(
-            (
-                episode.circuit_id,
-                str(episode.appliance_profile or ""),
-                episode.thermostat_entity_id,
-                str(episode.temperature_entity_id or ""),
-                episode.mode,
-                episode.episode_kind,
-                str(episode.temperature_bin or ""),
-                str(episode.season or ""),
-                str(episode.weather_mode or ""),
-                episode.gap_bin,
-                "+".join(participants),
-                "+".join(episode.supporting_blower_ids),
-            )
-        )
-        episodes.append(
-            {
-                "episode_id": episode.started_at.isoformat(),
-                "complete": episode.complete,
-                "excluded_from_baseline": episode.excluded_from_baseline,
-                "alerted": episode.started_at.isoformat() in alerted_episode_ids,
-                "context_key": context_key,
-                "minutes_per_degree": minutes_per_degree,
-            }
-        )
-
-    by_context: dict[str, list[dict[str, Any]]] = {}
-    for episode in episodes:
-        by_context.setdefault(str(episode["context_key"]), []).append(episode)
-    for comparable in by_context.values():
-        eligible = [
-            episode
-            for episode in comparable
-            if bool(episode.get("complete"))
-            and not bool(episode.get("excluded_from_baseline"))
-            and not bool(episode.get("alerted"))
-        ]
-        if len(eligible) < 9:
-            continue
-        baseline = median(
-            float(episode["minutes_per_degree"])
-            for episode in eligible[:9]
-        )
-        if baseline <= 0.0:
-            continue
-        for episode in eligible:
-            episode["absolute_deviation_percent"] = abs(
-                float(episode["minutes_per_degree"]) / baseline - 1.0
-            ) * 100.0
     return {
         "hvac_correlation_calls": calls[-256:],
-        "hvac_response_episodes": episodes[-256:],
     }
 
 

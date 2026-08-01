@@ -420,18 +420,18 @@
             }
           },
           "hvac_efficiency_settings": {
-            "name": "HVAC Thermostat Efficiency",
-            "description": "Links this HVAC appliance to thermostat zones and controls how much weather-adjusted response time must change before notification.",
+            "name": "Weather-Normalized HVAC Response",
+            "description": "Links this HVAC appliance to thermostat zones and controls how much weather-normalized daily runtime must slow before notification.",
             "data": {
               "reset_hvac_efficiency_settings_to_defaults": "Reset HVAC Efficiency Settings To Defaults",
               "linked_thermostat_entities": "Linked Thermostats",
-              "hvac_efficiency_change_threshold_pct": "Response Change Alert Percent",
+              "hvac_efficiency_change_threshold_pct": "Slower Response Alert Percent",
               "blower_represents_gas_heat": "Blower Represents Gas-Furnace Operation"
             },
             "data_description": {
               "reset_hvac_efficiency_settings_to_defaults": "Turn this on when saving to remove thermostat links, temperature overrides, the response-change threshold, and the gas-heat blower role.",
               "linked_thermostat_entities": "Choose the thermostat zones served by this appliance. With one globally configured thermostat, leaving this blank uses that thermostat automatically; multiple thermostats require explicit links.",
-              "hvac_efficiency_change_threshold_pct": "Alert when learned weather-adjusted time-to-setpoint becomes this percent slower or faster. Default 25%; allowed range 5–100%.",
+              "hvac_efficiency_change_threshold_pct": "Alert when weather-normalized HVAC runtime is this percent slower on at least three of five recent core days. Default 25%; allowed range 5–100%.",
               "blower_represents_gas_heat": "Enable only when this blower's power is the available proxy for gas-furnace heating. It never receives independent cooling credit."
             }
           },
@@ -991,7 +991,7 @@
         "linked_thermostat_entities": "Linked Thermostats",
         "thermostat_temperature_sensor_map": "Thermostat Temperature Sensors",
         "blower_represents_gas_heat": "Blower Represents Gas Heat",
-        "hvac_efficiency_change_threshold_pct": "HVAC Response Change Threshold"
+        "hvac_efficiency_change_threshold_pct": "HVAC Slower Response Threshold"
       },
       "fallback_setting_label": "Setting: {setting_key}",
       "units": {
@@ -1011,7 +1011,7 @@
         "power_quality": "Power Quality",
         "mains_balance": "Mains Balance",
         "solar_flow": "Solar Flow",
-        "hvac_efficiency": "HVAC Efficiency"
+        "hvac_efficiency": "Weather-Normalized HVAC Response"
       },
       "reasons": {
         "energy_usage": "Observed {observed_days} complete days of energy usage; the 95th percentile daily usage was {p95_daily_kwh} kWh.",
@@ -1626,26 +1626,29 @@
         "possible_sensor_problem": "Possible Sensor Problem",
         "sensor_unavailable": "Sensor Unavailable"
       },
-      "hvac_efficiency": "HVAC Thermostat Efficiency",
-      "hvac_efficiency_score": "Efficiency score",
-      "hvac_efficiency_score_note": "100 is the learned baseline; higher is faster and lower is slower under comparable outdoor conditions.",
+      "hvac_efficiency": "Weather-Normalized HVAC Response",
+      "hvac_efficiency_score": "Response score",
+      "hvac_efficiency_score_note": "100 is the learned weather-normalized baseline; higher is faster and lower is slower.",
       "hvac_efficiency_trend_label": "Response trend",
       "hvac_efficiency_threshold": "Alert threshold",
-      "hvac_efficiency_threshold_note": "Alert threshold: {value} response change",
-      "hvac_efficiency_baseline": "Learned response",
-      "hvac_efficiency_recent": "Recent response",
+      "hvac_efficiency_threshold_note": "Slower-runtime alert threshold: {value}",
+      "hvac_efficiency_baseline": "Expected daily runtime",
+      "hvac_efficiency_recent": "Recent daily runtime",
       "hvac_efficiency_thermostat": "Thermostat",
       "hvac_efficiency_mode_label": "Mode",
       "hvac_efficiency_outdoor_temperature": "Outdoor temperature",
       "hvac_efficiency_season": "Season",
       "hvac_efficiency_weather_context": "Weather context",
       "hvac_efficiency_attribution_label": "Attribution",
-      "hvac_efficiency_reference_episodes": "Reference episodes",
-      "hvac_efficiency_recent_episodes": "Recent episodes",
-      "hvac_efficiency_waiting": "HVAC response learning is waiting for completed thermostat episodes.",
+      "hvac_efficiency_reference_episodes": "Reference core days",
+      "hvac_efficiency_recent_episodes": "Recent core days",
+      "hvac_efficiency_waiting": "Learning requires outdoor temperature and at least 30 minutes of one HVAC mode per core day.",
       "hvac_efficiency_supporting_blower": "Cooling blower supports air handling; the compressor drives temperature change.",
       "hvac_efficiency_status": {
         "learning": "Learning",
+        "provisional": "Building weather baseline",
+        "no_weather_data": "Waiting for outdoor temperature",
+        "no_data": "Waiting for HVAC runtime",
         "tracking": "Tracking thermostat response",
         "ready": "Learned"
       },

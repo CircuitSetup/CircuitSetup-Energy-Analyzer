@@ -387,7 +387,7 @@ The generated dashboard uses Home Assistant's current entity registry IDs, so re
 
 Home live-sorts appliance tiles by attention state, Running state, current power, and name without repeating a separate Active Now list. Appliance rankings exclude mains, show the top five plus Other, and follow the floating date/calendar chooser in the footer. On older Home Assistant versions, the same floating date control falls back to the supported native control. On a single selected day, a Learning tile also shows its Health status and remaining learning days. Energy integrates recorder real-power history, and cost follows recorded cost changes across daily resets. The appliance grid keeps the All, Running, and Needs attention filters alongside search and detail navigation. Its selected timeline is built from each appliance's Activity Summary history and shows segmented Running intervals against the selected range. Live state refresh pauses while a search or selector has focus.
 
-Energy & Costs uses two equal-width columns for every available graph, including HVAC, water context, and defined NILM appliance power. When HVAC thermostat associations are configured, its **HVAC & Thermostats** card shows separate heating and cooling gauges, a weather-adjusted learned baseline at `100%`, thermostat-native minutes per degree, and links to appliance detail. The appliance contribution ranking appears only on Home, not a second time on this graph tab. Dashboard charts inherit the active Home Assistant theme and installation font, including headings, cards, tooltips, SVG labels, tables, and controls. They support tooltips, pointer-centered double-click zoom, and History arrows; there are no visible chart-level zoom, pan, or reset controls. Changing the shared date range resets every graph. The floating date/calendar chooser remains mounted during live refreshes when the selected range includes today. The arrow in each graph opens Home Assistant History with the visible date range and available source entities selected, where data can be added or removed. Compare overlays the immediately preceding equal-length range with matching dashed series. HVAC and appliance displays use real power in watts and exclude apparent and reactive power (`VA` and `var`) sources. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. The Home Energy and costs chart combines retained completed days with live today totals. When mains today totals are unavailable, the Home summary and chart use the monitored appliance totals instead. Historical rows preserve the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Expert Detail links open appliance detail pages directly. Monetary sensors and cards use Home Assistant's configured currency.
+Energy & Costs uses two equal-width columns for every available graph, including HVAC, water context, and defined NILM appliance power. When HVAC thermostat associations are configured, its **HVAC & Thermostats** card shows separate heating and cooling gauges, a weather-normalized learned baseline at `100%`, expected and recent daily runtime, and links to appliance detail. The appliance contribution ranking appears only on Home, not a second time on this graph tab. Dashboard charts inherit the active Home Assistant theme and installation font, including headings, cards, tooltips, SVG labels, tables, and controls. They support tooltips, pointer-centered double-click zoom, and History arrows; there are no visible chart-level zoom, pan, or reset controls. Changing the shared date range resets every graph. The floating date/calendar chooser remains mounted during live refreshes when the selected range includes today. The arrow in each graph opens Home Assistant History with the visible date range and available source entities selected, where data can be added or removed. Compare overlays the immediately preceding equal-length range with matching dashed series. HVAC and appliance displays use real power in watts and exclude apparent and reactive power (`VA` and `var`) sources. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. The Home Energy and costs chart combines retained completed days with live today totals. When mains today totals are unavailable, the Home summary and chart use the monitored appliance totals instead. Historical rows preserve the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Expert Detail links open appliance detail pages directly. Monetary sensors and cards use Home Assistant's configured currency.
 
 When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in the Mains & NILM card inside Insights. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; completed-day history starts with a selected appliance instead. HVAC graphs include every applicable circuit. Water context appears only when correlation evidence names a flow sensor, pairs applicable appliance watts with that sensor on a dual-axis graph, and shows a shared flow sensor only once.
 
@@ -666,12 +666,12 @@ This context applies only to HVAC, HVAC compressor, HVAC blower, Mini-Split, and
 
 Mini-Split inverter operation can remain at low power; tune the default `100 W` on and `40 W` off thresholds in Advanced Circuit Settings when equipment or metering differs.
 
-### HVAC thermostat response efficiency
+### Weather-normalized HVAC response
 
-Thermostat response learning internally normalizes how many elapsed minutes an
-HVAC temperature driver needs to move a zone one degree Fahrenheit toward its
-active setpoint, then displays minutes per degree in that thermostat's native
-unit.
+HVAC response learning uses completed thermostat calls to build local-day
+heating and cooling records. It compares daily active runtime with thermal
+demand derived from the time-weighted indoor and outdoor temperatures. This is
+a field-performance trend, not an AHRI SEER2, HSPF2, capacity, or COP rating.
 It supports combined HVAC systems, compressors, Heat Pumps, Mini-Splits,
 electric heat, and gas-furnace blowers. Cooling is attributed to the compressor
 or combined refrigerant system; a blower is supporting air handling and is
@@ -690,29 +690,33 @@ such as Ecobee and Nest can expose different capability sets without
 brand-specific handling. A configured indoor temperature mapping overrides the
 climate entity's current-temperature attribute for that zone.
 
-An eligible response episode either starts at least 1°F from the setpoint and
-completes within 0.5°F, or tracks a normal sub-1°F thermostat call until its
-heating/cooling action ends after at least 0.1°F of movement toward the target.
-Evaluation requires nine older and three recent complete episodes with the same
-episode type, thermostat, mode, season, weather mode, outdoor-temperature bin,
-starting-gap bin, and participating equipment. The default weather-adjusted
-response-change threshold is `25%` and can be set from `5%` to `100%`. A
-sustained slower result creates warning evidence and a Repair prompt; a faster
-result is informational and creates no Repair. Missing or incomparable data
-remains **Learning**.
+An eligible core day has at least 30 minutes of one HVAC mode, complete outdoor
+temperature coverage, and a consistent thermostat, temperature source, and
+equipment-participant signature. Days containing both heating and cooling are
+excluded. Individual sub-1°F thermostat calls remain useful diagnostics but do
+not independently mature or alert. The model becomes provisional after 30 core
+days. Notifications wait for 50 reference core days spanning at least six weeks
+and three 5°F outdoor-temperature bins, plus five recent core days.
 
-Observed response can appear while the feature is **Learning**, but its
-efficiency percentage waits for a mature weather-adjusted baseline. Appliance
-Detail shows heating and cooling separately, including each thermostat, learned
-and recent minutes per degree, outdoor context, sample counts, and attribution.
-The efficiency score is `100 × learned response / recent response`, capped from
+The standard-library regression predicts runtime from thermal demand and uses
+the learned prediction interval as an additional noise guard. The default
+slower-response threshold is `25%` and can be set from `5%` to `100%`. A warning
+requires at least three abnormal days in the recent five. Faster performance is
+shown only as information. An active warning clears after three consecutive
+normal core days. Missing weather or incomparable data remains **Learning**.
+
+Observed response can appear while the feature is **Learning**, but its score
+waits for a mature weather-normalized baseline. Appliance Detail shows heating
+and cooling separately, including each thermostat, expected and recent daily
+runtime, outdoor context, core-day counts, and attribution. The response score
+is `100 × expected runtime / recent runtime`, capped from
 `0` to `200`: `100` matches the learned baseline, below `100` is slower, and
 above `100` is faster. After upgrading, run **Configure > Create Or Update
 Dashboard** to add the HVAC & Thermostats card to an existing generated dashboard.
 
 Suggested Settings can recommend thermostat links, indoor-temperature
-mappings, the gas-heat blower role, and a noise-aware response threshold after
-enough consistent evidence. Call/overlap correlation is learned before a
+mappings, and the gas-heat blower role. The response threshold remains a manual
+advanced setting. Call/overlap correlation is learned before a
 per-circuit thermostat link exists so the link itself can be suggested.
 Applied suggestions use the normal undo and reset paths. Confirmed problem
 feedback excludes the affected recent episodes;

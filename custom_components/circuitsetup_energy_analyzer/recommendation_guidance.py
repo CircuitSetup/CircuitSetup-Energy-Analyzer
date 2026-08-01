@@ -147,8 +147,7 @@ _SETTING_EXPECTED_EFFECTS = {
         "cooling response attributed to the compressor."
     ),
     "hvac_efficiency_change_threshold_pct": (
-        "Tune response-change alerts to normal weather-adjusted variation while "
-        "preserving meaningful slower or faster changes."
+        "Set how much slower weather-normalized runtime must be before an alert."
     ),
 }
 
@@ -228,8 +227,7 @@ _SETTING_CONTROL_DESCRIPTIONS = {
         "gas-furnace heating."
     ),
     "hvac_efficiency_change_threshold_pct": (
-        "Controls how far weather-adjusted HVAC response time may change before "
-        "an alert."
+        "Controls how far weather-normalized HVAC runtime may slow before an alert."
     ),
 }
 

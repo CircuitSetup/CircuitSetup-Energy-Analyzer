@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime
-from statistics import median
+from datetime import date, datetime
+from statistics import linear_regression, median
 from typing import Any
+
+from .local_time import TimeZone, local_date
 
 _COMPLETION_TOLERANCE_F = 0.5
 _MINIMUM_START_GAP_F = 1.0
@@ -14,8 +16,15 @@ _MINIMUM_CALL_GAP_F = 0.1
 _MINIMUM_CALL_PROGRESS_F = 0.1
 _INACTIVE_TIMEOUT_MINUTES = 30.0
 _EPISODE_TIMEOUT_MINUTES = 8.0 * 60.0
-_RECENT_EPISODE_COUNT = 3
-_REFERENCE_EPISODE_COUNT = 9
+_MIN_CORE_DAY_RUNTIME_MINUTES = 30.0
+_PROVISIONAL_CORE_DAY_COUNT = 30
+_REFERENCE_CORE_DAY_COUNT = 50
+_RECENT_CORE_DAY_COUNT = 5
+_MIN_ABNORMAL_RECENT_DAYS = 3
+_MIN_REFERENCE_SPAN_DAYS = 42
+_MIN_OUTDOOR_TEMPERATURE_BINS = 3
+_OUTDOOR_TEMPERATURE_BIN_F = 5.0
+_MODEL_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +64,8 @@ class HvacResponseEpisode:
     temperature_entity_id: str | None = None
     appliance_profile: str | None = None
     episode_kind: str = "setpoint_response"
+    outdoor_temperature_minutes: float = 0.0
+    model_version: int = _MODEL_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,12 +73,21 @@ class HvacEfficiencyEvaluation:
     status: str
     score: float | None
     change_ratio: float | None
-    baseline_minutes_per_degree: float | None
-    recent_minutes_per_degree: float | None
+    baseline_runtime_minutes: float | None
+    recent_runtime_minutes: float | None
     reference_count: int
     recent_count: int
     finding: str | None
     context: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class _CoreDay:
+    day: date
+    runtime_minutes: float
+    indoor_temperature_f: float
+    outdoor_temperature_f: float
+    episode_ids: tuple[str, ...]
 
 
 def advance_episode(
@@ -135,6 +155,10 @@ def advance_episode(
             if not action_active or not _meets_minimum(gap, _MINIMUM_CALL_GAP_F):
                 return None, None
             episode_kind = "thermostat_call"
+        outdoor_temperature = _finite_float(
+            environmental_context.get("outdoor_temperature_f")
+        )
+        initial_active_minutes = _valid_duration(active_minutes_delta)
         episode = HvacResponseEpisode(
             stream_id=(
                 f"{circuit_id}|{observation.thermostat_entity_id}|{mode}"
@@ -148,10 +172,8 @@ def advance_episode(
             target_temperature_f=target,
             latest_temperature_f=actual,
             elapsed_minutes=0.0,
-            active_minutes=_valid_duration(active_minutes_delta),
-            outdoor_temperature_f=_finite_float(
-                environmental_context.get("outdoor_temperature_f")
-            ),
+            active_minutes=initial_active_minutes,
+            outdoor_temperature_f=outdoor_temperature,
             season=_optional_text(environmental_context.get("season")),
             weather_mode=_optional_text(
                 environmental_context.get("weather_mode")
@@ -166,6 +188,11 @@ def advance_episode(
             temperature_entity_id=observation.temperature_entity_id,
             appliance_profile=_optional_text(appliance_profile),
             episode_kind=episode_kind,
+            outdoor_temperature_minutes=(
+                initial_active_minutes
+                if outdoor_temperature is not None
+                else 0.0
+            ),
         )
         return episode, None
 
@@ -184,19 +211,37 @@ def advance_episode(
         return None, _exclude_episode(current, now, elapsed)
 
     previous_interval_active = current.inactive_since is None
+    active_delta = (
+        _valid_duration(active_minutes_delta) if previous_interval_active else 0.0
+    )
+    outdoor_temperature = _finite_float(
+        environmental_context.get("outdoor_temperature_f")
+    )
+    outdoor_minutes = current.outdoor_temperature_minutes + (
+        active_delta if outdoor_temperature is not None else 0.0
+    )
+    outdoor_average = current.outdoor_temperature_f
+    if outdoor_temperature is not None:
+        outdoor_average = (
+            (
+                (current.outdoor_temperature_f or 0.0)
+                * current.outdoor_temperature_minutes
+                + outdoor_temperature * active_delta
+            )
+            / outdoor_minutes
+            if outdoor_minutes > 0.0
+            else outdoor_temperature
+        )
     inactive_since = None if driver_active else current.inactive_since or now
     updated = replace(
         current,
         latest_temperature_f=actual,
         elapsed_minutes=elapsed,
         active_minutes=(
-            current.active_minutes
-            + (
-                _valid_duration(active_minutes_delta)
-                if previous_interval_active
-                else 0.0
-            )
+            current.active_minutes + active_delta
         ),
+        outdoor_temperature_f=outdoor_average,
+        outdoor_temperature_minutes=outdoor_minutes,
         participant_signature=_sorted_unique(
             (*current.participant_signature, *participant_signature)
         ),
@@ -237,80 +282,176 @@ def evaluate_efficiency(
     episodes: Sequence[HvacResponseEpisode],
     *,
     threshold_pct: float,
+    time_zone: TimeZone = None,
+    excluded_dates: Set[date] = frozenset(),
 ) -> HvacEfficiencyEvaluation:
-    groups: dict[tuple[Any, ...], list[tuple[HvacResponseEpisode, float]]] = (
-        defaultdict(list)
-    )
-    for episode in episodes:
-        metric = episode_minutes_per_degree(episode)
-        if metric is None:
-            continue
-        groups[_comparison_key(episode)].append((episode, metric))
-
-    if not groups:
-        return _empty_evaluation("no_data")
-
-    required_count = _REFERENCE_EPISODE_COUNT + _RECENT_EPISODE_COUNT
-    mature_groups = [
-        values for values in groups.values() if len(values) >= required_count
+    current_model = [
+        episode
+        for episode in episodes
+        if episode.model_version >= _MODEL_VERSION
+        and _is_valid_completed_episode(episode)
     ]
-    if mature_groups:
-        comparable = max(
-            mature_groups,
-            key=lambda values: max(
-                _episode_sort_time(item[0]) for item in values
-            ),
+    if not current_model:
+        return _empty_evaluation("no_data")
+    weather_ready = [
+        episode
+        for episode in current_model
+        if episode.outdoor_temperature_f is not None
+        and episode.outdoor_temperature_minutes
+        >= episode.active_minutes * 0.95
+    ]
+    if not weather_ready:
+        return _empty_evaluation("no_weather_data")
+
+    groups: dict[tuple[Any, ...], list[HvacResponseEpisode]] = defaultdict(list)
+    for episode in weather_ready:
+        if local_date(episode.started_at, time_zone) not in excluded_dates:
+            groups[_comparison_key(episode)].append(episode)
+    core_by_key = {
+        key: days
+        for key, group in groups.items()
+        if (days := _core_days(group, time_zone=time_zone))
+    }
+    if not core_by_key:
+        return _empty_evaluation("learning")
+    comparison_key = max(
+        core_by_key,
+        key=lambda key: (len(core_by_key[key]), core_by_key[key][-1].day),
+    )
+    comparable = core_by_key[comparison_key]
+    latest_episode = max(groups[comparison_key], key=_episode_sort_time)
+    context = _evaluation_context(latest_episode)
+    if len(comparable) < _REFERENCE_CORE_DAY_COUNT:
+        return _empty_evaluation(
+            "provisional"
+            if len(comparable) >= _PROVISIONAL_CORE_DAY_COUNT
+            else "learning",
+            context=context,
+            reference_count=len(comparable),
         )
-    else:
-        comparable = max(
-            groups.values(),
-            key=lambda values: (
-                len(values),
-                max(_episode_sort_time(item[0]) for item in values),
-            ),
-        )
-    comparable.sort(key=lambda item: _episode_sort_time(item[0]))
-    context = _evaluation_context(comparable[-1][0])
-    if len(comparable) < required_count:
-        observed = median(
-            metric for _episode, metric in comparable[-_RECENT_EPISODE_COUNT:]
+
+    reference = comparable[:_REFERENCE_CORE_DAY_COUNT]
+    reference_span = (reference[-1].day - reference[0].day).days
+    outdoor_bins = {
+        math.floor(day.outdoor_temperature_f / _OUTDOOR_TEMPERATURE_BIN_F)
+        for day in reference
+    }
+    if (
+        reference_span < _MIN_REFERENCE_SPAN_DAYS
+        or len(outdoor_bins) < _MIN_OUTDOOR_TEMPERATURE_BINS
+    ):
+        context.update(
+            {
+                "reference_span_days": reference_span,
+                "outdoor_temperature_bin_count": len(outdoor_bins),
+            }
         )
         return _empty_evaluation(
-            "learning",
+            "provisional",
             context=context,
-            reference_count=max(0, len(comparable) - _RECENT_EPISODE_COUNT),
-            recent_count=min(len(comparable), _RECENT_EPISODE_COUNT),
-            recent_minutes_per_degree=observed,
+            reference_count=len(reference),
+        )
+    if len(comparable) < _REFERENCE_CORE_DAY_COUNT + _RECENT_CORE_DAY_COUNT:
+        return _empty_evaluation(
+            "provisional",
+            context=context,
+            reference_count=len(reference),
+            recent_count=len(comparable) - len(reference),
         )
 
-    reference = comparable[:_REFERENCE_EPISODE_COUNT]
-    recent = comparable[-_RECENT_EPISODE_COUNT:]
+    recent = comparable[-_RECENT_CORE_DAY_COUNT:]
+    reference_load = [_thermal_demand(day, latest_episode.mode) for day in reference]
+    reference_runtime = [day.runtime_minutes for day in reference]
+    if len({round(load, 6) for load in reference_load}) < 2:
+        return _empty_evaluation(
+            "provisional",
+            context=context,
+            reference_count=len(reference),
+            recent_count=len(recent),
+        )
+    slope, intercept = linear_regression(reference_load, reference_runtime)
+    if slope <= 0.0:
+        return _empty_evaluation(
+            "provisional",
+            context=context,
+            reference_count=len(reference),
+            recent_count=len(recent),
+        )
+    recent_load = [_thermal_demand(day, latest_episode.mode) for day in recent]
+    predicted = [max(1.0, intercept + slope * load) for load in recent_load]
+    ratios = [
+        day.runtime_minutes / expected - 1.0
+        for day, expected in zip(recent, predicted, strict=True)
+    ]
+    prediction_margins = _prediction_margins(
+        reference_load,
+        reference_runtime,
+        recent_load,
+        slope=slope,
+        intercept=intercept,
+    )
+    threshold_ratio = max(0.0, float(threshold_pct)) / 100.0
+    slower = [
+        _meets_minimum(ratio, threshold_ratio)
+        and _meets_minimum(day.runtime_minutes, expected + margin)
+        for day, expected, ratio, margin in zip(
+            recent,
+            predicted,
+            ratios,
+            prediction_margins,
+            strict=True,
+        )
+    ]
+    faster = [
+        _meets_minimum(-ratio, threshold_ratio)
+        and (
+            day.runtime_minutes <= expected - margin
+            or math.isclose(day.runtime_minutes, expected - margin, abs_tol=1e-6)
+        )
+        for day, expected, ratio, margin in zip(
+            recent,
+            predicted,
+            ratios,
+            prediction_margins,
+            strict=True,
+        )
+    ]
+    finding = (
+        "slower"
+        if sum(slower) >= _MIN_ABNORMAL_RECENT_DAYS
+        else (
+            "faster" if sum(faster) >= _MIN_ABNORMAL_RECENT_DAYS else None
+        )
+    )
+    expected_runtime = median(predicted)
+    observed_runtime = median(day.runtime_minutes for day in recent)
+    change_ratio = median(ratios)
     context.update(
         {
+            "reference_core_dates": [day.day.isoformat() for day in reference],
+            "recent_core_dates": [day.day.isoformat() for day in recent],
             "reference_episode_ids": [
-                _episode_identifier(item[0]) for item in reference
+                identifier for day in reference for identifier in day.episode_ids
             ],
             "recent_episode_ids": [
-                _episode_identifier(item[0]) for item in recent
+                identifier for day in recent for identifier in day.episode_ids
             ],
+            "reference_span_days": reference_span,
+            "outdoor_temperature_bin_count": len(outdoor_bins),
+            "outdoor_temperature_f": median(
+                day.outdoor_temperature_f for day in recent
+            ),
+            "abnormal_recent_days": max(sum(slower), sum(faster)),
+            "normal_streak": _trailing_false_count(slower),
+            "prediction_margin_minutes": median(prediction_margins),
         }
     )
-    baseline_metric = median(item[1] for item in reference)
-    recent_metric = median(item[1] for item in recent)
-    change_ratio = recent_metric / baseline_metric - 1.0
-    threshold_ratio = max(0.0, float(threshold_pct)) / 100.0
-    finding = None
-    if change_ratio >= threshold_ratio:
-        finding = "slower"
-    elif change_ratio <= -threshold_ratio:
-        finding = "faster"
-    score = min(200.0, max(0.0, 100.0 * baseline_metric / recent_metric))
     return HvacEfficiencyEvaluation(
         status="ready",
-        score=score,
+        score=min(200.0, max(0.0, 100.0 * expected_runtime / observed_runtime)),
         change_ratio=change_ratio,
-        baseline_minutes_per_degree=baseline_metric,
-        recent_minutes_per_degree=recent_metric,
+        baseline_runtime_minutes=expected_runtime,
+        recent_runtime_minutes=observed_runtime,
         reference_count=len(reference),
         recent_count=len(recent),
         finding=finding,
@@ -379,6 +520,10 @@ def episode_from_dict(
             ),
             appliance_profile=_optional_text(raw.get("appliance_profile")),
             episode_kind=str(raw.get("episode_kind", "setpoint_response")),
+            outdoor_temperature_minutes=float(
+                raw.get("outdoor_temperature_minutes", 0.0)
+            ),
+            model_version=int(raw.get("model_version", 1)),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -461,24 +606,113 @@ def _comparison_key(episode: HvacResponseEpisode) -> tuple[Any, ...]:
         episode.thermostat_entity_id,
         episode.temperature_entity_id,
         episode.mode,
-        episode.episode_kind,
-        episode.temperature_bin,
-        episode.season,
-        episode.weather_mode,
-        episode.gap_bin,
         episode.participant_signature,
         episode.supporting_blower_ids,
     )
 
 
-def episode_minutes_per_degree(
-    episode: HvacResponseEpisode,
-) -> float | None:
-    """Return the bounded response-time metric for one completed episode."""
-    if episode.excluded_from_baseline or not _is_valid_completed_episode(episode):
-        return None
-    degrees_closed = _degrees_closed(episode)
-    return episode.elapsed_minutes / degrees_closed
+def _core_days(
+    episodes: Sequence[HvacResponseEpisode],
+    *,
+    time_zone: TimeZone,
+) -> list[_CoreDay]:
+    by_date: dict[date, list[HvacResponseEpisode]] = defaultdict(list)
+    for episode in episodes:
+        day = local_date(episode.started_at, time_zone)
+        if episode.ended_at is not None and local_date(
+            episode.ended_at,
+            time_zone,
+        ) != day:
+            continue
+        by_date[day].append(episode)
+    days = []
+    for day, day_episodes in by_date.items():
+        runtime = sum(episode.active_minutes for episode in day_episodes)
+        weather_minutes = sum(
+            episode.outdoor_temperature_minutes for episode in day_episodes
+        )
+        if (
+            runtime < _MIN_CORE_DAY_RUNTIME_MINUTES
+            or weather_minutes < runtime * 0.95
+        ):
+            continue
+        outdoor = sum(
+            float(episode.outdoor_temperature_f)
+            * episode.outdoor_temperature_minutes
+            for episode in day_episodes
+            if episode.outdoor_temperature_f is not None
+        ) / weather_minutes
+        indoor = sum(
+            (episode.start_temperature_f + episode.latest_temperature_f)
+            / 2.0
+            * episode.active_minutes
+            for episode in day_episodes
+        ) / runtime
+        days.append(
+            _CoreDay(
+                day=day,
+                runtime_minutes=runtime,
+                indoor_temperature_f=indoor,
+                outdoor_temperature_f=outdoor,
+                episode_ids=tuple(
+                    _episode_identifier(episode)
+                    for episode in sorted(
+                        day_episodes,
+                        key=_episode_sort_time,
+                    )
+                ),
+            )
+        )
+    return sorted(days, key=lambda item: item.day)
+
+
+def _thermal_demand(day: _CoreDay, mode: str) -> float:
+    return max(
+        0.0,
+        (
+            day.outdoor_temperature_f - day.indoor_temperature_f
+            if mode == "cooling"
+            else day.indoor_temperature_f - day.outdoor_temperature_f
+        ),
+    )
+
+
+def _prediction_margins(
+    loads: Sequence[float],
+    runtimes: Sequence[float],
+    recent_loads: Sequence[float],
+    *,
+    slope: float,
+    intercept: float,
+) -> list[float]:
+    if len(loads) <= 2:
+        return [0.0] * len(recent_loads)
+    squared_error = sum(
+        (runtime - (intercept + slope * load)) ** 2
+        for load, runtime in zip(loads, runtimes, strict=True)
+    )
+    standard_error = math.sqrt(squared_error / (len(loads) - 2))
+    mean_load = sum(loads) / len(loads)
+    load_variation = sum((load - mean_load) ** 2 for load in loads)
+    return [
+        1.96
+        * standard_error
+        * math.sqrt(
+            1.0
+            + 1.0 / len(loads)
+            + (load - mean_load) ** 2 / load_variation
+        )
+        for load in recent_loads
+    ]
+
+
+def _trailing_false_count(values: Sequence[bool]) -> int:
+    count = 0
+    for value in reversed(values):
+        if value:
+            break
+        count += 1
+    return count
 
 
 def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
@@ -523,11 +757,14 @@ def _is_valid_runtime_episode(episode: HvacResponseEpisode) -> bool:
         episode.latest_temperature_f,
         episode.elapsed_minutes,
         episode.active_minutes,
+        episode.outdoor_temperature_minutes,
     )
     return bool(
         all(math.isfinite(value) for value in numeric_values)
         and episode.elapsed_minutes >= 0.0
         and episode.active_minutes >= 0.0
+        and episode.outdoor_temperature_minutes >= 0.0
+        and episode.model_version >= 1
         and _valid_start_gap(
             episode,
             _directional_gap(
@@ -598,14 +835,14 @@ def _empty_evaluation(
     context: Mapping[str, Any] | None = None,
     reference_count: int = 0,
     recent_count: int = 0,
-    recent_minutes_per_degree: float | None = None,
+    recent_runtime_minutes: float | None = None,
 ) -> HvacEfficiencyEvaluation:
     return HvacEfficiencyEvaluation(
         status=status,
         score=None,
         change_ratio=None,
-        baseline_minutes_per_degree=None,
-        recent_minutes_per_degree=recent_minutes_per_degree,
+        baseline_runtime_minutes=None,
+        recent_runtime_minutes=recent_runtime_minutes,
         reference_count=reference_count,
         recent_count=recent_count,
         finding=None,
