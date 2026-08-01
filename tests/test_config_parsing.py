@@ -76,6 +76,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                     "sensors": [
                         {"entity_id": "sensor.energy_meter_mains_l1_harmonic"},
                         {"entity_id": "sensor.mains_harmonic_active_power"},
+                        {"entity_id": "sensor.mains_harmonic_kvar"},
+                        {"entity_id": "sensor.mains_harmonic_kva"},
                         {"entity_id": "sensor.energy_meter_mains_l1_watts"},
                         {"entity_id": "sensor.energy_meter_frequency_1"},
                         {"entity_id": "sensor.energy_meter_voltage_1"},
@@ -94,6 +96,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
                         {"entity_id": "sensor.voltage_panel_kvar"},
                         {"entity_id": "sensor.voltage_panel_ka"},
                         {"entity_id": "sensor.current_pump_kv"},
+                        {"entity_id": "sensor.panel_current_l1_2"},
+                        {"entity_id": "sensor.panel_voltage_leg_a_2"},
                         {"entity_id": "sensor.current_pump_kvarh"},
                         {"entity_id": "sensor.current_pump_kvarh_import"},
                         {"entity_id": "sensor.current_pump_varh_total"},
@@ -124,6 +128,8 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.voltage_panel_kvar", SensorRole.REACTIVE_POWER),
         ("sensor.voltage_panel_ka", SensorRole.CURRENT),
         ("sensor.current_pump_kv", SensorRole.VOLTAGE),
+        ("sensor.panel_current_l1_2", SensorRole.CURRENT),
+        ("sensor.panel_voltage_leg_a_2", SensorRole.VOLTAGE),
     ]
 
 

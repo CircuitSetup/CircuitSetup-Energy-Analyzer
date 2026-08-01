@@ -213,11 +213,9 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
-    harmonic_object_id = re.sub(
-        r"_\d+$", "", _strip_trailing_leg_token(object_id)
-    )
+    harmonic_object_id = _strip_trailing_source_qualifiers(object_id)
     harmonic_measurement = re.search(
-        r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w))?$",
+        r"(?:^|_)harmonic(?:_(?:(?:active|reactive|apparent|real)_power|power|watts?|[km]?w|[km]?(?:var|va)))?$",
         harmonic_object_id,
     )
     reactive_energy_measurement = (
@@ -638,16 +636,12 @@ def _canonical_source_circuit_id(value: Any) -> str:
 
 
 def strip_trailing_source_detail_tokens(object_id: str) -> str:
-    stripped = object_id
-    while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
-        stripped = without_leg
+    stripped = _strip_trailing_source_qualifiers(object_id)
     for suffix in _SOURCE_METRIC_SUFFIXES:
         if stripped.endswith(suffix):
             stripped = stripped[: -len(suffix)]
             break
-    while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
-        stripped = without_leg
-    return stripped or object_id
+    return _strip_trailing_source_qualifiers(stripped) or object_id
 
 
 def _strip_trailing_leg_token(object_id: str) -> str:
@@ -657,16 +651,22 @@ def _strip_trailing_leg_token(object_id: str) -> str:
     return object_id
 
 
+def _strip_trailing_source_qualifiers(object_id: str) -> str:
+    stripped = object_id
+    while True:
+        normalized = _strip_trailing_leg_token(stripped)
+        normalized = re.sub(r"_\d+$", "", normalized)
+        if normalized == stripped:
+            return stripped
+        stripped = normalized
+
+
 def _entity_object_id(entity_id: str) -> str:
     return str(entity_id).split(".")[-1].strip().lower()
 
 
 def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
-    normalized = re.sub(
-        r"_\d+$",
-        "",
-        _strip_trailing_leg_token(object_id.strip().lower()),
-    )
+    normalized = _strip_trailing_source_qualifiers(object_id.strip().lower())
     return any(
         normalized == suffix or normalized.endswith(f"_{suffix}")
         for suffix in metric_suffixes
