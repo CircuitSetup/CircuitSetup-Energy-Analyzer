@@ -4318,6 +4318,65 @@ def test_activity_alert_processor_skips_left_on_for_mains_nilm_config() -> None:
         (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
     ),
 )
+def test_activity_alert_processor_skips_idle_alerts_for_mixed_circuits(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.activity import (
+        ActivityAlertProcessor,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            events=[
+                CircuitEvent(
+                    timestamp=now - timedelta(minutes=45),
+                    circuit_id="washer",
+                    event_type=EventType.STOP,
+                )
+            ]
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=profile,
+        mode=mode,
+    )
+    policy = _CaptureAlertPolicy()
+    processor = ActivityAlertProcessor(
+        settings_for_config=lambda _config, _circuit_id: ActivityAlertSettings(
+            max_idle_minutes=30.0,
+        ),
+        alert_policy_for_circuit=lambda _circuit_id: policy,
+    )
+
+    result = processor.process(_energy_sample(1.0), config, context)
+
+    assert result.observations == []
+    assert result.alerts == []
+    assert result.notifications == []
+    assert policy.observations == []
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    (
+        (ApplianceProfile.WASHER, CircuitMode.MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE),
+    ),
+)
 def test_event_processor_skips_mixed_circuits(
     profile: ApplianceProfile, mode: CircuitMode
 ) -> None:
