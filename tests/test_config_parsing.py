@@ -48,6 +48,18 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
     ]
 
 
+def test_config_parser_preserves_metric_like_circuit_basename() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {CONF_SOURCE_ENTITIES: ["sensor.solar_kw_power"]}
+    )
+
+    assert configs[0].circuit_id == "solar_kw"
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

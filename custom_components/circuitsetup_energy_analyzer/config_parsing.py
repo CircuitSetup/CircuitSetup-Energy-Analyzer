@@ -628,13 +628,15 @@ def _canonical_source_circuit_id(value: Any) -> str:
 
 def _strip_trailing_source_detail_tokens(object_id: str) -> str:
     stripped = object_id
-    while True:
-        for suffix in (*_SOURCE_METRIC_SUFFIXES, *_SOURCE_LEG_SUFFIXES):
-            if stripped.endswith(suffix):
-                stripped = stripped[: -len(suffix)]
-                break
-        else:
-            return stripped or object_id
+    while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
+        stripped = without_leg
+    for suffix in _SOURCE_METRIC_SUFFIXES:
+        if stripped.endswith(suffix):
+            stripped = stripped[: -len(suffix)]
+            break
+    while (without_leg := _strip_trailing_leg_token(stripped)) != stripped:
+        stripped = without_leg
+    return stripped or object_id
 
 
 def _strip_trailing_leg_token(object_id: str) -> str:
