@@ -56,6 +56,7 @@ _CORRELATION_HISTORY_LIMIT = 256
 _SETUP_ISSUE_LIMIT = 8
 HVAC_EFFICIENCY_FEATURE = "hvac_thermostat_efficiency"
 _INITIAL_BASELINE_ERA = "initial"
+_CONTEXT_SWITCH_DAYS = 3
 
 type HvacAlertPolicyProvider = Callable[[str], Any]
 type RetentionDaysProvider = Callable[[str], int]
@@ -909,6 +910,19 @@ def _compact_circuit_response_history(
                 if str(token)
             }
             new_contexts = set(contexts) - known
+            latest_context = max(
+                contexts,
+                key=lambda token: max(
+                    episode.ended_at or episode.started_at
+                    for episode in contexts[token]
+                ),
+            )
+            candidate = str(raw_context.get("candidate") or "")
+            candidate_dates = {
+                str(day)
+                for day in raw_context.get("candidate_dates", ())
+                if str(day)
+            }
             if new_contexts:
                 selected = max(
                     new_contexts,
@@ -917,21 +931,36 @@ def _compact_circuit_response_history(
                         for episode in contexts[token]
                     ),
                 )
+                candidate = ""
+                candidate_dates.clear()
             elif selected not in contexts:
-                selected = max(
-                    contexts,
-                    key=lambda token: (
-                        len(contexts[token]),
-                        max(
-                            episode.ended_at or episode.started_at
-                            for episode in contexts[token]
-                        ),
-                    ),
+                selected = latest_context
+                candidate = ""
+                candidate_dates.clear()
+            elif latest_context != selected:
+                if candidate != latest_context:
+                    candidate = latest_context
+                    candidate_dates.clear()
+                candidate_dates.update(
+                    local_date(episode.started_at, context.time_zone).isoformat()
+                    for episode in contexts[latest_context]
                 )
+                if len(candidate_dates) >= _CONTEXT_SWITCH_DAYS:
+                    selected = latest_context
+                    candidate = ""
+                    candidate_dates.clear()
+            else:
+                candidate = ""
+                candidate_dates.clear()
             updated_context = {
                 "selected": selected,
                 "known": sorted(known | set(contexts)),
             }
+            if candidate:
+                updated_context.update(
+                    candidate=candidate,
+                    candidate_dates=sorted(candidate_dates),
+                )
             if updated_context != raw_context:
                 context_by_stream[stream_id] = updated_context
                 changed = True

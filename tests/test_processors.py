@@ -1778,6 +1778,34 @@ def test_hvac_new_equipment_context_replaces_mature_context() -> None:
 
     assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 2
 
+    context = replace(context, now=context.now + timedelta(days=5))
+    alternating_old = _hvac_response_history(stream_id, count=58)[-1]
+    alternating_old["participant_signature"] = ["heat_pump", "old"]
+    context.store_data.hvac_response_history_by_stream[stream_id].append(
+        alternating_old
+    )
+    processor.process([(heat_pump, SimpleNamespace())], context)
+    alternating_new = _hvac_response_history(stream_id, count=59)[-1]
+    alternating_new["participant_signature"] = ["heat_pump", "new"]
+    context.store_data.hvac_response_history_by_stream[stream_id].append(
+        alternating_new
+    )
+    processor.process([(heat_pump, SimpleNamespace())], context)
+
+    assert len(context.store_data.hvac_response_history_by_stream[stream_id]) == 3
+
+    for count in (60, 61, 62):
+        returning = _hvac_response_history(stream_id, count=count)[-1]
+        returning["participant_signature"] = ["heat_pump", "old"]
+        context.store_data.hvac_response_history_by_stream[stream_id].append(
+            returning
+        )
+        processor.process([(heat_pump, SimpleNamespace())], context)
+
+    retained = context.store_data.hvac_response_history_by_stream[stream_id]
+    assert len(retained) == 1
+    assert retained[0]["participant_signature"] == ["heat_pump", "old"]
+
 
 def test_hvac_efficiency_uses_only_the_current_temperature_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
