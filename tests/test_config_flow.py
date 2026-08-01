@@ -3820,8 +3820,14 @@ def test_options_source_merge_excludes_reactive_energy() -> None:
         ("sensor.panel_voltage_max", "voltage"),
         ("sensor.panel_current_min", "current"),
         ("sensor.panel_power_factor_max", "power_factor"),
+        ("sensor.panel_voltage_a_rms", "voltage"),
+        ("sensor.panel_current_b_max", "current"),
+        ("sensor.panel_reactive_power_a_average", "reactive_power"),
         ("sensor.fridge_energy_today", "energy"),
         ("sensor.fridge_kwh_today", "energy"),
+        ("sensor.grid_energy_import", "energy"),
+        ("sensor.grid_kwh_import", "energy"),
+        ("sensor.grid_energy_export", "energy"),
     ),
 )
 def test_guided_assignment_uses_terminal_metric_role(

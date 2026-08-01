@@ -578,6 +578,8 @@ _SOURCE_VALUE_QUALIFIER_SUFFIXES = (
     "_min",
     "_max",
     "_today",
+    "_import",
+    "_export",
 )
 _SOURCE_LEG_SUFFIXES = (
     "_leg_a",
@@ -693,10 +695,11 @@ def _strip_trailing_source_qualifiers(object_id: str) -> str:
             stripped = without_leg
             continue
         without_value_qualifier = _strip_trailing_value_qualifier(stripped)
+        normalized_value = _strip_terminal_phase_letter(without_value_qualifier)
         if without_value_qualifier != stripped and _source_metric_suffix_exposed(
-            without_value_qualifier
+            normalized_value
         ):
-            stripped = without_value_qualifier
+            stripped = normalized_value
             continue
         without_index = re.sub(r"_\d+$", "", stripped)
         normalized_index = _strip_terminal_phase_letter(without_index)
