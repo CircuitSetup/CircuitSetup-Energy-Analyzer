@@ -9,6 +9,7 @@ from .alert_feedback import mapping_datetime
 from .local_time import TimeZone, local_date, local_month_key
 
 DEFAULT_DEMAND_WINDOW_MINUTES = 15
+MAX_DEMAND_WINDOW_MINUTES = 240
 DEFAULT_PEAK_RANK_COUNT = 3
 DEFAULT_PEAK_WARNING_RATIO = 0.9
 MAX_MONTHLY_PEAK_WINDOWS_PER_MONTH = 24
@@ -94,7 +95,10 @@ def record_demand_sample(
     if real_power_w is None:
         return None
 
-    window_minutes = max(int(settings.window_minutes), 1)
+    window_minutes = min(
+        max(int(settings.window_minutes), 1),
+        MAX_DEMAND_WINDOW_MINUTES,
+    )
     window = timedelta(minutes=window_minutes)
     today = _calendar_date(timestamp, time_zone).isoformat()
     samples = _coerce_samples(
