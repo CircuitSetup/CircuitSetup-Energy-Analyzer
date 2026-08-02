@@ -240,9 +240,16 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
         re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
         or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
     )
+    terminal_reactive_energy = _has_metric_suffix(
+        object_id,
+        ("reactive_energy", "kvarh", "varh"),
+    )
     return harmonic_measurement or (
         reactive_energy_measurement
-        and not _has_metric_suffix(object_id, _NON_REACTIVE_ENERGY_METRIC_SUFFIXES)
+        and (
+            terminal_reactive_energy
+            or explicit_sensor_role_from_entity_id(entity_id) is None
+        )
     )
 
 
@@ -564,17 +571,6 @@ _SOURCE_METRIC_SUFFIXES = (
     "_va",
     "_pf",
     "_hz",
-)
-_NON_ENERGY_METRIC_SUFFIXES = tuple(
-    suffix.removeprefix("_")
-    for suffix in _SOURCE_METRIC_SUFFIXES
-    if suffix not in {"_energy", "_kvarh", "_kwh", "_mwh", "_varh", "_wh"}
-)
-_NON_REACTIVE_ENERGY_METRIC_SUFFIXES = (
-    *_NON_ENERGY_METRIC_SUFFIXES,
-    "kwh",
-    "mwh",
-    "wh",
 )
 _SOURCE_VALUE_QUALIFIER_SUFFIXES = (
     "_rms",

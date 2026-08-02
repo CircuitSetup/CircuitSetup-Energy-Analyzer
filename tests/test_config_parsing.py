@@ -232,6 +232,44 @@ def test_config_parser_uses_saved_sensors_for_alias_collisions() -> None:
     ]
 
 
+def test_config_parser_keeps_supported_metrics_on_reactive_energy_devices() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "sensors": [
+                        {"entity_id": "sensor.varh_meter_active_energy"},
+                        {"entity_id": "sensor.reactive_energy_monitor_w"},
+                        {"entity_id": "sensor.varh_meter_v"},
+                        {"entity_id": "sensor.varh_meter_volts"},
+                        {"entity_id": "sensor.varh_meter_a"},
+                        {"entity_id": "sensor.varh_meter_apparent"},
+                        {"entity_id": "sensor.varh_meter_reactive"},
+                        {"entity_id": "sensor.mains_reactive_energy"},
+                        {"entity_id": "sensor.mains_kvarh"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert [(sensor.entity_id, sensor.role) for sensor in configs[0].sensors] == [
+        ("sensor.varh_meter_active_energy", SensorRole.ENERGY),
+        ("sensor.reactive_energy_monitor_w", SensorRole.REAL_POWER),
+        ("sensor.varh_meter_v", SensorRole.VOLTAGE),
+        ("sensor.varh_meter_volts", SensorRole.VOLTAGE),
+        ("sensor.varh_meter_a", SensorRole.CURRENT),
+        ("sensor.varh_meter_apparent", SensorRole.APPARENT_POWER),
+        ("sensor.varh_meter_reactive", SensorRole.REACTIVE_POWER),
+    ]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
