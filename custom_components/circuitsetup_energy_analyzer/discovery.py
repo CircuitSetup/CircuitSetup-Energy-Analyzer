@@ -19,6 +19,8 @@ ENERGY_SOURCE_DEVICE_CLASSES = (
     "voltage",
 )
 _DEVICE_CLASSES = set(ENERGY_SOURCE_DEVICE_CLASSES)
+_UNSUPPORTED_REACTIVE_ENERGY_DEVICE_CLASSES = {"reactive_energy"}
+_UNSUPPORTED_REACTIVE_ENERGY_UNITS = {"varh", "kvarh", "mvarh"}
 _DEVICE_CLASS_ROLES = {
     "apparent_power": SensorRole.APPARENT_POWER,
     "current": SensorRole.CURRENT,
@@ -125,10 +127,17 @@ def infer_sensor_role(
 ) -> SensorRole | None:
     """Infer the analysis role from common energy meter sensor names."""
     text = _normalize_text(entity_id, friendly_name)
+    normalized_device_class = str(device_class or "").strip().lower()
+    normalized_unit = str(unit or "").strip().lower()
 
-    if role := _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower()):
+    if (
+        normalized_device_class in _UNSUPPORTED_REACTIVE_ENERGY_DEVICE_CLASSES
+        or normalized_unit in _UNSUPPORTED_REACTIVE_ENERGY_UNITS
+    ):
+        return None
+    if role := _DEVICE_CLASS_ROLES.get(normalized_device_class):
         return role
-    if role := _UNIT_ROLES.get(str(unit or "").strip().lower()):
+    if role := _UNIT_ROLES.get(normalized_unit):
         return role
     if "reactive power" in text:
         return SensorRole.REACTIVE_POWER
@@ -178,6 +187,15 @@ def is_energy_source_sensor(sensor: DiscoveredSensor) -> bool:
     return unit in _ENERGY_SOURCE_UNITS
 
 
+def _sensor_role_known_unsupported(sensor: DiscoveredSensor) -> bool:
+    device_class = str(sensor.device_class or "").strip().lower()
+    unit = str(sensor.unit or "").strip().lower()
+    return (
+        device_class in _UNSUPPORTED_REACTIVE_ENERGY_DEVICE_CLASSES
+        or unit in _UNSUPPORTED_REACTIVE_ENERGY_UNITS
+    )
+
+
 def discovered_sensor_roles(
     hass: Any,
     entity_ids: Iterable[str] | None = None,
@@ -194,15 +212,18 @@ def discovered_sensor_roles(
             entry = registry_entries.get(entity_id)
             if state is None and entry is None:
                 continue
-            roles[entity_id] = _build_discovered_sensor(
+            sensor = _build_discovered_sensor(
                 entity_id,
                 state,
                 entry,
-            ).role
+            )
+            if sensor.role is not None or _sensor_role_known_unsupported(sensor):
+                roles[entity_id] = sensor.role
         return roles
     return {
         sensor.entity_id: sensor.role
         for sensor in _build_discovered_sensors(hass)
+        if sensor.role is not None or _sensor_role_known_unsupported(sensor)
     }
 
 

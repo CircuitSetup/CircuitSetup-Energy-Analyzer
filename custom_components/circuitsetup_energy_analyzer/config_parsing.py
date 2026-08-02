@@ -242,6 +242,8 @@ def _mains_sensor_ref(
     if _harmonic_source_entity_excluded(entity_id):
         return None
     if sensor_roles is not None and entity_id in sensor_roles:
+        if sensor_roles[entity_id] is None:
+            return None
         try:
             role = SensorRole(sensor_roles[entity_id])
         except (TypeError, ValueError):
@@ -825,15 +827,17 @@ def source_circuit_ids_from_entity_ids(
         entity_id: _source_circuit_id_from_entity_id(entity_id)
         for entity_id in entity_id_list
     }
-    entities_by_collision: dict[tuple[str, SensorRole, str | None], list[str]] = {}
+    buckets_by_base: dict[
+        str,
+        dict[tuple[SensorRole, str | None], list[str]],
+    ] = {}
     for entity_id in entity_id_list:
         try:
             role = SensorRole((sensor_roles or {})[entity_id])
-        except (KeyError, ValueError):
+        except (KeyError, TypeError, ValueError):
             role = sensor_role_from_entity_id(entity_id)
-        entities_by_collision.setdefault(
+        buckets_by_base.setdefault(circuit_ids[entity_id], {}).setdefault(
             (
-                circuit_ids[entity_id],
                 role,
                 normalized_leg((sensor_legs or {}).get(entity_id))
                 or source_entity_leg_hint(entity_id),
@@ -845,57 +849,96 @@ def source_circuit_ids_from_entity_ids(
         suffix.removeprefix("_"): index
         for index, suffix in enumerate(_SOURCE_METRIC_SUFFIXES)
     }
+    qualifier_priority = {
+        suffix.removeprefix("_"): index
+        for index, suffix in enumerate(_SOURCE_VALUE_QUALIFIER_SUFFIXES)
+    }
+    qualifiers = {
+        entity_id: _source_value_qualifier_from_entity_id(entity_id)
+        for entity_id in entity_id_list
+    }
+    metrics = {
+        entity_id: _source_metric_suffix_from_entity_id(entity_id)
+        for entity_id in entity_id_list
+    }
+    variant_by_entity: dict[str, tuple[str, str, int]] = {}
+    for base_circuit_id, buckets in sorted(buckets_by_base.items()):
+        base_qualifier = min(
+            {
+                qualifiers[entity_id]
+                for entities in buckets.values()
+                for entity_id in entities
+            },
+            key=lambda qualifier: (
+                bool(qualifier),
+                qualifier_priority.get(qualifier, len(qualifier_priority)),
+                qualifier,
+            ),
+        )
+        for _, bucket_entities in sorted(
+            buckets.items(),
+            key=lambda item: (item[0][0].value, item[0][1] or ""),
+        ):
+            entities_by_qualifier: dict[str, list[str]] = {}
+            for entity_id in bucket_entities:
+                entities_by_qualifier.setdefault(qualifiers[entity_id], []).append(
+                    entity_id
+                )
+            for qualifier, qualified_entities in sorted(
+                entities_by_qualifier.items(),
+                key=lambda item: (
+                    qualifier_priority.get(item[0], len(qualifier_priority)),
+                    item[0],
+                ),
+            ):
+                ordered_entities = sorted(
+                    qualified_entities,
+                    key=lambda entity_id: (
+                        metric_priority.get(metrics[entity_id], len(metric_priority)),
+                        entity_id,
+                    ),
+                )
+                variants = (
+                    ordered_entities[1:]
+                    if qualifier == base_qualifier
+                    else ordered_entities
+                )
+                if qualifier:
+                    for ordinal, entity_id in enumerate(variants):
+                        variant_by_entity[entity_id] = (
+                            base_circuit_id,
+                            qualifier,
+                            ordinal,
+                        )
+                    continue
+                occurrences: dict[str, int] = {}
+                for entity_id in variants:
+                    detail = metrics[entity_id] or "source"
+                    ordinal = occurrences.get(detail, 0)
+                    occurrences[detail] = ordinal + 1
+                    variant_by_entity[entity_id] = (
+                        base_circuit_id,
+                        detail,
+                        ordinal,
+                    )
+
     reserved_ids = set(circuit_ids.values()) | {
         _canonical_source_circuit_id(circuit_id)
         for circuit_id in reserved_circuit_ids
     }
-    variant_ids: dict[tuple[str, str], str] = {}
-    for (base_circuit_id, _, _), collided_entities in entities_by_collision.items():
-        if len(collided_entities) < 2:
-            continue
-        qualifiers = {
-            entity_id: _source_value_qualifier_from_entity_id(entity_id)
-            for entity_id in collided_entities
-        }
-        metrics = {
-            entity_id: _source_metric_suffix_from_entity_id(entity_id)
-            for entity_id in collided_entities
-        }
-        primary_entity = min(
-            collided_entities,
-            key=lambda entity_id: (
-                bool(qualifiers[entity_id]),
-                metric_priority.get(metrics[entity_id], len(metric_priority)),
-                entity_id,
-            ),
-        )
-        bucket_variants: set[tuple[str, str]] = set()
-        for entity_id in sorted(
-            collided_entities,
-            key=lambda entity_id: (
-                qualifiers[entity_id],
-                metric_priority.get(metrics[entity_id], len(metric_priority)),
-                entity_id,
-            ),
-        ):
-            if entity_id == primary_entity:
-                continue
-            detail = qualifiers[entity_id] or metrics[entity_id]
-            variant_key = (base_circuit_id, detail or "source")
-            if variant_key in variant_ids and variant_key not in bucket_variants:
-                circuit_ids[entity_id] = variant_ids[variant_key]
-                bucket_variants.add(variant_key)
-                continue
-            candidate_base = f"{base_circuit_id}_{detail or 'source'}"
-            candidate = candidate_base
-            suffix = 2
-            while candidate in reserved_ids:
-                candidate = f"{candidate_base}_{suffix}"
-                suffix += 1
-            circuit_ids[entity_id] = candidate
-            variant_ids.setdefault(variant_key, candidate)
-            bucket_variants.add(variant_key)
-            reserved_ids.add(candidate)
+    variant_ids: dict[tuple[str, str, int], str] = {}
+    for variant_key in sorted(set(variant_by_entity.values())):
+        base_circuit_id, detail, _ = variant_key
+        candidate_base = f"{base_circuit_id}_{detail}"
+        candidate = candidate_base
+        suffix = 2
+        while candidate in reserved_ids:
+            candidate = f"{candidate_base}_{suffix}"
+            suffix += 1
+        variant_ids[variant_key] = candidate
+        reserved_ids.add(candidate)
+    for entity_id, variant_key in variant_by_entity.items():
+        circuit_ids[entity_id] = variant_ids[variant_key]
     return circuit_ids
 
 

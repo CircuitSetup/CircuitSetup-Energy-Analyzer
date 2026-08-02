@@ -216,6 +216,7 @@ def test_config_parser_groups_complementary_qualified_measurements() -> None:
         "sensor.panel_current_max",
         "sensor.panel_voltage_max",
         "sensor.panel_kw_max",
+        "sensor.panel_amps_max",
     ]
     configs = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: entity_ids})
     reversed_configs = circuit_configs_from_entry_data(
@@ -237,7 +238,10 @@ def test_config_parser_groups_complementary_qualified_measurements() -> None:
         SensorRole.CURRENT,
         SensorRole.VOLTAGE,
     }
-    assert [sensor.role for sensor in configs[2].sensors] == [SensorRole.REAL_POWER]
+    assert {sensor.role for sensor in configs[2].sensors} == {
+        SensorRole.REAL_POWER,
+        SensorRole.CURRENT,
+    }
     assert {
         sensor.entity_id: config.circuit_id
         for config in reversed_configs
@@ -246,6 +250,33 @@ def test_config_parser_groups_complementary_qualified_measurements() -> None:
         sensor.entity_id: config.circuit_id
         for config in configs
         for sensor in config.sensors
+    }
+
+
+def test_config_parser_groups_singleton_complementary_qualifiers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_power_max",
+                "sensor.panel_current_max",
+                "sensor.panel_voltage_max",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["panel", "panel_max"]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.panel_power"
+    ]
+    assert {sensor.role for sensor in configs[1].sensors} == {
+        SensorRole.REAL_POWER,
+        SensorRole.CURRENT,
+        SensorRole.VOLTAGE,
     }
 
 
@@ -442,7 +473,7 @@ def test_config_parser_keeps_saved_mains_role_when_metadata_is_inconclusive() ->
             ],
             CONF_MAINS_SOURCE_ENTITIES: [entity_id],
         },
-        mains_sensor_roles={entity_id: None},
+        mains_sensor_roles={},
     )
 
     assert configs[0].sensors == (SensorRef(entity_id, SensorRole.REAL_POWER),)

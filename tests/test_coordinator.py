@@ -11086,6 +11086,73 @@ def test_runtime_discovers_metadata_for_filtered_mains_sensor_names() -> None:
     )
 
 
+def test_runtime_drops_saved_mains_role_when_metadata_is_unsupported() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    entity_id = "sensor.channel_1"
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda requested: SimpleNamespace(
+                    attributes={
+                        "device_class": "reactive_energy",
+                        "unit_of_measurement": "kvarh",
+                    }
+                )
+                if requested == entity_id
+                else None
+            ),
+            data={},
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "mode": "mains_nilm",
+                    "sensors": [{"entity_id": entity_id, "role": "real_power"}],
+                }
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [entity_id],
+        },
+    )
+
+    assert coordinator.circuit_configs[0].sensors == ()
+
+
+def test_runtime_keeps_saved_mains_role_when_metadata_is_inconclusive() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    entity_id = "sensor.channel_1"
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda requested: SimpleNamespace(attributes={})
+                if requested == entity_id
+                else None
+            ),
+            data={},
+        ),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "mode": "mains_nilm",
+                    "sensors": [{"entity_id": entity_id, "role": "real_power"}],
+                }
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [entity_id],
+        },
+    )
+
+    assert coordinator.circuit_configs[0].sensors == (
+        SensorRef(entity_id, SensorRole.REAL_POWER),
+    )
+
+
 @pytest.mark.asyncio
 async def test_demo_source_entities_are_treated_as_current_for_data_quality() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
