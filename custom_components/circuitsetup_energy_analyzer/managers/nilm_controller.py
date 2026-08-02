@@ -11,6 +11,7 @@ from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
 from ..nilm import NilmEdge
+from ..profiles import nilm_source_kind
 
 
 class NilmController:
@@ -71,12 +72,7 @@ class NilmController:
                 coordinator.entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
             )
         )
-        return enabled and (
-            config.mode is CircuitMode.MAINS_NILM
-            or config.appliance_profile is ApplianceProfile.MAINS_NILM
-            or config.mode is CircuitMode.MIXED
-            or config.appliance_profile is ApplianceProfile.MIXED
-        )
+        return enabled and nilm_source_kind(config) is not None
 
     def clear_topology_state(self, circuit_id: str) -> None:
         """Clear retained NILM topology state and cached alert policy."""
@@ -92,7 +88,7 @@ class NilmController:
         events: Iterable[Any],
         context: Any | None = None,
     ) -> list[AlertEvidence]:
-        """Process one NILM mains sample and apply resulting state updates."""
+        """Process one NILM source sample and apply resulting state updates."""
         coordinator = self._coordinator
         result = self._sample_processor.process(
             sample,

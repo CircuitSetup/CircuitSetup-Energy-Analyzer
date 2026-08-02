@@ -48,6 +48,14 @@ class CircuitMode(StrEnum):
     MAINS_NILM = "mains_nilm"
 
 
+class NilmSourceKind(StrEnum):
+    """Explicit source topology supported by NILM processing."""
+
+    MAINS = "mains"
+    PURE_MIXED = "pure_mixed"
+    PRIMARY_MIXED = "primary_mixed"
+
+
 class PowerFlowMode(StrEnum):
     """Real-power sign convention for a circuit."""
 

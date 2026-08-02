@@ -8827,6 +8827,96 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode", "expected_events"),
+    [
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, 1),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE, 1),
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.MIXED, 1),
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.SINGLE_PHASE, 0),
+    ],
+)
+def test_nilm_sample_processor_processes_only_configured_source_kinds(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    expected_events: int,
+) -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="source",
+        name="Source",
+        appliance_profile=profile,
+        mode=mode,
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    controller = nilm_controller.NilmController(
+        SimpleNamespace(
+            options={"enable_experimental_nilm": True},
+            entry_data={},
+            circuit_registry=SimpleNamespace(
+                known_load_circuit_ids=frozenset(),
+                config_for_circuit=lambda _circuit_id: config,
+            ),
+        ),
+        label_interval_max_items=1,
+        assignment_max_items=1,
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=controller.enabled_for_config,
+        seed_demo_nilm_state=controller.seed_demo_state,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=controller.known_load_events,
+        observe_topology=lambda _config, _match, _context: [],
+    )
+
+    for seconds, watts in ((0, 100.0), (5, 420.0), (10, 420.0)):
+        processor.process(
+            NormalizedCircuitSample(
+                timestamp=now + timedelta(seconds=seconds),
+                circuit_id="source",
+                real_power=watts,
+                current=None,
+                voltage=None,
+                reactive_power=None,
+                apparent_power=None,
+                power_factor=None,
+                frequency=60.0,
+                energy=None,
+            ),
+            config,
+            context,
+            events=(),
+        )
+
+    assert processor.total_events_by_circuit["source"] == expected_events
+
+
 def test_leg_imbalance_processor_marks_single_phase_not_dual_phase() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
