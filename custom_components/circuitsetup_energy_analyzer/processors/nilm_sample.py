@@ -418,9 +418,16 @@ def _record_assignment_model_drift(
     if not changed:
         return False
     by_fingerprint[fingerprint] = seen[-3:]
-    assignment["model_drift_edges_by_fingerprint"] = dict(
-        list(by_fingerprint.items())[-4:]
-    )
+    retained_fingerprints = {
+        str(value or "").strip()
+        for value in _list_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    }
+    assignment["model_drift_edges_by_fingerprint"] = {
+        key: value
+        for key, value in by_fingerprint.items()
+        if not retained_fingerprints or key in retained_fingerprints
+    }
     assignment.pop("model_drift_edge_ids", None)
     if len(by_fingerprint[fingerprint]) >= 3:
         assignment["model_status"] = "needs_review"

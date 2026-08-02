@@ -8296,6 +8296,37 @@ def test_assignment_drift_is_scoped_per_persisted_fingerprint() -> None:
     assert restored["model_status"] == "needs_review"
 
 
+def test_assignment_drift_retains_all_reviewed_fingerprints_across_restart() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _record_assignment_model_drift,
+    )
+
+    fingerprints = [f"signature-{index}" for index in range(5)]
+    assignment = {
+        "signature_fingerprints": fingerprints,
+        "transition_prototypes": [{
+            "direction": "on", "delta_w": 80.0, "spread_w": 2.0,
+        }],
+    }
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    for index, fingerprint in enumerate(fingerprints):
+        _record_assignment_model_drift(assignment, fingerprint, [
+            NilmEdge(start + timedelta(minutes=index), 140.0, 0.0, 140.0, 0.0, "on")
+        ])
+
+    restored = dict(assignment)
+    for index in range(2):
+        _record_assignment_model_drift(restored, fingerprints[0], [
+            NilmEdge(
+                start + timedelta(minutes=10 + index),
+                140.0, 0.0, 140.0, 0.0, "on",
+            )
+        ])
+
+    assert restored["model_status"] == "needs_review"
+
+
 def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (

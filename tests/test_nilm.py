@@ -107,7 +107,7 @@ def test_assignment_model_discards_invalid_before_recent_cap() -> None:
 def test_assignment_model_tolerates_malformed_optional_fields() -> None:
     assignment = {
         "assignment_id": "pump", "confirmed_session_ids": ["one"],
-        "model_revision": "bad", "model_confidence": float("nan"),
+        "model_revision": 10**10_000, "model_confidence": float("nan"),
         "transition_prototypes": [{"direction": "on", "sample_count": "bad"}],
     }
     model = build_nilm_assignment_model(assignment, [{
@@ -119,6 +119,38 @@ def test_assignment_model_tolerates_malformed_optional_fields() -> None:
     assert model["model_revision"] == 1
     assert model["model_confidence"] == 0.0
     assert nilm_assignment_model_is_compound_eligible(assignment) is False
+
+
+def test_assignment_model_requires_directional_evidence_and_conservative_confidence(
+) -> None:
+    session_ids = ["wrong-on", "wrong-off", "valid-a", "valid-b", "valid-c"]
+    assignment = {"assignment_id": "pump", "confirmed_session_ids": session_ids}
+    sessions = [
+        {
+            "session_id": "wrong-on", "assignment_id": "pump",
+            "end": "2026-07-02T10:00:00+00:00", "on_delta_w": -80.0,
+            "off_delta_w": -80.0, "confidence": 1.0,
+        },
+        {
+            "session_id": "wrong-off", "assignment_id": "pump",
+            "end": "2026-07-01T10:00:00+00:00", "on_delta_w": 80.0,
+            "off_delta_w": 80.0, "confidence": 1.0,
+        },
+        *[
+            {
+                "session_id": f"valid-{suffix}", "assignment_id": "pump",
+                "end": f"2026-06-0{index}T10:00:00+00:00",
+                "on_delta_w": 80.0, "off_delta_w": -80.0,
+                **({"confidence": 0.9} if index == 1 else {}),
+            }
+            for index, suffix in enumerate(("a", "b", "c"), start=1)
+        ],
+    ]
+
+    model = build_nilm_assignment_model(assignment, sessions)
+
+    assert model["transition_prototypes"][0]["sample_count"] == 3
+    assert model["model_confidence"] == 0.0
 
 
 def sample(

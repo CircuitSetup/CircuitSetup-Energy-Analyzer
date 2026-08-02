@@ -42,7 +42,9 @@ def build_nilm_assignment_model(
             and session.get("end") is not None
             and session.get("ambiguous") is not True
             and on_delta is not None
+            and on_delta > 0
             and off_delta is not None
+            and off_delta < 0
         ):
             eligible.append((session, on_delta, off_delta))
     eligible.sort(
@@ -54,8 +56,9 @@ def build_nilm_assignment_model(
     off_values = [item[2] for item in eligible]
     confidences = [
         value
-        for session, _, _ in eligible
         if (value := _model_number(session.get("confidence"))) is not None
+        else 0.0
+        for session, _, _ in eligible
     ]
     normalized = normalize_nilm_assignment_model(assignment)
     model: dict[str, Any] = {
@@ -169,7 +172,7 @@ def _transition_prototype(
 def _model_number(value: Any) -> float | None:
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return None
     return number if isfinite(number) else None
 
