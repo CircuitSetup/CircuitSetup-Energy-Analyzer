@@ -113,7 +113,7 @@ from .settings_advisor import SETTING_LABELS
 from .state import circuit_is_learning
 from .ux import alert_evidence_detail, friendly_feature_name
 
-DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
+DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 24
 APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS = (24, 168, 720)
 _HISTORY_UNIT_BY_ROLE = {
     SensorRole.VOLTAGE: "V",
@@ -1109,7 +1109,11 @@ def _appliance_detail_history_payload(
     payload = {
         "entities": [item["entity_id"] for item in entity_series],
         "entity_series": entity_series,
-        "default_hours": DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS,
+        "default_hours": (
+            720
+            if detail.appliance_profile == ApplianceProfile.SUMP_PUMP.value
+            else DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS
+        ),
         "period_hours": list(APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS),
     }
     if embedded_series:

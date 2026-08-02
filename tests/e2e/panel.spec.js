@@ -6142,7 +6142,23 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
     host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth
   ));
   expect(horizontalOverflow).toBe(false);
+  const graphControls = panel.locator("[data-appliance-history-graph]");
+  await expect(graphControls.locator(".labeled-graph-controls")).toHaveCount(0);
+  await expect(graphControls.locator("button")).toHaveText(["", "", "", ""]);
 
+  const period = panel.locator('[data-appliance-history-period="24"]');
+  await expect(period).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => {
+    const graphWindow = window.__panel._applianceDetailHistoryGraphWindow();
+    return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
+  })).toBe(24);
+  const sevenDayPeriod = panel.locator('[data-appliance-history-period="168"]');
+  await sevenDayPeriod.click();
+  await expect(sevenDayPeriod).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => {
+    const graphWindow = window.__panel._applianceDetailHistoryGraphWindow();
+    return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
+  })).toBe(168);
   await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
   await expect.poll(() => page.evaluate(() => {
     const graphWindow = window.__panel._applianceDetailHistoryGraphWindow();
@@ -6157,9 +6173,9 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
     return Math.round((graphWindow.end - graphWindow.start) / 3_600_000);
   })).toBe(168);
 
-  const period = panel.locator('[data-appliance-history-period="24"]');
   await period.click();
   await expect(period).toHaveAttribute("aria-pressed", "true");
+  await toHaveNoViolations(page);
 });
 
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {

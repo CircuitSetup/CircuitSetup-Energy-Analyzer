@@ -231,6 +231,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
 
     assert payload["status"] == "ok"
+    assert payload["history"]["default_hours"] == 24
     detail = payload["detail"]
     assert detail["circuit_id"] == "fridge"
     assert detail["display_name"] == "Kitchen Fridge"
@@ -328,6 +329,7 @@ def test_sump_pump_detail_exposes_history_driver_entities() -> None:
 
     payload = appliance_detail_payload([coordinator], circuit_id="sump")
 
+    assert payload["history"]["default_hours"] == 720
     assert payload["detail"]["sump_driver_context"] == {
         "default_hours": 720,
         "period_hours": [24, 168, 720],
@@ -350,10 +352,12 @@ def test_sump_pump_detail_exposes_history_driver_entities() -> None:
     nilm_coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
         "appliance_profile"
     ] = "sump_pump"
-    nilm_detail = appliance_detail_payload(
+    nilm_payload = appliance_detail_payload(
         [nilm_coordinator],
         assignment_id="assignment-dishwasher",
-    )["detail"]
+    )
+    assert nilm_payload["history"]["default_hours"] == 720
+    nilm_detail = nilm_payload["detail"]
     assert nilm_detail["source_type"] == "nilm_estimate"
     assert "sump_driver_context" not in nilm_detail
 

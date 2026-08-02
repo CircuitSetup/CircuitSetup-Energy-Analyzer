@@ -807,8 +807,7 @@ export class PanelShellMethods {
           display: grid;
           gap: 4px;
         }
-        .appliance-period-button,
-        .labeled-graph-controls .icon-button {
+        .appliance-period-button {
           background: var(--secondary-background-color, #f4f6f8);
           border-color: transparent;
           color: var(--primary-text-color, #1f2933);
@@ -1307,9 +1306,6 @@ export class PanelShellMethods {
           height: 44px;
           padding: 0;
           width: 44px;
-        }
-        .labeled-graph-controls .icon-button {
-          width: auto;
         }
         .decision-tile,
         .nilm-lane,
