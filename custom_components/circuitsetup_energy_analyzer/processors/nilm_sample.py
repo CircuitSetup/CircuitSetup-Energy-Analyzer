@@ -805,7 +805,7 @@ def _optional_float(*values: Any) -> float | None:
     for value in values:
         try:
             return float(value)
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             continue
     return None
 

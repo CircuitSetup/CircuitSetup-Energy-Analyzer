@@ -9067,7 +9067,7 @@ def test_confirmed_helper_link_refresh_normalizes_malformed_metrics() -> None:
         "status": "confirmed",
         "matched_on_count": "invalid",
         "matched_off_count": {},
-        "confirmed_matched_on_count": "NaN",
+        "confirmed_matched_on_count": 10**10_000,
         "confirmed_matched_off_count": -4,
         "confidence": "NaN",
     }
