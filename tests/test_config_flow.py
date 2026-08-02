@@ -5335,6 +5335,10 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
                 "sensor.microwave_power",
             ],
             CONF_CIRCUITS: circuits,
+            CONF_ADVANCED_SETTINGS: {
+                "refrigerator": {"preset": "sensitive"},
+                "microwave": {"preset": "balanced"},
+            },
         },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
@@ -5359,6 +5363,9 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
         "sensor.refrigerator_power",
         "sensor.microwave_power",
     ]
+    assert result["data"][CONF_ADVANCED_SETTINGS] == {
+        "refrigerator": {"preset": "sensitive"}
+    }
 
 
 @pytest.mark.asyncio

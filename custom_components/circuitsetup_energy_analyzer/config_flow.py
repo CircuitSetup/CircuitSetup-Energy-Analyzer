@@ -3236,6 +3236,7 @@ def _final_config_from_reviewed_circuits(
         str(circuit.get("circuit_id") or circuit.get("id") or "")
         for circuit in circuit_list
     }
+    _prune_advanced_settings(final_config, circuit_ids)
     known_loads = [
         circuit_id
         for circuit_id in _strict_string_list(
@@ -3308,6 +3309,7 @@ def _final_config_from_single_assignment_update(
         str(circuit.get("circuit_id") or circuit.get("id") or "")
         for circuit in final_circuits
     }
+    _prune_advanced_settings(final_config, circuit_ids)
     known_loads = [
         circuit_id
         for circuit_id in _strict_string_list(
@@ -3372,10 +3374,21 @@ def _final_config_from_empty_assignment_update(
             entity_id for entity_id in source_entities if entity_id not in removed
         ]
     final_config[CONF_CIRCUITS] = []
+    _prune_advanced_settings(final_config, set())
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits([])
     if CONF_KNOWN_LOAD_CIRCUITS in final_config:
         final_config[CONF_KNOWN_LOAD_CIRCUITS] = []
     return final_config
+
+
+def _prune_advanced_settings(
+    config: dict[str, Any], circuit_ids: set[str]
+) -> None:
+    settings = config.get(CONF_ADVANCED_SETTINGS)
+    if isinstance(settings, Mapping):
+        config[CONF_ADVANCED_SETTINGS] = {
+            key: value for key, value in settings.items() if str(key) in circuit_ids
+        }
 
 
 def _source_entities_after_assignment_update(
