@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
@@ -53,9 +54,9 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         ("solar", "mains_balance"),
         (SensorRole.REAL_POWER,),
     ),
+    (("demand",), (SensorRole.REAL_POWER,)),
     (
         (
-            "demand",
             "always_on",
             "standby",
             "cycle",
@@ -153,15 +154,31 @@ def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
 
 
 def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
-    """Return the graph window containing only the alert evidence."""
+    """Return the alert evidence interval with enough surrounding context."""
     raw_start = alert.first_seen or alert.timestamp
     raw_end = alert.last_seen or alert.timestamp
     start = min(raw_start, raw_end)
     end = max(raw_start, raw_end)
+
+    if "demand" in _feature_for_alert(alert).lower():
+        try:
+            demand_window_minutes = float(
+                alert.features.get("demand_window_minutes", 0.0)
+            )
+        except (TypeError, ValueError):
+            demand_window_minutes = 0.0
+        if math.isfinite(demand_window_minutes) and demand_window_minutes > 0.0:
+            start = min(
+                start,
+                alert.timestamp - timedelta(minutes=demand_window_minutes),
+            )
+
     if start == end:
         point_padding = timedelta(minutes=15)
         return (start - point_padding, end + point_padding)
-    return (start, end)
+
+    context_padding = timedelta(minutes=10)
+    return (start - context_padding, end + context_padding)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
