@@ -3762,6 +3762,22 @@ def test_assignment_groups_separate_duplicate_qualified_measurements() -> None:
     )
 
 
+def test_assignment_groups_separate_duplicate_metric_aliases() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.pump_power", "sensor.pump_kw", "sensor.pump_kva"]
+    )
+
+    assert [group["group_id"] for group in groups] == ["pump", "pump_kw"]
+    assert groups[0]["entity_ids"] == (
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    )
+
+
 def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,

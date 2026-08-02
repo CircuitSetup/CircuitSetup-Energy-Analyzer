@@ -2612,7 +2612,10 @@ def assignment_groups_from_sources(
             source_name_by_entity.get(entity_id, ""),
         )
     ]
-    inferred_circuit_ids = source_circuit_ids_from_entity_ids(grouped_entities)
+    inferred_circuit_ids = source_circuit_ids_from_entity_ids(
+        grouped_entities,
+        sensor_roles=source_role_by_entity,
+    )
 
     owners_by_entity: dict[str, set[int]] = {}
     inferred_group_owners: dict[str, set[int]] = {}

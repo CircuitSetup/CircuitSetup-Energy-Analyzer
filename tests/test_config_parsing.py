@@ -161,6 +161,28 @@ def test_config_parser_separates_duplicate_qualified_measurements() -> None:
     ]
 
 
+def test_config_parser_separates_duplicate_metric_aliases() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.pump_power",
+                "sensor.pump_kw",
+                "sensor.pump_kva",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["pump", "pump_kw"]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    ]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

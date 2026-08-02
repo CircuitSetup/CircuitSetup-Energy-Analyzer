@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -667,28 +666,66 @@ def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     )
 
 
-def source_circuit_ids_from_entity_ids(entity_ids: Iterable[str]) -> dict[str, str]:
+def source_circuit_ids_from_entity_ids(
+    entity_ids: Iterable[str],
+    *,
+    sensor_roles: Mapping[str, SensorRole | str] | None = None,
+) -> dict[str, str]:
     """Return circuit IDs without collapsing duplicate role measurements."""
     entity_id_list = list(dict.fromkeys(entity_ids))
     circuit_ids = {
         entity_id: _source_circuit_id_from_entity_id(entity_id)
         for entity_id in entity_id_list
     }
-    collision_keys = [
-        (
-            circuit_ids[entity_id],
-            sensor_role_from_entity_id(entity_id),
-            _entity_id_leg_hint(entity_id),
-        )
-        for entity_id in entity_id_list
-    ]
-    duplicate_keys = {
-        key for key, count in Counter(collision_keys).items() if count > 1
+    entities_by_collision: dict[tuple[str, SensorRole, str | None], list[str]] = {}
+    for entity_id in entity_id_list:
+        try:
+            role = SensorRole((sensor_roles or {})[entity_id])
+        except (KeyError, ValueError):
+            role = sensor_role_from_entity_id(entity_id)
+        entities_by_collision.setdefault(
+            (
+                circuit_ids[entity_id],
+                role,
+                _entity_id_leg_hint(entity_id),
+            ),
+            [],
+        ).append(entity_id)
+
+    metric_priority = {
+        suffix.removeprefix("_"): index
+        for index, suffix in enumerate(_SOURCE_METRIC_SUFFIXES)
     }
-    for entity_id, collision_key in zip(entity_id_list, collision_keys, strict=True):
-        qualifier = _source_value_qualifier_from_entity_id(entity_id)
-        if qualifier and collision_key in duplicate_keys:
-            circuit_ids[entity_id] = f"{circuit_ids[entity_id]}_{qualifier}"
+    for (base_circuit_id, _, _), collided_entities in entities_by_collision.items():
+        if len(collided_entities) < 2:
+            continue
+        qualifiers = {
+            entity_id: _source_value_qualifier_from_entity_id(entity_id)
+            for entity_id in collided_entities
+        }
+        metrics = {
+            entity_id: _source_metric_suffix_from_entity_id(entity_id)
+            for entity_id in collided_entities
+        }
+        primary_entity = min(
+            collided_entities,
+            key=lambda entity_id: (
+                bool(qualifiers[entity_id]),
+                metric_priority.get(metrics[entity_id], len(metric_priority)),
+                entity_id,
+            ),
+        )
+        used_circuit_ids = {base_circuit_id}
+        for entity_id in collided_entities:
+            if entity_id == primary_entity:
+                continue
+            detail = qualifiers[entity_id] or metrics[entity_id]
+            candidate = f"{base_circuit_id}_{detail}"
+            if not detail or candidate in used_circuit_ids:
+                object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id))
+                candidate = f"{base_circuit_id}_{object_id.strip('_')}"
+            circuit_ids[entity_id] = candidate
+            used_circuit_ids.add(candidate)
     return circuit_ids
 
 
@@ -774,6 +811,19 @@ def _source_value_qualifier_from_entity_id(entity_id: str) -> str:
             suffix.removeprefix("_")
             for suffix in _SOURCE_VALUE_QUALIFIER_SUFFIXES
             if suffix.removeprefix("_") in removed_tokens
+        ),
+        "",
+    )
+
+
+def _source_metric_suffix_from_entity_id(entity_id: str) -> str:
+    object_id = _strip_terminal_phase_letter(_entity_object_id(entity_id))
+    normalized = _strip_trailing_source_qualifiers(object_id)
+    return next(
+        (
+            suffix.removeprefix("_")
+            for suffix in _SOURCE_METRIC_SUFFIXES
+            if normalized.endswith(suffix)
         ),
         "",
     )
