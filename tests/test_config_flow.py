@@ -1496,7 +1496,12 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
         },
     ]
     entry = SimpleNamespace(
-        data={},
+        data={
+            CONF_CIRCUITS: existing_circuits,
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"thermostat_entity": "climate.attic"},
+            },
+        },
         options={
             CONF_SOURCE_DEVICES: ["meter-device"],
             CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
@@ -1505,7 +1510,6 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
                 "sensor.hvac_power",
                 "sensor.manual_power",
             ],
-            CONF_CIRCUITS: existing_circuits,
             CONF_SENSITIVITY: "quiet",
             CONF_RETENTION_MODE: "diagnostic",
         },
@@ -1520,7 +1524,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert config_entries.reloads == []
-    assert entry.options[CONF_CIRCUITS] == existing_circuits
+    assert entry.data[CONF_CIRCUITS] == existing_circuits
     assert [group["circuit_id"] for group in flow._assignment_groups] == [
         "fridge",
         "hvac",
@@ -1589,6 +1593,9 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     ]
     assert result["data"][CONF_SENSITIVITY] == "quiet"
     assert result["data"][CONF_RETENTION_MODE] == "diagnostic"
+    assert result["data"][CONF_ADVANCED_SETTINGS] == {
+        "hvac": {"thermostat_entity": "climate.attic"},
+    }
     assert config_entries.reloads == ["entry-1"]
 
 
@@ -3250,6 +3257,66 @@ async def test_options_assignment_review_preserves_outdoor_temperature_entity() 
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_preserves_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    shared_thermostat = "climate.main_floor"
+    temperature_sensor = "sensor.main_floor_temperature"
+    advanced_settings = {
+        circuit_id: {
+            CONF_LINKED_THERMOSTAT_ENTITIES: [shared_thermostat],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                shared_thermostat: temperature_sensor
+            },
+        }
+        for circuit_id in ("ac_1", "ac_2")
+    }
+    advanced_settings["mains"] = {"preset": "sensitive"}
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ac_1",
+                    "name": "AC 1",
+                    "appliance_profile": "hvac",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.hvac_power"],
+                },
+                {
+                    "circuit_id": "ac_2",
+                    "name": "AC 2",
+                    "appliance_profile": "hvac",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.ac_2_power"],
+                },
+            ],
+            CONF_ADVANCED_SETTINGS: advanced_settings,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    await flow.async_step_assign()
+    await flow.async_step_select_assignment({"selected_assignment": "ac_1"})
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.hvac_power"],
+            "circuit_name": "AC 1",
+            "appliance_profile": "hvac",
+            "circuit_retention_mode": "standard",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS] == advanced_settings
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_saves_optional_rain_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -4785,11 +4852,27 @@ def test_unassigned_filtered_sources_remain_available_for_later_assignment() -> 
         {
             CONF_EXTRA_SOURCE_ENTITIES: [source],
             CONF_SOURCE_ENTITIES: [source],
+            CONF_ADVANCED_SETTINGS: {
+                "mains": {"preset": "sensitive"},
+                "removed": {"preset": "balanced"},
+            },
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"source": "sensor.utility_total"},
+                "removed": {"source": "sensor.removed_energy"},
+            },
         }
     )
 
     assert final_config[CONF_EXTRA_SOURCE_ENTITIES] == [source]
     assert final_config[CONF_SOURCE_ENTITIES] == []
+    assert final_config[CONF_ADVANCED_SETTINGS] == {
+        "mains": {"preset": "sensitive"},
+        "removed": {},
+    }
+    assert final_config[CONF_UTILITY_COMPARISON_SETTINGS] == {
+        "mains": {"source": "sensor.utility_total"},
+        "removed": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -5341,7 +5424,15 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
         },
     ]
     entry = SimpleNamespace(
-        data={},
+        data={
+            CONF_CIRCUITS: circuits,
+            CONF_ADVANCED_SETTINGS: {
+                "mains": {"preset": "sensitive"},
+            },
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"source": "sensor.utility_total"},
+            },
+        },
         options={
             CONF_SOURCE_ENTITIES: [
                 "sensor.refrigerator_power",
@@ -5351,7 +5442,12 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
                 "sensor.refrigerator_power",
                 "sensor.microwave_power",
             ],
-            CONF_CIRCUITS: circuits,
+            CONF_ADVANCED_SETTINGS: {
+                "refrigerator": {"preset": "sensitive"},
+            },
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "refrigerator": {"source": "sensor.refrigerator_energy"},
+            },
         },
     )
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
@@ -5376,6 +5472,16 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
         "sensor.refrigerator_power",
         "sensor.microwave_power",
     ]
+    assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
+        "mains": {"source": "sensor.utility_total"},
+        "refrigerator": {"source": "sensor.refrigerator_energy"},
+        "microwave": {},
+    }
+    assert result["data"][CONF_ADVANCED_SETTINGS] == {
+        "mains": {"preset": "sensitive"},
+        "refrigerator": {"preset": "sensitive"},
+        "microwave": {},
+    }
 
 
 @pytest.mark.asyncio

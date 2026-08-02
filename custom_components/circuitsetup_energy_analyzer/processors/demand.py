@@ -379,9 +379,15 @@ def _contextual_demand_comparison(
         "alert_baseline_value": selected.p90,
         "sample_recorded": sample_recorded,
     }
+    normal_spread_w = max(
+        selected.mad * 1.4826,
+        abs(selected.median) * 0.05,
+        1.0,
+    )
     if (
-        result.monthly_peak_warning is not None
-        and result.current_demand_w <= selected.p90
+        result.limit_exceeded is None
+        and result.monthly_peak_warning is not None
+        and result.current_demand_w <= selected.p90 + normal_spread_w
     ):
         attrs["status_override"] = "context_explained"
     return attrs

@@ -36,6 +36,27 @@ def test_record_demand_sample_uses_time_weighted_window_and_tracks_peak() -> Non
     ]
 
 
+def test_record_demand_sample_clamps_window_to_supported_maximum() -> None:
+    history: dict[str, object] = {}
+
+    result = record_demand_sample(
+        history,
+        circuit_id="ev_charger",
+        timestamp=datetime(2026, 6, 3, 12, 15, tzinfo=UTC),
+        real_power_w=2600.0,
+        settings=DemandSettings(window_minutes=300),
+    )
+
+    assert result.window_minutes == 240
+    assert history["monthly_peak_windows"] == [
+        {
+            "timestamp": "2026-06-03T12:15:00+00:00",
+            "demand_w": 2600.0,
+            "window_minutes": 240,
+        }
+    ]
+
+
 def test_record_demand_sample_flags_configured_limit() -> None:
     history = {
         "samples": [
