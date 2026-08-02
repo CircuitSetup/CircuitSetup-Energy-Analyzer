@@ -726,7 +726,8 @@ export function createNilmWorkspaceMethods({
 
   _routeRequestsNilmWorkspace(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
-    return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1";
+    return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1"
+      || routeUrl.pathname.endsWith("/nilm");
   }
 
   _nilmActionMessage(actionKey, data) {
@@ -1529,12 +1530,21 @@ export function createNilmWorkspaceMethods({
     }, 0);
     const reviewed = Math.max(0, total - needsReview);
     const progressText = this._panelTextFormat("nilm_workspace.review_progress_value", { reviewed, total });
+    const sources = Array.isArray(workspace.sources) ? workspace.sources : [];
+    const sourcePicker = sources.length > 1 ? `
+      <label class="nilm-label-field">
+        <span class="muted">${this._escape(this._panelText("nilm_workspace.source_picker_label"))}</span>
+        <select data-nilm-source-picker aria-label="${this._escape(this._panelText("nilm_workspace.source_picker_label"))}">
+          ${sources.map((source) => `<option value="${this._escape(source.path || "")}" ${source.circuit_id === circuit.circuit_id ? "selected" : ""}>${this._escape(source.name || source.circuit_id || "")}</option>`).join("")}
+        </select>
+      </label>` : "";
     return `
       <section class="workspace-summary section-surface" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
         <div class="workspace-summary-item">
           <span>${this._escape(this._panelText("nilm_workspace.circuit"))}</span>
           <strong>${this._escape(circuit.name || circuit.circuit_id || this._panelText("common.unknown"))}</strong>
         </div>
+        ${sourcePicker}
         <div class="workspace-summary-item">
           <span>${this._escape(this._panelText("nilm_workspace.lane_needs_review"))}</span>
           <strong>${needsReview}</strong>

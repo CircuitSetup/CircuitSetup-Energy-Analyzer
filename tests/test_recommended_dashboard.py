@@ -1567,6 +1567,41 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     }
 
 
+def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
+    sources = (
+        CircuitConfig(
+            circuit_id="mixed",
+            name="Mixed Loads",
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.MIXED,
+        ),
+        CircuitConfig(
+            circuit_id="hvac_2",
+            name="HVAC 2",
+            appliance_profile=ApplianceProfile.HVAC,
+            mode=CircuitMode.MIXED,
+        ),
+    )
+
+    dashboard = build_recommended_dashboard(
+        sources, DASHBOARD_LAYOUT_STANDARD, entry_id="entry-1"
+    )
+
+    insights = next(
+        view for view in _dashboard_views(dashboard) if view["path"] == "insights"
+    )
+    cards = _dashboard_cards(insights)
+    paths = [
+        card["tap_action"]["navigation_path"]
+        for card in cards
+        if card.get("name") == "Open Load Separation"
+    ]
+    assert paths == [
+        "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mixed",
+        "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=hvac_2",
+    ]
+
+
 def test_dashboard_omits_empty_nilm_graph_from_graph_tab() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),

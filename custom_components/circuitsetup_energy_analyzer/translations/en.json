@@ -1122,6 +1122,7 @@
         "appliance_run_timeline": "Appliance run timeline",
         "nilm_review": "NILM review",
         "review_nilm_assignments": "Review NILM Assignments",
+        "open_load_separation": "Open Load Separation",
         "hvac_energy_temperature": "HVAC daily energy and outdoor temperature",
         "water_flow_context": "Water flow context",
         "defined_nilm_appliance_power": "Defined NILM appliance power",
@@ -1409,9 +1410,9 @@
         "appliance_detail_message": "Appliance behavior summary.",
         "suggested_settings": "Suggested Settings",
         "suggested_settings_message": "Review pending analyzer setting recommendations.",
-        "nilm_workspace": "NILM Workspace",
-        "nilm_workspace_message": "Mains NILM graph and review.",
-        "nilm_workspace_message_for_circuit": "Mains NILM graph and review for {name}."
+        "nilm_workspace": "Load Separation",
+        "nilm_workspace_message": "Experimental NILM: source power is measured while components are estimated.",
+        "nilm_workspace_message_for_circuit": "Experimental NILM for {name}: source power is measured while components are estimated."
       },
       "status": {
         "matched_alert": "Matched alert",
@@ -1520,6 +1521,7 @@
           "not_helpful": "Not Helpful",
           "open_advanced_circuit_settings": "Open Advanced Circuit Settings",
           "open_appliance_detail": "Open Appliance Detail",
+          "open_load_separation": "Open Load Separation",
           "open_evidence": "Open Evidence",
           "pan_earlier": "Pan Earlier",
           "pan_later": "Pan Later",
@@ -1822,6 +1824,7 @@
         "preview_alert_selected_history": "A reliable preview is unavailable because retained history contains only alerts selected by the current setting."
       },
       "nilm_workspace": {
+        "source_picker_label": "Load Separation source",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",
         "no_mains_circuit": "No mains NILM circuit is available for this workspace.",

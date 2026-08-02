@@ -1673,6 +1673,48 @@ def test_appliance_detail_reports_stale_assignment_before_circuit_fallback() -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode"),
+    [
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED),
+        (ApplianceProfile.HVAC, CircuitMode.MIXED),
+    ],
+)
+def test_appliance_detail_offers_load_separation_for_each_source(
+    profile: ApplianceProfile, mode: CircuitMode
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    config = _config("source", profile=profile, mode=mode)
+    coordinator = SimpleNamespace(
+        circuit_configs=(config,),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        entry_id="entry-1",
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="source")
+
+    assert payload["actions"]["open_load_separation"] == {
+        "type": "navigate",
+        "label": "Open Load Separation",
+        "path": "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=source",
+    }
+
+
+def test_appliance_detail_omits_load_separation_for_dedicated_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
+
+    assert "open_load_separation" not in payload["actions"]
+
+
 def test_appliance_detail_payload_reports_missing_ids_friendly() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

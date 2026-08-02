@@ -27,6 +27,7 @@ from .panel_contracts import (
     NILM_WORKSPACE_HISTORY_API_PATH,
     PANEL_URL_PATH,
 )
+from .profiles import nilm_source_kind
 from .services import (
     ATTR_APPLIANCE_PROFILE,
     ATTR_ASSIGNMENT_ID,
@@ -122,7 +123,7 @@ def nilm_workspace_payload(
             "message": _panel_text("nilm_workspace", "no_mains_circuit"),
         }
 
-    coordinator, config = target
+    coordinator, config, sources = target
     selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
     edges = _nilm_edges_for_circuit(coordinator, config.circuit_id)
     recent_edges = sorted(edges, key=lambda edge: edge.timestamp)[
@@ -204,6 +205,8 @@ def nilm_workspace_payload(
     return {
         "status": "ok",
         "circuit": _circuit_payload(config),
+        "source": _nilm_workspace_source(coordinator, config, include_path=False),
+        "sources": sources,
         "history": _nilm_workspace_history_payload(
             config,
             known_load_overlays,
@@ -489,46 +492,66 @@ def _nilm_workspace_target(
     circuit_id: str | None,
     *,
     entry_id: str | None = None,
-) -> tuple[Any, Any] | None:
+) -> tuple[Any, Any, list[dict[str, str]]] | None:
     requested_circuit_id = str(circuit_id or "").strip()
     requested_entry_id = str(entry_id or "").strip()
-    sensor_fallback: tuple[Any, Any] | None = None
     for coordinator in coordinators:
         if (
             requested_entry_id
             and str(getattr(coordinator, "entry_id", "") or "") != requested_entry_id
         ):
             continue
-        for config in getattr(coordinator, "circuit_configs", ()) or ():
-            config_circuit_id = str(getattr(config, "circuit_id", "") or "").strip()
-            if not config_circuit_id:
-                continue
-            if requested_circuit_id and config_circuit_id != requested_circuit_id:
-                continue
-            if _is_explicit_nilm_config(config):
-                return coordinator, config
-            if sensor_fallback is None and _is_sensor_backed_mains_config(config):
-                sensor_fallback = (coordinator, config)
-    return sensor_fallback
+        source_configs = _nilm_workspace_source_configs(coordinator)
+        sources = [source for _config, source in source_configs]
+        candidates = [
+            config
+            for config, source in source_configs
+            if not requested_circuit_id or source["circuit_id"] == requested_circuit_id
+        ]
+        if candidates:
+            return coordinator, candidates[0], sources
+        if requested_entry_id:
+            return None
+    return None
 
 
-def _is_explicit_nilm_config(config: Any) -> bool:
-    mode = getattr(config, "mode", None)
-    appliance_profile = getattr(config, "appliance_profile", None)
-    return (
-        mode is CircuitMode.MAINS_NILM
-        or appliance_profile is ApplianceProfile.MAINS_NILM
-        or str(mode) == CircuitMode.MAINS_NILM.value
-        or str(appliance_profile) == ApplianceProfile.MAINS_NILM.value
-    )
+def _nilm_workspace_sources(coordinator: Any) -> list[dict[str, str]]:
+    return [source for _config, source in _nilm_workspace_source_configs(coordinator)]
 
 
-def _is_sensor_backed_mains_config(config: Any) -> bool:
-    return (
-        str(getattr(config, "circuit_id", "") or "").strip() == "mains"
-        or getattr(config, "mode", None) is CircuitMode.MIXED
-        or getattr(config, "appliance_profile", None) is ApplianceProfile.MIXED
-    ) and bool(_sensor_entity_ids(config))
+def _nilm_workspace_source_configs(
+    coordinator: Any,
+) -> list[tuple[Any, dict[str, str]]]:
+    sources: dict[str, tuple[Any, dict[str, str]]] = {}
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        kind = nilm_source_kind(config)
+        if kind is None:
+            continue
+        circuit_id = str(getattr(config, "circuit_id", "") or "")
+        if circuit_id not in sources or kind.value == "mains":
+            sources[circuit_id] = (config, _nilm_workspace_source(coordinator, config))
+    return list(sources.values())
+
+
+def _nilm_workspace_source(
+    coordinator: Any, config: Any, *, include_path: bool = True
+) -> dict[str, str]:
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    circuit_id = str(getattr(config, "circuit_id", "") or "")
+    source = {
+        "entry_id": entry_id,
+        "circuit_id": circuit_id,
+        "name": str(getattr(config, "name", "") or circuit_id),
+        "source_kind": str(nilm_source_kind(config).value),
+    }
+    if include_path:
+        source["path"] = _nilm_workspace_path(entry_id, circuit_id)
+    return source
+
+
+def _nilm_workspace_path(entry_id: str, circuit_id: str) -> str:
+    query = urlencode({"entry_id": entry_id, "circuit_id": circuit_id})
+    return f"/circuitsetup-energy-analyzer/nilm?{query}"
 
 
 def _nilm_workspace_signatures(
@@ -1303,8 +1326,9 @@ def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:
     target = _nilm_workspace_target((coordinator,), circuit_id)
     if target is None:
         return {}
-    _target_coordinator, config = target
-    query = urlencode({"circuit_id": config.circuit_id})
+    _target_coordinator, config, _sources = target
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    query = urlencode({"entry_id": entry_id, "circuit_id": config.circuit_id})
     return {
         "workspace_api_path": f"{NILM_WORKSPACE_API_PATH}?{query}",
         "workspace_call_api_path": f"{DOMAIN}/nilm_workspace?{query}",

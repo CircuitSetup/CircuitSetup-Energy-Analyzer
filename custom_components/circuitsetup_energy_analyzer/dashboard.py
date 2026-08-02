@@ -18,6 +18,7 @@ from .const import (
 )
 from .localized_text import translation_section, translation_text
 from .managers.source_samples import normalized_leg
+from .profiles import nilm_source_kind
 
 
 def _dashboard_text(*keys: str) -> str:
@@ -80,6 +81,7 @@ class DashboardCircuit:
     circuit_id: str
     name: str
     profile: str
+    mode: str
     area: str | None
     is_mains: bool
     is_hvac: bool
@@ -217,7 +219,7 @@ def build_recommended_dashboard(
     insight_cards: list[dict[str, Any]] = []
     if (
         context.layout in {DASHBOARD_LAYOUT_STANDARD, DASHBOARD_LAYOUT_EXPERT}
-        and context.mains
+        and _nilm_sources(context)
     ):
         insight_cards.extend(
             _build_mains_nilm_view(context)["sections"][0]["cards"]
@@ -403,6 +405,7 @@ def _dashboard_circuit(
         circuit_id=circuit_id,
         name=_circuit_name(circuit),
         profile=_circuit_profile(circuit),
+        mode=_circuit_mode(circuit),
         area=str(_circuit_value(circuit, "area") or "").strip() or None,
         is_mains=is_mains,
         is_hvac=_is_hvac_circuit(circuit),
@@ -782,9 +785,8 @@ def _build_energy_costs_view(
 
 
 def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
+    sources = _nilm_sources(context)
     primary = context.primary_mains
-    if primary is None:
-        raise ValueError("Mains view requires a primary mains circuit")
     cards: list[dict[str, Any]] = [
         {
             "type": HOUSE_FLOW_CARD,
@@ -815,8 +817,9 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
             "labels": dict(translation_section("dashboard", "live_cards")),
         }
     ]
-    cards.append(
-        {
+    if len(sources) == 1:
+        source = sources[0]
+        cards.append({
             "type": "button",
             "name": _dashboard_text("cards", "review_nilm_assignments"),
             "icon": "mdi:playlist-check",
@@ -824,16 +827,47 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
                 "action": "navigate",
                 "navigation_path": (
                     f"{DEFAULT_ALERT_EVIDENCE_PATH}?nilm_workspace=1&"
-                    f"circuit_id={quote(primary.circuit_id, safe='')}"
+                    f"circuit_id={quote(source.circuit_id, safe='')}"
                 ),
             },
-        }
-    )
+        })
+    else:
+        cards.extend(
+            {
+                "type": "button",
+                "name": _dashboard_text("cards", "open_load_separation"),
+                "icon": "mdi:playlist-check",
+                "tap_action": {
+                    "action": "navigate",
+                    "navigation_path": _nilm_dashboard_path(
+                        context.entry_id, source.circuit_id
+                    ),
+                },
+            }
+            for source in sources
+        )
     return _dashboard_view(
         title=_dashboard_text("views", "mains_nilm"),
         path="mains-nilm",
         icon="mdi:transmission-tower",
         cards=cards,
+    )
+
+
+def _nilm_sources(context: DashboardContext) -> tuple[DashboardCircuit, ...]:
+    return tuple(
+        circuit
+        for circuit in context.circuits
+        if nilm_source_kind(
+            {"mode": circuit.mode, "appliance_profile": circuit.profile}
+        )
+        is not None
+    )
+
+
+def _nilm_dashboard_path(entry_id: str | None, circuit_id: str) -> str:
+    return "/circuitsetup-energy-analyzer/nilm?" + urlencode(
+        {"entry_id": entry_id or "", "circuit_id": circuit_id}
     )
 
 

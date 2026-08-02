@@ -1529,6 +1529,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody()",
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
+        "data-nilm-source-picker",
+        "nilm_workspace.source_picker_label",
         '_panelText("headers.nilm_workspace")',
         "_renderNilmWorkspaceLanes(workspace)",
         "_renderNilmReviewLayout(workspace)",
@@ -1667,7 +1669,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
 
     for text in (
         "Appliance Detail",
-        "NILM Workspace",
+        "Load Separation",
         "Respond to this alert",
         "Known Load Overlays",
         "Label appliance interval",
@@ -5016,7 +5018,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
 
     for text in (
         "Appliance Detail",
-        "NILM Workspace",
+        "Load Separation",
         "Review Evidence",
         "Respond to this alert",
         "Pause alerts for maintenance",

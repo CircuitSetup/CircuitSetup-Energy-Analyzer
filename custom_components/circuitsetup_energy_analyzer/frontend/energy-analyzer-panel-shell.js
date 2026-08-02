@@ -1500,6 +1500,9 @@ export class PanelShellMethods {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
+    for (const select of this.shadowRoot.querySelectorAll("[data-nilm-source-picker]")) {
+      select.addEventListener("change", () => this._navigate(select.value));
+    }
     this._listen("[data-retry-nilm-history]", () => {
       const failedRequest = this._nilmWorkspaceHistoryFailedRequest;
       return failedRequest

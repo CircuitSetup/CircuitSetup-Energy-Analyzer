@@ -77,7 +77,7 @@ from .panel_views import (
     NilmWorkspaceView,
     SetupHealthView,
 )
-from .profiles import supports_direct_appliance_analysis
+from .profiles import nilm_source_kind, supports_direct_appliance_analysis
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_evidence_preview,
@@ -1388,6 +1388,14 @@ def _actions_for_context(
                 ),
             }
         )
+        if config is not None and nilm_source_kind(config) is not None:
+            entry_id = str(getattr(coordinator, "entry_id", "") or "")
+            query = urlencode({"entry_id": entry_id, ATTR_CIRCUIT_ID: circuit_id})
+            actions["open_load_separation"] = {
+                "type": "navigate",
+                "label": _panel_text("actions", "labels", "open_load_separation"),
+                "path": f"/circuitsetup-energy-analyzer/nilm?{query}",
+            }
         if (
             config is not None
             and config.mode is CircuitMode.SINGLE_PHASE
@@ -1931,7 +1939,7 @@ async def nilm_workspace_history_payload(
     )
     if target is None:
         return []
-    coordinator, config = target
+    coordinator, config, _sources = target
     known_load_overlays = _nilm_known_load_overlays(
         coordinator,
         config.circuit_id,
