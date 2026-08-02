@@ -92,6 +92,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     disconnectedCallback() {
       super.disconnectedCallback();
       window.removeEventListener(RANGE_EVENT, this._handleDashboardRange);
+      localStorage.removeItem(RANGE_KEY);
+      localStorage.removeItem(RANGE_PRESET_KEY);
       if (dashboardSeries.delete(this)) {
         window.dispatchEvent(new Event(DATA_EVENT));
       }
