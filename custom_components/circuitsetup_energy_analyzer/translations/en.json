@@ -38,14 +38,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Composition determines whether this is one appliance, a primary appliance with other loads, or several loads with no primary. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
-        "circuit_is_shared": "This circuit also powers unrelated loads",
+        "circuit_composition": "Circuit Composition",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -53,8 +53,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
+        "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -521,14 +521,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Composition determines whether this is one appliance, a primary appliance with other loads, or several loads with no primary. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
-        "circuit_is_shared": "This circuit also powers unrelated loads",
+        "circuit_composition": "Circuit Composition",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -536,8 +536,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
+        "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }

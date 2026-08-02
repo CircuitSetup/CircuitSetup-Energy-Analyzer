@@ -286,6 +286,7 @@ FIELD_SELECTED_ASSIGNMENT = "selected_assignment"
 FIELD_REMOVE_ASSIGNMENTS = "remove_assignments"
 FIELD_CIRCUIT_NAME = "circuit_name"
 FIELD_CIRCUIT_IS_SHARED = "circuit_is_shared"
+FIELD_CIRCUIT_COMPOSITION = "circuit_composition"
 FIELD_APPLIANCE_PROFILE = "appliance_profile"
 FIELD_CIRCUIT_MODE = "circuit_mode"
 FIELD_POWER_FLOW = "power_flow"
@@ -313,6 +314,9 @@ FIELD_BILLING_MIN_ELAPSED_DAYS = "billing_min_elapsed_days"
 FIELD_WINDOW_MINUTES = "window_minutes"
 FIELD_DEMAND_LIMIT_W = "demand_limit_w"
 FIELD_BREAKER_AMPS = "breaker_amps"
+COMPOSITION_DEDICATED = "dedicated"
+COMPOSITION_PRIMARY_MIXED = "primary_mixed"
+COMPOSITION_PURE_MIXED = "pure_mixed"
 _SELECTOR_NO_ITEMS_VALUE = "__no_items_available__"
 _ANALYZER_SOURCE_ENTITY_PREFIXES = (
     "circuitsetup_energy_analyzer_",
@@ -1541,14 +1545,21 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=str(group.get("appliance_profile") or ApplianceProfile.MIXED),
             ): _select_selector(appliance_profile_options()),
             vol.Required(
-                FIELD_CIRCUIT_IS_SHARED,
-                default=(
-                    str(group.get("mode") or "") == CircuitMode.MIXED.value
-                    or str(group.get("appliance_profile") or "")
-                    == ApplianceProfile.MIXED.value
-                    or bool(group.get(FIELD_CIRCUIT_IS_SHARED, False))
-                ),
-            ): bool,
+                FIELD_CIRCUIT_COMPOSITION,
+                default=_assignment_composition(group),
+            ): _select_selector(
+                (
+                    {"value": COMPOSITION_DEDICATED, "label": "One appliance"},
+                    {
+                        "value": COMPOSITION_PRIMARY_MIXED,
+                        "label": "A primary appliance plus other loads",
+                    },
+                    {
+                        "value": COMPOSITION_PURE_MIXED,
+                        "label": "Several loads with no primary",
+                    },
+                )
+            ),
             vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
                 default=str(group.get("retention_mode") or DEFAULT_RETENTION_MODE),
@@ -1556,6 +1567,18 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
         }
     )
     return vol.Schema(schema)
+
+
+def _assignment_composition(group: Mapping[str, Any]) -> str:
+    profile = str(group.get("appliance_profile") or "")
+    mode = str(group.get("mode") or "")
+    if profile == ApplianceProfile.MIXED.value:
+        return COMPOSITION_PURE_MIXED
+    if mode == CircuitMode.MIXED.value:
+        return COMPOSITION_PRIMARY_MIXED
+    if bool(group.get(FIELD_CIRCUIT_IS_SHARED)):
+        return COMPOSITION_PRIMARY_MIXED
+    return COMPOSITION_DEDICATED
 
 
 def _assignment_picker_schema(groups: Iterable[Mapping[str, Any]]) -> Any:
@@ -2722,6 +2745,9 @@ def assignment_groups_from_sources(
                 ),
                 "saved_mode": str(saved_circuit.get("mode") or ""),
                 "saved_entity_ids": tuple(saved_sensor_entities),
+                FIELD_CIRCUIT_IS_SHARED: bool(
+                    saved_circuit.get(FIELD_CIRCUIT_IS_SHARED)
+                ),
                 "sensor_roles": dict(source_role_by_entity)
                 | {
                     str(sensor["entity_id"]): str(sensor["role"])
@@ -3070,16 +3096,32 @@ def _remember_assignment_review_input(flow: Any, user_input: Mapping[str, Any]) 
         FIELD_CIRCUIT_NAME,
         FIELD_APPLIANCE_PROFILE,
         FIELD_CIRCUIT_RETENTION_MODE,
-        FIELD_CIRCUIT_IS_SHARED,
     ):
         if field in user_input:
-            group[
-                FIELD_CIRCUIT_IS_SHARED
-                if field == FIELD_CIRCUIT_IS_SHARED
-                else field.removeprefix("circuit_")
-            ] = user_input[field]
+            group[field.removeprefix("circuit_")] = user_input[field]
     if FIELD_INCLUDED_SENSORS in user_input:
         group["selected_entity_ids"] = tuple(user_input[FIELD_INCLUDED_SENSORS])
+    composition_group = dict(group)
+    if FIELD_CIRCUIT_IS_SHARED in user_input:
+        composition_group[FIELD_CIRCUIT_IS_SHARED] = user_input[
+            FIELD_CIRCUIT_IS_SHARED
+        ]
+    composition = str(
+        user_input.get(FIELD_CIRCUIT_COMPOSITION)
+        or _assignment_composition(composition_group)
+    )
+    if composition == COMPOSITION_PURE_MIXED:
+        group["appliance_profile"] = ApplianceProfile.MIXED.value
+        group["mode"] = CircuitMode.MIXED.value
+    elif composition == COMPOSITION_PRIMARY_MIXED:
+        group["mode"] = CircuitMode.MIXED.value
+    else:
+        group["mode"] = _assignment_mode_for_profile_and_entities(
+            str(group.get("appliance_profile") or ApplianceProfile.MIXED.value),
+            _selected_entity_ids_for_group(group),
+            group.get("sensor_legs"),
+        )
+    group.pop(FIELD_CIRCUIT_IS_SHARED, None)
     groups[index] = group
     flow._assignment_groups = groups
 
@@ -3098,12 +3140,26 @@ def _circuit_from_assignment_group(
     name = str(user_input.get(FIELD_CIRCUIT_NAME) or group.get("name") or "").strip()
     if not name:
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
-    profile = _normalize_assignment_profile(
+    selected_profile = _normalize_assignment_profile(
         str(
             user_input.get(FIELD_APPLIANCE_PROFILE)
             or group.get("appliance_profile")
             or ApplianceProfile.MIXED.value
         )
+    )
+    composition_group = dict(group)
+    if FIELD_CIRCUIT_IS_SHARED in user_input:
+        composition_group[FIELD_CIRCUIT_IS_SHARED] = user_input[
+            FIELD_CIRCUIT_IS_SHARED
+        ]
+    composition = str(
+        user_input.get(FIELD_CIRCUIT_COMPOSITION)
+        or _assignment_composition(composition_group)
+    )
+    profile = (
+        ApplianceProfile.MIXED.value
+        if composition == COMPOSITION_PURE_MIXED
+        else selected_profile
     )
     retention_mode = _normalize_retention_mode(
         str(
@@ -3113,15 +3169,13 @@ def _circuit_from_assignment_group(
         )
     )
     entity_ids = _included_entity_ids_for_assignment(group, user_input)
-    shared = bool(user_input.get(FIELD_CIRCUIT_IS_SHARED, False)) or (
-        profile == ApplianceProfile.MIXED.value
-    )
+    mixed = composition != COMPOSITION_DEDICATED
     legacy_mixed = (
         str(group.get("saved_mode") or "") == CircuitMode.MIXED.value
         and str(group.get("mode") or "") == CircuitMode.MIXED.value
         and set(entity_ids) == set(group.get("saved_entity_ids", ()))
     )
-    if shared and (
+    if mixed and (
         profile in {
             ApplianceProfile.MAINS_NILM.value,
             ApplianceProfile.SOLAR_INVERTER.value,
@@ -3137,7 +3191,7 @@ def _circuit_from_assignment_group(
         raise SetupValidationError(ERROR_INVALID_CIRCUIT_ASSIGNMENTS)
     mode = (
         CircuitMode.MIXED.value
-        if shared
+        if mixed
         else _assignment_mode_for_profile_and_entities(
             profile,
             entity_ids,
