@@ -14,6 +14,140 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .models import CircuitEvent, CircuitSample, EventType
 
 
+def build_nilm_assignment_model(
+    assignment: Mapping[str, Any],
+    sessions: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build one assignment's transition model from reviewed complete sessions."""
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    confirmed = {
+        str(value or "").strip()
+        for value in assignment.get("confirmed_session_ids", ())
+        if str(value or "").strip()
+    }
+    rejected = {
+        str(value or "").strip()
+        for value in assignment.get("rejected_session_ids", ())
+        if str(value or "").strip()
+    }
+    eligible = [
+        session
+        for session in sessions
+        if str(session.get("session_id") or "").strip() in confirmed
+        and str(session.get("session_id") or "").strip() not in rejected
+        and (
+            not str(session.get("assignment_id") or "").strip()
+            or str(session.get("assignment_id") or "").strip() == assignment_id
+        )
+        and session.get("end") is not None
+        and session.get("ambiguous") is not True
+    ]
+    eligible.sort(
+        key=lambda session: str(session.get("end") or session.get("start") or ""),
+        reverse=True,
+    )
+    eligible = eligible[:32]
+    on_values = [
+        value
+        for session in eligible
+        if (value := _model_number(
+            session.get("on_delta_w", session.get("median_power_w"))
+        )) is not None
+    ]
+    off_values = [
+        value
+        for session in eligible
+        if (value := _model_number(
+            session.get(
+                "off_delta_w",
+                -abs(float(session["median_power_w"]))
+                if _model_number(session.get("median_power_w")) is not None
+                else None,
+            )
+        )) is not None
+    ]
+    confidences = [
+        value
+        for session in eligible
+        if (value := _model_number(session.get("confidence"))) is not None
+    ]
+    role = str(assignment.get("role") or "component").strip() or "component"
+    model: dict[str, Any] = {
+        "role": role,
+        "power_states_w": [],
+        "transition_prototypes": [],
+        "model_confidence": 0.0,
+        "model_revision": int(assignment.get("model_revision") or 0),
+    }
+    if not on_values or not off_values:
+        return model
+    on_median = median(on_values)
+    off_median = median(off_values)
+    active_state = round(max(on_median, abs(off_median)), 3)
+    model["power_states_w"] = [0.0, active_state]
+    model["transition_prototypes"] = [
+        _transition_prototype("on", 0.0, active_state, on_median, on_values),
+        _transition_prototype("off", active_state, 0.0, off_median, off_values),
+    ]
+    model["model_confidence"] = round(
+        min(max(median(confidences) if confidences else 0.0, 0.0), 1.0)
+        * min(len(eligible) / 3, 1),
+        3,
+    )
+    previous = {
+        "power_states_w": assignment.get("power_states_w", []),
+        "transition_prototypes": assignment.get("transition_prototypes", []),
+    }
+    current = {
+        "power_states_w": model["power_states_w"],
+        "transition_prototypes": model["transition_prototypes"],
+    }
+    if current != previous:
+        model["model_revision"] += 1
+    return model
+
+
+def nilm_assignment_model_is_compound_eligible(
+    assignment: Mapping[str, Any],
+) -> bool:
+    """Return whether both directions are learned and confidence is sufficient."""
+    prototypes = assignment.get("transition_prototypes", ())
+    learned = {
+        str(item.get("direction") or "")
+        for item in prototypes
+        if isinstance(item, Mapping) and int(item.get("sample_count") or 0) >= 3
+    }
+    return learned == {"on", "off"} and float(
+        assignment.get("model_confidence") or 0.0
+    ) >= 0.70
+
+
+def _transition_prototype(
+    direction: str,
+    from_state_w: float,
+    to_state_w: float,
+    delta_w: float,
+    values: list[float],
+) -> dict[str, Any]:
+    center = median(values)
+    return {
+        "direction": direction,
+        "from_state_w": round(from_state_w, 3),
+        "to_state_w": round(to_state_w, 3),
+        "delta_w": round(delta_w, 3),
+        "spread_w": round(median(abs(value - center) for value in values), 3),
+        "sample_count": len(values),
+    }
+
+
+def _model_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
 @dataclass(frozen=True, slots=True)
 class NilmApplianceIdentity:
     """Stable logical identity for one NILM appliance assignment."""
@@ -935,6 +1069,8 @@ class NilmSession:
     known_load_masked: bool = False
     known_load_confidence: float | None = None
     assignment_id: str | None = None
+    on_delta_w: float | None = None
+    off_delta_w: float | None = None
 
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
@@ -957,6 +1093,8 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "known_load_masked": session.known_load_masked,
         "known_load_confidence": session.known_load_confidence,
         "assignment_id": session.assignment_id,
+        "on_delta_w": session.on_delta_w,
+        "off_delta_w": session.off_delta_w,
     }
 
 
@@ -1899,6 +2037,7 @@ def _open_nilm_session(
             known_load_confidence,
         ),
         assignment_id=assignment_id,
+        on_delta_w=round(float(on_edge.delta_w), 3),
     )
 
 
@@ -1953,6 +2092,8 @@ def _closed_nilm_session(
             known_load_confidence,
         ),
         assignment_id=assignment_id,
+        on_delta_w=round(float(on_edge.delta_w), 3),
+        off_delta_w=round(float(off_edge.delta_w), 3),
     )
 
 

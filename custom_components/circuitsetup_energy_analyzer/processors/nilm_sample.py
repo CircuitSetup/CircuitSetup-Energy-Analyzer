@@ -309,6 +309,29 @@ class NilmSampleProcessor:
                 if edge.timestamp >= context.now - timedelta(minutes=10)
                 and _nilm_signature_edge_score(edge, payload) is not None
             ]
+            assignment = next(
+                (
+                    item
+                    for item in (
+                        context.store_data.nilm_appliance_assignments_by_circuit.get(
+                            circuit_id, []
+                        )
+                    )
+                    if isinstance(item, dict)
+                    and feedback_fingerprint
+                    in {
+                        str(value or "").strip()
+                        for value in _list_items(
+                            item.get("signature_fingerprints")
+                        )
+                    }
+                ),
+                None,
+            )
+            if assignment is not None and _record_assignment_model_drift(
+                assignment, signature_edges
+            ):
+                self._helper_links_dirty = True
             observations = self._helper_events_by_source.get(circuit_id, [])
             if observations:
                 by_circuit: defaultdict[str, list[CircuitEvent]] = defaultdict(list)
@@ -357,6 +380,39 @@ class NilmSampleProcessor:
                 payloads.append(signature)
 
         return payloads
+
+
+def _record_assignment_model_drift(
+    assignment: dict[str, Any], edges: Iterable[NilmEdge]
+) -> bool:
+    """Retain repeated reviewed-signature drift without changing its model."""
+    prototypes = {
+        str(item.get("direction") or ""): item
+        for item in _list_items(assignment.get("transition_prototypes"))
+        if isinstance(item, Mapping)
+    }
+    seen = list(_list_items(assignment.get("model_drift_edge_ids")))
+    changed = False
+    for edge in edges:
+        prototype = prototypes.get(edge.direction)
+        if prototype is None:
+            continue
+        delta = _optional_float(prototype.get("delta_w"))
+        spread = _optional_float(prototype.get("spread_w")) or 0.0
+        if delta is None:
+            continue
+        tolerance = max(15.0, 3 * spread, abs(delta) * 0.2)
+        edge_id = f"{edge.timestamp.isoformat()}|{round(edge.delta_w, 3)}"
+        if abs(edge.delta_w - delta) <= tolerance or edge_id in seen:
+            continue
+        seen.append(edge_id)
+        changed = True
+    if not changed:
+        return False
+    assignment["model_drift_edge_ids"] = seen[-3:]
+    if len(assignment["model_drift_edge_ids"]) >= 3:
+        assignment["model_status"] = "needs_review"
+    return True
 
 
 def _helper_event_key(event: CircuitEvent) -> tuple[Any, ...]:

@@ -8220,6 +8220,53 @@ def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
     assert sessions[0]["signature_fingerprint"] == "120-w"
 
 
+def test_nilm_completed_session_retains_separate_transition_deltas() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    sessions = _nilm_session_history_payloads(
+        "mixed",
+        [
+            NilmEdge(start, 83.0, 0.0, 83.0, 0.0, "on"),
+            NilmEdge(start + timedelta(minutes=5), -79.0, 0.0, -79.0, 0.0, "off"),
+        ],
+        [{"signature_id": "pump", "typical_watts": 81.0}],
+        [{"assignment_id": "pump", "signature_fingerprints": ["pump"]}],
+    )
+
+    assert sessions[0]["on_delta_w"] == 83.0
+    assert sessions[0]["off_delta_w"] == -79.0
+
+
+def test_reviewed_fingerprint_drift_requests_review_without_relearning() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _record_assignment_model_drift,
+    )
+
+    assignment = {
+        "model_revision": 4,
+        "transition_prototypes": [{
+            "direction": "on", "delta_w": 83.0, "spread_w": 2.0,
+            "sample_count": 4,
+        }],
+    }
+    prototypes = list(assignment["transition_prototypes"])
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+
+    for index in range(3):
+        _record_assignment_model_drift(assignment, [
+            NilmEdge(start + timedelta(minutes=index), 140.0, 0.0, 140.0, 0.0, "on")
+        ])
+
+    assert assignment["model_status"] == "needs_review"
+    assert assignment["model_revision"] == 4
+    assert assignment["transition_prototypes"] == prototypes
+
+
 def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (

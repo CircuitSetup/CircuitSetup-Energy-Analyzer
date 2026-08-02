@@ -17,10 +17,12 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdgeDetector,
     NilmHelperCandidate,
     NilmSignature,
+    build_nilm_assignment_model,
     classify_signature,
     cluster_recurring_signatures,
     discover_nilm_helper_candidates,
     mask_known_loads,
+    nilm_assignment_model_is_compound_eligible,
     nilm_helper_candidate_to_dict,
     pair_nilm_sessions_for_signatures,
     score_nilm_helper_candidate,
@@ -31,6 +33,57 @@ from custom_components.circuitsetup_energy_analyzer.normalize import (
 )
 
 BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+
+
+def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
+    assignment = {
+        "assignment_id": "pump",
+        "confirmed_session_ids": [f"session-{index}" for index in range(35)],
+    }
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{index + 1:02d}T10:00:00+00:00",
+            "end": f"2026-06-{index + 1:02d}T10:05:00+00:00",
+            "on_delta_w": 10.0 if index < 3 else 80.0 + index % 3,
+            "off_delta_w": -10.0 if index < 3 else -82.0 + index % 3,
+            "confidence": 0.9,
+            "ambiguous": False,
+        }
+        for index in range(35)
+    ]
+
+    model = build_nilm_assignment_model(assignment, sessions)
+
+    assert model["role"] == "component"
+    assert model["power_states_w"] == [0.0, 81.0]
+    assert [item["direction"] for item in model["transition_prototypes"]] == [
+        "on", "off"
+    ]
+    assert model["transition_prototypes"][0]["sample_count"] == 32
+    assert model["transition_prototypes"][0]["spread_w"] == 1.0
+    assert model["model_confidence"] == 0.9
+    assert nilm_assignment_model_is_compound_eligible(model) is True
+
+
+def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> None:
+    assignment = {"assignment_id": "pump", "confirmed_session_ids": ["one"]}
+    sessions = [{
+        "session_id": "one", "assignment_id": "pump",
+        "start": "2026-06-01T10:00:00+00:00",
+        "end": "2026-06-01T10:05:00+00:00",
+        "median_power_w": 83.0, "confidence": 0.8,
+    }]
+
+    first = build_nilm_assignment_model(assignment, sessions)
+    second = build_nilm_assignment_model({**assignment, **first}, sessions)
+
+    assert first["power_states_w"] == [0.0, 83.0]
+    assert first["transition_prototypes"][1]["delta_w"] == -83.0
+    assert first["model_confidence"] == 0.267
+    assert nilm_assignment_model_is_compound_eligible(first) is False
+    assert first["model_revision"] == second["model_revision"] == 1
 
 
 def sample(
