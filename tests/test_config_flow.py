@@ -112,6 +112,50 @@ def test_assignment_composition_maps_to_canonical_circuit(
     assert "circuit_is_shared" not in circuit
 
 
+@pytest.mark.parametrize("composition", ["dedicated", "primary_mixed"])
+def test_assignment_composition_rejects_mixed_profile_without_pure_mixed(
+    composition: str,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    with pytest.raises(
+        config_flow.SetupValidationError, match="invalid_circuit_composition"
+    ):
+        config_flow._circuit_from_assignment_group(
+            {
+                "circuit_id": "kitchen_loads",
+                "entity_ids": ("sensor.kitchen_power",),
+                "name": "Kitchen Loads",
+                "appliance_profile": "mixed",
+                "mode": "mixed",
+            },
+            {
+                "include_circuit": True,
+                "included_sensors": ["sensor.kitchen_power"],
+                "circuit_name": "Kitchen Loads",
+                "appliance_profile": "mixed",
+                "circuit_composition": composition,
+            },
+        )
+
+
+def test_assignment_composition_selector_uses_translated_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    schema = config_flow._assignment_schema({"entity_ids": ()})
+
+    assert _schema_validator(schema, "circuit_composition") == {
+        "select": {
+            "options": ["dedicated", "primary_mixed", "pure_mixed"],
+            "translation_key": "circuit_composition",
+        }
+    }
+
+
 @pytest.mark.parametrize("profile", ["mains_nilm", "solar_inverter"])
 def test_shared_assignment_rejects_ineligible_profiles(profile: str) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow

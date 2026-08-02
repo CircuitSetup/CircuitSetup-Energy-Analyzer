@@ -255,6 +255,7 @@ ERROR_NO_SOURCE_DEVICES = "no_source_devices"
 ERROR_NO_SOURCE_DEVICE_ENTITIES = "no_source_device_entities"
 ERROR_INVALID_SOURCE_ENTITIES = "invalid_source_entities"
 ERROR_INVALID_CIRCUIT_ASSIGNMENTS = "invalid_circuit_assignments"
+ERROR_INVALID_CIRCUIT_COMPOSITION = "invalid_circuit_composition"
 ERROR_MIXED_DUAL_PHASE_NOT_SUPPORTED = "mixed_dual_phase_not_supported"
 _VALID_RETENTION_MODES = {mode.value for mode in RetentionMode}
 _SENSITIVITY_OPTIONS = ("quiet", "balanced", "sensitive")
@@ -1138,13 +1139,20 @@ def _source_device_selector_config() -> dict[str, Any]:
     }
 
 
-def _select_selector(options: Iterable[Any]) -> Any:
+def _select_selector(
+    options: Iterable[Any],
+    *,
+    translation_key: str | None = None,
+) -> Any:
     option_list = list(options)
     values = [
         str(option.get("value")) if isinstance(option, Mapping) else str(option)
         for option in option_list
     ]
-    return _selector({"select": {"options": option_list}}, vol.In(tuple(values)))
+    config: dict[str, Any] = {"select": {"options": option_list}}
+    if translation_key is not None:
+        config["select"]["translation_key"] = translation_key
+    return _selector(config, vol.In(tuple(values)))
 
 
 def _multi_select_selector(options: Iterable[Mapping[str, str]]) -> Any:
@@ -1549,16 +1557,11 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 default=_assignment_composition(group),
             ): _select_selector(
                 (
-                    {"value": COMPOSITION_DEDICATED, "label": "One appliance"},
-                    {
-                        "value": COMPOSITION_PRIMARY_MIXED,
-                        "label": "A primary appliance plus other loads",
-                    },
-                    {
-                        "value": COMPOSITION_PURE_MIXED,
-                        "label": "Several loads with no primary",
-                    },
-                )
+                    COMPOSITION_DEDICATED,
+                    COMPOSITION_PRIMARY_MIXED,
+                    COMPOSITION_PURE_MIXED,
+                ),
+                translation_key=FIELD_CIRCUIT_COMPOSITION,
             ),
             vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
@@ -3152,10 +3155,21 @@ def _circuit_from_assignment_group(
         composition_group[FIELD_CIRCUIT_IS_SHARED] = user_input[
             FIELD_CIRCUIT_IS_SHARED
         ]
+    submitted_composition = user_input.get(FIELD_CIRCUIT_COMPOSITION)
     composition = str(
-        user_input.get(FIELD_CIRCUIT_COMPOSITION)
-        or _assignment_composition(composition_group)
+        submitted_composition
+        or (
+            COMPOSITION_PURE_MIXED
+            if selected_profile == ApplianceProfile.MIXED.value
+            else _assignment_composition(composition_group)
+        )
     )
+    if (
+        submitted_composition is not None
+        and composition != COMPOSITION_PURE_MIXED
+        and selected_profile == ApplianceProfile.MIXED.value
+    ):
+        raise SetupValidationError(ERROR_INVALID_CIRCUIT_COMPOSITION)
     profile = (
         ApplianceProfile.MIXED.value
         if composition == COMPOSITION_PURE_MIXED

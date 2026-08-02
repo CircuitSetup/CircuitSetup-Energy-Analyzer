@@ -100,6 +100,7 @@
       "invalid_source_devices": "Source meter devices must be text values.",
       "invalid_source_entities": "Source sensor entity IDs must be text values.",
       "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
+      "invalid_circuit_composition": "Choose Several loads with no primary when Appliance Type is Mixed.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
@@ -547,12 +548,22 @@
       "no_source_device_entities": "No supported electrical sensors were found on the selected Source Devices. Existing settings were not changed.",
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
+      "invalid_circuit_composition": "Choose Several loads with no primary when Appliance Type is Mixed.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
       "mixed_dual_phase_not_supported": "Shared dual-phase analysis is not supported."
+    }
+  },
+  "selector": {
+    "circuit_composition": {
+      "options": {
+        "dedicated": "One appliance",
+        "primary_mixed": "A primary appliance plus other loads",
+        "pure_mixed": "Several loads with no primary"
+      }
     }
   },
   "entity": {
