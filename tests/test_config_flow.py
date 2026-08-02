@@ -4783,10 +4783,12 @@ def test_unassigned_filtered_sources_remain_available_for_later_assignment() -> 
     assert final_config[CONF_EXTRA_SOURCE_ENTITIES] == [source]
     assert final_config[CONF_SOURCE_ENTITIES] == []
     assert final_config[CONF_ADVANCED_SETTINGS] == {
-        "mains": {"preset": "sensitive"}
+        "mains": {"preset": "sensitive"},
+        "removed": {},
     }
     assert final_config[CONF_UTILITY_COMPARISON_SETTINGS] == {
-        "mains": {"source": "sensor.utility_total"}
+        "mains": {"source": "sensor.utility_total"},
+        "removed": {},
     }
 
 
@@ -5339,7 +5341,16 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
         },
     ]
     entry = SimpleNamespace(
-        data={},
+        data={
+            CONF_ADVANCED_SETTINGS: {
+                "mains": {"preset": "sensitive"},
+                "microwave": {"preset": "balanced"},
+            },
+            CONF_UTILITY_COMPARISON_SETTINGS: {
+                "mains": {"source": "sensor.utility_total"},
+                "microwave": {"source": "sensor.microwave_energy"},
+            },
+        },
         options={
             CONF_SOURCE_ENTITIES: [
                 "sensor.refrigerator_power",
@@ -5351,14 +5362,10 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
             ],
             CONF_CIRCUITS: circuits,
             CONF_ADVANCED_SETTINGS: {
-                "mains": {"preset": "sensitive"},
                 "refrigerator": {"preset": "sensitive"},
-                "microwave": {"preset": "balanced"},
             },
             CONF_UTILITY_COMPARISON_SETTINGS: {
-                "mains": {"source": "sensor.utility_total"},
                 "refrigerator": {"source": "sensor.refrigerator_energy"},
-                "microwave": {"source": "sensor.microwave_energy"},
             },
         },
     )
@@ -5387,10 +5394,12 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
     assert result["data"][CONF_UTILITY_COMPARISON_SETTINGS] == {
         "mains": {"source": "sensor.utility_total"},
         "refrigerator": {"source": "sensor.refrigerator_energy"},
+        "microwave": {},
     }
     assert result["data"][CONF_ADVANCED_SETTINGS] == {
         "mains": {"preset": "sensitive"},
         "refrigerator": {"preset": "sensitive"},
+        "microwave": {},
     }
 
 

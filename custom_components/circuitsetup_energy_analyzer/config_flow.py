@@ -3388,9 +3388,8 @@ def _prune_circuit_settings(config: dict[str, Any], circuit_ids: set[str]) -> No
         settings = config.get(config_key)
         if isinstance(settings, Mapping):
             config[config_key] = {
-                key: value
+                key: value if str(key) in retained_ids else {}
                 for key, value in settings.items()
-                if str(key) in retained_ids
             }
 
 
@@ -5390,6 +5389,12 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
 
     return {
         **options,
+        CONF_ADVANCED_SETTINGS: _settings_map_for_entry(
+            config_entry, CONF_ADVANCED_SETTINGS
+        ),
+        CONF_UTILITY_COMPARISON_SETTINGS: _settings_map_for_entry(
+            config_entry, CONF_UTILITY_COMPARISON_SETTINGS
+        ),
         CONF_SOURCE_DEVICES: _strict_string_list(
             options.get(CONF_SOURCE_DEVICES, data.get(CONF_SOURCE_DEVICES, [])),
             invalid_error_key="invalid_source_devices",
