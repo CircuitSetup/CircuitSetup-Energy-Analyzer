@@ -20,9 +20,11 @@ from .config_parsing import (
 )
 from .const import (
     CONF_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
     DOMAIN,
     EVENT_HVAC_ASSOCIATION_UPDATED,
 )
+from .context_sources import configured_context_entities
 from .discovery import discovered_sensor_roles
 from .expected_schedule import (
     expected_schedule_circuit_ids,
@@ -178,15 +180,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.entry_data,
             self.options,
         )
+        mains_entity_ids = {
+            sensor.entity_id
+            for config in candidate_configs
+            if config.mode is CircuitMode.MAINS_NILM or config.circuit_id == "mains"
+            for sensor in config.sensors
+        }
+        mains_entity_ids.update(
+            configured_context_entities(
+                self.entry_data,
+                self.options,
+                CONF_MAINS_SOURCE_ENTITIES,
+            )
+        )
         mains_sensor_roles = discovered_sensor_roles(
             hass,
-            (
-                sensor.entity_id
-                for config in candidate_configs
-                if config.mode is CircuitMode.MAINS_NILM
-                or config.circuit_id == "mains"
-                for sensor in config.sensors
-            ),
+            mains_entity_ids,
         )
         self.circuit_configs = _circuit_configs_from_entry_data(
             self.entry_data,

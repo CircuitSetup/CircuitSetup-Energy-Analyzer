@@ -11061,6 +11061,31 @@ def test_runtime_uses_metadata_for_generic_mains_sensor_names() -> None:
     assert coordinator.circuit_configs[0].sensors[0].role is SensorRole.VOLTAGE
 
 
+def test_runtime_discovers_metadata_for_filtered_mains_sensor_names() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    entity_id = "sensor.reactive_energy_monitor_channel_1"
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda requested: SimpleNamespace(
+                    attributes={"device_class": "power", "unit_of_measurement": "W"}
+                )
+                if requested == entity_id
+                else None
+            ),
+            data={},
+        ),
+        options={CONF_MAINS_SOURCE_ENTITIES: [entity_id]},
+    )
+
+    assert coordinator.circuit_configs[0].sensors == (
+        SensorRef(entity_id, SensorRole.REAL_POWER),
+    )
+
+
 @pytest.mark.asyncio
 async def test_demo_source_entities_are_treated_as_current_for_data_quality() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

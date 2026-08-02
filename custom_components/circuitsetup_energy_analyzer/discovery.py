@@ -126,6 +126,10 @@ def infer_sensor_role(
     """Infer the analysis role from common energy meter sensor names."""
     text = _normalize_text(entity_id, friendly_name)
 
+    if role := _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower()):
+        return role
+    if role := _UNIT_ROLES.get(str(unit or "").strip().lower()):
+        return role
     if "reactive power" in text:
         return SensorRole.REACTIVE_POWER
     if "apparent power" in text:
@@ -138,10 +142,6 @@ def infer_sensor_role(
         return SensorRole.PEAK_CURRENT
     if "reactive energy" in text or re.search(r"\b(?:kvarh|varh)\b", text):
         return None
-    if role := _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower()):
-        return role
-    if role := _UNIT_ROLES.get(str(unit or "").strip().lower()):
-        return role
     if "voltage" in text:
         return SensorRole.VOLTAGE
     if "current" in text or re.search(r"\bamps?\b", text):

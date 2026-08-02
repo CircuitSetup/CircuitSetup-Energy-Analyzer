@@ -245,7 +245,7 @@ def _mains_sensor_ref(
         try:
             role = SensorRole(sensor_roles[entity_id])
         except (TypeError, ValueError):
-            return None
+            return existing
     elif existing is not None:
         return existing
     else:
@@ -849,6 +849,7 @@ def source_circuit_ids_from_entity_ids(
         _canonical_source_circuit_id(circuit_id)
         for circuit_id in reserved_circuit_ids
     }
+    variant_ids: dict[tuple[str, str], str] = {}
     for (base_circuit_id, _, _), collided_entities in entities_by_collision.items():
         if len(collided_entities) < 2:
             continue
@@ -872,6 +873,10 @@ def source_circuit_ids_from_entity_ids(
             if entity_id == primary_entity:
                 continue
             detail = qualifiers[entity_id] or metrics[entity_id]
+            variant_key = (base_circuit_id, detail or "source")
+            if variant_key in variant_ids:
+                circuit_ids[entity_id] = variant_ids[variant_key]
+                continue
             candidate_base = f"{base_circuit_id}_{detail or 'source'}"
             candidate = candidate_base
             suffix = 2
@@ -879,6 +884,7 @@ def source_circuit_ids_from_entity_ids(
                 candidate = f"{candidate_base}_{suffix}"
                 suffix += 1
             circuit_ids[entity_id] = candidate
+            variant_ids[variant_key] = candidate
             reserved_ids.add(candidate)
     return circuit_ids
 

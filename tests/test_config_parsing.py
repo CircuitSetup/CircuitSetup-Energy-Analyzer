@@ -15,6 +15,7 @@ from custom_components.circuitsetup_energy_analyzer.coordinator import (
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitMode,
+    SensorRef,
     SensorRole,
 )
 
@@ -202,6 +203,43 @@ def test_config_parser_separates_duplicate_qualified_measurements() -> None:
     ]
 
 
+def test_config_parser_groups_complementary_qualified_measurements() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    entity_ids = [
+        "sensor.panel_power",
+        "sensor.panel_current",
+        "sensor.panel_voltage",
+        "sensor.panel_power_max",
+        "sensor.panel_current_max",
+        "sensor.panel_voltage_max",
+    ]
+    configs = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: entity_ids})
+    reversed_configs = circuit_configs_from_entry_data(
+        {CONF_SOURCE_ENTITIES: list(reversed(entity_ids))}
+    )
+
+    assert [config.circuit_id for config in configs] == ["panel", "panel_max"]
+    assert {
+        config.circuit_id: {sensor.entity_id for sensor in config.sensors}
+        for config in configs
+    } == {
+        "panel": set(entity_ids[:3]),
+        "panel_max": set(entity_ids[3:]),
+    }
+    assert {
+        sensor.entity_id: config.circuit_id
+        for config in reversed_configs
+        for sensor in config.sensors
+    } == {
+        sensor.entity_id: config.circuit_id
+        for config in configs
+        for sensor in config.sensors
+    }
+
+
 def test_config_parser_separates_duplicate_metric_aliases() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
@@ -376,6 +414,29 @@ def test_config_parser_uses_runtime_metadata_for_generic_mains_sources() -> None
         (entities[0], SensorRole.REAL_POWER),
         (entities[1], SensorRole.VOLTAGE),
     ]
+
+
+def test_config_parser_keeps_saved_mains_role_when_metadata_is_inconclusive() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    entity_id = "sensor.channel_1"
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "mode": "mains_nilm",
+                    "sensors": [{"entity_id": entity_id, "role": "real_power"}],
+                }
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [entity_id],
+        },
+        mains_sensor_roles={entity_id: None},
+    )
+
+    assert configs[0].sensors == (SensorRef(entity_id, SensorRole.REAL_POWER),)
 
 
 def test_config_parser_keeps_supported_metrics_on_reactive_energy_devices() -> None:
