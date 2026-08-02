@@ -1105,7 +1105,7 @@ set_demand_settings:
       selector:
         number:
           min: 1
-          max: 120
+          max: 240
           mode: box
     demand_limit_w:
       name: Demand Limit W

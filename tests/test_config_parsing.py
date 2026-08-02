@@ -49,6 +49,29 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
     ]
 
 
+def test_config_parser_clamps_demand_window_to_supported_maximum() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "ev",
+                    "name": "EV Charger",
+                    "demand_window_minutes": 300,
+                    "sensors": [
+                        {"entity_id": "sensor.ev_power", "role": "real_power"}
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert configs[0].demand_window_minutes == 240
+
+
 def test_config_parser_preserves_metric_like_circuit_basename() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

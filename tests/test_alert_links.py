@@ -264,8 +264,8 @@ def test_alert_graph_window_matches_sustained_evidence() -> None:
     )
 
     assert alert_graph_window(_alert()) == (
-        datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
-        datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        datetime(2026, 6, 5, 9, 50, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
     )
 
 
@@ -285,6 +285,10 @@ def test_alert_graph_entities_covers_current_alert_families() -> None:
         "sensor.hvac_l2_watts",
     )
     assert alert_graph_entities(_alert("solar_flow"), _config()) == (
+        "sensor.hvac_l1_watts",
+        "sensor.hvac_l2_watts",
+    )
+    assert alert_graph_entities(_alert("demand_monthly_peak"), _config()) == (
         "sensor.hvac_l1_watts",
         "sensor.hvac_l2_watts",
     )
@@ -325,6 +329,120 @@ def test_alert_graph_window_centers_point_alert() -> None:
     )
 
 
+def test_alert_graph_window_keeps_sustained_datetime_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    start = datetime.min.replace(tzinfo=UTC)
+    end = datetime.max.replace(tzinfo=UTC)
+    alert = replace(_alert(), first_seen=start, last_seen=end)
+
+    assert alert_graph_window(alert) == (start, end)
+
+
+def test_alert_graph_window_keeps_point_datetime_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    cases = (
+        (
+            datetime.min.replace(tzinfo=UTC),
+            datetime.min.replace(tzinfo=UTC),
+            datetime(1, 1, 1, 0, 15, tzinfo=UTC),
+        ),
+        (
+            datetime.max.replace(tzinfo=UTC),
+            datetime(9999, 12, 31, 23, 44, 59, 999999, tzinfo=UTC),
+            datetime.max.replace(tzinfo=UTC),
+        ),
+    )
+    for timestamp, expected_start, expected_end in cases:
+        alert = replace(
+            _alert(),
+            timestamp=timestamp,
+            first_seen=timestamp,
+            last_seen=timestamp,
+        )
+
+        assert alert_graph_window(alert) == (expected_start, expected_end)
+
+
+def test_alert_graph_window_uses_only_valid_demand_measurement_windows() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    timestamp = datetime(2026, 6, 5, 12, 30, tzinfo=UTC)
+    cases = (
+        (
+            15.0,
+            datetime(2026, 6, 5, 12, 5, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
+        ),
+        (
+            "invalid",
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            float("nan"),
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            -15.0,
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            1e308,
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            1_000_000.0,
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            240.0,
+            datetime(2026, 6, 5, 8, 20, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
+        ),
+    )
+    for demand_window_minutes, expected_start, expected_end in cases:
+        alert = replace(
+            _alert("demand_monthly_peak"),
+            timestamp=timestamp,
+            first_seen=timestamp,
+            last_seen=timestamp,
+            features={"demand_window_minutes": demand_window_minutes},
+        )
+
+        assert alert_graph_window(alert) == (expected_start, expected_end)
+
+
+def test_alert_graph_window_extends_sustained_demand_to_measurement_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    alert = replace(
+        _alert("demand_monthly_peak"),
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        first_seen=datetime(2026, 6, 5, 12, 29, tzinfo=UTC),
+        last_seen=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        features={"demand_window_minutes": 15.0},
+    )
+
+    assert alert_graph_window(alert) == (
+        datetime(2026, 6, 5, 12, 5, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
+    )
+
+
 def test_alert_graph_window_orders_reversed_evidence_timestamps() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,
@@ -337,6 +455,6 @@ def test_alert_graph_window_orders_reversed_evidence_timestamps() -> None:
     )
 
     assert alert_graph_window(alert) == (
-        datetime(2026, 6, 5, 10, 0, tzinfo=UTC),
-        datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        datetime(2026, 6, 5, 9, 50, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
     )

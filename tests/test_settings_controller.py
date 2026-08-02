@@ -1163,7 +1163,7 @@ async def test_settings_controller_sets_usage_and_load_settings() -> None:
     controller = settings_controller.SettingsController(coordinator)
 
     await controller.async_set_energy_usage_settings("fridge", 14, 0.2)
-    await controller.async_set_demand_settings("fridge", 30, 4500.0)
+    await controller.async_set_demand_settings("fridge", 300, 4500.0)
     await controller.async_set_capacity_settings("fridge", 20.0, 0.8)
     await controller.async_set_standby_settings("fridge", 24, 8.0, 25.0)
 
@@ -1172,7 +1172,7 @@ async def test_settings_controller_sets_usage_and_load_settings() -> None:
         "daily_spike_ratio": 0.2,
     }
     assert coordinator.store_data.demand_settings_by_circuit["fridge"] == {
-        "window_minutes": 30,
+        "window_minutes": 240,
         "demand_limit_w": 4500.0,
     }
     assert coordinator.store_data.capacity_settings_by_circuit["fridge"] == {
@@ -1405,7 +1405,7 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
         billing_cycle_budget_alert_ratio=0.85,
         billing_cycle_min_elapsed_days=5,
         cost_cycle_start_day=10,
-        demand_window_minutes=30,
+        demand_window_minutes=300,
         demand_limit_w=1200.0,
         standby_window_hours=72,
         standby_threshold_w=6.0,
@@ -1476,7 +1476,7 @@ def test_settings_controller_reads_runtime_setting_defaults() -> None:
     assert cost.tou_weekdays == (1, 3, 5)
     assert cost.tou_name == "Critical Peak"
     demand = controller.demand_settings_for_config(config, "fridge")
-    assert demand.window_minutes == 30
+    assert demand.window_minutes == 240
     assert demand.demand_limit_w == 1500.0
     capacity = controller.capacity_settings_for_config("fridge")
     assert capacity.breaker_amps == 20.0

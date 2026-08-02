@@ -5421,8 +5421,8 @@ def test_refresh_ux_state_includes_alert_graph_metadata_from_config() -> None:
         "sensor.fridge_reactive_power",
         "sensor.fridge_power_factor",
     ]
-    assert detail["graph_window_start"] == "2026-06-02T10:00:00+00:00"
-    assert detail["graph_window_end"] == "2026-06-02T12:30:00+00:00"
+    assert detail["graph_window_start"] == "2026-06-02T09:50:00+00:00"
+    assert detail["graph_window_end"] == "2026-06-02T12:40:00+00:00"
 
 
 @pytest.mark.asyncio

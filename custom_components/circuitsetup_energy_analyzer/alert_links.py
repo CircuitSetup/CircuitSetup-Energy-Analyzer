@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
+from .demand import MAX_DEMAND_WINDOW_MINUTES
 from .models import AlertEvidence, CircuitConfig, SensorRole
 
 DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer-evidence"
@@ -53,9 +55,9 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
         ("solar", "mains_balance"),
         (SensorRole.REAL_POWER,),
     ),
+    (("demand",), (SensorRole.REAL_POWER,)),
     (
         (
-            "demand",
             "always_on",
             "standby",
             "cycle",
@@ -153,15 +155,51 @@ def alert_source_entities(config: CircuitConfig | None) -> tuple[str, ...]:
 
 
 def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
-    """Return the graph window containing only the alert evidence."""
+    """Return the alert evidence interval with enough surrounding context."""
     raw_start = alert.first_seen or alert.timestamp
     raw_end = alert.last_seen or alert.timestamp
     start = min(raw_start, raw_end)
     end = max(raw_start, raw_end)
+
+    if "demand" in _feature_for_alert(alert).lower():
+        try:
+            demand_window_minutes = float(
+                alert.features.get("demand_window_minutes", 0.0)
+            )
+        except (TypeError, ValueError):
+            demand_window_minutes = 0.0
+        if (
+            math.isfinite(demand_window_minutes)
+            and 0.0 < demand_window_minutes <= MAX_DEMAND_WINDOW_MINUTES
+        ):
+            try:
+                start = min(
+                    start,
+                    alert.timestamp - timedelta(minutes=demand_window_minutes),
+                )
+            except OverflowError:
+                pass
+
     if start == end:
-        point_padding = timedelta(minutes=15)
-        return (start - point_padding, end + point_padding)
-    return (start, end)
+        return _padded_window(start, end, timedelta(minutes=15))
+
+    return _padded_window(start, end, timedelta(minutes=10))
+
+
+def _padded_window(
+    start: datetime,
+    end: datetime,
+    padding: timedelta,
+) -> tuple[datetime, datetime]:
+    try:
+        padded_start = start - padding
+    except OverflowError:
+        padded_start = start
+    try:
+        padded_end = end + padding
+    except OverflowError:
+        padded_end = end
+    return (padded_start, padded_end)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:

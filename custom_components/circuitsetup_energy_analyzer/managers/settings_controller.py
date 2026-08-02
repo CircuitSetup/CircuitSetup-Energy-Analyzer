@@ -30,7 +30,7 @@ from ..cycles import (
     RUN_CYCLE_DURATION_FEATURE,
     cycle_baseline_feature_values,
 )
-from ..demand import DemandSettings
+from ..demand import MAX_DEMAND_WINDOW_MINUTES, DemandSettings
 from ..goals import EnergyGoalSettings
 from ..hvac_efficiency import episode_from_dict
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
@@ -1142,9 +1142,12 @@ class SettingsController:
         )
         default_limit_w = config.demand_limit_w if config is not None else None
         return DemandSettings(
-            window_minutes=_positive_int_value(
-                overrides.get("window_minutes"),
-                default=default_window_minutes,
+            window_minutes=min(
+                _positive_int_value(
+                    overrides.get("window_minutes"),
+                    default=default_window_minutes,
+                ),
+                MAX_DEMAND_WINDOW_MINUTES,
             ),
             demand_limit_w=_optional_positive_float_value(
                 overrides.get("demand_limit_w"),
@@ -1396,9 +1399,12 @@ class SettingsController:
         config = coordinator.circuit_registry.config_for_circuit(circuit_id)
         current = self.demand_settings_for_config(config, circuit_id)
         settings: dict[str, Any] = {
-            "window_minutes": _positive_int_value(
-                window_minutes,
-                default=current.window_minutes,
+            "window_minutes": min(
+                _positive_int_value(
+                    window_minutes,
+                    default=current.window_minutes,
+                ),
+                MAX_DEMAND_WINDOW_MINUTES,
             ),
         }
         limit_w = _optional_positive_float_value(
