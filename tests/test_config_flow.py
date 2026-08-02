@@ -3184,6 +3184,50 @@ async def test_options_assignment_review_preserves_outdoor_temperature_entity() 
 
 
 @pytest.mark.asyncio
+async def test_options_assignment_preserves_advanced_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    advanced_settings = {
+        "hvac": {CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.main_floor"]}
+    }
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac",
+                    "name": "HVAC",
+                    "appliance_profile": "hvac",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.hvac_power"],
+                }
+            ],
+            CONF_ADVANCED_SETTINGS: advanced_settings,
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    await flow.async_step_assign()
+    await flow.async_step_select_assignment({"selected_assignment": "hvac"})
+    result = await flow.async_step_assign(
+        {
+            "include_circuit": True,
+            "included_sensors": ["sensor.hvac_power"],
+            "circuit_name": "HVAC",
+            "appliance_profile": "hvac",
+            "circuit_retention_mode": "standard",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ADVANCED_SETTINGS] == advanced_settings
+
+
+@pytest.mark.asyncio
 async def test_options_assignment_review_saves_optional_rain_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,

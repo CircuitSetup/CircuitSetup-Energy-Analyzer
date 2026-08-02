@@ -5373,6 +5373,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     return {
+        **options,
         CONF_SOURCE_DEVICES: _strict_string_list(
             options.get(CONF_SOURCE_DEVICES, data.get(CONF_SOURCE_DEVICES, [])),
             invalid_error_key="invalid_source_devices",
