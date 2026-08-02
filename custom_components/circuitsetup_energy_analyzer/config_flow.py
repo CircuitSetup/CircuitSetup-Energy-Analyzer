@@ -3001,6 +3001,7 @@ def _final_config_without_assignment_review(
 ) -> dict[str, Any]:
     final_config = dict(pending_config)
     final_config[CONF_SOURCE_ENTITIES] = []
+    _prune_circuit_settings(final_config, set())
     final_config[CONF_CIRCUITS] = []
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = ""
     return final_config
@@ -3236,11 +3237,12 @@ def _final_config_from_reviewed_circuits(
 
     final_config = dict(pending_config)
     final_config[CONF_SOURCE_ENTITIES] = assigned_source_entities
-    final_config[CONF_CIRCUITS] = circuit_list
     circuit_ids = {
         str(circuit.get("circuit_id") or circuit.get("id") or "")
         for circuit in circuit_list
     }
+    _prune_circuit_settings(final_config, circuit_ids)
+    final_config[CONF_CIRCUITS] = circuit_list
     known_loads = [
         circuit_id
         for circuit_id in _strict_string_list(
@@ -3308,11 +3310,12 @@ def _final_config_from_single_assignment_update(
         final_circuits,
         removed_source_entities=selected_entity_ids,
     )
-    final_config[CONF_CIRCUITS] = final_circuits
     circuit_ids = {
         str(circuit.get("circuit_id") or circuit.get("id") or "")
         for circuit in final_circuits
     }
+    _prune_circuit_settings(final_config, circuit_ids)
+    final_config[CONF_CIRCUITS] = final_circuits
     known_loads = [
         circuit_id
         for circuit_id in _strict_string_list(
@@ -3376,11 +3379,33 @@ def _final_config_from_empty_assignment_update(
         final_config[CONF_SOURCE_ENTITIES] = [
             entity_id for entity_id in source_entities if entity_id not in removed
         ]
+    _prune_circuit_settings(final_config, set())
     final_config[CONF_CIRCUITS] = []
     final_config[CONF_CIRCUIT_ASSIGNMENTS] = _assignment_text_from_circuits([])
     if CONF_KNOWN_LOAD_CIRCUITS in final_config:
         final_config[CONF_KNOWN_LOAD_CIRCUITS] = []
     return final_config
+
+
+def _prune_circuit_settings(config: dict[str, Any], circuit_ids: set[str]) -> None:
+    retained_ids = {*circuit_ids, "mains"}
+    configured_ids = {
+        str(circuit.get("circuit_id") or circuit.get("id"))
+        for circuit in config.get(CONF_CIRCUITS, ())
+        if isinstance(circuit, Mapping)
+        and (circuit.get("circuit_id") or circuit.get("id"))
+    }
+    removed_ids = configured_ids - retained_ids
+    for config_key in (CONF_ADVANCED_SETTINGS, CONF_UTILITY_COMPARISON_SETTINGS):
+        settings = config.get(config_key)
+        updated = {
+            key: value if str(key) in retained_ids else {}
+            for key, value in (
+                settings.items() if isinstance(settings, Mapping) else ()
+            )
+        }
+        updated.update({circuit_id: {} for circuit_id in removed_ids})
+        config[config_key] = updated
 
 
 def _source_entities_after_assignment_update(
@@ -3963,7 +3988,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 errors={"base": err.error_key},
             )
 
-        updated_options = _options_with_updates(self._config_entry, validated)
+        updated_options = {**source_input, **validated}
         available_source_entities = await _async_discover_energy_source_entities(
             getattr(self, "hass", None)
         )
@@ -5378,6 +5403,14 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
         raise SetupValidationError(ERROR_NO_SOURCE_ENTITIES)
 
     return {
+        **options,
+        CONF_CIRCUITS: _options_existing_circuits(config_entry),
+        CONF_ADVANCED_SETTINGS: _settings_map_for_entry(
+            config_entry, CONF_ADVANCED_SETTINGS
+        ),
+        CONF_UTILITY_COMPARISON_SETTINGS: _settings_map_for_entry(
+            config_entry, CONF_UTILITY_COMPARISON_SETTINGS
+        ),
         CONF_SOURCE_DEVICES: _strict_string_list(
             options.get(CONF_SOURCE_DEVICES, data.get(CONF_SOURCE_DEVICES, [])),
             invalid_error_key="invalid_source_devices",
