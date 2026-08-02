@@ -114,12 +114,12 @@ def _configs_with_merged_source_entity_refs(
         options,
         CONF_SOURCE_ENTITIES,
     )
-    if not source_entities:
-        return configs
-
     mains_entities = set(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
+    if not source_entities and not mains_entities:
+        return configs
+
     eligible_source_entities = [
         entity_id
         for entity_id in source_entities
@@ -127,17 +127,104 @@ def _configs_with_merged_source_entity_refs(
         and not untyped_source_entity_excluded(entity_id)
     ]
     config_index = _config_index_by_source_circuit_id(configs)
-    existing_sensor_refs = [sensor for config in configs for sensor in config.sensors]
+    existing_sensor_refs = [
+        sensor
+        for config in configs
+        if config.mode is not CircuitMode.MAINS_NILM and config.circuit_id != "mains"
+        for sensor in config.sensors
+        if sensor.entity_id not in mains_entities
+        and not untyped_source_entity_excluded(sensor.entity_id)
+    ]
     existing_source_entity_list = list(
         dict.fromkeys(sensor.entity_id for sensor in existing_sensor_refs)
     )
     existing_source_entities = set(existing_source_entity_list)
+    owned_source_entities = {
+        sensor.entity_id
+        for config in configs
+        if config.mode is not CircuitMode.MAINS_NILM and config.circuit_id != "mains"
+        for sensor in config.sensors
+        if not untyped_source_entity_excluded(sensor.entity_id)
+    }
+    source_candidates = [*existing_source_entity_list, *eligible_source_entities]
+    auto_base_ids = {
+        owned_id
+        for config in configs
+        if config.mode is not CircuitMode.MAINS_NILM and config.circuit_id != "mains"
+        if (owned_id := _canonical_source_circuit_id(config.circuit_id))
+        if (
+            any(
+                sensor.entity_id in owned_source_entities
+                and _source_circuit_id_from_entity_id(sensor.entity_id) == owned_id
+                for sensor in config.sensors
+            )
+            or (
+                not config.sensors
+                and any(
+                    _source_circuit_id_from_entity_id(entity_id) == owned_id
+                    for entity_id in source_candidates
+                )
+            )
+        )
+    }
+    reusable_variant_ids = {
+        owned_id
+        for config in configs
+        if (owned_id := _canonical_source_circuit_id(config.circuit_id))
+        if (
+            any(
+                _source_circuit_id_from_entity_id(sensor.entity_id) in auto_base_ids
+                and source_entity_matches_variant_circuit_id(
+                    sensor.entity_id,
+                    owned_id,
+                )
+                for sensor in config.sensors
+                if sensor.entity_id in owned_source_entities
+            )
+            or (
+                not config.sensors
+                and any(
+                    _source_circuit_id_from_entity_id(entity_id) in auto_base_ids
+                    and source_entity_matches_variant_circuit_id(entity_id, owned_id)
+                    for entity_id in source_candidates
+                )
+            )
+        )
+    }
     source_circuit_ids = source_circuit_ids_from_entity_ids(
         [*existing_source_entity_list, *eligible_source_entities],
         sensor_roles={sensor.entity_id: sensor.role for sensor in existing_sensor_refs},
         sensor_legs={sensor.entity_id: sensor.leg for sensor in existing_sensor_refs},
-        reserved_circuit_ids=config_index,
+        reserved_circuit_ids=(
+            circuit_id
+            for circuit_id in config_index
+            if circuit_id not in reusable_variant_ids
+        ),
     )
+    auto_templates = {
+        owned_id: config
+        for config in configs
+        if config.mode is not CircuitMode.MAINS_NILM and config.circuit_id != "mains"
+        if (owned_id := _canonical_source_circuit_id(config.circuit_id))
+        if owned_id in auto_base_ids
+    }
+
+    def ensure_target(desired_id: str, template: CircuitConfig) -> int:
+        target_index = config_index.get(desired_id)
+        if target_index is not None:
+            return target_index
+        target_index = len(configs)
+        configs.append(
+            replace(
+                template,
+                circuit_id=desired_id,
+                name=friendly_source_name(desired_id),
+                sensors=(),
+            )
+        )
+        config_index[desired_id] = target_index
+        return target_index
+
     displaced_refs: list[tuple[SensorRef, str, CircuitConfig]] = []
     for index, config in enumerate(tuple(configs)):
         if config.mode is CircuitMode.MAINS_NILM or config.circuit_id == "mains":
@@ -149,27 +236,28 @@ def _configs_with_merged_source_entity_refs(
         owned_id = _canonical_source_circuit_id(config.circuit_id)
         retained_refs = []
         for sensor in config.sensors:
+            if sensor.entity_id in mains_entities:
+                continue
+            if sensor.entity_id not in source_circuit_ids:
+                retained_refs.append(sensor)
+                continue
             desired_id = source_circuit_ids[sensor.entity_id]
             natural_id = _source_circuit_id_from_entity_id(sensor.entity_id)
-            if desired_id in current_ids or natural_id != owned_id:
+            automatic_owner = natural_id == owned_id or (
+                natural_id in auto_base_ids
+                and source_entity_matches_variant_circuit_id(
+                    sensor.entity_id,
+                    owned_id,
+                )
+            )
+            if desired_id in current_ids or not automatic_owner:
                 retained_refs.append(sensor)
             else:
                 displaced_refs.append((sensor, desired_id, config))
         if len(retained_refs) != len(config.sensors):
             configs[index] = replace(config, sensors=tuple(retained_refs))
     for sensor, desired_id, template in displaced_refs:
-        target_index = config_index.get(desired_id)
-        if target_index is None:
-            target_index = len(configs)
-            configs.append(
-                replace(
-                    template,
-                    circuit_id=desired_id,
-                    name=friendly_source_name(desired_id),
-                    sensors=(),
-                )
-            )
-            config_index[desired_id] = target_index
+        target_index = ensure_target(desired_id, template)
         target = configs[target_index]
         if sensor.entity_id not in {ref.entity_id for ref in target.sensors}:
             configs[target_index] = replace(
@@ -179,9 +267,13 @@ def _configs_with_merged_source_entity_refs(
     for entity_id in eligible_source_entities:
         if entity_id in existing_source_entities:
             continue
-        config_index_value = config_index.get(source_circuit_ids[entity_id])
+        desired_id = source_circuit_ids[entity_id]
+        config_index_value = config_index.get(desired_id)
         if config_index_value is None:
-            continue
+            template = auto_templates.get(_source_circuit_id_from_entity_id(entity_id))
+            if template is None:
+                continue
+            config_index_value = ensure_target(desired_id, template)
         config = configs[config_index_value]
         configs[config_index_value] = replace(
             config,
@@ -195,15 +287,25 @@ def _configs_with_merged_source_entity_refs(
             ),
         )
         existing_source_entities.add(entity_id)
-    return configs
+    return [
+        config
+        for config in configs
+        if config.sensors
+        or _canonical_source_circuit_id(config.circuit_id)
+        not in reusable_variant_ids
+    ]
 
 
 def _config_index_by_source_circuit_id(
     configs: Iterable[CircuitConfig],
 ) -> dict[str, int]:
+    config_list = list(configs)
     config_index: dict[str, int] = {}
-    for index, config in enumerate(configs):
-        for value in (config.circuit_id, config.name):
+    for values in (
+        (config.circuit_id for config in config_list),
+        (config.name for config in config_list),
+    ):
+        for index, value in enumerate(values):
             circuit_id = _canonical_source_circuit_id(value)
             if circuit_id:
                 config_index.setdefault(circuit_id, index)
@@ -852,6 +954,24 @@ def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     return _canonical_source_circuit_id(
         strip_trailing_source_detail_tokens(object_id)
     )
+
+
+def source_entity_matches_variant_circuit_id(
+    entity_id: str,
+    circuit_id: str,
+) -> bool:
+    """Return whether a saved circuit ID is an automatic source variant."""
+    detail = _source_value_qualifier_from_entity_id(
+        entity_id
+    ) or _source_metric_suffix_from_entity_id(entity_id)
+    if not detail:
+        return False
+    prefix = f"{_source_circuit_id_from_entity_id(entity_id)}_{detail}"
+    canonical_id = _canonical_source_circuit_id(circuit_id)
+    if canonical_id == prefix:
+        return True
+    ordinal = canonical_id.removeprefix(f"{prefix}_")
+    return ordinal != canonical_id and ordinal.isdigit() and int(ordinal) >= 2
 
 
 def source_circuit_ids_from_entity_ids(

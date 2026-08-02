@@ -345,10 +345,13 @@ def test_config_parser_uses_saved_sensors_for_alias_collisions() -> None:
         }
     )
 
-    assert [sensor.entity_id for sensor in configs[0].sensors] == [
-        "sensor.pump_power",
-        "sensor.pump_kva",
-    ]
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "pump": ["sensor.pump_power", "sensor.pump_kva"],
+        "pump_kw": ["sensor.pump_kw"],
+    }
 
 
 def test_config_parser_moves_saved_qualified_sensor_before_base_merge() -> None:
@@ -383,6 +386,226 @@ def test_config_parser_moves_saved_qualified_sensor_before_base_merge() -> None:
     } == {
         "panel": ["sensor.panel_voltage"],
         "panel_max": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_config_parser_reuses_saved_variants_for_later_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [
+                        {"entity_id": "sensor.panel_power", "role": "real_power"},
+                        {"entity_id": "sensor.panel_voltage", "role": "voltage"},
+                    ],
+                },
+                {
+                    "circuit_id": "panel_max",
+                    "name": "Panel Max",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_power_max",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.panel_voltage_max",
+                            "role": "voltage",
+                        },
+                    ],
+                },
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage",
+                "sensor.panel_power_max",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+                "sensor.panel_kw_max",
+            ],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_power", "sensor.panel_voltage"],
+        "panel_max": [
+            "sensor.panel_power_max",
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+        "panel_max_2": ["sensor.panel_kw_max"],
+    }
+
+
+def test_config_parser_removes_saved_sensor_promoted_to_mains() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [
+                        {"entity_id": "sensor.panel_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "panel_max",
+                    "name": "Panel Max",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_voltage_max",
+                            "role": "voltage",
+                        }
+                    ],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": ["sensor.panel_current_max"],
+        "mains": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_config_parser_removes_emptied_saved_variant() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [
+                        {"entity_id": "sensor.panel_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "panel_max",
+                    "name": "Panel Max",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_voltage_max",
+                            "role": "voltage",
+                        }
+                    ],
+                },
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_power"],
+        "mains": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_config_parser_reindexes_saved_variant_after_collision_clears() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [
+                        {"entity_id": "sensor.panel_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "panel_max_2",
+                    "name": "Panel Max 2",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_voltage_max",
+                            "role": "voltage",
+                        }
+                    ],
+                },
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": [
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+    }
+
+
+def test_config_parser_reuses_emptied_saved_base_for_later_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_voltage",
+                "sensor.panel_current_max",
+            ],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_voltage"],
+        "panel_max": ["sensor.panel_current_max"],
     }
 
 
@@ -449,10 +672,14 @@ def test_config_parser_does_not_merge_alias_into_reserved_saved_circuit() -> Non
         }
     )
 
-    assert [[sensor.entity_id for sensor in config.sensors] for config in configs] == [
-        ["sensor.pump_power"],
-        ["sensor.basement_power"],
-    ]
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "pump": ["sensor.pump_power"],
+        "pump_kw": ["sensor.basement_power"],
+        "pump_kw_2": ["sensor.pump_kw"],
+    }
 
 
 def test_config_parser_merges_supported_mains_sources_and_drops_harmonics() -> None:

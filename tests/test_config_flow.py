@@ -3935,7 +3935,7 @@ def test_options_source_merge_excludes_reactive_energy() -> None:
     )
 
 
-def test_options_source_merge_skips_duplicate_metric_alias() -> None:
+def test_options_source_merge_separates_duplicate_metric_alias() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
     circuits = [
@@ -3958,10 +3958,13 @@ def test_options_source_merge_skips_duplicate_metric_alias() -> None:
     )
 
     assert merged is not None
-    assert [sensor["entity_id"] for sensor in merged[0]["sensors"]] == [
-        "sensor.pump_power",
-        "sensor.pump_kva",
-    ]
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "pump": ["sensor.pump_power", "sensor.pump_kva"],
+        "pump_kw": ["sensor.pump_kw"],
+    }
 
 
 def test_options_source_merge_moves_saved_qualified_sensor() -> None:
@@ -3995,6 +3998,216 @@ def test_options_source_merge_moves_saved_qualified_sensor() -> None:
     } == {
         "panel": ["sensor.panel_voltage"],
         "panel_max": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_options_source_merge_reuses_saved_variants_for_later_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage",
+                "sensor.panel_power_max",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+                "sensor.panel_kw_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"},
+                    {"entity_id": "sensor.panel_voltage", "role": "voltage"},
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_power_max",
+                        "role": "real_power",
+                    },
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    },
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power", "sensor.panel_voltage"],
+        "panel_max": [
+            "sensor.panel_power_max",
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+        "panel_max_2": ["sensor.panel_kw_max"],
+    }
+
+
+def test_options_source_merge_removes_saved_sensor_promoted_to_mains() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": ["sensor.panel_current_max"],
+    }
+
+
+def test_options_source_merge_removes_emptied_saved_variant() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert [circuit["circuit_id"] for circuit in merged] == ["panel"]
+
+
+def test_options_source_merge_reindexes_saved_variant_after_collision_clears() -> (
+    None
+):
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max_2",
+                "name": "Panel Max 2",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": [
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+    }
+
+
+def test_options_source_merge_reuses_emptied_saved_base_for_later_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_voltage",
+                "sensor.panel_current_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [],
+            }
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_voltage"],
+        "panel_max": ["sensor.panel_current_max"],
     }
 
 
