@@ -2691,6 +2691,63 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
     ]
 
 
+@pytest.mark.asyncio
+async def test_nilm_history_ignores_malformed_persisted_helper_containers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    source = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+    )
+    helper = CircuitConfig(
+        circuit_id="helper",
+        name="Helper",
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.helper_w", SensorRole.REAL_POWER),),
+    )
+    arbitrary = CircuitConfig(
+        circuit_id="arbitrary",
+        name="Arbitrary",
+        appliance_profile=ApplianceProfile.MOTOR_LOAD,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.arbitrary_w", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        config=source, configs=(source, helper, arbitrary)
+    )
+    coordinator.store_data.nilm_signatures = {"mains": [
+        {"helper_candidates": None},
+        {"helper_candidates": "bad"},
+        {"helper_candidates": [None, "bad"]},
+    ]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [
+        {"helper_links": None},
+        {"helper_links": "bad"},
+        {"helper_links": [None, "bad", {"helper_circuit_id": "helper"}]},
+    ]}
+    queried = []
+
+    async def history_rows(_hass, _start, _end, entity_ids):
+        queried.extend(entity_ids)
+        return []
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+    await panel.nilm_workspace_history_payload(
+        SimpleNamespace(),
+        [coordinator],
+        circuit_id="mains",
+        helper_circuit_ids=["arbitrary", "helper"],
+    )
+
+    assert queried == ["sensor.mains_w", "sensor.helper_w"]
+
+
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,

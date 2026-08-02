@@ -1959,7 +1959,7 @@ async def nilm_workspace_history_payload(
         for parent in collection
         if isinstance(parent, Mapping)
         for key in ("helper_candidates", "helper_links")
-        for item in parent.get(key, ())
+        for item in _iter_items(parent.get(key))
         if isinstance(item, Mapping) and item.get("helper_circuit_id")
     }
     requested_helpers = list(
