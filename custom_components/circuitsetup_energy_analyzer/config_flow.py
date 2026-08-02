@@ -5060,7 +5060,10 @@ def _is_hidden_recommendation_evidence_key(key: str) -> bool:
 
 
 def _format_recommendation_value(value: Any, unit: Any) -> str:
-    if value is None:
+    if value is None or (
+        isinstance(value, str)
+        and value.strip().casefold() in {"", "unknown"}
+    ):
         return "not set"
     if isinstance(value, bool):
         text = "on" if value else "off"
