@@ -1367,6 +1367,7 @@
         "local_time": "local time",
         "mains": "Mains",
         "normal": "Normal",
+        "not_set": "Not set",
         "open_session": "Open session",
         "retry": "Retry",
         "running": "running",

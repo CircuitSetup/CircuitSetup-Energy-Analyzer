@@ -452,18 +452,19 @@ export function createEvidenceViewMethods({
     const applied = status === "applied";
     const currentValue = applied && recommendation.suggested_value !== undefined ? recommendation.suggested_value : recommendation.current_value;
     const suggestedValue = applied ? undefined : recommendation.suggested_value;
+    const currentValueIsUnset = currentValue === null
+      || currentValue === undefined
+      || (typeof currentValue === "string" && ["", "unknown"].includes(currentValue.trim().toLowerCase()));
     const rows = [];
-    if (currentValue !== undefined) {
-      rows.push([this._panelText("common.current"), currentValue]);
-    }
+    rows.push([this._panelText("common.current"), currentValue, currentValueIsUnset]);
     if (recommendation.default_value !== undefined) {
       rows.push([this._panelText("common.default"), recommendation.default_value]);
     }
     if (suggestedValue !== undefined) {
       rows.push([this._panelText("common.suggested"), suggestedValue]);
     }
-    return rows.length ? `<div class="recommendation-values">${rows.map(([label, value]) => `
-      <div class="recommendation-value"><span>${this._escape(label)}</span><strong>${this._escape(this._formatComparisonValue(recommendation, value))}</strong></div>
+    return rows.length ? `<div class="recommendation-values">${rows.map(([label, value, unset]) => `
+      <div class="recommendation-value"><span>${this._escape(label)}</span><strong>${this._escape(unset ? this._panelText("common.not_set") : this._formatComparisonValue(recommendation, value))}</strong></div>
     `).join("")}</div>` : "";
   }
 
