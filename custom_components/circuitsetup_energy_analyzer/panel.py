@@ -1109,7 +1109,11 @@ def _appliance_detail_history_payload(
     payload = {
         "entities": [item["entity_id"] for item in entity_series],
         "entity_series": entity_series,
-        "default_hours": DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS,
+        "default_hours": (
+            720
+            if detail.appliance_profile == ApplianceProfile.SUMP_PUMP.value
+            else DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS
+        ),
         "period_hours": list(APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS),
     }
     if embedded_series:
