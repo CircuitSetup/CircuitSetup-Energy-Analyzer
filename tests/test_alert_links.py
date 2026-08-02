@@ -329,6 +329,46 @@ def test_alert_graph_window_centers_point_alert() -> None:
     )
 
 
+def test_alert_graph_window_keeps_sustained_datetime_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    start = datetime.min.replace(tzinfo=UTC)
+    end = datetime.max.replace(tzinfo=UTC)
+    alert = replace(_alert(), first_seen=start, last_seen=end)
+
+    assert alert_graph_window(alert) == (start, end)
+
+
+def test_alert_graph_window_keeps_point_datetime_bounds() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    cases = (
+        (
+            datetime.min.replace(tzinfo=UTC),
+            datetime.min.replace(tzinfo=UTC),
+            datetime(1, 1, 1, 0, 15, tzinfo=UTC),
+        ),
+        (
+            datetime.max.replace(tzinfo=UTC),
+            datetime(9999, 12, 31, 23, 44, 59, 999999, tzinfo=UTC),
+            datetime.max.replace(tzinfo=UTC),
+        ),
+    )
+    for timestamp, expected_start, expected_end in cases:
+        alert = replace(
+            _alert(),
+            timestamp=timestamp,
+            first_seen=timestamp,
+            last_seen=timestamp,
+        )
+
+        assert alert_graph_window(alert) == (expected_start, expected_end)
+
+
 def test_alert_graph_window_uses_only_valid_demand_measurement_windows() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,

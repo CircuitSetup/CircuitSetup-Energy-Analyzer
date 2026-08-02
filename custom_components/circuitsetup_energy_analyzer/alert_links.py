@@ -181,11 +181,25 @@ def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
                 pass
 
     if start == end:
-        point_padding = timedelta(minutes=15)
-        return (start - point_padding, end + point_padding)
+        return _padded_window(start, end, timedelta(minutes=15))
 
-    context_padding = timedelta(minutes=10)
-    return (start - context_padding, end + context_padding)
+    return _padded_window(start, end, timedelta(minutes=10))
+
+
+def _padded_window(
+    start: datetime,
+    end: datetime,
+    padding: timedelta,
+) -> tuple[datetime, datetime]:
+    try:
+        padded_start = start - padding
+    except OverflowError:
+        padded_start = start
+    try:
+        padded_end = end + padding
+    except OverflowError:
+        padded_end = end
+    return (padded_start, padded_end)
 
 
 def _roles_for_feature(feature: str) -> tuple[SensorRole, ...]:
