@@ -3899,6 +3899,35 @@ def test_options_source_merge_excludes_reactive_energy() -> None:
     )
 
 
+def test_options_source_merge_skips_duplicate_metric_alias() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuits = [
+        {
+            "circuit_id": "pump",
+            "name": "Pump",
+            "sensors": [{"entity_id": "sensor.pump_power", "role": "real_power"}],
+        }
+    ]
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.pump_power",
+                "sensor.pump_kw",
+                "sensor.pump_kva",
+            ]
+        },
+        circuits,
+    )
+
+    assert merged is not None
+    assert [sensor["entity_id"] for sensor in merged[0]["sensors"]] == [
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    ]
+
+
 @pytest.mark.parametrize(
     ("entity_id", "expected_role"),
     (

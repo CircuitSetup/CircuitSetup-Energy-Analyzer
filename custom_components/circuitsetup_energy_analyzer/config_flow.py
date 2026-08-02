@@ -5487,31 +5487,46 @@ def _circuits_with_merged_source_circuit_sensors(
         return None
 
     circuit_index = _circuit_index_by_assignment_id(circuits)
-    assigned_source_entities = {
+    assigned_source_entity_list = [
         entity_id
         for circuit in circuits
         for entity_id in _sensor_entity_ids_from_circuit(circuit)
-    }
+    ]
+    assigned_source_entities = set(assigned_source_entity_list)
     mains_source_entities = set(
         _strict_string_list(
             config.get(CONF_MAINS_SOURCE_ENTITIES, []),
             invalid_error_key="invalid_mains_source_entities",
         )
     )
-    changed = False
-    for entity_id in _strict_string_list(
+    source_entities = _strict_string_list(
         config.get(CONF_SOURCE_ENTITIES, []),
         invalid_error_key=ERROR_INVALID_SOURCE_ENTITIES,
-    ):
-        if (
-            entity_id in mains_source_entities
-            or entity_id in assigned_source_entities
-            or untyped_source_entity_excluded(entity_id)
-        ):
+    )
+    eligible_source_entities = [
+        entity_id
+        for entity_id in source_entities
+        if entity_id not in mains_source_entities
+        and not untyped_source_entity_excluded(entity_id)
+    ]
+    saved_sensor_roles = {
+        str(sensor["entity_id"]): str(sensor["role"])
+        for circuit in circuits
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping)
+        and sensor.get("entity_id")
+        and sensor.get("role")
+    }
+    inferred_circuit_ids = source_circuit_ids_from_entity_ids(
+        [*assigned_source_entity_list, *eligible_source_entities],
+        sensor_roles=saved_sensor_roles,
+    )
+
+    changed = False
+    for entity_id in eligible_source_entities:
+        if entity_id in assigned_source_entities:
             continue
-        circuit_index_value = circuit_index.get(
-            _assignment_circuit_id_from_entity_id(entity_id)
-        )
+        circuit_index_value = circuit_index.get(inferred_circuit_ids[entity_id])
         if circuit_index_value is None:
             continue
         circuits[circuit_index_value]["sensors"].append(
