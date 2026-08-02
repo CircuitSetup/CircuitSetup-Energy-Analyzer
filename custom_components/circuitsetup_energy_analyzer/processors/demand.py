@@ -385,7 +385,8 @@ def _contextual_demand_comparison(
         1.0,
     )
     if (
-        result.monthly_peak_warning is not None
+        result.limit_exceeded is None
+        and result.monthly_peak_warning is not None
         and result.current_demand_w <= selected.p90 + normal_spread_w
     ):
         attrs["status_override"] = "context_explained"
