@@ -2238,6 +2238,43 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
 
 
+def test_nilm_workspace_payload_rejects_missing_source_in_requested_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="First Mains",
+        entity_id="sensor.first_mains_power",
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+
+    payload = nilm_workspace_payload(
+        [first, second], circuit_id="mains", entry_id="missing-entry"
+    )
+
+    assert payload["status"] == "not_found"
+    assert payload["requested_circuit_id"] == "mains"
+    assert "circuit" not in payload
+
+
+def test_nilm_workspace_missing_source_message_is_source_neutral() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    payload = nilm_workspace_payload([], circuit_id="mixed", entry_id="entry-1")
+
+    assert payload["message"] == (
+        "No Load Separation source is available for this workspace."
+    )
+
+
 def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,

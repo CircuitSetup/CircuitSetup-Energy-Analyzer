@@ -109,7 +109,7 @@ def nilm_workspace_payload(
     hours: Any = None,
     entry_id: str | None = None,
 ) -> dict[str, Any]:
-    """Return bounded NILM workspace data for one mains NILM circuit."""
+    """Return bounded NILM workspace data for one Load Separation source."""
 
     target = _nilm_workspace_target(
         tuple(coordinators),
@@ -120,7 +120,7 @@ def nilm_workspace_payload(
         return {
             "status": "not_found",
             "requested_circuit_id": circuit_id or None,
-            "message": _panel_text("nilm_workspace", "no_mains_circuit"),
+            "message": _panel_text("nilm_workspace", "no_source"),
         }
 
     coordinator, config, sources = target
@@ -513,10 +513,6 @@ def _nilm_workspace_target(
         if requested_entry_id:
             return None
     return None
-
-
-def _nilm_workspace_sources(coordinator: Any) -> list[dict[str, str]]:
-    return [source for _config, source in _nilm_workspace_source_configs(coordinator)]
 
 
 def _nilm_workspace_source_configs(

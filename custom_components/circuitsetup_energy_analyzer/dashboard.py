@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .appliance_metadata import appliance_icon_for_profile
@@ -787,8 +787,10 @@ def _build_energy_costs_view(
 def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
     sources = _nilm_sources(context)
     primary = context.primary_mains
-    cards: list[dict[str, Any]] = [
-        {
+    cards: list[dict[str, Any]] = []
+    if primary is not None:
+        cards.append(
+            {
             "type": HOUSE_FLOW_CARD,
             "mode": "mains",
             "title": _dashboard_text("cards", "mains_and_nilm"),
@@ -815,22 +817,23 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
                 for circuit in context.mains[1:]
             ],
             "labels": dict(translation_section("dashboard", "live_cards")),
-        }
-    ]
+            }
+        )
     if len(sources) == 1:
         source = sources[0]
-        cards.append({
-            "type": "button",
-            "name": _dashboard_text("cards", "review_nilm_assignments"),
-            "icon": "mdi:playlist-check",
-            "tap_action": {
-                "action": "navigate",
-                "navigation_path": (
-                    f"{DEFAULT_ALERT_EVIDENCE_PATH}?nilm_workspace=1&"
-                    f"circuit_id={quote(source.circuit_id, safe='')}"
-                ),
-            },
-        })
+        cards.append(
+            {
+                "type": "button",
+                "name": _dashboard_text("cards", "review_nilm_assignments"),
+                "icon": "mdi:playlist-check",
+                "tap_action": {
+                    "action": "navigate",
+                    "navigation_path": _nilm_dashboard_path(
+                        context.entry_id, source.circuit_id
+                    ),
+                },
+            }
+        )
     else:
         cards.extend(
             {

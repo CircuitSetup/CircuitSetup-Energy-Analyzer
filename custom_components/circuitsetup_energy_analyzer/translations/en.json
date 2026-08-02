@@ -1828,7 +1828,7 @@
         "source_picker_label": "Load Separation source",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",
-        "no_mains_circuit": "No mains NILM circuit is available for this workspace.",
+        "no_source": "No Load Separation source is available for this workspace.",
         "description": "Review mains load changes, labels, and assignments used by NILM.",
         "focused_graph": "Showing graph sessions matching selected signature.",
         "no_graph_history": "No NILM workspace history samples were available for this graph window.",

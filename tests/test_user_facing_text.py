@@ -7635,6 +7635,50 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         assert expected in readme_text
 
 
+def test_nilm_workspace_source_picker_renders_and_navigates_only_for_multiple_sources() -> None:
+    _run_panel_node_script(
+        r'''
+const panel = new context.Panel();
+const summary = (sources) => panel._renderNilmWorkspaceSummary({
+  circuit: { circuit_id: "mains", name: "Mains" },
+  sources,
+  lanes: {},
+  lane_counts: {},
+});
+if (summary([]).includes("data-nilm-source-picker")
+    || summary([{ circuit_id: "mains", name: "Mains", path: "/nilm?entry_id=one&circuit_id=mains" }]).includes("data-nilm-source-picker")) {
+  throw new Error("zero and one source must not render a picker");
+}
+const path = "/circuitsetup-energy-analyzer/nilm?entry_id=entry-2&circuit_id=mixed";
+const html = summary([
+  { circuit_id: "mains", name: "Mains", path: "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mains" },
+  { circuit_id: "mixed", name: "Mixed", path },
+]);
+if (!html.includes("data-nilm-source-picker") || !html.includes(`value="${path.replace("&", "&amp;")}"`)) {
+  throw new Error("multiple sources must render backend paths in the picker");
+}
+let changed;
+const select = { value: path, addEventListener(_event, callback) { changed = callback; } };
+let navigated = "";
+panel._navigate = (value) => { navigated = value; };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll(selector) { return selector === "[data-nilm-source-picker]" ? [select] : []; },
+  querySelector() { return null; },
+};
+panel._attachChartInspectors = () => {};
+panel._listen = () => {};
+panel._renderNilmWorkspaceBody = () => "";
+panel._routeRequestsNilmWorkspace = () => false;
+panel._renderEvidenceBody = () => "";
+panel._renderActionConfirmation = () => "";
+panel._render();
+changed();
+if (navigated !== path) throw new Error(`picker did not navigate to backend path: ${navigated}`);
+'''
+    )
+
+
 def test_readme_describes_bounded_settings_suggestion_attributes() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 

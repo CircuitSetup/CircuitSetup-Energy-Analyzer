@@ -1456,6 +1456,7 @@ def test_dashboard_nilm_review_section_only_appears_when_mains_nilm_exists() -> 
     assert "mains-nilm" not in {
         view["path"] for view in _dashboard_views(dashboard)
     }
+    assert "Load Separation" not in str(dashboard)
 
 
 def test_appliance_status_cards_match_dashboard_example_summary_fields() -> None:
@@ -1547,6 +1548,7 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     dashboard = build_recommended_dashboard(
         _circuits(),
         DASHBOARD_LAYOUT_STANDARD,
+        entry_id="entry-1",
     )
     mains_view = next(
         view for view in _dashboard_views(dashboard) if view["path"] == "insights"
@@ -1562,7 +1564,7 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     assert review_card["tap_action"] == {
         "action": "navigate",
         "navigation_path": (
-            "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+            "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mains"
         ),
     }
 
@@ -1604,6 +1606,7 @@ def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
         "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mixed",
         "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=hvac_2",
     ]
+    assert not [card for card in cards if card.get("type") == HOUSE_FLOW_CARD]
 
 
 def test_dashboard_omits_empty_nilm_graph_from_graph_tab() -> None:
@@ -2028,7 +2031,7 @@ def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> No
     assert "sensor.fridge_energy_dashboard_status" not in refs
     assert "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge" in markdown
     assert (
-        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&circuit_id=mains"
+        "/circuitsetup-energy-analyzer/nilm?entry_id=&circuit_id=mains"
         in markdown
     )
 
