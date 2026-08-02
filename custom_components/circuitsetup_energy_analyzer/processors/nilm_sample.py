@@ -329,7 +329,7 @@ class NilmSampleProcessor:
                 None,
             )
             if assignment is not None and _record_assignment_model_drift(
-                assignment, signature_edges
+                assignment, feedback_fingerprint, signature_edges
             ):
                 self._helper_links_dirty = True
             observations = self._helper_events_by_source.get(circuit_id, [])
@@ -383,7 +383,7 @@ class NilmSampleProcessor:
 
 
 def _record_assignment_model_drift(
-    assignment: dict[str, Any], edges: Iterable[NilmEdge]
+    assignment: dict[str, Any], fingerprint: str, edges: Iterable[NilmEdge]
 ) -> bool:
     """Retain repeated reviewed-signature drift without changing its model."""
     prototypes = {
@@ -391,7 +391,15 @@ def _record_assignment_model_drift(
         for item in _list_items(assignment.get("transition_prototypes"))
         if isinstance(item, Mapping)
     }
-    seen = list(_list_items(assignment.get("model_drift_edge_ids")))
+    stored = assignment.get("model_drift_edges_by_fingerprint")
+    by_fingerprint = {
+        str(key): list(_list_items(value))[-3:]
+        for key, value in stored.items()
+    } if isinstance(stored, Mapping) else {}
+    fingerprint = str(fingerprint or "").strip()
+    seen = by_fingerprint.get(
+        fingerprint, list(_list_items(assignment.get("model_drift_edge_ids")))[-3:]
+    )
     changed = False
     for edge in edges:
         prototype = prototypes.get(edge.direction)
@@ -409,8 +417,12 @@ def _record_assignment_model_drift(
         changed = True
     if not changed:
         return False
-    assignment["model_drift_edge_ids"] = seen[-3:]
-    if len(assignment["model_drift_edge_ids"]) >= 3:
+    by_fingerprint[fingerprint] = seen[-3:]
+    assignment["model_drift_edges_by_fingerprint"] = dict(
+        list(by_fingerprint.items())[-4:]
+    )
+    assignment.pop("model_drift_edge_ids", None)
+    if len(by_fingerprint[fingerprint]) >= 3:
         assignment["model_status"] = "needs_review"
     return True
 

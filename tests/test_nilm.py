@@ -86,6 +86,41 @@ def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> No
     assert first["model_revision"] == second["model_revision"] == 1
 
 
+def test_assignment_model_discards_invalid_before_recent_cap() -> None:
+    ids = [f"bad-{index}" for index in range(35)] + ["good"]
+    assignment = {"assignment_id": "pump", "confirmed_session_ids": ids}
+    sessions = [{
+        "session_id": value, "assignment_id": "pump",
+        "end": "2026-07-01T10:00:00+00:00", "confidence": 1.0,
+    } for value in ids[:-1]] + [{
+        "session_id": "good", "assignment_id": "pump",
+        "end": "2026-06-01T10:00:00+00:00", "on_delta_w": 80.0,
+        "off_delta_w": -80.0, "confidence": 0.9,
+    }]
+
+    model = build_nilm_assignment_model(assignment, sessions)
+
+    assert model["transition_prototypes"][0]["sample_count"] == 1
+    assert model["model_confidence"] == 0.3
+
+
+def test_assignment_model_tolerates_malformed_optional_fields() -> None:
+    assignment = {
+        "assignment_id": "pump", "confirmed_session_ids": ["one"],
+        "model_revision": "bad", "model_confidence": float("nan"),
+        "transition_prototypes": [{"direction": "on", "sample_count": "bad"}],
+    }
+    model = build_nilm_assignment_model(assignment, [{
+        "session_id": "one", "assignment_id": "pump",
+        "end": "2026-06-01T10:00:00+00:00", "on_delta_w": 80.0,
+        "off_delta_w": -80.0, "confidence": float("nan"),
+    }])
+
+    assert model["model_revision"] == 1
+    assert model["model_confidence"] == 0.0
+    assert nilm_assignment_model_is_compound_eligible(assignment) is False
+
+
 def sample(
     seconds: int,
     watts: float,

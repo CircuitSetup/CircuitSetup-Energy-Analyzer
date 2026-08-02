@@ -30,54 +30,40 @@ def build_nilm_assignment_model(
         for value in assignment.get("rejected_session_ids", ())
         if str(value or "").strip()
     }
-    eligible = [
-        session
-        for session in sessions
-        if str(session.get("session_id") or "").strip() in confirmed
-        and str(session.get("session_id") or "").strip() not in rejected
-        and (
-            not str(session.get("assignment_id") or "").strip()
-            or str(session.get("assignment_id") or "").strip() == assignment_id
-        )
-        and session.get("end") is not None
-        and session.get("ambiguous") is not True
-    ]
+    eligible = []
+    for session in sessions:
+        session_id = str(session.get("session_id") or "").strip()
+        owner = str(session.get("assignment_id") or "").strip()
+        on_delta, off_delta = _session_transition_values(session)
+        if (
+            session_id in confirmed
+            and session_id not in rejected
+            and (not owner or owner == assignment_id)
+            and session.get("end") is not None
+            and session.get("ambiguous") is not True
+            and on_delta is not None
+            and off_delta is not None
+        ):
+            eligible.append((session, on_delta, off_delta))
     eligible.sort(
-        key=lambda session: str(session.get("end") or session.get("start") or ""),
+        key=lambda item: str(item[0].get("end") or item[0].get("start") or ""),
         reverse=True,
     )
     eligible = eligible[:32]
-    on_values = [
-        value
-        for session in eligible
-        if (value := _model_number(
-            session.get("on_delta_w", session.get("median_power_w"))
-        )) is not None
-    ]
-    off_values = [
-        value
-        for session in eligible
-        if (value := _model_number(
-            session.get(
-                "off_delta_w",
-                -abs(float(session["median_power_w"]))
-                if _model_number(session.get("median_power_w")) is not None
-                else None,
-            )
-        )) is not None
-    ]
+    on_values = [item[1] for item in eligible]
+    off_values = [item[2] for item in eligible]
     confidences = [
         value
-        for session in eligible
+        for session, _, _ in eligible
         if (value := _model_number(session.get("confidence"))) is not None
     ]
-    role = str(assignment.get("role") or "component").strip() or "component"
+    normalized = normalize_nilm_assignment_model(assignment)
     model: dict[str, Any] = {
-        "role": role,
+        "role": normalized["role"],
         "power_states_w": [],
         "transition_prototypes": [],
         "model_confidence": 0.0,
-        "model_revision": int(assignment.get("model_revision") or 0),
+        "model_revision": normalized["model_revision"],
     }
     if not on_values or not off_values:
         return model
@@ -95,8 +81,8 @@ def build_nilm_assignment_model(
         3,
     )
     previous = {
-        "power_states_w": assignment.get("power_states_w", []),
-        "transition_prototypes": assignment.get("transition_prototypes", []),
+        "power_states_w": normalized["power_states_w"],
+        "transition_prototypes": normalized["transition_prototypes"],
     }
     current = {
         "power_states_w": model["power_states_w"],
@@ -107,19 +93,59 @@ def build_nilm_assignment_model(
     return model
 
 
+def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize optional persisted assignment model fields conservatively."""
+    role = assignment.get("role")
+    states = assignment.get("power_states_w")
+    confidence = _model_number(assignment.get("model_confidence"))
+    valid_states = (
+        [_model_number(value) for value in states]
+        if isinstance(states, list)
+        else []
+    )
+    prototypes = []
+    stored_prototypes = assignment.get("transition_prototypes")
+    for item in stored_prototypes if isinstance(stored_prototypes, list) else ():
+        if not isinstance(item, Mapping) or item.get("direction") not in {"on", "off"}:
+            continue
+        values = [
+            _model_number(item.get(key))
+            for key in ("from_state_w", "to_state_w", "delta_w", "spread_w")
+        ]
+        if any(value is None for value in values):
+            continue
+        prototypes.append({
+            "direction": item["direction"], "from_state_w": values[0],
+            "to_state_w": values[1], "delta_w": values[2],
+            "spread_w": max(values[3], 0.0),
+            "sample_count": _model_nonnegative_int(item.get("sample_count")),
+        })
+    return {
+        "role": role.strip() if isinstance(role, str) and role.strip() else "component",
+        "power_states_w": (
+            valid_states if all(value is not None for value in valid_states) else []
+        ),
+        "transition_prototypes": prototypes,
+        "model_confidence": min(max(confidence or 0.0, 0.0), 1.0),
+        "model_revision": _model_nonnegative_int(assignment.get("model_revision")),
+    }
+
+
 def nilm_assignment_model_is_compound_eligible(
     assignment: Mapping[str, Any],
 ) -> bool:
     """Return whether both directions are learned and confidence is sufficient."""
-    prototypes = assignment.get("transition_prototypes", ())
+    prototypes = assignment.get("transition_prototypes")
+    if not isinstance(prototypes, list):
+        return False
     learned = {
         str(item.get("direction") or "")
         for item in prototypes
-        if isinstance(item, Mapping) and int(item.get("sample_count") or 0) >= 3
+        if isinstance(item, Mapping)
+        and _model_nonnegative_int(item.get("sample_count")) >= 3
     }
-    return learned == {"on", "off"} and float(
-        assignment.get("model_confidence") or 0.0
-    ) >= 0.70
+    confidence = _model_number(assignment.get("model_confidence"))
+    return learned == {"on", "off"} and confidence is not None and confidence >= 0.70
 
 
 def _transition_prototype(
@@ -146,6 +172,23 @@ def _model_number(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
+
+
+def _model_nonnegative_int(value: Any) -> int:
+    number = _model_number(value)
+    return int(number) if number is not None and number >= 0 else 0
+
+
+def _session_transition_values(
+    session: Mapping[str, Any],
+) -> tuple[float | None, float | None]:
+    legacy = _model_number(session.get("median_power_w"))
+    return (
+        _model_number(session.get("on_delta_w")) if "on_delta_w" in session else legacy,
+        _model_number(session.get("off_delta_w"))
+        if "off_delta_w" in session
+        else -abs(legacy) if legacy is not None else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)

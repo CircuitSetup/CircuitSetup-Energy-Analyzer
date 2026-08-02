@@ -11,7 +11,11 @@ from typing import Any
 from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
-from ..nilm import NilmEdge, build_nilm_assignment_model
+from ..nilm import (
+    NilmEdge,
+    build_nilm_assignment_model,
+    normalize_nilm_assignment_model,
+)
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
 
 
@@ -262,11 +266,7 @@ class NilmController:
                     assignment.update(model)
                     rebuilt = True
                 else:
-                    assignment.setdefault("role", "component")
-                    assignment.setdefault("power_states_w", [])
-                    assignment.setdefault("transition_prototypes", [])
-                    assignment.setdefault("model_confidence", 0.0)
-                    assignment.setdefault("model_revision", 0)
+                    assignment.update(normalize_nilm_assignment_model(assignment))
         if rebuilt:
             coordinator.store_persistence.mark_dirty()
         for circuit_id, signatures in coordinator.store_data.nilm_signatures.items():
@@ -1685,6 +1685,11 @@ class NilmController:
         ):
             if interval.get("assignment_id") == source_id:
                 interval["assignment_id"] = target_id
+        for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id, []
+        ):
+            if session.get("assignment_id") == source_id:
+                session["assignment_id"] = target_id
         self._update_assignment_duration_bounds(circuit_id, target)
         self._rebuild_assignment_model(circuit_id, target)
         await self.async_save_assignment_change()
