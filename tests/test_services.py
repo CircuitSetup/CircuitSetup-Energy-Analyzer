@@ -698,6 +698,78 @@ def test_nilm_label_schema_validates_required_fields() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("schema_name", "data"),
+    (
+        ("NILM_LABEL_SERVICE_SCHEMA", {"signature_id": "signature", "label": "Load"}),
+        (
+            "NILM_LABEL_INTERVAL_SERVICE_SCHEMA",
+            {
+                "label": "Load",
+                "start": "2026-06-02T12:00:00+00:00",
+                "end": "2026-06-02T12:30:00+00:00",
+            },
+        ),
+        ("NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA", {"interval_id": "interval"}),
+        (
+            "NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA",
+            {
+                "label": "Load",
+                "start": "2026-06-02T12:00:00+00:00",
+                "end": "2026-06-02T12:30:00+00:00",
+                "ground_truth_entity_id": "sensor.load",
+            },
+        ),
+        (
+            "NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA",
+            {"signature_id": "signature", "label": "Load"},
+        ),
+        (
+            "NILM_ASSIGN_SESSION_SERVICE_SCHEMA",
+            {"session_id": "session", "label": "Load"},
+        ),
+        (
+            "NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA",
+            {"interval_id": "interval", "label": "Load"},
+        ),
+        ("NILM_SESSION_VALIDATION_SERVICE_SCHEMA", {"session_id": "session"}),
+        (
+            "NILM_RENAME_APPLIANCE_SERVICE_SCHEMA",
+            {"assignment_id": "assignment", "label": "Load"},
+        ),
+        (
+            "NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA",
+            {"assignment_id": "assignment", "appliance_profile": "other"},
+        ),
+        (
+            "NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA",
+            {"assignment_id": "assignment", "direct_circuit_id": "direct"},
+        ),
+        (
+            "NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA",
+            {"source_assignment_id": "source", "target_assignment_id": "target"},
+        ),
+        ("NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA", {"assignment_id": "assignment"}),
+        ("NILM_SIGNATURE_SERVICE_SCHEMA", {"signature_id": "signature"}),
+        (
+            "NILM_MERGE_SERVICE_SCHEMA",
+            {"source_signature_id": "source", "target_signature_id": "target"},
+        ),
+    ),
+)
+def test_nilm_mutation_schemas_accept_entry_id(
+    schema_name: str, data: dict[str, str]
+) -> None:
+    """Catches schemas that reject workspace entry-scoped NILM actions."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    schema = getattr(services, schema_name)
+    assert any(
+        getattr(field, "schema", field) == "entry_id" for field in schema.schema
+    )
+    assert schema({**data, "entry_id": "entry-2"})["entry_id"] == "entry-2"
+
+
 def test_nilm_label_schema_raises_for_missing_required_field() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         NILM_LABEL_SERVICE_SCHEMA,
@@ -4388,6 +4460,99 @@ async def test_mark_circuit_mixed_scopes_duplicate_circuit_to_entry() -> None:
     )
     first.async_mark_circuit_mixed.assert_awaited_once_with("fridge")
     assert second.async_mark_circuit_mixed.await_count == 2
+
+
+def _entry_scoped_nilm_coordinator() -> SimpleNamespace:
+    return SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mains")],
+        store_data=FeatureStoreData(
+            nilm_signatures={"mains": [{"signature_id": "signature-1"}]},
+            nilm_label_intervals_by_circuit={"mains": [{"interval_id": "interval-1"}]},
+        ),
+        async_label_nilm_interval=AsyncMock(),
+        async_label_nilm_signature=AsyncMock(),
+        async_assign_nilm_interval=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_nilm_generic_action_scopes_duplicate_circuit_and_legacy_broadcasts(
+) -> None:
+    """Catches label actions mutating every entry with the same circuit ID."""
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
+        SERVICE_LABEL_NILM_INTERVAL,
+        _dispatch_service,
+    )
+
+    first = _entry_scoped_nilm_coordinator()
+    second = _entry_scoped_nilm_coordinator()
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    data = {
+        ATTR_CIRCUIT_ID: "mains",
+        "label": "Load",
+        "start": "2026-06-02T12:00:00+00:00",
+        "end": "2026-06-02T12:30:00+00:00",
+    }
+
+    await _dispatch_service(
+        hass, SERVICE_LABEL_NILM_INTERVAL, {**data, ATTR_ENTRY_ID: "entry-2"}
+    )
+
+    first.async_label_nilm_interval.assert_not_awaited()
+    second.async_label_nilm_interval.assert_awaited_once()
+
+    await _dispatch_service(hass, SERVICE_LABEL_NILM_INTERVAL, data)
+
+    first.async_label_nilm_interval.assert_awaited_once()
+    assert second.async_label_nilm_interval.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service", "data", "method_name"),
+    (
+        (
+            "label_nilm_signature",
+            {"signature_id": "signature-1", "label": "Load"},
+            "async_label_nilm_signature",
+        ),
+        (
+            "assign_interval_to_appliance",
+            {"interval_id": "interval-1", "label": "Load"},
+            "async_assign_nilm_interval",
+        ),
+    ),
+)
+async def test_nilm_identity_actions_scope_duplicate_circuit_to_entry(
+    service: str, data: dict[str, str], method_name: str
+) -> None:
+    """Catches signature and interval lookup bypassing an entry-scoped target."""
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
+        _dispatch_service,
+    )
+
+    first = _entry_scoped_nilm_coordinator()
+    second = _entry_scoped_nilm_coordinator()
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+
+    await _dispatch_service(
+        hass,
+        service,
+        {ATTR_CIRCUIT_ID: "mains", ATTR_ENTRY_ID: "entry-2", **data},
+    )
+
+    getattr(first, method_name).assert_not_awaited()
+    getattr(second, method_name).assert_awaited_once()
+
+    await _dispatch_service(hass, service, {ATTR_CIRCUIT_ID: "mains", **data})
+
+    getattr(first, method_name).assert_awaited_once()
+    assert getattr(second, method_name).await_count == 2
 
 
 @pytest.mark.asyncio

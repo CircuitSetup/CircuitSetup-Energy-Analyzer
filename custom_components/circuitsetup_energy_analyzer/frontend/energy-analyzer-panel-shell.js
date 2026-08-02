@@ -1500,6 +1500,9 @@ export class PanelShellMethods {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
+    for (const select of this.shadowRoot.querySelectorAll("[data-nilm-source-picker]")) {
+      select.addEventListener("change", () => this._navigate(select.value));
+    }
     this._listen("[data-retry-nilm-history]", () => {
       const failedRequest = this._nilmWorkspaceHistoryFailedRequest;
       return failedRequest
@@ -1529,6 +1532,7 @@ export class PanelShellMethods {
     this._listen("#cancel_action_confirmation", () => this._cancelActionConfirmation());
     this._listen("#confirm_action", () => this._confirmPendingAction());
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
+    this._listen("#open_load_separation", () => this._callAction("open_load_separation"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
     for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {

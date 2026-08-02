@@ -5254,7 +5254,7 @@ for (const route of [
   { name: "appliance insights", query: "?appliance_insights=1", heading: "Appliance Insights" },
   { name: "appliance detail", query: "?appliance_detail=1&circuit_id=kitchen", heading: "Kitchen Appliances" },
   { name: "setup health", query: "?setup_health=1", heading: "Setup Health" },
-  { name: "NILM workspace", query: "?nilm_workspace=1&circuit_id=mains", heading: "NILM Workspace" },
+  { name: "NILM workspace", query: "?nilm_workspace=1&circuit_id=mains", heading: "Load Separation" },
 ]) {
   test(`${route.name} renders without browser errors`, async ({ page }) => {
     await mockPanelApi(page);

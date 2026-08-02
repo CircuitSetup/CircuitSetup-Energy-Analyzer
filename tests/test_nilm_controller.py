@@ -15,7 +15,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
+    NilmSourceKind,
 )
+from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.storage import (
     FeatureStoreData,
     feature_store_data_from_dict,
@@ -45,6 +47,50 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode", "expected"),
+    [
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, NilmSourceKind.MAINS),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MIXED, NilmSourceKind.MAINS),
+        (ApplianceProfile.MIXED, CircuitMode.MAINS_NILM, NilmSourceKind.MAINS),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED, NilmSourceKind.PURE_MIXED),
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.MIXED, NilmSourceKind.PRIMARY_MIXED),
+        (ApplianceProfile.MIXED, CircuitMode.SINGLE_PHASE, NilmSourceKind.PURE_MIXED),
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.SINGLE_PHASE, None),
+    ],
+)
+def test_nilm_source_kind_uses_explicit_configuration(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    expected: NilmSourceKind | None,
+) -> None:
+    assert nilm_source_kind(_config(profile=profile, mode=mode)) is expected
+
+
+def test_nilm_source_kind_normalizes_mapping_values() -> None:
+    config = _config(profile=ApplianceProfile.MIXED, mode=CircuitMode.MIXED)
+
+    assert nilm_source_kind(
+        {"appliance_profile": "mixed", "mode": "mixed"}
+    ) is nilm_source_kind(config)
+    assert (
+        nilm_source_kind({"appliance_profile": "invalid", "mode": "mixed"})
+        is None
+    )
+    assert nilm_source_kind({"mode": "mixed"}) is None
+
+
+def test_nilm_source_kind_never_uses_circuit_name() -> None:
+    assert nilm_source_kind(
+        _config(
+            circuit_id="mains",
+            name="Mains",
+            profile=ApplianceProfile.HVAC_BLOWER,
+            mode=CircuitMode.SINGLE_PHASE,
+        )
+    ) is None
 
 
 @pytest.mark.parametrize(
@@ -396,6 +442,21 @@ def test_assignment_history_prefers_explicit_session_owner() -> None:
     controller = _nilm_controller(SimpleNamespace(store_data=store_data))
 
     assert controller.assignment_session_history("mains", "assignment-one") == []
+
+
+def _config(
+    *,
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    circuit_id: str = "source",
+    name: str = "Source",
+) -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id=circuit_id,
+        name=name,
+        appliance_profile=profile,
+        mode=mode,
+    )
 
 
 def _nilm_controller(coordinator: object) -> NilmController:

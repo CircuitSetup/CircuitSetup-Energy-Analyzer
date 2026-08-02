@@ -38,14 +38,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Composition determines whether this is one appliance, a primary appliance with other loads, or several loads with no primary. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
-        "circuit_is_shared": "This circuit also powers unrelated loads",
+        "circuit_composition": "Circuit Composition",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -53,8 +53,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
+        "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -100,6 +100,7 @@
       "invalid_source_devices": "Source meter devices must be text values.",
       "invalid_source_entities": "Source sensor entity IDs must be text values.",
       "invalid_circuit_assignments": "Circuit assignments must use the generated line format.",
+      "invalid_circuit_composition": "Choose Several loads with no primary when Appliance Type is Mixed.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "invalid_retention_mode": "Select a supported retention mode.",
       "invalid_mains_source_entities": "Mains NILM source entity IDs must be text values.",
@@ -521,14 +522,14 @@
       },
       "assign": {
         "title": "Appliance Circuit Assignments",
-      "description": "The form is prefilled from automatic classification or your saved assignment. Appliance Type is the primary appliance; shared circuit usage can make Circuit Mode mixed. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
+      "description": "The form is prefilled from automatic classification or your saved assignment. Circuit Composition determines whether this is one appliance, a primary appliance with other loads, or several loads with no primary. Power Flow is selected automatically. Current classification: {appliance_profile} / {circuit_mode} / {power_flow}.",
         "data": {
           "include_circuit": "Analyze this appliance",
           "remove_from_analysis": "Remove From Analysis",
           "included_sensors": "Included Sensors",
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
-        "circuit_is_shared": "This circuit also powers unrelated loads",
+        "circuit_composition": "Circuit Composition",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -536,8 +537,8 @@
           "remove_from_analysis": "Removes this appliance from analyzer configuration after reload. Source sensors stay in Home Assistant and can be selected again later.",
           "included_sensors": "Unchecked sensors stay available in source selection but are not used for this appliance.",
           "circuit_name": "Edit the display name used for this analyzed circuit.",
-        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts.",
-        "circuit_is_shared": "Appliance Type is the primary appliance; select this when the circuit also serves unrelated loads.",
+        "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
+        "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
@@ -547,12 +548,22 @@
       "no_source_device_entities": "No supported electrical sensors were found on the selected Source Devices. Existing settings were not changed.",
       "recommendations_not_loaded": "The analyzer is not loaded yet. Start the integration, then come back to review suggested settings.",
       "invalid_recommendation": "Choose one of the pending suggested settings.",
+      "invalid_circuit_composition": "Choose Several loads with no primary when Appliance Type is Mixed.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
       "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",
       "dashboard_removal_unavailable": "Home Assistant did not make the dashboard collection available for dashboard removal. Reload Home Assistant or open Lovelace once, then try again.",
       "mixed_dual_phase_not_supported": "Shared dual-phase analysis is not supported."
+    }
+  },
+  "selector": {
+    "circuit_composition": {
+      "options": {
+        "dedicated": "One appliance",
+        "primary_mixed": "A primary appliance plus other loads",
+        "pure_mixed": "Several loads with no primary"
+      }
     }
   },
   "entity": {
@@ -1111,6 +1122,8 @@
         "appliance_run_timeline": "Appliance run timeline",
         "nilm_review": "NILM review",
         "review_nilm_assignments": "Review NILM Assignments",
+        "open_load_separation": "Open Load Separation",
+        "open_load_separation_for_source": "Open Load Separation: {name}",
         "hvac_energy_temperature": "HVAC daily energy and outdoor temperature",
         "water_flow_context": "Water flow context",
         "defined_nilm_appliance_power": "Defined NILM appliance power",
@@ -1398,9 +1411,9 @@
         "appliance_detail_message": "Appliance behavior summary.",
         "suggested_settings": "Suggested Settings",
         "suggested_settings_message": "Review pending analyzer setting recommendations.",
-        "nilm_workspace": "NILM Workspace",
-        "nilm_workspace_message": "Mains NILM graph and review.",
-        "nilm_workspace_message_for_circuit": "Mains NILM graph and review for {name}."
+        "nilm_workspace": "Load Separation",
+        "nilm_workspace_message": "Experimental NILM: source power is measured while components are estimated.",
+        "nilm_workspace_message_for_circuit": "Experimental NILM for {name}: source power is measured while components are estimated."
       },
       "status": {
         "matched_alert": "Matched alert",
@@ -1509,6 +1522,7 @@
           "not_helpful": "Not Helpful",
           "open_advanced_circuit_settings": "Open Advanced Circuit Settings",
           "open_appliance_detail": "Open Appliance Detail",
+          "open_load_separation": "Open Load Separation",
           "open_evidence": "Open Evidence",
           "pan_earlier": "Pan Earlier",
           "pan_later": "Pan Later",
@@ -1811,9 +1825,10 @@
         "preview_alert_selected_history": "A reliable preview is unavailable because retained history contains only alerts selected by the current setting."
       },
       "nilm_workspace": {
+        "source_picker_label": "Load Separation source",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",
-        "no_mains_circuit": "No mains NILM circuit is available for this workspace.",
+        "no_source": "No Load Separation source is available for this workspace.",
         "description": "Review mains load changes, labels, and assignments used by NILM.",
         "focused_graph": "Showing graph sessions matching selected signature.",
         "no_graph_history": "No NILM workspace history samples were available for this graph window.",

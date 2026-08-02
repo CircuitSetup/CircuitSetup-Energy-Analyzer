@@ -39,7 +39,7 @@ type TopologyObserver = Callable[
 
 
 class NilmSampleProcessor:
-    """Process mains NILM samples into signatures, unknown loads, and alerts."""
+    """Process NILM source samples into signatures, unknown loads, and alerts."""
 
     name = "nilm_sample"
 

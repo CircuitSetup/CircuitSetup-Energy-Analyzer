@@ -1,15 +1,48 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from .const import MIN_LEARNING_DAYS
 from .models import (
     ApplianceProfile,
     CircuitConfig,
     CircuitMode,
+    NilmSourceKind,
     PowerFlowMode,
     SensorRole,
 )
+
+
+def nilm_source_kind(
+    config: CircuitConfig | Mapping[str, Any],
+) -> NilmSourceKind | None:
+    """Return the explicitly configured NILM source topology."""
+    if isinstance(config, Mapping):
+        mode_value = config.get("mode")
+        profile_value = config.get("appliance_profile")
+    else:
+        mode_value = getattr(config, "mode", None)
+        profile_value = getattr(config, "appliance_profile", None)
+    try:
+        mode = CircuitMode(mode_value) if mode_value is not None else None
+        profile = (
+            ApplianceProfile(profile_value) if profile_value is not None else None
+        )
+    except ValueError:
+        return None
+
+    if mode is CircuitMode.MAINS_NILM or profile is ApplianceProfile.MAINS_NILM:
+        return NilmSourceKind.MAINS
+    if mode is CircuitMode.MIXED:
+        if profile is ApplianceProfile.MIXED:
+            return NilmSourceKind.PURE_MIXED
+        if profile is not None:
+            return NilmSourceKind.PRIMARY_MIXED
+    if profile is ApplianceProfile.MIXED:
+        return NilmSourceKind.PURE_MIXED
+    return None
 
 
 def supports_direct_appliance_analysis(config: CircuitConfig) -> bool:

@@ -328,12 +328,13 @@ MAINTENANCE_END_SERVICE_SCHEMA = _schema(
 ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(optional=(ATTR_ALERT_ID, ATTR_ENTITY_ID))
 NILM_LABEL_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_LABEL, ATTR_START, ATTR_END),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_INTERVAL_ID,
         ATTR_ASSIGNMENT_ID,
@@ -347,12 +348,13 @@ NILM_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
 )
 NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_INTERVAL_ID,),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_LABEL, ATTR_START, ATTR_END, ATTR_GROUND_TRUTH_ENTITY_ID),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_APPLIANCE_ID,
         ATTR_MAINS_ENTITY_ID,
@@ -364,6 +366,7 @@ NILM_ASSIGN_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_ASSIGNMENT_ID,
         ATTR_APPLIANCE_ID,
@@ -374,6 +377,7 @@ NILM_ASSIGN_SESSION_SERVICE_SCHEMA = _schema(
     required=(ATTR_SESSION_ID, ATTR_LABEL),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_ASSIGNMENT_ID,
         ATTR_SIGNATURE_FINGERPRINT,
@@ -385,6 +389,7 @@ NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_INTERVAL_ID, ATTR_LABEL),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_ASSIGNMENT_ID,
         ATTR_APPLIANCE_ID,
@@ -393,20 +398,21 @@ NILM_ASSIGN_INTERVAL_SERVICE_SCHEMA = _schema(
 )
 NILM_SESSION_VALIDATION_SERVICE_SCHEMA = _schema(
     required=(ATTR_SESSION_ID,),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_ASSIGNMENT_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID, ATTR_ASSIGNMENT_ID),
 )
 NILM_RENAME_APPLIANCE_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID, ATTR_LABEL),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID, ATTR_APPLIANCE_PROFILE),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID, ATTR_DIRECT_CIRCUIT_ID),
     optional=(
         ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
         ATTR_KEEP_ASSIGNMENT_FOR_MASKING,
         ATTR_KEEP_PUBLISHED_ESTIMATE,
@@ -414,19 +420,19 @@ NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA = _schema(
 )
 NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA = _schema(
     required=(ATTR_SOURCE_ASSIGNMENT_ID, ATTR_TARGET_ASSIGNMENT_ID),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID,),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 NILM_MERGE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SOURCE_SIGNATURE_ID, ATTR_TARGET_SIGNATURE_ID),
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA = _schema(
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
@@ -735,6 +741,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             circuit_id,
             data.get(ATTR_SIGNATURE_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -751,6 +758,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             circuit_id,
             data.get(ATTR_SIGNATURE_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -762,7 +770,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_LABEL_NILM_INTERVAL:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_label_nilm_interval",
@@ -783,7 +793,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_DELETE_NILM_LABEL_INTERVAL:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_delete_nilm_label_interval",
@@ -818,7 +830,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             raise HomeAssistantError(
                 "No active ground-truth sensor intervals were found."
             )
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             for interval in intervals:
                 await _call_if_present(
                     coordinator,
@@ -843,6 +857,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             circuit_id,
             data.get(ATTR_SIGNATURE_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -858,7 +873,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_ASSIGN_SESSION_TO_APPLIANCE:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_assign_nilm_session",
@@ -878,6 +895,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             circuit_id,
             data.get(ATTR_INTERVAL_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -893,7 +911,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_VALIDATE_NILM_SESSION:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_validate_nilm_session",
@@ -905,7 +925,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_REJECT_NILM_SESSION:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_reject_nilm_session",
@@ -917,7 +939,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_validate_nilm_assignment_history",
@@ -928,7 +952,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_RENAME_NILM_APPLIANCE:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_rename_nilm_appliance",
@@ -940,7 +966,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_CHANGE_NILM_APPLIANCE_PROFILE:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_change_nilm_appliance_profile",
@@ -952,7 +980,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_convert_nilm_assignment_to_direct_meter",
@@ -980,7 +1010,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "source_assignment_id and target_assignment_id must be different"
             )
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_merge_nilm_assignments",
@@ -992,7 +1024,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_publish_nilm_appliance_assignment",
@@ -1003,7 +1037,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_unpublish_nilm_appliance_assignment",
@@ -1014,7 +1050,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
 
     if service == SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT:
         circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_coordinators(hass, circuit_id):
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
             await _call_if_present(
                 coordinator,
                 "async_retire_nilm_appliance_assignment",
@@ -1029,6 +1067,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             hass,
             circuit_id,
             data.get(ATTR_SIGNATURE_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -1045,6 +1084,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             circuit_id,
             data.get(ATTR_SOURCE_SIGNATURE_ID),
             data.get(ATTR_TARGET_SIGNATURE_ID),
+            entry_id=data.get(ATTR_ENTRY_ID),
         ):
             await _call_if_present(
                 coordinator,
@@ -1404,6 +1444,17 @@ def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
     raise HomeAssistantError(_unknown_circuit_message(circuit_id, coordinators))
 
 
+def _target_nilm_coordinators(
+    hass: Any,
+    circuit_id: Any,
+    entry_id: Any = None,
+) -> list[Any]:
+    """Return the requested entry's source, or preserve legacy broadcast."""
+    if isinstance(entry_id, str) and entry_id.strip():
+        return _target_entry_circuit_coordinator(hass, entry_id.strip(), circuit_id)
+    return _target_coordinators(hass, circuit_id)
+
+
 def _target_entry_circuit_coordinator(
     hass: Any, entry_id: str, circuit_id: str
 ) -> list[Any]:
@@ -1651,10 +1702,11 @@ def _target_nilm_signature_coordinators(
     hass: Any,
     circuit_id: Any,
     *signature_ids: Any,
+    entry_id: Any = None,
 ) -> list[Any]:
     if not isinstance(circuit_id, str) or not circuit_id:
         raise HomeAssistantError("Missing circuit_id.")
-    target_coordinators = _target_coordinators(hass, circuit_id)
+    target_coordinators = _target_nilm_coordinators(hass, circuit_id, entry_id)
     required_signature_ids = [
         signature_id
         for signature_id in signature_ids
@@ -1705,12 +1757,14 @@ def _target_nilm_interval_coordinators(
     hass: Any,
     circuit_id: Any,
     interval_id: Any,
+    *,
+    entry_id: Any = None,
 ) -> list[Any]:
     if not isinstance(circuit_id, str) or not circuit_id:
         raise HomeAssistantError("Missing circuit_id.")
     if not isinstance(interval_id, str) or not interval_id:
         raise HomeAssistantError("Missing interval_id.")
-    target_coordinators = _target_coordinators(hass, circuit_id)
+    target_coordinators = _target_nilm_coordinators(hass, circuit_id, entry_id)
     matches = [
         coordinator
         for coordinator in target_coordinators

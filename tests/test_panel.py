@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-1"
+    assert PANEL_MODULE_VERSION == "20260802-3"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -2236,6 +2236,179 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
 
     assert payload["circuit"]["name"] == "Second Mains"
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
+
+
+def _nilm_service_actions(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, dict):
+        actions = (
+            [payload]
+            if payload.get("domain") == DOMAIN
+            and isinstance(payload.get("service"), str)
+            and isinstance(payload.get("data"), dict)
+            else []
+        )
+        return actions + [
+            action
+            for value in payload.values()
+            for action in _nilm_service_actions(value)
+        ]
+    if isinstance(payload, list):
+        return [action for value in payload for action in _nilm_service_actions(value)]
+    return []
+
+
+def test_nilm_payload_actions_keep_selected_entry_id() -> None:
+    """Catches nested workspace actions dropping their selected config entry."""
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_payload_for_circuit,
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+    coordinator.store_data.nilm_signatures = {
+        "mains": [{"signature_id": "signature-1"}]
+    }
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [{"interval_id": "interval-1"}]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [{"assignment_id": "assignment-1", "lifecycle_state": "assigned"}]
+    }
+
+    workspace = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-2"
+    )
+    summary = _nilm_payload_for_circuit(coordinator, "mains")
+    actions = _nilm_service_actions(workspace) + _nilm_service_actions(summary)
+
+    assert actions
+    assert all(action["data"]["entry_id"] == "entry-2" for action in actions)
+
+
+def test_nilm_workspace_payload_rejects_missing_source_in_requested_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="First Mains",
+        entity_id="sensor.first_mains_power",
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+
+    payload = nilm_workspace_payload(
+        [first, second], circuit_id="mains", entry_id="missing-entry"
+    )
+
+    assert payload["status"] == "not_found"
+    assert payload["requested_circuit_id"] == "mains"
+    assert "circuit" not in payload
+
+
+def test_nilm_workspace_missing_source_message_is_source_neutral() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    payload = nilm_workspace_payload([], circuit_id="mixed", entry_id="entry-1")
+
+    assert payload["message"] == (
+        "No Load Separation source is available for this workspace."
+    )
+
+
+def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    mixed = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    hvac = CircuitConfig(
+        circuit_id="hvac_2",
+        name="HVAC 2",
+        appliance_profile=ApplianceProfile.HVAC,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.hvac_2_power", SensorRole.REAL_POWER),),
+    )
+    dedicated = CircuitConfig(
+        circuit_id="fridge",
+        name="Refrigerator",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    first = _coordinator(config=mains, configs=(mains, mixed, hvac, dedicated))
+    first.entry_id = "entry-1"
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Other Mains",
+        entity_id="sensor.other_mains_power",
+    )
+
+    payload = nilm_workspace_payload(
+        [first, second], circuit_id="hvac_2", entry_id="entry-1"
+    )
+
+    assert payload["source"] == {
+        "entry_id": "entry-1",
+        "circuit_id": "hvac_2",
+        "name": "HVAC 2",
+        "source_kind": "primary_mixed",
+    }
+    assert payload["sources"] == [
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mains",
+            "name": "Mains",
+            "source_kind": "mains",
+            "path": (
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=mains"
+            ),
+        },
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mixed",
+            "name": "Mixed Loads",
+            "source_kind": "pure_mixed",
+            "path": (
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=mixed"
+            ),
+        },
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "hvac_2",
+            "name": "HVAC 2",
+            "source_kind": "primary_mixed",
+            "path": (
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2"
+            ),
+        },
+    ]
 
 
 @pytest.mark.asyncio

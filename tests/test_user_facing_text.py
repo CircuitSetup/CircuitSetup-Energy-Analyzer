@@ -699,7 +699,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "included_sensors": "Included Sensors",
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
-            "circuit_is_shared": "This circuit also powers unrelated loads",
+            "circuit_composition": "Circuit Composition",
             "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
@@ -710,7 +710,12 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
-        assert "primary appliance" in descriptions["circuit_is_shared"].lower()
+        assert "several loads with no primary" in descriptions[
+            "appliance_profile"
+        ].lower()
+        assert "primary appliance plus other loads" in descriptions[
+            "circuit_composition"
+        ].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
@@ -1524,6 +1529,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._routeRequestsNilmWorkspace() ? this._renderNilmWorkspaceBody()",
         "_renderNilmWorkspace",
         "_renderNilmWorkspaceBody",
+        "data-nilm-source-picker",
+        "nilm_workspace.source_picker_label",
         '_panelText("headers.nilm_workspace")',
         "_renderNilmWorkspaceLanes(workspace)",
         "_renderNilmReviewLayout(workspace)",
@@ -1662,7 +1669,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
 
     for text in (
         "Appliance Detail",
-        "NILM Workspace",
+        "Load Separation",
         "Respond to this alert",
         "Known Load Overlays",
         "Label appliance interval",
@@ -5011,7 +5018,7 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
 
     for text in (
         "Appliance Detail",
-        "NILM Workspace",
+        "Load Separation",
         "Review Evidence",
         "Respond to this alert",
         "Pause alerts for maintenance",
@@ -7626,6 +7633,86 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "`publish_nilm_appliance_assignment`",
     ):
         assert expected in readme_text
+
+
+def test_nilm_workspace_source_picker_renders_and_navigates_only_for_multiple_sources() -> None:
+    _run_panel_node_script(
+        r'''
+const panel = new context.Panel();
+const summary = (sources) => panel._renderNilmWorkspaceSummary({
+  circuit: { circuit_id: "mains", name: "Mains" },
+  sources,
+  lanes: {},
+  lane_counts: {},
+});
+if (summary([]).includes("data-nilm-source-picker")
+    || summary([{ circuit_id: "mains", name: "Mains", path: "/nilm?entry_id=one&circuit_id=mains" }]).includes("data-nilm-source-picker")) {
+  throw new Error("zero and one source must not render a picker");
+}
+const path = "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-2&circuit_id=mixed";
+const html = summary([
+  { circuit_id: "mains", name: "Mains", path: "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mains" },
+  { circuit_id: "mixed", name: "Mixed", path },
+]);
+if (!html.includes("data-nilm-source-picker") || !html.includes(`value="${path.replaceAll("&", "&amp;")}"`)) {
+  throw new Error("multiple sources must render backend paths in the picker");
+}
+let changed;
+const select = { value: path, addEventListener(_event, callback) { changed = callback; } };
+let navigated = "";
+panel._navigate = (value) => { navigated = value; };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelectorAll(selector) { return selector === "[data-nilm-source-picker]" ? [select] : []; },
+  querySelector() { return null; },
+};
+panel._attachChartInspectors = () => {};
+panel._listen = () => {};
+panel._renderNilmWorkspaceBody = () => "";
+panel._routeRequestsNilmWorkspace = () => false;
+panel._renderEvidenceBody = () => "";
+panel._renderActionConfirmation = () => "";
+panel._render();
+changed();
+if (navigated !== path) throw new Error(`picker did not navigate to backend path: ${navigated}`);
+'''
+    )
+
+
+def test_evidence_views_render_and_navigate_load_separation_action() -> None:
+    _run_panel_node_script(
+        r'''
+const path = "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mixed";
+const panel = makePanel({
+  _payload: { actions: { open_load_separation: { type: "navigate", path } } },
+});
+const alertHtml = panel._renderAlertContent(
+  { circuit_id: "mixed", feature: "daily_energy", graph_entities: [] },
+  { name: "Mixed Loads" },
+);
+const fallbackHtml = panel._renderFallbackActionsContent();
+for (const html of [alertHtml, fallbackHtml]) {
+  if (!html.includes('id="open_load_separation"')) {
+    throw new Error("Load Separation action missing from an evidence action list");
+  }
+}
+let navigated = "";
+panel._navigate = (value) => { navigated = value; };
+let click;
+const button = { addEventListener(_event, callback) { click = callback; } };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelector(selector) { return selector === "#open_load_separation" ? button : null; },
+  querySelectorAll() { return []; },
+};
+panel._attachChartInspectors = () => {};
+panel._renderEvidenceBody = () => "";
+panel._renderActionConfirmation = () => "";
+panel._render();
+click();
+if (navigated !== path) throw new Error(`Load Separation action did not navigate: ${navigated}`);
+'''
+    )
 
 
 def test_readme_describes_bounded_settings_suggestion_attributes() -> None:

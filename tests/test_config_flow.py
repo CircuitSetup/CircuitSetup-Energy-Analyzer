@@ -48,46 +48,112 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 CONF_DEMO_SOURCE_BUNDLE_ENABLED = "demo_source_bundle_enabled"
 
 
-def test_assignment_schema_defaults_shared_from_saved_mode() -> None:
+@pytest.mark.parametrize(
+    ("group", "expected"),
+    [
+        (
+            {"appliance_profile": "refrigerator", "circuit_is_shared": True},
+            "primary_mixed",
+        ),
+        (
+            {"appliance_profile": "mixed", "mode": "mixed"},
+            "pure_mixed",
+        ),
+        (
+            {"appliance_profile": "mixed", "mode": "single_phase"},
+            "pure_mixed",
+        ),
+    ],
+)
+def test_assignment_schema_round_trips_saved_circuit_composition(
+    group: dict[str, object], expected: str
+) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
-    schema = config_flow._assignment_schema(
-        {
-            "entity_ids": ("sensor.kitchen_power",),
-            "name": "Kitchen Refrigerator",
-            "appliance_profile": "refrigerator",
-            "mode": "mixed",
-        }
-    )
+    schema = config_flow._assignment_schema({"entity_ids": (), **group})
 
-    assert _schema_default(schema, "circuit_is_shared") is True
+    assert _schema_default(schema, "circuit_composition") == expected
 
 
-def test_specific_profile_can_save_shared_single_phase_assignment() -> None:
+@pytest.mark.parametrize(
+    ("composition", "expected_profile", "expected_mode"),
+    [
+        ("dedicated", "hvac_blower", "single_phase"),
+        ("primary_mixed", "hvac_blower", "mixed"),
+        ("pure_mixed", "mixed", "mixed"),
+    ],
+)
+def test_assignment_composition_maps_to_canonical_circuit(
+    composition: str, expected_profile: str, expected_mode: str
+) -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
     circuit = config_flow._circuit_from_assignment_group(
         {
-            "circuit_id": "kitchen_refrigerator",
-            "entity_ids": ("sensor.kitchen_power",),
-            "name": "Kitchen Refrigerator",
-            "appliance_profile": "refrigerator",
+            "circuit_id": "hvac_blower",
+            "entity_ids": ("sensor.hvac_blower_power",),
+            "name": "HVAC Blower",
+            "appliance_profile": "hvac_blower",
             "mode": "single_phase",
         },
         {
             "include_circuit": True,
-            "included_sensors": ["sensor.kitchen_power"],
-            "circuit_name": "Kitchen Refrigerator",
-            "appliance_profile": "refrigerator",
-            "circuit_is_shared": True,
+            "included_sensors": ["sensor.hvac_blower_power"],
+            "circuit_name": "HVAC Blower",
+            "appliance_profile": "hvac_blower",
+            "circuit_composition": composition,
             "circuit_retention_mode": "standard",
         },
     )
 
     assert circuit is not None
-    assert circuit["appliance_profile"] == "refrigerator"
-    assert circuit["mode"] == "mixed"
+    assert circuit["appliance_profile"] == expected_profile
+    assert circuit["mode"] == expected_mode
     assert "circuit_is_shared" not in circuit
+
+
+@pytest.mark.parametrize("composition", ["dedicated", "primary_mixed"])
+def test_assignment_composition_rejects_mixed_profile_without_pure_mixed(
+    composition: str,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    with pytest.raises(
+        config_flow.SetupValidationError, match="invalid_circuit_composition"
+    ):
+        config_flow._circuit_from_assignment_group(
+            {
+                "circuit_id": "kitchen_loads",
+                "entity_ids": ("sensor.kitchen_power",),
+                "name": "Kitchen Loads",
+                "appliance_profile": "mixed",
+                "mode": "mixed",
+            },
+            {
+                "include_circuit": True,
+                "included_sensors": ["sensor.kitchen_power"],
+                "circuit_name": "Kitchen Loads",
+                "appliance_profile": "mixed",
+                "circuit_composition": composition,
+            },
+        )
+
+
+def test_assignment_composition_selector_uses_translated_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
+
+    schema = config_flow._assignment_schema({"entity_ids": ()})
+
+    assert _schema_validator(schema, "circuit_composition") == {
+        "select": {
+            "options": ["dedicated", "primary_mixed", "pure_mixed"],
+            "translation_key": "circuit_composition",
+        }
+    }
 
 
 @pytest.mark.parametrize("profile", ["mains_nilm", "solar_inverter"])
@@ -3307,7 +3373,7 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "included_sensors",
         "circuit_name",
         "appliance_profile",
-        "circuit_is_shared",
+        "circuit_composition",
         "circuit_retention_mode",
     }
     assert _schema_default(result["data_schema"], "circuit_name") == (
@@ -3372,7 +3438,7 @@ async def test_options_shared_dual_phase_error_keeps_selection() -> None:
             ],
             "circuit_name": "Roof Solar",
             "appliance_profile": "solar_inverter",
-            "circuit_is_shared": True,
+            "circuit_composition": "primary_mixed",
             "circuit_retention_mode": "standard",
         }
     )
@@ -3381,7 +3447,10 @@ async def test_options_shared_dual_phase_error_keeps_selection() -> None:
     assert (
         _schema_default(result["data_schema"], "appliance_profile") == "solar_inverter"
     )
-    assert _schema_default(result["data_schema"], "circuit_is_shared") is True
+    assert (
+        _schema_default(result["data_schema"], "circuit_composition")
+        == "primary_mixed"
+    )
 
 
 @pytest.mark.asyncio
@@ -3399,7 +3468,8 @@ async def test_options_assignment_preserves_saved_mixed_specific_profile() -> No
                     "circuit_id": "kitchen_refrigerator",
                     "name": "Kitchen Refrigerator",
                     "appliance_profile": "refrigerator",
-                    "mode": "mixed",
+                    "mode": "single_phase",
+                    "circuit_is_shared": True,
                     "sensors": [
                         {
                             "entity_id": "sensor.kitchen_refrigerator_power",
@@ -3417,7 +3487,10 @@ async def test_options_assignment_preserves_saved_mixed_specific_profile() -> No
         {"selected_assignment": "kitchen_refrigerator"}
     )
 
-    assert _schema_default(form["data_schema"], "circuit_is_shared") is True
+    assert (
+        _schema_default(form["data_schema"], "circuit_composition")
+        == "primary_mixed"
+    )
 
     result = await flow.async_step_assign(
         {
@@ -3425,7 +3498,7 @@ async def test_options_assignment_preserves_saved_mixed_specific_profile() -> No
             "included_sensors": ["sensor.kitchen_refrigerator_power"],
             "circuit_name": "Kitchen Refrigerator",
             "appliance_profile": "refrigerator",
-            "circuit_is_shared": True,
+            "circuit_composition": "primary_mixed",
             "circuit_retention_mode": "standard",
         }
     )
@@ -3467,14 +3540,17 @@ async def test_options_mains_shared_error_keeps_selection() -> None:
             "included_sensors": ["sensor.mains_power"],
             "circuit_name": "Mains",
             "appliance_profile": "mains_nilm",
-            "circuit_is_shared": True,
+            "circuit_composition": "primary_mixed",
             "circuit_retention_mode": "standard",
         }
     )
 
     assert result["errors"] == {"base": "mixed_dual_phase_not_supported"}
     assert _schema_default(result["data_schema"], "appliance_profile") == "mains_nilm"
-    assert _schema_default(result["data_schema"], "circuit_is_shared") is True
+    assert (
+        _schema_default(result["data_schema"], "circuit_composition")
+        == "primary_mixed"
+    )
 
 
 @pytest.mark.asyncio
