@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
 from datetime import timedelta
+from math import isfinite
 from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
@@ -305,7 +306,8 @@ class NilmSampleProcessor:
             signature_edges = [
                 edge
                 for edge in self.unmatched_edges_by_circuit[circuit_id]
-                if _nilm_signature_edge_score(edge, payload) is not None
+                if edge.timestamp >= context.now - timedelta(minutes=10)
+                and _nilm_signature_edge_score(edge, payload) is not None
             ]
             observations = self._helper_events_by_source.get(circuit_id, [])
             if observations:
@@ -396,27 +398,50 @@ def _refresh_confirmed_helper_links(
                 continue
             previous = dict(link)
             link.setdefault(
-                "confirmed_matched_on_count", int(link.get("matched_on_count") or 0)
+                "confirmed_matched_on_count",
+                _nonnegative_int(link.get("matched_on_count")),
             )
             link.setdefault(
-                "confirmed_matched_off_count", int(link.get("matched_off_count") or 0)
+                "confirmed_matched_off_count",
+                _nonnegative_int(link.get("matched_off_count")),
             )
             relationship = link.get("relationship")
             status = link.get("status")
             link.update(candidate)
             link["relationship"] = relationship
             link["status"] = status
-            new_on = int(link.get("matched_on_count") or 0) - int(
-                link["confirmed_matched_on_count"]
+            for key in (
+                "matched_on_count",
+                "matched_off_count",
+                "unmatched_source_count",
+                "unmatched_helper_count",
+                "source_event_count",
+                "helper_event_count",
+                "confirmed_matched_on_count",
+                "confirmed_matched_off_count",
+            ):
+                link[key] = _nonnegative_int(link.get(key))
+            link["confidence"] = confidence = _clamped_confidence(
+                link.get("confidence")
             )
-            new_off = int(link.get("matched_off_count") or 0) - int(
-                link["confirmed_matched_off_count"]
-            )
-            confidence = float(link.get("confidence") or 0)
+            new_on = link["matched_on_count"] - link["confirmed_matched_on_count"]
+            new_off = link["matched_off_count"] - link["confirmed_matched_off_count"]
             if new_on >= 3 and new_off >= 3 and confidence < 0.75:
                 link["status"] = "degraded"
             changed |= link != previous
     return changed
+
+
+def _nonnegative_int(value: Any) -> int:
+    parsed = _optional_float(value)
+    return int(parsed) if parsed is not None and isfinite(parsed) and parsed > 0 else 0
+
+
+def _clamped_confidence(value: Any) -> float:
+    parsed = _optional_float(value)
+    if parsed is None or not isfinite(parsed):
+        return 0.0
+    return min(max(parsed, 0.0), 1.0)
 
 
 def nilm_state_updates(
