@@ -1394,14 +1394,20 @@ class NilmController:
         fingerprints = set(self._clean_string_list(
             assignment.get("signature_fingerprints")
         ))
-        candidates = [candidate for signature in
+        candidates = [(str(signature.get("feedback_fingerprint") or ""), candidate)
+            for signature in
             self._coordinator.store_data.nilm_signatures.get(circuit_id, ())
             if isinstance(signature, Mapping)
             and str(signature.get("feedback_fingerprint") or "") in fingerprints
             for candidate in signature.get("helper_candidates", ())
             if isinstance(candidate, Mapping)
             and candidate.get("helper_circuit_id") == helper_id]
-        candidate = max(candidates, key=_helper_candidate_sort_key, default=None)
+        selected = max(
+            candidates,
+            key=lambda item: (*_helper_candidate_sort_key(item[1]), item[0]),
+            default=None,
+        )
+        candidate = selected[1] if selected else None
         link = _normalized_helper_link(candidate or {})
         link.update(helper_circuit_id=helper_id, relationship=relationship,
                     status="confirmed")

@@ -578,6 +578,37 @@ async def test_nilm_helper_link_uses_newest_candidate_across_fingerprints() -> N
 
 
 @pytest.mark.asyncio
+async def test_nilm_helper_link_candidate_tie_is_storage_order_independent() -> None:
+    async def selected_lag(reverse: bool) -> float:
+        controller, assignment = _helper_link_controller()
+        assignment["signature_fingerprints"] = ["alpha", "zeta"]
+        signatures = [
+            {"feedback_fingerprint": "alpha", "helper_candidates": [{
+                "helper_circuit_id": "helper", "confidence": 0.8,
+                "matched_on_count": 5, "matched_off_count": 6,
+                "start_lag_seconds": 11,
+                "last_observed": "2026-06-02T11:00:00+00:00",
+            }]},
+            {"feedback_fingerprint": "zeta", "helper_candidates": [{
+                "helper_circuit_id": "helper", "confidence": 0.8,
+                "matched_on_count": 5, "matched_off_count": 6,
+                "start_lag_seconds": 22,
+                "last_observed": "2026-06-02T11:00:00+00:00",
+            }]},
+        ]
+        controller._coordinator.store_data.nilm_signatures["mixed"] = (
+            list(reversed(signatures)) if reverse else signatures
+        )
+        linked = await controller.async_set_nilm_helper_link(
+            "mixed", "assignment-load", helper_circuit_id="helper",
+            relationship="corroborates",
+        )
+        return linked["helper_links"][0]["start_lag_seconds"]
+
+    assert await selected_lag(False) == await selected_lag(True) == 22
+
+
+@pytest.mark.asyncio
 async def test_nilm_helper_link_normalizes_malformed_candidate_and_link_values(
 ) -> None:
     controller, assignment = _helper_link_controller()
