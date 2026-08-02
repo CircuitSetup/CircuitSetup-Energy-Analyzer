@@ -8841,6 +8841,74 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
     )
 
 
+def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        cluster_recurring_signatures,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    edges = [
+        NilmEdge(
+            now + timedelta(minutes=index),
+            300.0 if index % 2 == 0 else -300.0,
+            0.0,
+            300.0,
+            0.0,
+            "on" if index % 2 == 0 else "off",
+        )
+        for index in range(6)
+    ]
+    events = [
+        CircuitEvent(
+            edge.timestamp,
+            "hvac-2",
+            EventType.START if edge.direction == "on" else EventType.STOP,
+            {},
+        )
+        for edge in edges
+    ]
+    context = ProcessingContext(
+        now=now + timedelta(minutes=6),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        helper_candidate_events=lambda _id, values: values,
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    processor.unmatched_edges_by_circuit["ac-2"] = edges
+    processor._helper_events_by_source["ac-2"] = events
+
+    payload = processor._nilm_signature_payloads(
+        "ac-2", cluster_recurring_signatures(edges), context
+    )[0]
+
+    candidate = payload["helper_candidates"][0]
+    assert candidate["helper_circuit_id"] == "hvac-2"
+    assert candidate["matched_on_count"] == candidate["matched_off_count"] == 3
+
+
 @pytest.mark.parametrize(
     ("profile", "mode", "expected_events"),
     [

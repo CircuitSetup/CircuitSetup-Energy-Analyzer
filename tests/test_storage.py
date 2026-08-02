@@ -30,6 +30,22 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 )
 
 
+def test_feature_store_round_trips_nilm_helper_candidates() -> None:
+    candidate = {
+        "helper_circuit_id": "hvac-2",
+        "matched_on_count": 3,
+        "confidence": 0.91,
+    }
+    data = FeatureStoreData(nilm_signatures={
+        "ac-2": [{"signature_id": "sig", "helper_candidates": [candidate]}]
+    })
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert STORAGE_VERSION == 9
+    assert restored.nilm_signatures["ac-2"][0]["helper_candidates"] == [candidate]
+
+
 def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     now = datetime(2026, 6, 2, tzinfo=UTC)
     old = CircuitEvent(

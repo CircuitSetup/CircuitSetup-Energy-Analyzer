@@ -13,9 +13,12 @@ from ..nilm import (
     NilmEdge,
     NilmEdgeDetector,
     NilmSignature,
+    _nilm_signature_edge_score,
     classify_signature,
     cluster_recurring_signatures,
+    discover_nilm_helper_candidates,
     mask_known_loads,
+    nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     pair_nilm_sessions_for_signatures,
@@ -32,6 +35,7 @@ type KnownLoadEventsProvider = Callable[
     [str, Iterable[CircuitEvent]],
     Iterable[CircuitEvent],
 ]
+type HelperCandidateEventsProvider = KnownLoadEventsProvider
 type TopologyObserver = Callable[
     [CircuitConfig, Any, ProcessingContext],
     list[AlertEvidence],
@@ -55,6 +59,7 @@ class NilmSampleProcessor:
         ignored_signatures: MutableSet[tuple[str, str]],
         known_load_events: KnownLoadEventsProvider,
         observe_topology: TopologyObserver,
+        helper_candidate_events: HelperCandidateEventsProvider | None = None,
         unmatched_edges_max_items: int = 512,
     ) -> None:
         self._nilm_enabled = nilm_enabled
@@ -66,6 +71,10 @@ class NilmSampleProcessor:
         self.ignored_signatures = ignored_signatures
         self._known_load_events = known_load_events
         self._pending_known_load_events: dict[str, tuple[CircuitEvent, ...]] = {}
+        self._helper_candidate_events = helper_candidate_events or (
+            lambda _id, _events: ()
+        )
+        self._helper_events_by_source: dict[str, list[CircuitEvent]] = defaultdict(list)
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
 
@@ -95,6 +104,15 @@ class NilmSampleProcessor:
         )
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
+        helper_events = self._helper_events_by_source[circuit_id]
+        helper_events.extend(self._helper_candidate_events(circuit_id, events))
+        cutoff = sample.timestamp - timedelta(minutes=10)
+        retained = [event for event in helper_events if event.timestamp >= cutoff]
+        self._helper_events_by_source[circuit_id] = (
+            retained[-self._unmatched_edges_max_items :]
+            if self._unmatched_edges_max_items
+            else []
+        )
         current_known_events = tuple(self._known_load_events(circuit_id, events))
         pending_known_events = self._pending_known_load_events.pop(circuit_id, ())
         known_events = (*pending_known_events, *current_known_events)
@@ -273,6 +291,24 @@ class NilmSampleProcessor:
                 "classification": classify_signature(classified_signature),
                 "feedback_fingerprint": feedback_fingerprint,
             }
+            signature_edges = [
+                edge
+                for edge in self.unmatched_edges_by_circuit[circuit_id]
+                if _nilm_signature_edge_score(edge, payload) is not None
+            ]
+            observations = self._helper_events_by_source.get(circuit_id, [])
+            if observations:
+                by_circuit: defaultdict[str, list[CircuitEvent]] = defaultdict(list)
+                for event in observations:
+                    by_circuit[event.circuit_id].append(event)
+                payload["helper_candidates"] = [
+                    nilm_helper_candidate_to_dict(candidate)
+                    for candidate in discover_nilm_helper_candidates(
+                        signature_edges, by_circuit
+                    )
+                ]
+            elif "helper_candidates" in metadata_current:
+                payload["helper_candidates"] = metadata_current["helper_candidates"]
             if user_label:
                 payload["user_label"] = user_label
             if ignored:

@@ -16,6 +16,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitConfig,
     CircuitMode,
     NilmSourceKind,
+    PowerFlowMode,
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.storage import (
@@ -47,6 +48,27 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+def test_nilm_controller_filters_helpers_to_current_direct_loads() -> None:
+    configs = {
+        "mixed": _config(ApplianceProfile.MIXED, CircuitMode.MIXED),
+        "hvac-2": _config(ApplianceProfile.HVAC_BLOWER),
+        "solar": _config(
+            ApplianceProfile.MOTOR_LOAD,
+            power_flow=PowerFlowMode.GENERATION,
+        ),
+    }
+    controller = _nilm_controller(SimpleNamespace(
+        circuit_registry=SimpleNamespace(config_for_circuit=configs.get)
+    ))
+    events = [SimpleNamespace(circuit_id=value) for value in (
+        "mixed", "hvac-2", "solar", "other-entry"
+    )]
+
+    assert [event.circuit_id for event in controller.helper_candidate_events(
+        "mixed", events
+    )] == ["hvac-2"]
 
 
 @pytest.mark.parametrize(
@@ -445,17 +467,18 @@ def test_assignment_history_prefers_explicit_session_owner() -> None:
 
 
 def _config(
-    *,
     profile: ApplianceProfile,
-    mode: CircuitMode,
+    mode: CircuitMode = CircuitMode.SINGLE_PHASE,
     circuit_id: str = "source",
     name: str = "Source",
+    power_flow: PowerFlowMode = PowerFlowMode.LOAD,
 ) -> CircuitConfig:
     return CircuitConfig(
         circuit_id=circuit_id,
         name=name,
         appliance_profile=profile,
         mode=mode,
+        power_flow=power_flow,
     )
 
 

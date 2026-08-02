@@ -11,7 +11,7 @@ from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
 from ..nilm import NilmEdge
-from ..profiles import nilm_source_kind
+from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
 
 
 class NilmController:
@@ -149,6 +149,18 @@ class NilmController:
             result.state_updates,
         )
         return result.alerts[0] if result.alerts else None
+
+    def helper_candidate_events(
+        self, nilm_circuit_id: str, events: Iterable[Any]
+    ) -> Iterable[Any]:
+        """Yield current-entry direct-load events as correlation evidence."""
+        registry = self._coordinator.circuit_registry
+        for event in events:
+            if event.circuit_id == nilm_circuit_id:
+                continue
+            config = registry.config_for_circuit(event.circuit_id)
+            if config is not None and supports_direct_appliance_analysis(config):
+                yield event
 
     def signature_payloads(
         self,
