@@ -5344,11 +5344,9 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
         data={
             CONF_ADVANCED_SETTINGS: {
                 "mains": {"preset": "sensitive"},
-                "microwave": {"preset": "balanced"},
             },
             CONF_UTILITY_COMPARISON_SETTINGS: {
                 "mains": {"source": "sensor.utility_total"},
-                "microwave": {"source": "sensor.microwave_energy"},
             },
         },
         options={
