@@ -421,7 +421,7 @@ A good dashboard order is:
 When a single appliance needs review, use this pattern:
 
 1. **Appliance status card**: Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
-2. **Appliance history**: Appliance Detail starts with the configured source history for the past 7 days (30 days for sump pumps). Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, use the explicit zoom and pan controls, or open the visible range with its History arrow. Sump-pump cycle markers distinguish rain, HVAC-plus-humidity, combined, unexplained, and unclassified activity.
+2. **Appliance history**: Appliance Detail starts with the configured source history for the past 24 hours (30 days for sump pumps). Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, use the explicit zoom and pan controls, or open the visible range with its History arrow. Sump-pump cycle markers distinguish rain, HVAC-plus-humidity, combined, unexplained, and unclassified activity.
 3. **Appliance automations**: Activity Summary state or `is_running` attribute for washer, dryer, pump, microwave, or appliance-complete automations.
 4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
 5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.

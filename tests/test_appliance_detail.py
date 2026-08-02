@@ -231,6 +231,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
 
     assert payload["status"] == "ok"
+    assert payload["history"]["default_hours"] == 24
     detail = payload["detail"]
     assert detail["circuit_id"] == "fridge"
     assert detail["display_name"] == "Kitchen Fridge"

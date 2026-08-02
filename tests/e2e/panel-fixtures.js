@@ -304,7 +304,7 @@ export const applianceDetail = {
   history: {
     entities: ["sensor.kitchen_energy"],
     entity_series: [{ entity_id: "sensor.kitchen_energy", unit: "kWh" }],
-    default_hours: 168,
+    default_hours: 24,
     period_hours: [24, 168, 720],
   },
   daily_totals: [

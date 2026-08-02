@@ -113,7 +113,7 @@ from .settings_advisor import SETTING_LABELS
 from .state import circuit_is_learning
 from .ux import alert_evidence_detail, friendly_feature_name
 
-DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 168
+DEFAULT_APPLIANCE_DETAIL_HISTORY_HOURS = 24
 APPLIANCE_DETAIL_HISTORY_PERIOD_HOURS = (24, 168, 720)
 _HISTORY_UNIT_BY_ROLE = {
     SensorRole.VOLTAGE: "V",
