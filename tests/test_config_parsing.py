@@ -206,6 +206,32 @@ def test_config_parser_reserves_existing_ids_for_duplicate_aliases() -> None:
     assert all(len(config.sensors) == 1 for config in configs)
 
 
+def test_config_parser_uses_saved_sensors_for_alias_collisions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "pump",
+                    "name": "Pump",
+                    "sensors": [
+                        {"entity_id": "sensor.pump_power", "role": "real_power"}
+                    ],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: ["sensor.pump_kw", "sensor.pump_kva"],
+        }
+    )
+
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    ]
+
+
 def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

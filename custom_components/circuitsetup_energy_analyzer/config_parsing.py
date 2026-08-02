@@ -108,10 +108,15 @@ def _configs_with_merged_source_entity_refs(
         _string_list_from_sources(entry_data, options, CONF_MAINS_SOURCE_ENTITIES)
     )
     config_index = _config_index_by_source_circuit_id(configs)
-    source_circuit_ids = source_circuit_ids_from_entity_ids(source_entities)
-    existing_source_entities = {
-        sensor.entity_id for config in configs for sensor in config.sensors
-    }
+    existing_sensor_refs = [sensor for config in configs for sensor in config.sensors]
+    existing_source_entity_list = list(
+        dict.fromkeys(sensor.entity_id for sensor in existing_sensor_refs)
+    )
+    existing_source_entities = set(existing_source_entity_list)
+    source_circuit_ids = source_circuit_ids_from_entity_ids(
+        [*existing_source_entity_list, *source_entities],
+        sensor_roles={sensor.entity_id: sensor.role for sensor in existing_sensor_refs},
+    )
     for entity_id in source_entities:
         if (
             entity_id in mains_entities
