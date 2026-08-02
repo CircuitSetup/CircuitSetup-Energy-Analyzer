@@ -168,10 +168,13 @@ def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
         except (TypeError, ValueError):
             demand_window_minutes = 0.0
         if math.isfinite(demand_window_minutes) and demand_window_minutes > 0.0:
-            start = min(
-                start,
-                alert.timestamp - timedelta(minutes=demand_window_minutes),
-            )
+            try:
+                start = min(
+                    start,
+                    alert.timestamp - timedelta(minutes=demand_window_minutes),
+                )
+            except OverflowError:
+                pass
 
     if start == end:
         point_padding = timedelta(minutes=15)
