@@ -6662,7 +6662,18 @@ def test_demand_processor_restart_preserves_maintenance_window_exclusion() -> No
     assert result.store_dirty is False
 
 
-def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
+@pytest.mark.parametrize(
+    ("demand_limit_w", "expected_status", "expected_alert_features"),
+    (
+        (None, "context_explained", ()),
+        (3000.0, "over_limit", ("demand_limit",)),
+    ),
+)
+def test_demand_processor_suppresses_negligible_contextual_excess(
+    demand_limit_w: float | None,
+    expected_status: str,
+    expected_alert_features: tuple[str, ...],
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -6728,6 +6739,7 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
     processor = DemandProcessor(
         settings_for_config=lambda _config, _circuit_id: DemandSettings(
             window_minutes=15,
+            demand_limit_w=demand_limit_w,
             peak_rank_count=3,
             peak_warning_ratio=0.9,
         ),
@@ -6735,14 +6747,16 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
         retention_days_for_circuit=lambda _circuit_id: 45,
     )
 
-    result = processor.process(_sample(0, 3700.0), config, context)
+    result = processor.process(_sample(0, 3800.1), config, context)
 
     assert result.store_dirty is True
-    assert result.alerts == []
-    assert policy.observations == []
+    assert tuple(alert.feature for alert in result.alerts) == expected_alert_features
+    assert tuple(observation.feature for observation in policy.observations) == (
+        expected_alert_features
+    )
     updates = {update.path: update.value for update in result.state_updates}
     evidence = updates[("demand_evidence_by_circuit", "ev")]
-    assert evidence["status"] == "context_explained"
+    assert evidence["status"] == expected_status
     assert evidence["comparison_basis"] == "contextual"
     assert evidence["baseline_fallback_level"] == "exact_context"
     assert evidence["baseline_sample_count"] == 7

@@ -186,6 +186,7 @@ from .const import (
     ENTITY_DETAIL_STANDARD,
 )
 from .dashboard import normalize_dashboard_layout
+from .demand import MAX_DEMAND_WINDOW_MINUTES
 from .demo import DEMO_SOURCE_ENTITY_IDS as _DEMO_SOURCE_ENTITY_IDS
 from .discovery import (
     ENERGY_SOURCE_DEVICE_CLASSES,
@@ -1963,7 +1964,11 @@ def _demand_capacity_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
         vol.Optional(
             FIELD_WINDOW_MINUTES,
             default=int(settings.get(FIELD_WINDOW_MINUTES, 15)),
-        ): _number_selector(minimum=1, maximum=240, step=1),
+        ): _number_selector(
+            minimum=1,
+            maximum=MAX_DEMAND_WINDOW_MINUTES,
+            step=1,
+        ),
         vol.Optional(
             FIELD_DEMAND_LIMIT_W,
             default=float(settings.get(FIELD_DEMAND_LIMIT_W, 0.0)),
