@@ -374,6 +374,25 @@ def test_alert_graph_window_uses_only_valid_demand_measurement_windows() -> None
         assert alert_graph_window(alert) == (expected_start, expected_end)
 
 
+def test_alert_graph_window_extends_sustained_demand_to_measurement_window() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_window,
+    )
+
+    alert = replace(
+        _alert("demand_monthly_peak"),
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        first_seen=datetime(2026, 6, 5, 12, 29, tzinfo=UTC),
+        last_seen=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        features={"demand_window_minutes": 15.0},
+    )
+
+    assert alert_graph_window(alert) == (
+        datetime(2026, 6, 5, 12, 5, tzinfo=UTC),
+        datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
+    )
+
+
 def test_alert_graph_window_orders_reversed_evidence_timestamps() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_graph_window,
