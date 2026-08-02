@@ -2333,7 +2333,8 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
             "name": "Mains",
             "source_kind": "mains",
             "path": (
-                "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mains"
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=mains"
             ),
         },
         {
@@ -2342,7 +2343,8 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
             "name": "Mixed Loads",
             "source_kind": "pure_mixed",
             "path": (
-                "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mixed"
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=mixed"
             ),
         },
         {
@@ -2351,7 +2353,8 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
             "name": "HVAC 2",
             "source_kind": "primary_mixed",
             "path": (
-                "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=hvac_2"
+                "/circuitsetup-energy-analyzer-evidence?"
+                "nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2"
             ),
         },
     ]

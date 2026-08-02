@@ -546,8 +546,10 @@ def _nilm_workspace_source(
 
 
 def _nilm_workspace_path(entry_id: str, circuit_id: str) -> str:
-    query = urlencode({"entry_id": entry_id, "circuit_id": circuit_id})
-    return f"/circuitsetup-energy-analyzer/nilm?{query}"
+    query = urlencode(
+        {"nilm_workspace": "1", "entry_id": entry_id, "circuit_id": circuit_id}
+    )
+    return f"/{PANEL_URL_PATH}?{query}"
 
 
 def _nilm_workspace_signatures(

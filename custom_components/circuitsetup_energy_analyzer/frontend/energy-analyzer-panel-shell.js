@@ -1532,6 +1532,7 @@ export class PanelShellMethods {
     this._listen("#cancel_action_confirmation", () => this._cancelActionConfirmation());
     this._listen("#confirm_action", () => this._confirmPendingAction());
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
+    this._listen("#open_load_separation", () => this._callAction("open_load_separation"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));
     this._listen("[data-save-weekly-digest]", () => this._saveWeeklyDigestSettings());
     for (const button of this.shadowRoot.querySelectorAll("[data-recommendation-action]")) {

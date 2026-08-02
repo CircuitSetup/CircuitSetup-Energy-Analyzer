@@ -871,8 +871,12 @@ def _nilm_sources(context: DashboardContext) -> tuple[DashboardCircuit, ...]:
 
 
 def _nilm_dashboard_path(entry_id: str | None, circuit_id: str) -> str:
-    return "/circuitsetup-energy-analyzer/nilm?" + urlencode(
-        {"entry_id": entry_id or "", "circuit_id": circuit_id}
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?" + urlencode(
+        {
+            "nilm_workspace": "1",
+            "entry_id": entry_id or "",
+            "circuit_id": circuit_id,
+        }
     )
 
 

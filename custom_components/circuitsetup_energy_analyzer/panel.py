@@ -1394,7 +1394,7 @@ def _actions_for_context(
             actions["open_load_separation"] = {
                 "type": "navigate",
                 "label": _panel_text("actions", "labels", "open_load_separation"),
-                "path": f"/circuitsetup-energy-analyzer/nilm?{query}",
+                "path": f"/{PANEL_URL_PATH}?nilm_workspace=1&{query}",
             }
         if (
             config is not None

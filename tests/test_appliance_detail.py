@@ -1701,7 +1701,10 @@ def test_appliance_detail_offers_load_separation_for_each_source(
     assert payload["actions"]["open_load_separation"] == {
         "type": "navigate",
         "label": "Open Load Separation",
-        "path": "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=source",
+        "path": (
+            "/circuitsetup-energy-analyzer-evidence?"
+            "nilm_workspace=1&entry_id=entry-1&circuit_id=source"
+        ),
     }
 
 

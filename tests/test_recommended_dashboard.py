@@ -1564,7 +1564,8 @@ def test_standard_dashboard_links_mains_nilm_graph_review() -> None:
     assert review_card["tap_action"] == {
         "action": "navigate",
         "navigation_path": (
-            "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mains"
+            "/circuitsetup-energy-analyzer-evidence?"
+            "nilm_workspace=1&entry_id=entry-1&circuit_id=mains"
         ),
     }
 
@@ -1603,8 +1604,8 @@ def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
         "Open Load Separation: HVAC 2",
     ]
     assert [card["tap_action"]["navigation_path"] for card in source_cards] == [
-        "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mixed",
-        "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=hvac_2",
+        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mixed",
+        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2",
     ]
     assert not [card for card in cards if card.get("type") == HOUSE_FLOW_CARD]
 
@@ -2031,7 +2032,7 @@ def test_expert_dashboard_layout_adds_evidence_links_without_duplication() -> No
     assert "sensor.fridge_energy_dashboard_status" not in refs
     assert "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge" in markdown
     assert (
-        "/circuitsetup-energy-analyzer/nilm?entry_id=&circuit_id=mains"
+        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=&circuit_id=mains"
         in markdown
     )
 

@@ -7649,12 +7649,12 @@ if (summary([]).includes("data-nilm-source-picker")
     || summary([{ circuit_id: "mains", name: "Mains", path: "/nilm?entry_id=one&circuit_id=mains" }]).includes("data-nilm-source-picker")) {
   throw new Error("zero and one source must not render a picker");
 }
-const path = "/circuitsetup-energy-analyzer/nilm?entry_id=entry-2&circuit_id=mixed";
+const path = "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-2&circuit_id=mixed";
 const html = summary([
-  { circuit_id: "mains", name: "Mains", path: "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mains" },
+  { circuit_id: "mains", name: "Mains", path: "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mains" },
   { circuit_id: "mixed", name: "Mixed", path },
 ]);
-if (!html.includes("data-nilm-source-picker") || !html.includes(`value="${path.replace("&", "&amp;")}"`)) {
+if (!html.includes("data-nilm-source-picker") || !html.includes(`value="${path.replaceAll("&", "&amp;")}"`)) {
   throw new Error("multiple sources must render backend paths in the picker");
 }
 let changed;
@@ -7675,6 +7675,42 @@ panel._renderActionConfirmation = () => "";
 panel._render();
 changed();
 if (navigated !== path) throw new Error(`picker did not navigate to backend path: ${navigated}`);
+'''
+    )
+
+
+def test_evidence_views_render_and_navigate_load_separation_action() -> None:
+    _run_panel_node_script(
+        r'''
+const path = "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mixed";
+const panel = makePanel({
+  _payload: { actions: { open_load_separation: { type: "navigate", path } } },
+});
+const alertHtml = panel._renderAlertContent(
+  { circuit_id: "mixed", feature: "daily_energy", graph_entities: [] },
+  { name: "Mixed Loads" },
+);
+const fallbackHtml = panel._renderFallbackActionsContent();
+for (const html of [alertHtml, fallbackHtml]) {
+  if (!html.includes('id="open_load_separation"')) {
+    throw new Error("Load Separation action missing from an evidence action list");
+  }
+}
+let navigated = "";
+panel._navigate = (value) => { navigated = value; };
+let click;
+const button = { addEventListener(_event, callback) { click = callback; } };
+panel.shadowRoot = {
+  innerHTML: "",
+  querySelector(selector) { return selector === "#open_load_separation" ? button : null; },
+  querySelectorAll() { return []; },
+};
+panel._attachChartInspectors = () => {};
+panel._renderEvidenceBody = () => "";
+panel._renderActionConfirmation = () => "";
+panel._render();
+click();
+if (navigated !== path) throw new Error(`Load Separation action did not navigate: ${navigated}`);
 '''
     )
 
