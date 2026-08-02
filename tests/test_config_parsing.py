@@ -351,6 +351,70 @@ def test_config_parser_uses_saved_sensors_for_alias_collisions() -> None:
     ]
 
 
+def test_config_parser_moves_saved_qualified_sensor_before_base_merge() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "panel",
+                    "name": "Panel",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.panel_voltage_max",
+                            "role": "voltage",
+                        }
+                    ],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_voltage_max",
+                "sensor.panel_voltage",
+            ],
+        }
+    )
+
+    assert {
+        config.circuit_id: [sensor.entity_id for sensor in config.sensors]
+        for config in configs
+    } == {
+        "panel": ["sensor.panel_voltage"],
+        "panel_max": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_config_parser_does_not_rehome_manual_circuit_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "cold_storage",
+                    "name": "Cold Storage",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"}
+                    ],
+                }
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.fridge_power",
+                "sensor.fridge_voltage",
+            ],
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["cold_storage"]
+    assert [sensor.entity_id for sensor in configs[0].sensors] == [
+        "sensor.fridge_power"
+    ]
+
+
 def test_config_parser_does_not_merge_alias_into_reserved_saved_circuit() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,

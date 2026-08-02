@@ -5551,6 +5551,12 @@ def _circuits_with_merged_source_circuit_sensors(
         if entity_id not in mains_source_entities
         and not untyped_source_entity_excluded(entity_id)
     ]
+    grouped_assigned_entity_list = [
+        entity_id
+        for entity_id in assigned_source_entity_list
+        if entity_id not in mains_source_entities
+        and not untyped_source_entity_excluded(entity_id)
+    ]
     saved_sensor_roles = {
         str(sensor["entity_id"]): str(sensor["role"])
         for circuit in circuits
@@ -5568,13 +5574,82 @@ def _circuits_with_merged_source_circuit_sensors(
         and sensor.get("leg")
     }
     inferred_circuit_ids = source_circuit_ids_from_entity_ids(
-        [*assigned_source_entity_list, *eligible_source_entities],
+        [*grouped_assigned_entity_list, *eligible_source_entities],
         sensor_roles=saved_sensor_roles,
         sensor_legs=saved_sensor_legs,
         reserved_circuit_ids=circuit_index,
     )
 
     changed = False
+    displaced_sensors: list[tuple[Any, str, dict[str, Any]]] = []
+    for index, circuit in enumerate(tuple(circuits)):
+        current_ids = {
+            _canonical_assignment_circuit_id(value)
+            for value in (
+                circuit.get("circuit_id"),
+                circuit.get("id"),
+                circuit.get("name"),
+            )
+            if value
+        }
+        owned_ids = {
+            _canonical_assignment_circuit_id(value)
+            for value in (circuit.get("circuit_id"), circuit.get("id"))
+            if value
+        }
+        if (
+            "mains" in current_ids
+            or circuit.get("mode") == CircuitMode.MAINS_NILM.value
+        ):
+            continue
+        retained_sensors = []
+        for sensor in circuit["sensors"]:
+            entity_id = (
+                sensor
+                if isinstance(sensor, str)
+                else str(sensor.get("entity_id") or "")
+            )
+            if entity_id not in inferred_circuit_ids:
+                retained_sensors.append(sensor)
+                continue
+            desired_id = inferred_circuit_ids[entity_id]
+            natural_id = _assignment_circuit_id_from_entity_id(entity_id)
+            if (
+                desired_id in current_ids
+                or natural_id not in owned_ids
+                or entity_id in mains_source_entities
+            ):
+                retained_sensors.append(sensor)
+            else:
+                displaced_sensors.append((sensor, desired_id, circuit))
+        if len(retained_sensors) != len(circuit["sensors"]):
+            circuits[index]["sensors"] = retained_sensors
+            changed = True
+    for sensor, desired_id, template in displaced_sensors:
+        target_index = circuit_index.get(desired_id)
+        if target_index is None:
+            target_index = len(circuits)
+            target = {
+                **template,
+                "circuit_id": desired_id,
+                "name": _friendly_name_from_id(desired_id),
+                "sensors": [],
+            }
+            if "id" in target:
+                target["id"] = desired_id
+            circuits.append(target)
+            circuit_index[desired_id] = target_index
+        target_sensors = circuits[target_index]["sensors"]
+        entity_id = (
+            sensor if isinstance(sensor, str) else str(sensor.get("entity_id") or "")
+        )
+        if entity_id not in {
+            existing
+            if isinstance(existing, str)
+            else str(existing.get("entity_id") or "")
+            for existing in target_sensors
+        }:
+            target_sensors.append(sensor)
     for entity_id in eligible_source_entities:
         if entity_id in assigned_source_entities:
             continue
