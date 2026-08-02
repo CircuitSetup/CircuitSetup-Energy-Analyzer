@@ -6662,7 +6662,7 @@ def test_demand_processor_restart_preserves_maintenance_window_exclusion() -> No
     assert result.store_dirty is False
 
 
-def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
+def test_demand_processor_suppresses_negligible_contextual_excess() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
@@ -6735,7 +6735,7 @@ def test_demand_processor_suppresses_context_explained_monthly_peak() -> None:
         retention_days_for_circuit=lambda _circuit_id: 45,
     )
 
-    result = processor.process(_sample(0, 3700.0), config, context)
+    result = processor.process(_sample(0, 3800.1), config, context)
 
     assert result.store_dirty is True
     assert result.alerts == []
