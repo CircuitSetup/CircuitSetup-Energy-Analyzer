@@ -315,6 +315,44 @@ def test_nilm_retired_stop_is_single_only_and_never_compound() -> None:
     assert result.reason != "compound"
 
 
+def test_nilm_retired_models_do_not_consume_recent_compound_slots() -> None:
+    components = [
+        assignment_model(
+            name,
+            transition(name, watts),
+            last_observed=BASE_TIME,
+        )
+        for name, watts in (("component-a", 60), ("component-b", 40))
+    ]
+    decoys = [
+        assignment_model(
+            f"decoy-{index:02d}",
+            transition(f"decoy-{index:02d}", 5),
+            last_observed=BASE_TIME + timedelta(seconds=index + 1),
+        )
+        for index in range(18)
+    ]
+    retired = assignment_model(
+        "retired",
+        transition("retired", -5),
+        lifecycle_state="retired",
+        last_observed=BASE_TIME + timedelta(minutes=1),
+    )
+    models = [retired, *decoys, *components]
+
+    result = reconcile(
+        edge(0, 100),
+        models,
+        {model.assignment_id: 0.0 for model in models},
+    )
+
+    assert result.reason == "compound"
+    assert {item.assignment_id for item in result.transitions} == {
+        "component-a",
+        "component-b",
+    }
+
+
 def test_nilm_recent_cutoff_and_equal_error_prototypes_are_order_independent() -> None:
     first = assignment_model("a-first", transition("a-first", 60))
     second = assignment_model("b-second", transition("b-second", 40))

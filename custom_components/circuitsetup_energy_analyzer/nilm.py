@@ -462,7 +462,11 @@ def reconcile_nilm_edge(
     recent_ids = {
         model.assignment_id
         for model in sorted(
-            models,
+            (
+                model
+                for model in models
+                if model.lifecycle_state.strip().lower() != "retired"
+            ),
             key=lambda item: (
                 -_nilm_aware(item.last_observed).timestamp()
                 if item.last_observed is not None
