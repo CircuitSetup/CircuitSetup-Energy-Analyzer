@@ -696,6 +696,7 @@ def source_circuit_ids_from_entity_ids(
         suffix.removeprefix("_"): index
         for index, suffix in enumerate(_SOURCE_METRIC_SUFFIXES)
     }
+    reserved_circuit_ids = set(circuit_ids.values())
     for (base_circuit_id, _, _), collided_entities in entities_by_collision.items():
         if len(collided_entities) < 2:
             continue
@@ -715,17 +716,18 @@ def source_circuit_ids_from_entity_ids(
                 entity_id,
             ),
         )
-        used_circuit_ids = {base_circuit_id}
         for entity_id in collided_entities:
             if entity_id == primary_entity:
                 continue
             detail = qualifiers[entity_id] or metrics[entity_id]
-            candidate = f"{base_circuit_id}_{detail}"
-            if not detail or candidate in used_circuit_ids:
-                object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id))
-                candidate = f"{base_circuit_id}_{object_id.strip('_')}"
+            candidate_base = f"{base_circuit_id}_{detail or 'source'}"
+            candidate = candidate_base
+            suffix = 2
+            while candidate in reserved_circuit_ids:
+                candidate = f"{candidate_base}_{suffix}"
+                suffix += 1
             circuit_ids[entity_id] = candidate
-            used_circuit_ids.add(candidate)
+            reserved_circuit_ids.add(candidate)
     return circuit_ids
 
 
