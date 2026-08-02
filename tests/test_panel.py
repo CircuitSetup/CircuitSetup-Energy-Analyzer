@@ -2648,6 +2648,14 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
     )
     coordinator = _coordinator(config=source, configs=(source, *helpers))
     coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mains": [{
+        "signature_id": "sig-1",
+        "helper_candidates": [{"helper_circuit_id": "helper-2"}],
+    }]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [{
+        "assignment_id": "assignment-1",
+        "helper_links": [{"helper_circuit_id": "helper-1"}],
+    }]}
     other = _nilm_workspace_coordinator(
         entry_id="entry-2", name="Other", entity_id="sensor.other"
     )
@@ -2680,7 +2688,6 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
 
     assert queried == [
         "sensor.mains_w", "sensor.helper_2_w", "sensor.helper_1_w",
-        "sensor.helper_3_w", "sensor.helper_4_w",
     ]
 
 

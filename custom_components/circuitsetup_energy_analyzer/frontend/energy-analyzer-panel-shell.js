@@ -1577,7 +1577,8 @@ export class PanelShellMethods {
         if (fingerprint) {
           void this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
         } else {
-          this._render();
+          this._nilmSyncHelperSelection(this._nilmWorkspace);
+          void this._loadNilmWorkspaceHistory();
         }
       });
     }

@@ -18,6 +18,7 @@ export function createNilmWorkspaceMethods({
     }
 
     this._invalidateNilmFocusedHistoryRequests();
+    this._invalidateNilmHelperHistoryRequests();
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
@@ -151,6 +152,11 @@ export function createNilmWorkspaceMethods({
     if (!this._routeRequestsNilmWorkspace(routeKey)) {
       return;
     }
+    this._invalidateNilmFocusedHistoryRequests();
+    const token = (this._nilmHelperHistoryToken || 0) + 1;
+    this._nilmHelperHistoryToken = token;
+    const isCurrent = () => token === this._nilmHelperHistoryToken
+      && this._isCurrentRequest(requestId, routeKey);
     const historyPath = this._nilmHistoryPathWithHelpers(workspace && workspace.history && workspace.history.api_path);
     const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
       ? this._nilmHistoryPathWithHelpers(workspace.history.fetch_path)
@@ -165,19 +171,19 @@ export function createNilmWorkspaceMethods({
     this._render();
     try {
       const history = await this._requestJson(historyPath, historyFetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrent()) {
         return;
       }
       this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
       this._nilmWorkspaceHistoryError = "";
       this._nilmWorkspaceHistoryFailedRequest = null;
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrent()) {
         return;
       }
       this._nilmWorkspaceHistoryError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrent()) {
         this._nilmWorkspaceHistoryLoading = false;
         this._render();
       }
@@ -841,6 +847,10 @@ export function createNilmWorkspaceMethods({
     this._nilmFocusedHistoryToken += 1;
   }
 
+  _invalidateNilmHelperHistoryRequests() {
+    this._nilmHelperHistoryToken = (this._nilmHelperHistoryToken || 0) + 1;
+  }
+
   _isCurrentNilmFocusedHistoryRequest(token, requestId, routeKey) {
     return token === this._nilmFocusedHistoryToken
       && this._isCurrentRequest(requestId, routeKey);
@@ -1268,6 +1278,7 @@ export function createNilmWorkspaceMethods({
   }
 
   async _loadNilmWorkspaceHistoryForWindow(window, failedRequest = null) {
+    this._invalidateNilmHelperHistoryRequests();
     const workspace = this._nilmWorkspace;
     const history = workspace && workspace.history;
     if (!history || !history.api_path) {

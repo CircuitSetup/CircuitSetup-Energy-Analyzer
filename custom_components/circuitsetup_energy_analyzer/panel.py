@@ -1941,12 +1941,34 @@ async def nilm_workspace_history_payload(
     if target is None:
         return []
     coordinator, config, _sources = target
+    store_data = getattr(coordinator, "store_data", None)
+    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
+    assignments_by_circuit = getattr(
+        store_data, "nilm_appliance_assignments_by_circuit", {}
+    )
+    surfaced_helper_ids = {
+        str(item.get("helper_circuit_id") or "").strip()
+        for collection in (
+            signatures_by_circuit.get(config.circuit_id, ())
+            if isinstance(signatures_by_circuit, Mapping)
+            else (),
+            assignments_by_circuit.get(config.circuit_id, ())
+            if isinstance(assignments_by_circuit, Mapping)
+            else (),
+        )
+        for parent in collection
+        if isinstance(parent, Mapping)
+        for key in ("helper_candidates", "helper_links")
+        for item in parent.get(key, ())
+        if isinstance(item, Mapping) and item.get("helper_circuit_id")
+    }
     requested_helpers = list(
         dict.fromkeys(
             str(value or "").strip()
             for value in helper_circuit_ids
             if str(value or "").strip()
             and str(value or "").strip() != config.circuit_id
+            and str(value or "").strip() in surfaced_helper_ids
         )
     )
     configs_by_id = {
