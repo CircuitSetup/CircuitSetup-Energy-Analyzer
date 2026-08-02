@@ -1430,7 +1430,12 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
         },
     ]
     entry = SimpleNamespace(
-        data={},
+        data={
+            CONF_CIRCUITS: existing_circuits,
+            CONF_ADVANCED_SETTINGS: {
+                "hvac": {"thermostat_entity": "climate.attic"},
+            },
+        },
         options={
             CONF_SOURCE_DEVICES: ["meter-device"],
             CONF_EXTRA_SOURCE_ENTITIES: ["sensor.manual_power"],
@@ -1439,7 +1444,6 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
                 "sensor.hvac_power",
                 "sensor.manual_power",
             ],
-            CONF_CIRCUITS: existing_circuits,
             CONF_SENSITIVITY: "quiet",
             CONF_RETENTION_MODE: "diagnostic",
         },
@@ -1454,7 +1458,7 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     assert result["type"] == "form"
     assert result["step_id"] == "assign"
     assert config_entries.reloads == []
-    assert entry.options[CONF_CIRCUITS] == existing_circuits
+    assert entry.data[CONF_CIRCUITS] == existing_circuits
     assert [group["circuit_id"] for group in flow._assignment_groups] == [
         "fridge",
         "hvac",
@@ -1523,6 +1527,9 @@ async def test_options_refresh_sources_rescans_selected_devices(monkeypatch) -> 
     ]
     assert result["data"][CONF_SENSITIVITY] == "quiet"
     assert result["data"][CONF_RETENTION_MODE] == "diagnostic"
+    assert result["data"][CONF_ADVANCED_SETTINGS] == {
+        "hvac": {"thermostat_entity": "climate.attic"},
+    }
     assert config_entries.reloads == ["entry-1"]
 
 

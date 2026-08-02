@@ -3983,7 +3983,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 errors={"base": err.error_key},
             )
 
-        updated_options = _options_with_updates(self._config_entry, validated)
+        updated_options = {**source_input, **validated}
         available_source_entities = await _async_discover_energy_source_entities(
             getattr(self, "hass", None)
         )
