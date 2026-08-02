@@ -464,31 +464,35 @@ def reconcile_nilm_edge(
         for model in sorted(
             models,
             key=lambda item: (
-                _nilm_aware(item.last_observed).timestamp()
+                -_nilm_aware(item.last_observed).timestamp()
                 if item.last_observed is not None
-                else float("-inf")
+                else float("inf"),
+                item.assignment_id,
             ),
-            reverse=True,
         )[:20]
     }
     per_assignment: dict[str, NilmTransitionPrototype] = {}
     for model, prototype in legal:
         if (
             model.assignment_id in recent_ids
+            and model.lifecycle_state.strip().lower() != "retired"
             and prototype.sample_count >= 3
             and model.model_confidence >= 0.70
         ):
             previous = per_assignment.get(model.assignment_id)
-            if previous is None or abs(edge.delta_w - prototype.delta_w) < abs(
-                edge.delta_w - previous.delta_w
-            ):
+            if previous is None or _nilm_transition_choice_key(
+                edge, prototype
+            ) < _nilm_transition_choice_key(edge, previous):
                 per_assignment[model.assignment_id] = prototype
     best_single_residual = min(
         (abs(edge.delta_w - prototype.delta_w) for _, prototype in legal),
         default=abs(edge.delta_w),
     )
     pairs: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
-    for first, second in combinations(per_assignment.values(), 2):
+    ordered_transitions = tuple(
+        per_assignment[assignment_id] for assignment_id in sorted(per_assignment)
+    )
+    for first, second in combinations(ordered_transitions, 2):
         combined = _nilm_combined_transition(first, second)
         residual = abs(edge.delta_w - combined.delta_w)
         if residual > nilm_transition_tolerance_w(combined):
@@ -525,7 +529,7 @@ def reconcile_nilm_edge(
     if pairs and (len(pairs) == 1 or pairs[0][0] - pairs[1][0] >= 0.15):
         return _nilm_reconciliation(edge, pairs[0][1], reason="compound")
     if len(per_assignment) > 2 and _nilm_multi_transition_matches(
-        edge, per_assignment.values()
+        edge, ordered_transitions
     ):
         return _nilm_reconciliation(edge, (), reason="compound_unknown")
     return _nilm_reconciliation(
@@ -548,6 +552,8 @@ def _nilm_transition_legal(
     if lifecycle in {"hidden", "ignored", "expected", "rejected", "converted"}:
         return False
     current = current_states_w.get(model.assignment_id)
+    if current is None or not isfinite(current):
+        return False
     if lifecycle == "retired" and not (prototype.direction == "off" and current):
         return False
     if prototype.direction != ("on" if prototype.delta_w > 0 else "off"):
@@ -557,7 +563,21 @@ def _nilm_transition_legal(
         for expected in (prototype.from_state_w, prototype.to_state_w)
     ):
         return False
-    return current is None or abs(current - prototype.from_state_w) <= 1e-6
+    return abs(current - prototype.from_state_w) <= 1e-6
+
+
+def _nilm_transition_choice_key(
+    edge: NilmEdge, prototype: NilmTransitionPrototype
+) -> tuple[float, str, float, float, float, float, int]:
+    return (
+        abs(edge.delta_w - prototype.delta_w),
+        prototype.direction,
+        prototype.from_state_w,
+        prototype.to_state_w,
+        prototype.delta_w,
+        prototype.spread_w,
+        prototype.sample_count,
+    )
 
 
 def _nilm_candidate_score(
@@ -610,8 +630,7 @@ def _nilm_multi_transition_matches(
     return any(
         abs(edge.delta_w - sum(item.delta_w for item in group))
         <= max(15.0, 0.20 * abs(edge.delta_w))
-        for size in range(3, len(transitions) + 1)
-        for group in combinations(transitions, size)
+        for group in combinations(transitions, 3)
     )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from itertools import combinations as stdlib_combinations
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -292,6 +293,90 @@ def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> N
     )
     assert not result.accepted and result.reason == "compound_unknown"
     assert result.consistent is False and result.energy_allocation_allowed is False
+
+
+def test_nilm_reconciliation_requires_a_known_finite_current_state() -> None:
+    model = assignment_model("a", transition("a", 100))
+    for states in ({}, {"a": None}, {"a": float("nan")}, {"a": float("inf")}):
+        result = reconcile(edge(0, 100), [model], states)
+        assert not result.accepted
+
+
+def test_nilm_retired_stop_is_single_only_and_never_compound() -> None:
+    retired = assignment_model(
+        "retired", transition("retired", -60), lifecycle_state="retired"
+    )
+    active = assignment_model("active", transition("active", 100))
+    states = {"retired": 60.0, "active": 0.0}
+
+    assert reconcile(edge(0, -60), [retired], states).reason == "single"
+    result = reconcile(edge(0, 40), [retired, active], states)
+    assert not result.accepted
+    assert result.reason != "compound"
+
+
+def test_nilm_recent_cutoff_and_equal_error_prototypes_are_order_independent() -> None:
+    first = assignment_model("a-first", transition("a-first", 60))
+    second = assignment_model("b-second", transition("b-second", 40))
+    decoys = [
+        assignment_model(f"z-{index:02d}", transition(f"z-{index:02d}", 5))
+        for index in range(19)
+    ]
+    models = [first, second, *decoys]
+    states = {model.assignment_id: 0.0 for model in models}
+    forward = reconcile(edge(0, 100), models, states)
+    reverse = reconcile(edge(0, 100), list(reversed(models)), states)
+    assert forward == reverse
+    assert forward.reason == "compound"
+
+    low = transition("equal", 90)
+    high = transition("equal", 110)
+    equal = nilm_domain.NilmAssignmentModel(
+        assignment_id="equal",
+        power_states_w=(0.0, 90.0, 110.0),
+        transition_prototypes=(low, high),
+        model_confidence=0.9,
+        lifecycle_state="validated",
+        last_observed=BASE_TIME,
+    )
+    partner = assignment_model("partner", transition("partner", 10))
+    normal = reconcile(edge(0, 100), [equal, partner], {"equal": 0.0, "partner": 0.0})
+    reversed_equal = nilm_domain.NilmAssignmentModel(
+        assignment_id="equal",
+        power_states_w=equal.power_states_w,
+        transition_prototypes=tuple(reversed(equal.transition_prototypes)),
+        model_confidence=equal.model_confidence,
+        lifecycle_state=equal.lifecycle_state,
+        last_observed=equal.last_observed,
+    )
+    reversed_result = reconcile(
+        edge(0, 100), [reversed_equal, partner], {"equal": 0.0, "partner": 0.0}
+    )
+    assert normal == reversed_result
+    assert [item.delta_w for item in normal.transitions] == [90, 10]
+
+
+def test_nilm_compound_unknown_check_never_enumerates_beyond_triples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_sizes: list[int] = []
+
+    def bounded_combinations(iterable, size):
+        checked_sizes.append(size)
+        if size > 3:
+            raise AssertionError("compound diagnostics exceeded the three-load bound")
+        return stdlib_combinations(iterable, size)
+
+    monkeypatch.setattr(nilm_domain, "combinations", bounded_combinations)
+    models = [
+        assignment_model(f"load-{index:02d}", transition(f"load-{index:02d}", 1))
+        for index in range(20)
+    ]
+    result = reconcile(
+        edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
+    )
+    assert not result.accepted and result.reason == "below_threshold"
+    assert max(checked_sizes) == 3
 
 
 def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
