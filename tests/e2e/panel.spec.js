@@ -6328,6 +6328,28 @@ test("Suggested Settings uses a compact support column", async ({ page, isMobile
   }
 });
 
+test("Suggested Settings labels an unset current value as not set", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/alert_evidence")) return false;
+    await route.fulfill({
+      json: {
+        ...evidence,
+        setting_recommendations: [{
+          ...evidence.setting_recommendations[0],
+          current_value: null,
+        }],
+      },
+    });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?review_suggested_settings=1&circuit_id=kitchen");
+  const values = panel.locator(".recommendation-values").first();
+
+  await expect(values).toContainText("Not set");
+  await expect(values).not.toContainText("Unknown");
+});
+
 test("alert responses and setting preview actions call their services", async ({ page, isMobile }) => {
   test.skip(isMobile, "Mobile route and accessibility coverage runs separately.");
   await mockPanelApi(page);

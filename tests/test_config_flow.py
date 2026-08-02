@@ -921,6 +921,29 @@ async def test_options_recommendations_step_shows_friendly_pending_suggestions(
     assert coordinator.async_recalculate_setting_recommendations.calls == [(None,)]
 
 
+def test_recommendation_summary_labels_unknown_current_value_as_not_set() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _recommendation_label,
+        _recommendation_summary,
+    )
+
+    recommendation = {
+        "circuit_name": "Garage",
+        "setting_key": "max_active_minutes",
+        "setting_label": "Maximum Active Minutes",
+        "current_value": "unknown",
+        "suggested_value": 45,
+        "unit": "minutes",
+    }
+
+    assert _recommendation_label(recommendation) == (
+        "Garage - Max Active Minutes: not set -> 45 minutes"
+    )
+    summary = _recommendation_summary([recommendation])
+    assert "Current value: not set" in summary
+    assert "unknown" not in summary
+
+
 @pytest.mark.asyncio
 async def test_options_recommendations_step_guides_capacity_suggestions() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
