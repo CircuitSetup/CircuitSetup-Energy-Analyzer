@@ -55,7 +55,7 @@ test("real Home Assistant loads panel routes and accepts a reversible mutation",
     ["?appliance_insights=1", "Appliance Insights"],
     ["?appliance_detail=1&circuit_id=fridge", "Kitchen Fridge"],
     ["?setup_health=1", "Setup Health"],
-    ["?nilm_workspace=1&circuit_id=mains", "NILM Workspace"],
+    ["?nilm_workspace=1&circuit_id=mains", "Load Separation"],
   ];
   for (const [query, heading] of routes) {
     await page.goto("/circuitsetup-energy-analyzer-evidence" + query);
