@@ -11,11 +11,39 @@ FUTURE_TIMESTAMP_TOLERANCE = timedelta(seconds=30)
 UNAVAILABLE_STATES = {"unknown", "unavailable", ""}
 NEGATIVE_LOAD_TOLERANCE_W = 5.0
 
-_POWER_ROLES = {
-    SensorRole.REAL_POWER,
-    SensorRole.REACTIVE_POWER,
-    SensorRole.APPARENT_POWER,
+_UNIT_SCALE_BY_ROLE = {
+    SensorRole.REAL_POWER: {"kw": 1_000.0, "mw": 0.001, "Mw": 1_000_000.0},
+    SensorRole.REACTIVE_POWER: {
+        "kvar": 1_000.0,
+        "mvar": 0.001,
+        "Mvar": 1_000_000.0,
+    },
+    SensorRole.APPARENT_POWER: {
+        "kva": 1_000.0,
+        "mva": 0.001,
+        "Mva": 1_000_000.0,
+    },
+    SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
+    SensorRole.PEAK_CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
+    SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001, "Mv": 1_000_000.0},
 }
+
+
+def normalize_sensor_value(
+    value: float,
+    role: SensorRole,
+    unit: str | None,
+) -> float:
+    """Normalize a sensor value to the base unit used for its role."""
+    if role is SensorRole.ENERGY:
+        return _normalize_energy_kwh(value, unit)
+    if unit is None:
+        return value
+    normalized_unit = unit.strip()
+    normalized_unit = (
+        normalized_unit[:1].replace("K", "k") + normalized_unit[1:].lower()
+    )
+    return value * _UNIT_SCALE_BY_ROLE.get(role, {}).get(normalized_unit, 1.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,13 +100,13 @@ def build_circuit_sample(
     for sensor in config.sensors:
         source = states.get(sensor.entity_id)
         if source is None:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} missing")
             continue
 
         timestamp_issue = _timestamp_issue(now, source.last_updated)
         if timestamp_issue is not None:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} {timestamp_issue}")
             continue
 
@@ -90,30 +118,27 @@ def build_circuit_sample(
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} unavailable")
             continue
         if is_stale:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             continue
 
         try:
             value = float(state)
         except ValueError:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_numeric")
             continue
         if not math.isfinite(value):
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
-        if sensor.role in _POWER_ROLES and _is_kw(source.unit):
-            value *= 1000
-        elif sensor.role is SensorRole.ENERGY:
-            value = _normalize_energy_kwh(value, source.unit)
+        value = normalize_sensor_value(value, sensor.role, source.unit)
         if not math.isfinite(value):
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
@@ -177,10 +202,6 @@ def suppress_inactive_stale_current_issues(
             if issue not in stale_current_issues
         ),
     )
-
-
-def _is_kw(unit: str | None) -> bool:
-    return unit is not None and unit.strip().lower() == "kw"
 
 
 def _timestamp_issue(now: datetime, source_last_updated: datetime) -> str | None:

@@ -6957,8 +6957,8 @@ def test_capacity_processor_prefers_peak_current_for_spike_alerts() -> None:
     )
     peak_state = SourceState(
         entity_id="sensor.ev_peak_a",
-        state="42",
-        unit="A",
+        state="42000",
+        unit="mA",
         last_updated=now,
     )
     policy = _CaptureAlertPolicy()

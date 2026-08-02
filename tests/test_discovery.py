@@ -57,6 +57,16 @@ def test_infer_sensor_role_from_entity_id_and_friendly_name() -> None:
             "Power Factor 1",
             SensorRole.POWER_FACTOR,
         ),
+        (
+            "sensor.high_voltage_panel_active_power",
+            "High Voltage Panel Active Power",
+            SensorRole.REAL_POWER,
+        ),
+        (
+            "sensor.current_pump_real_power",
+            "Current Pump Real Power",
+            SensorRole.REAL_POWER,
+        ),
     ]
 
     for entity_id, friendly_name, role in cases:
@@ -94,6 +104,36 @@ def test_infer_sensor_role_from_circuitsetup_live_sensor_names() -> None:
 
     for entity_id, friendly_name, role in cases:
         assert infer_sensor_role(entity_id, friendly_name) is role
+
+
+def test_infer_sensor_role_uses_device_class_and_unit_for_generic_names() -> None:
+    assert (
+        infer_sensor_role(
+            "sensor.channel_1",
+            "Channel 1",
+            device_class="voltage",
+            unit="V",
+        )
+        is SensorRole.VOLTAGE
+    )
+    assert (
+        infer_sensor_role(
+            "sensor.channel_2",
+            "Channel 2",
+            device_class=None,
+            unit="kvar",
+        )
+        is SensorRole.REACTIVE_POWER
+    )
+    assert (
+        infer_sensor_role(
+            "sensor.channel_3",
+            "Channel 3",
+            device_class="reactive_energy",
+            unit="kvarh",
+        )
+        is None
+    )
 
 
 def test_async_discover_energy_sources_includes_generic_sensors() -> None:

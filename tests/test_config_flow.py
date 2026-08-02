@@ -3726,6 +3726,671 @@ def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
     )
 
 
+def test_assignment_groups_share_scaled_metric_suffixes() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.pump_power", "sensor.pump_kva"]
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["entity_ids"] == (
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    )
+
+
+def test_assignment_groups_separate_duplicate_qualified_measurements() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        [
+            "sensor.panel_power",
+            "sensor.panel_voltage",
+            "sensor.panel_voltage_max",
+        ]
+    )
+
+    assert [group["group_id"] for group in groups] == ["panel", "panel_max"]
+    assert groups[0]["entity_ids"] == (
+        "sensor.panel_power",
+        "sensor.panel_voltage",
+    )
+
+
+def test_assignment_groups_separate_duplicate_metric_aliases() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.pump_power", "sensor.pump_kw", "sensor.pump_kva"]
+    )
+
+    assert [group["group_id"] for group in groups] == ["pump", "pump_kw"]
+    assert groups[0]["entity_ids"] == (
+        "sensor.pump_power",
+        "sensor.pump_kva",
+    )
+
+
+def test_assignment_groups_preserve_explicit_saved_legs() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entity_ids = ("sensor.panel_power", "sensor.panel_w")
+    group = config_flow.assignment_groups_from_sources(
+        entity_ids,
+        existing_circuits=[
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "appliance_profile": "ev_charger",
+                "mode": "dual_phase",
+                "sensors": [
+                    {"entity_id": entity_ids[0], "role": "real_power", "leg": "a"},
+                    {"entity_id": entity_ids[1], "role": "real_power", "leg": "b"},
+                ],
+            }
+        ],
+    )[0]
+
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "circuit_name": "Panel",
+            "appliance_profile": "ev_charger",
+            "included_sensors": entity_ids,
+        },
+    )
+
+    assert group["mode"] == "dual_phase"
+    assert circuit is not None
+    assert circuit["mode"] == "dual_phase"
+    assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
+
+
+def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        [
+            "sensor.pump_power",
+            "sensor.pump_reactive_energy",
+            "sensor.pump_kvarh",
+        ]
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["entity_ids"] == ("sensor.pump_power",)
+
+
+def test_assignment_groups_exclude_unsupported_roleless_saved_sensors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    source_entities = [
+        "sensor.fridge_power",
+        "sensor.fridge_kvarh",
+        "sensor.fridge_harmonic_current",
+        "sensor.fridge_harmonic_voltage",
+    ]
+    groups = assignment_groups_from_sources(
+        source_entities,
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "sensors": [
+                    {"entity_id": source_entities[0]},
+                    {"entity_id": source_entities[1]},
+                    {"entity_id": source_entities[2]},
+                    {"entity_id": source_entities[3], "role": "voltage"},
+                ],
+            }
+        ],
+    )
+
+    assert groups[0]["entity_ids"] == (source_entities[0], source_entities[3])
+    assert groups[0]["sensor_roles"][source_entities[3]] == "voltage"
+
+
+def test_assignment_groups_exclude_harmonic_friendly_name() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    source = "sensor.channel_1"
+
+    assert (
+        assignment_groups_from_sources(
+            [source],
+            source_names={source: "Mains Harmonic Active Power"},
+        )
+        == []
+    )
+
+
+def test_assignment_groups_prefer_explicit_metric_over_friendly_name_exclusion() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    entity_id = "sensor.channel_1_power"
+    groups = assignment_groups_from_sources(
+        [entity_id],
+        source_names={entity_id: "Reactive Energy Monitor"},
+    )
+
+    assert groups[0]["entity_ids"] == (entity_id,)
+    assert groups[0]["sensor_roles"][entity_id] == "real_power"
+
+
+def test_assignment_groups_exclude_collision_qualified_harmonic_distortion() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        assignment_groups_from_sources,
+    )
+
+    assert (
+        assignment_groups_from_sources(
+            ["sensor.mains_harmonic_distortion_2"],
+        )
+        == []
+    )
+
+
+def test_options_source_merge_excludes_reactive_energy() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuits = [
+        {
+            "circuit_id": "refrigerator",
+            "name": "Refrigerator",
+            "sensors": [
+                {"entity_id": "sensor.refrigerator_power", "role": "real_power"}
+            ],
+        }
+    ]
+
+    assert (
+        config_flow._circuits_with_merged_source_circuit_sensors(
+            {
+                CONF_SOURCE_ENTITIES: [
+                    "sensor.refrigerator_power",
+                    "sensor.refrigerator_kvarh",
+                ]
+            },
+            circuits,
+        )
+        is None
+    )
+
+
+def test_options_source_merge_separates_duplicate_metric_alias() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuits = [
+        {
+            "circuit_id": "pump",
+            "name": "Pump",
+            "sensors": [{"entity_id": "sensor.pump_power", "role": "real_power"}],
+        }
+    ]
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.pump_power",
+                "sensor.pump_kw",
+                "sensor.pump_kva",
+            ]
+        },
+        circuits,
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "pump": ["sensor.pump_power", "sensor.pump_kva"],
+        "pump_kw": ["sensor.pump_kw"],
+    }
+
+
+def test_options_source_merge_moves_saved_qualified_sensor() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_voltage_max",
+                "sensor.panel_voltage",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_voltage"],
+        "panel_max": ["sensor.panel_voltage_max"],
+    }
+
+
+def test_options_source_merge_reuses_saved_variants_for_later_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage",
+                "sensor.panel_power_max",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+                "sensor.panel_kw_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"},
+                    {"entity_id": "sensor.panel_voltage", "role": "voltage"},
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_power_max",
+                        "role": "real_power",
+                    },
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    },
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power", "sensor.panel_voltage"],
+        "panel_max": [
+            "sensor.panel_power_max",
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+        "panel_max_2": ["sensor.panel_kw_max"],
+    }
+
+
+def test_options_source_merge_removes_saved_sensor_promoted_to_mains() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": ["sensor.panel_current_max"],
+    }
+
+
+def test_options_source_merge_removes_emptied_saved_variant() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_voltage_max"],
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max",
+                "name": "Panel Max",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert [circuit["circuit_id"] for circuit in merged] == ["panel"]
+
+
+def test_options_source_merge_reindexes_saved_variant_after_collision_clears() -> (
+    None
+):
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power",
+                "sensor.panel_voltage_max",
+                "sensor.panel_current_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [
+                    {"entity_id": "sensor.panel_power", "role": "real_power"}
+                ],
+            },
+            {
+                "circuit_id": "panel_max_2",
+                "name": "Panel Max 2",
+                "sensors": [
+                    {
+                        "entity_id": "sensor.panel_voltage_max",
+                        "role": "voltage",
+                    }
+                ],
+            },
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_power"],
+        "panel_max": [
+            "sensor.panel_voltage_max",
+            "sensor.panel_current_max",
+        ],
+    }
+
+
+def test_options_source_merge_reuses_emptied_saved_base_for_later_sources() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_voltage",
+                "sensor.panel_current_max",
+            ]
+        },
+        [
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "sensors": [],
+            }
+        ],
+    )
+
+    assert merged is not None
+    assert {
+        circuit["circuit_id"]: [sensor["entity_id"] for sensor in circuit["sensors"]]
+        for circuit in merged
+    } == {
+        "panel": ["sensor.panel_voltage"],
+        "panel_max": ["sensor.panel_current_max"],
+    }
+
+
+def test_options_source_merge_preserves_manual_circuit_assignment() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    merged = config_flow._circuits_with_merged_source_circuit_sensors(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.fridge_power",
+                "sensor.fridge_voltage",
+            ]
+        },
+        [
+            {
+                "circuit_id": "cold_storage",
+                "name": "Cold Storage",
+                "sensors": [
+                    {"entity_id": "sensor.fridge_power", "role": "real_power"}
+                ],
+            }
+        ],
+    )
+
+    assert merged is None
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "expected_role"),
+    (
+        ("sensor.high_voltage_panel_active_power", "real_power"),
+        ("sensor.panel_voltage_rms", "voltage"),
+        ("sensor.panel_current_rms", "current"),
+        ("sensor.panel_reactive_power_average", "reactive_power"),
+        ("sensor.energy_meter_voltage_a", "voltage"),
+        ("sensor.energy_meter_voltage_a_2", "voltage"),
+        ("sensor.energy_meter_reactive_power_a", "reactive_power"),
+        ("sensor.energy_meter_apparent_power_a", "apparent_power"),
+        ("sensor.energy_meter_frequency_a", "frequency"),
+        ("sensor.voltage_a", "voltage"),
+        ("sensor.frequency_a", "frequency"),
+        ("sensor.power_factor_a", "power_factor"),
+        ("sensor.panel_voltage_max", "voltage"),
+        ("sensor.panel_current_min", "current"),
+        ("sensor.panel_power_factor_max", "power_factor"),
+        ("sensor.panel_voltage_a_rms", "voltage"),
+        ("sensor.panel_current_b_max", "current"),
+        ("sensor.panel_reactive_power_a_average", "reactive_power"),
+        ("sensor.fridge_energy_today", "energy"),
+        ("sensor.fridge_kwh_today", "energy"),
+        ("sensor.grid_energy_import", "energy"),
+        ("sensor.grid_kwh_import", "energy"),
+        ("sensor.grid_energy_export", "energy"),
+    ),
+)
+def test_guided_assignment_uses_terminal_metric_role(
+    entity_id: str,
+    expected_role: str,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    circuit = config_flow._circuit_from_assignment_group(
+        {
+            "circuit_id": "high_voltage_panel",
+            "name": "High Voltage Panel",
+            "entity_ids": (entity_id,),
+        },
+        {
+            "include_circuit": True,
+            "included_sensors": [entity_id],
+            "circuit_name": "High Voltage Panel",
+            "appliance_profile": "mixed",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == expected_role
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "friendly_name", "expected_role"),
+    (
+        (
+            "sensor.fridge_energy_consumption",
+            "Fridge Energy Consumption",
+            "energy",
+        ),
+        ("sensor.fridge_power", "Current Power", "real_power"),
+        ("sensor.fridge_energy", "Fridge Power Consumption", "energy"),
+    ),
+)
+def test_guided_assignment_preserves_discovered_or_explicit_role(
+    entity_id: str,
+    friendly_name: str,
+    expected_role: str,
+) -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    group = config_flow.assignment_groups_from_sources(
+        [entity_id],
+        source_names={entity_id: friendly_name},
+    )[0]
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "included_sensors": [entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "mixed",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == expected_role
+
+
+def test_guided_assignment_preserves_saved_sensor_role() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entity_id = "sensor.fridge_energy_consumption"
+    group = config_flow.assignment_groups_from_sources(
+        [entity_id],
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [{"entity_id": entity_id, "role": "energy"}],
+            }
+        ],
+    )[0]
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "included_sensors": [entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["sensors"][0]["role"] == "energy"
+
+
+def test_guided_assignment_preserves_new_discovered_role_in_saved_group() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    saved_entity_id = "sensor.fridge_power"
+    new_entity_id = "sensor.fridge"
+    group = config_flow.assignment_groups_from_sources(
+        [saved_entity_id, new_entity_id],
+        source_names={new_entity_id: "Fridge Energy"},
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [
+                    {"entity_id": saved_entity_id, "role": "real_power"}
+                ],
+            }
+        ],
+    )[0]
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "included_sensors": [saved_entity_id, new_entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+        },
+    )
+
+    assert circuit is not None
+    assert {sensor["entity_id"]: sensor["role"] for sensor in circuit["sensors"]} == {
+        saved_entity_id: "real_power",
+        new_entity_id: "energy",
+    }
+
+
 def test_assignment_groups_keep_existing_sensor_ownership_separate() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,
@@ -3798,6 +4463,51 @@ def test_assignment_review_does_not_offer_sensors_owned_by_other_appliances() ->
         (source_entities[0],),
         (source_entities[1],),
     ]
+
+
+def test_assignment_review_preserves_role_when_moving_unowned_sensor() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    saved_entity_id = "sensor.refrigerator_power"
+    moved_entity_id = "sensor.fridge_energy_consumption"
+    flow = SimpleNamespace(hass=None, async_show_form=lambda **kwargs: kwargs)
+
+    config_flow._start_assignment_review(
+        flow,
+        {CONF_SOURCE_ENTITIES: [saved_entity_id, moved_entity_id]},
+        existing_circuits=[
+            {
+                "circuit_id": "refrigerator",
+                "name": "Refrigerator",
+                "appliance_profile": "refrigerator",
+                "mode": "single_phase",
+                "sensors": [
+                    {"entity_id": saved_entity_id, "role": "real_power"}
+                ],
+            }
+        ],
+        show_picker=True,
+        update_existing=True,
+    )
+    group = next(
+        group
+        for group in flow._assignment_groups
+        if group.get("circuit_id") == "refrigerator"
+    )
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "included_sensors": [saved_entity_id, moved_entity_id],
+            "circuit_name": "Refrigerator",
+            "appliance_profile": "refrigerator",
+        },
+    )
+
+    assert circuit is not None
+    assert {sensor["entity_id"]: sensor["role"] for sensor in circuit["sensors"]} == {
+        saved_entity_id: "real_power",
+        moved_entity_id: "energy",
+    }
 
 
 def test_removed_assignment_sensors_remain_available_as_candidates() -> None:

@@ -20,9 +20,12 @@ from .config_parsing import (
 )
 from .const import (
     CONF_CIRCUITS,
+    CONF_MAINS_SOURCE_ENTITIES,
     DOMAIN,
     EVENT_HVAC_ASSOCIATION_UPDATED,
 )
+from .context_sources import configured_context_entities
+from .discovery import discovered_sensor_roles
 from .expected_schedule import (
     expected_schedule_circuit_ids,
     refresh_expected_schedule_contexts,
@@ -173,13 +176,36 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._config_entry = config_entry
         self._store = store
         self.store_data = store_data or FeatureStoreData()
+        candidate_configs = _circuit_configs_from_entry_data(
+            self.entry_data,
+            self.options,
+        )
+        mains_entity_ids = {
+            sensor.entity_id
+            for config in candidate_configs
+            if config.mode is CircuitMode.MAINS_NILM or config.circuit_id == "mains"
+            for sensor in config.sensors
+        }
+        mains_entity_ids.update(
+            configured_context_entities(
+                self.entry_data,
+                self.options,
+                CONF_MAINS_SOURCE_ENTITIES,
+            )
+        )
+        mains_sensor_roles = discovered_sensor_roles(
+            hass,
+            mains_entity_ids,
+        )
         self.circuit_configs = _circuit_configs_from_entry_data(
             self.entry_data,
             self.options,
+            mains_sensor_roles=mains_sensor_roles,
         )
         self._mains_context_config = mains_context_config_from_sources(
             self.entry_data,
             self.options,
+            mains_sensor_roles=mains_sensor_roles,
         )
         self._mains_voltage_entity_ids = frozenset(
             sensor.entity_id

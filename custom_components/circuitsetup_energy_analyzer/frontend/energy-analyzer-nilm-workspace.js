@@ -2260,7 +2260,8 @@ export function createNilmWorkspaceMethods({
       [],
       MAX_NILM_CHART_POINTS_PER_SERIES,
     ).map((item) => {
-      const factor = String(item.unit || "").trim().toLowerCase() === "kw" ? 1000 : 1;
+      const unit = String(item.unit || "").trim();
+      const factor = unit === "MW" ? 1000000 : unit === "mW" ? 0.001 : unit.toLowerCase() === "kw" ? 1000 : 1;
       return {
         ...item,
         unit: "W",

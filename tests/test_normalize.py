@@ -19,7 +19,14 @@ from custom_components.circuitsetup_energy_analyzer.normalize import (
 )
 
 
-def test_build_circuit_sample_converts_kw_to_watts() -> None:
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    (("kW", 180.0), ("KW", 180.0), ("Kw", 180.0), ("mW", 0.00018)),
+)
+def test_build_circuit_sample_normalizes_real_power_units(
+    unit: str,
+    expected: float,
+) -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(
         circuit_id="fridge",
@@ -35,7 +42,7 @@ def test_build_circuit_sample_converts_kw_to_watts() -> None:
         "sensor.fridge_power": SourceState(
             "sensor.fridge_power",
             "0.18",
-            "kW",
+            unit,
             now,
         ),
         "sensor.fridge_current": SourceState(
@@ -48,9 +55,68 @@ def test_build_circuit_sample_converts_kw_to_watts() -> None:
 
     sample = build_circuit_sample(config, states, now)
 
-    assert sample.real_power_w == 180.0
+    assert sample.real_power_w == pytest.approx(expected)
     assert sample.current == 1.7
     assert sample.quality_issues == ()
+
+
+@pytest.mark.parametrize(
+    ("units", "expected"),
+    (
+        (
+            ("MW", "mA", "kV", "kVA", "kVAR"),
+            (1000.0, 0.5, 240.0, 2000.0, 3000.0),
+        ),
+        (
+            ("mW", "ma", "mv", "mva", "mvar"),
+            (0.000001, 0.5, 0.00024, 0.002, 0.003),
+        ),
+        (
+            ("MW", "MA", "MV", "MVA", "MVAR"),
+            (1000.0, 500_000_000.0, 240_000.0, 2_000_000.0, 3_000_000.0),
+        ),
+        (
+            ("MW", "mA", "KV", "KVA", "KVAR"),
+            (1000.0, 0.5, 240.0, 2000.0, 3000.0),
+        ),
+    ),
+)
+def test_build_circuit_sample_normalizes_scaled_measurements(
+    units: tuple[str, ...],
+    expected: tuple[float, ...],
+) -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    sensors = (
+        SensorRef("sensor.power", SensorRole.REAL_POWER),
+        SensorRef("sensor.current", SensorRole.CURRENT),
+        SensorRef("sensor.voltage", SensorRole.VOLTAGE),
+        SensorRef("sensor.apparent", SensorRole.APPARENT_POWER),
+        SensorRef("sensor.reactive", SensorRole.REACTIVE_POWER),
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        sensors=sensors,
+    )
+    states = {
+        sensor.entity_id: SourceState(sensor.entity_id, state, unit, now)
+        for sensor, state, unit in zip(
+            sensors,
+            ("0.001", "500", "0.24", "2", "3"),
+            units,
+            strict=True,
+        )
+    }
+
+    sample = build_circuit_sample(config, states, now)
+
+    assert sample.real_power == pytest.approx(expected[0])
+    assert sample.current == pytest.approx(expected[1])
+    assert sample.voltage == pytest.approx(expected[2])
+    assert sample.apparent_power == pytest.approx(expected[3])
+    assert sample.reactive_power == pytest.approx(expected[4])
 
 
 def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
@@ -76,6 +142,36 @@ def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
     assert sample.real_power_w is None
     assert "sensor.fridge_power unavailable" in sample.quality_issues
     assert "sensor.fridge_power stale" in sample.quality_issues
+
+
+def test_missing_duplicate_role_does_not_clear_valid_value() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_power_backup", SensorRole.REAL_POWER),
+        ),
+    )
+
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.fridge_power": SourceState(
+                "sensor.fridge_power",
+                "180",
+                "W",
+                now,
+            )
+        },
+        now,
+    )
+
+    assert sample.real_power == 180.0
+    assert "sensor.fridge_power_backup missing" in sample.quality_issues
 
 
 def test_build_circuit_sample_treats_stale_numeric_power_as_unavailable() -> None:
