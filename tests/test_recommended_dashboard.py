@@ -1591,12 +1591,16 @@ def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
         view for view in _dashboard_views(dashboard) if view["path"] == "insights"
     )
     cards = _dashboard_cards(insights)
-    paths = [
-        card["tap_action"]["navigation_path"]
+    source_cards = [
+        card
         for card in cards
-        if card.get("name") == "Open Load Separation"
+        if card.get("name", "").startswith("Open Load Separation:")
     ]
-    assert paths == [
+    assert [card["name"] for card in source_cards] == [
+        "Open Load Separation: Mixed Loads",
+        "Open Load Separation: HVAC 2",
+    ]
+    assert [card["tap_action"]["navigation_path"] for card in source_cards] == [
         "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=mixed",
         "/circuitsetup-energy-analyzer/nilm?entry_id=entry-1&circuit_id=hvac_2",
     ]

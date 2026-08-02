@@ -835,7 +835,9 @@ def _build_mains_nilm_view(context: DashboardContext) -> dict[str, Any]:
         cards.extend(
             {
                 "type": "button",
-                "name": _dashboard_text("cards", "open_load_separation"),
+                "name": _dashboard_text(
+                    "cards", "open_load_separation_for_source"
+                ).format(name=source.name),
                 "icon": "mdi:playlist-check",
                 "tap_action": {
                     "action": "navigate",

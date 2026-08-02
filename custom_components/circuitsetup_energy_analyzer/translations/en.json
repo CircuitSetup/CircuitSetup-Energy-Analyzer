@@ -1123,6 +1123,7 @@
         "nilm_review": "NILM review",
         "review_nilm_assignments": "Review NILM Assignments",
         "open_load_separation": "Open Load Separation",
+        "open_load_separation_for_source": "Open Load Separation: {name}",
         "hvac_energy_temperature": "HVAC daily energy and outdoor temperature",
         "water_flow_context": "Water flow context",
         "defined_nilm_appliance_power": "Defined NILM appliance power",
