@@ -5342,6 +5342,7 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
     ]
     entry = SimpleNamespace(
         data={
+            CONF_CIRCUITS: circuits,
             CONF_ADVANCED_SETTINGS: {
                 "mains": {"preset": "sensitive"},
             },
@@ -5358,7 +5359,6 @@ async def test_options_assignment_review_can_remove_selected_appliance() -> None
                 "sensor.refrigerator_power",
                 "sensor.microwave_power",
             ],
-            CONF_CIRCUITS: circuits,
             CONF_ADVANCED_SETTINGS: {
                 "refrigerator": {"preset": "sensitive"},
             },

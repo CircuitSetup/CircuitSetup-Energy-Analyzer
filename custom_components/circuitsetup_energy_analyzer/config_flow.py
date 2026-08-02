@@ -5399,6 +5399,7 @@ def _options_source_payload(config_entry: config_entries.ConfigEntry) -> dict[st
 
     return {
         **options,
+        CONF_CIRCUITS: _options_existing_circuits(config_entry),
         CONF_ADVANCED_SETTINGS: _settings_map_for_entry(
             config_entry, CONF_ADVANCED_SETTINGS
         ),
