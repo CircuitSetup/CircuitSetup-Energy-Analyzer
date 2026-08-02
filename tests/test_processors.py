@@ -8871,7 +8871,7 @@ def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
             edge.timestamp,
             "hvac-2",
             EventType.START if edge.direction == "on" else EventType.STOP,
-            {},
+            features={},
         )
         for edge in edges
     ]
@@ -8907,6 +8907,93 @@ def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
     candidate = payload["helper_candidates"][0]
     assert candidate["helper_circuit_id"] == "hvac-2"
     assert candidate["matched_on_count"] == candidate["matched_off_count"] == 3
+    context.store_data.nilm_signatures["ac-2"] = [payload]
+
+    config = CircuitConfig(
+        circuit_id="ac-2",
+        name="AC 2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now + timedelta(minutes=6),
+        circuit_id="ac-2",
+        real_power=100.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+    processor.process(sample, config, context, events=events)
+    processor.process(sample, config, context, events=events)
+
+    assert len(processor._helper_events_by_source["ac-2"]) == 6
+    retained_candidate = context.store_data.nilm_signatures["ac-2"][0][
+        "helper_candidates"
+    ][0]
+    assert retained_candidate["matched_on_count"] == 3
+    assert retained_candidate["matched_off_count"] == 3
+
+
+def test_confirmed_helper_link_refresh_preserves_relationship() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _refresh_confirmed_helper_links,
+    )
+
+    link = {
+        "helper_circuit_id": "hvac-2",
+        "relationship": "tracks_runtime",
+        "status": "confirmed",
+        "matched_on_count": 4,
+        "matched_off_count": 5,
+        "confidence": 0.9,
+    }
+    assignments = [{"signature_fingerprints": ["fingerprint"], "helper_links": [link]}]
+    low_confidence = {
+        "helper_circuit_id": "hvac-2",
+        "matched_on_count": 6,
+        "matched_off_count": 8,
+        "confidence": 0.7,
+        "start_lag_seconds": 8.0,
+        "stop_lag_seconds": 12.0,
+    }
+
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [low_confidence])
+
+    assert link["relationship"] == "tracks_runtime"
+    assert link["status"] == "confirmed"
+    assert link["confidence"] == 0.7
+    assert link["confirmed_matched_on_count"] == 4
+    assert link["confirmed_matched_off_count"] == 5
+
+    low_confidence["matched_on_count"] = 7
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [low_confidence])
+
+    assert link["status"] == "degraded"
+
+
+def test_confirmed_helper_link_unavailability_does_not_degrade() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _refresh_confirmed_helper_links,
+    )
+
+    link = {
+        "helper_circuit_id": "hvac-2",
+        "relationship": "tracks_runtime",
+        "status": "confirmed",
+        "matched_on_count": 3,
+        "matched_off_count": 3,
+        "confidence": 0.9,
+    }
+    assignments = [{"signature_fingerprints": ["fingerprint"], "helper_links": [link]}]
+
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [])
+
+    assert link["status"] == "confirmed"
+    assert "confirmed_matched_on_count" not in link
 
 
 @pytest.mark.parametrize(

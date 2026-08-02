@@ -75,6 +75,7 @@ class NilmSampleProcessor:
             lambda _id, _events: ()
         )
         self._helper_events_by_source: dict[str, list[CircuitEvent]] = defaultdict(list)
+        self._helper_links_dirty = False
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
 
@@ -105,13 +106,20 @@ class NilmSampleProcessor:
         detector.min_delta_w = min_delta_w
         edges = detector.process(sample)
         helper_events = self._helper_events_by_source[circuit_id]
+        previous_helper_event_keys = tuple(map(_helper_event_key, helper_events))
         helper_events.extend(self._helper_candidate_events(circuit_id, events))
+        helper_events = list(
+            {_helper_event_key(event): event for event in helper_events}.values()
+        )
         cutoff = sample.timestamp - timedelta(minutes=10)
         retained = [event for event in helper_events if event.timestamp >= cutoff]
         self._helper_events_by_source[circuit_id] = (
             retained[-self._unmatched_edges_max_items :]
             if self._unmatched_edges_max_items
             else []
+        )
+        helper_events_changed = previous_helper_event_keys != tuple(
+            map(_helper_event_key, self._helper_events_by_source[circuit_id])
         )
         current_known_events = tuple(self._known_load_events(circuit_id, events))
         pending_known_events = self._pending_known_load_events.pop(circuit_id, ())
@@ -144,7 +152,7 @@ class NilmSampleProcessor:
                 self._observe_topology(circuit_config, match, context),
             )
 
-        if edges or next_unmatched != existing_unmatched:
+        if edges or next_unmatched != existing_unmatched or helper_events_changed:
             signatures = cluster_recurring_signatures(
                 self.unmatched_edges_by_circuit[circuit_id],
             )
@@ -153,6 +161,9 @@ class NilmSampleProcessor:
                 signatures,
                 context,
             )
+            if self._helper_links_dirty:
+                store_dirty = True
+                self._helper_links_dirty = False
             if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
                 context.store_data.nilm_signatures[circuit_id] = payloads
                 store_dirty = True
@@ -307,6 +318,13 @@ class NilmSampleProcessor:
                         signature_edges, by_circuit
                     )
                 ]
+                self._helper_links_dirty |= _refresh_confirmed_helper_links(
+                    context.store_data.nilm_appliance_assignments_by_circuit.get(
+                        circuit_id, []
+                    ),
+                    feedback_fingerprint,
+                    payload["helper_candidates"],
+                )
             elif "helper_candidates" in metadata_current:
                 payload["helper_candidates"] = metadata_current["helper_candidates"]
             if user_label:
@@ -337,6 +355,68 @@ class NilmSampleProcessor:
                 payloads.append(signature)
 
         return payloads
+
+
+def _helper_event_key(event: CircuitEvent) -> tuple[Any, ...]:
+    """Return stable identity for retry-safe helper observation retention."""
+    return (
+        event.timestamp,
+        event.circuit_id,
+        event.event_type,
+        repr(event.severity),
+        repr(sorted(event.features.items())),
+    )
+
+
+def _refresh_confirmed_helper_links(
+    assignments: Iterable[Any],
+    feedback_fingerprint: str,
+    candidates: Iterable[Mapping[str, Any]],
+) -> bool:
+    """Refresh statistics on confirmed links without changing relationships."""
+    candidates_by_id = {
+        str(candidate.get("helper_circuit_id") or ""): candidate
+        for candidate in candidates
+    }
+    changed = False
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping) or feedback_fingerprint not in {
+            str(value or "")
+            for value in _list_items(assignment.get("signature_fingerprints"))
+        }:
+            continue
+        for link in _list_items(assignment.get("helper_links")):
+            if not isinstance(link, dict) or link.get("status") not in {
+                "confirmed",
+                "degraded",
+            }:
+                continue
+            candidate = candidates_by_id.get(str(link.get("helper_circuit_id") or ""))
+            if candidate is None:
+                continue
+            previous = dict(link)
+            link.setdefault(
+                "confirmed_matched_on_count", int(link.get("matched_on_count") or 0)
+            )
+            link.setdefault(
+                "confirmed_matched_off_count", int(link.get("matched_off_count") or 0)
+            )
+            relationship = link.get("relationship")
+            status = link.get("status")
+            link.update(candidate)
+            link["relationship"] = relationship
+            link["status"] = status
+            new_on = int(link.get("matched_on_count") or 0) - int(
+                link["confirmed_matched_on_count"]
+            )
+            new_off = int(link.get("matched_off_count") or 0) - int(
+                link["confirmed_matched_off_count"]
+            )
+            confidence = float(link.get("confidence") or 0)
+            if new_on >= 3 and new_off >= 3 and confidence < 0.75:
+                link["status"] = "degraded"
+            changed |= link != previous
+    return changed
 
 
 def nilm_state_updates(
