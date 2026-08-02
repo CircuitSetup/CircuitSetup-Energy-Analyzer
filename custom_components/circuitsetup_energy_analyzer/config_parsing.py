@@ -869,13 +869,22 @@ def source_circuit_ids_from_entity_ids(
                 entity_id,
             ),
         )
-        for entity_id in sorted(collided_entities):
+        bucket_variants: set[tuple[str, str]] = set()
+        for entity_id in sorted(
+            collided_entities,
+            key=lambda entity_id: (
+                qualifiers[entity_id],
+                metric_priority.get(metrics[entity_id], len(metric_priority)),
+                entity_id,
+            ),
+        ):
             if entity_id == primary_entity:
                 continue
             detail = qualifiers[entity_id] or metrics[entity_id]
             variant_key = (base_circuit_id, detail or "source")
-            if variant_key in variant_ids:
+            if variant_key in variant_ids and variant_key not in bucket_variants:
                 circuit_ids[entity_id] = variant_ids[variant_key]
+                bucket_variants.add(variant_key)
                 continue
             candidate_base = f"{base_circuit_id}_{detail or 'source'}"
             candidate = candidate_base
@@ -884,7 +893,8 @@ def source_circuit_ids_from_entity_ids(
                 candidate = f"{candidate_base}_{suffix}"
                 suffix += 1
             circuit_ids[entity_id] = candidate
-            variant_ids[variant_key] = candidate
+            variant_ids.setdefault(variant_key, candidate)
+            bucket_variants.add(variant_key)
             reserved_ids.add(candidate)
     return circuit_ids
 

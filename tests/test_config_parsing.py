@@ -215,20 +215,29 @@ def test_config_parser_groups_complementary_qualified_measurements() -> None:
         "sensor.panel_power_max",
         "sensor.panel_current_max",
         "sensor.panel_voltage_max",
+        "sensor.panel_kw_max",
     ]
     configs = circuit_configs_from_entry_data({CONF_SOURCE_ENTITIES: entity_ids})
     reversed_configs = circuit_configs_from_entry_data(
         {CONF_SOURCE_ENTITIES: list(reversed(entity_ids))}
     )
 
-    assert [config.circuit_id for config in configs] == ["panel", "panel_max"]
-    assert {
-        config.circuit_id: {sensor.entity_id for sensor in config.sensors}
-        for config in configs
-    } == {
-        "panel": set(entity_ids[:3]),
-        "panel_max": set(entity_ids[3:]),
+    assert [config.circuit_id for config in configs] == [
+        "panel",
+        "panel_max",
+        "panel_max_2",
+    ]
+    assert {sensor.role for sensor in configs[0].sensors} == {
+        SensorRole.REAL_POWER,
+        SensorRole.CURRENT,
+        SensorRole.VOLTAGE,
     }
+    assert {sensor.role for sensor in configs[1].sensors} == {
+        SensorRole.REAL_POWER,
+        SensorRole.CURRENT,
+        SensorRole.VOLTAGE,
+    }
+    assert [sensor.role for sensor in configs[2].sensors] == [SensorRole.REAL_POWER]
     assert {
         sensor.entity_id: config.circuit_id
         for config in reversed_configs

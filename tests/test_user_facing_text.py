@@ -3291,7 +3291,8 @@ def test_nilm_graph_uses_dense_watt_series_and_disables_selection_tooltips() -> 
 (() => {
   const panel = makePanel({
     _hass: { states: {
-      "sensor.mains_power": { attributes: { unit_of_measurement: "kW" } },
+      "sensor.mains_power": { attributes: { unit_of_measurement: "KW" } },
+      "sensor.mixed_power": { attributes: { unit_of_measurement: "Kw" } },
       "sensor.milli_power": { attributes: { unit_of_measurement: "mW" } },
       "sensor.mega_power": { attributes: { unit_of_measurement: "MW" } },
     } },
@@ -3309,6 +3310,10 @@ def test_nilm_graph_uses_dense_watt_series_and_disables_selection_tooltips() -> 
     entity_id: "sensor.mega_power",
     state: "0.001",
     last_changed: new Date(start).toISOString(),
+  }], [{
+    entity_id: "sensor.mixed_power",
+    state: "0.18",
+    last_changed: new Date(start).toISOString(),
   }]];
   panel._nilmWorkspaceHistorySeries = history;
   const nilmSeries = panel._visibleNilmWorkspaceSeries(makeWorkspace(), null);
@@ -3317,6 +3322,7 @@ def test_nilm_graph_uses_dense_watt_series_and_disables_selection_tooltips() -> 
   assert.equal(nilmSeries[0].points[1000].value, 1000);
   assert.equal(nilmSeries[1].points[0].value, 1);
   assert.equal(nilmSeries[2].points[0].value, 1000);
+  assert.equal(nilmSeries[3].points[0].value, 180);
   assert.equal(panel._chartSeries(history)[0].points.length, 240);
 
   panel._nilmIntervalEditorOpen = true;
