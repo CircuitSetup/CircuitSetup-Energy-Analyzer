@@ -34,9 +34,11 @@ from .services import (
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
+    ATTR_HELPER_CIRCUIT_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
+    ATTR_RELATIONSHIP,
     ATTR_SESSION_ID,
     ATTR_SIGNATURE_FINGERPRINT,
     ATTR_SIGNATURE_ID,
@@ -57,8 +59,10 @@ from .services import (
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_REJECT_NILM_SESSION,
+    SERVICE_REMOVE_NILM_HELPER_LINK,
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
@@ -91,6 +95,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "fingerprint",
     "feedback_fingerprint",
     "signature_fingerprint",
+    "helper_candidates",
 )
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
 MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
@@ -146,6 +151,7 @@ def nilm_workspace_payload(
         config.circuit_id,
         label_intervals=all_label_intervals,
     )
+    _add_nilm_helper_evidence(assignments, signatures, config.circuit_id)
     assignment_options = _nilm_assignment_options(assignments)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
     reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
@@ -719,6 +725,74 @@ def _nilm_assignment_options(
         ).strip()
         options.append({"value": assignment_id, "label": label})
     return options
+
+
+def _add_nilm_helper_evidence(
+    assignments: list[dict[str, Any]],
+    signatures: list[dict[str, Any]],
+    circuit_id: str,
+) -> None:
+    signatures_by_fingerprint = {
+        str(signature.get(key) or "").strip(): signature
+        for signature in signatures
+        for key in ("fingerprint", "feedback_fingerprint", "signature_fingerprint")
+        if signature.get(key)
+    }
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        candidates = [
+            dict(candidate)
+            for fingerprint in assignment.get("signature_fingerprints", ())
+            for candidate in signatures_by_fingerprint.get(str(fingerprint), {}).get(
+                "helper_candidates", ()
+            )
+            if isinstance(candidate, Mapping) and candidate.get(ATTR_HELPER_CIRCUIT_ID)
+        ]
+        links = [
+            dict(link)
+            for link in assignment.get("helper_links", ())
+            if isinstance(link, Mapping)
+        ]
+        for item in candidates:
+            item["state"] = (
+                "degraded"
+                if item.get("degraded") or item.get("status") == "degraded"
+                else "suggested"
+                if item.get("suggested")
+                else "available"
+            )
+            item["relationship_options"] = ["corroborates", "direct_component"]
+            item["actions"] = {
+                "set": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_SET_NILM_HELPER_LINK,
+                    "data": {
+                        ATTR_CIRCUIT_ID: circuit_id,
+                        ATTR_ASSIGNMENT_ID: assignment_id,
+                        ATTR_HELPER_CIRCUIT_ID: item[ATTR_HELPER_CIRCUIT_ID],
+                    },
+                    "requires": [ATTR_RELATIONSHIP],
+                }
+            }
+        for item in links:
+            item["state"] = (
+                "degraded"
+                if item.get("degraded") or item.get("status") == "degraded"
+                else "confirmed"
+            )
+            item["actions"] = {
+                "remove": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_REMOVE_NILM_HELPER_LINK,
+                    "data": {
+                        ATTR_CIRCUIT_ID: circuit_id,
+                        ATTR_ASSIGNMENT_ID: assignment_id,
+                        ATTR_HELPER_CIRCUIT_ID: item.get(ATTR_HELPER_CIRCUIT_ID),
+                    },
+                }
+            }
+        assignment["helper_candidates"] = candidates
+        assignment["helper_links"] = links
 
 
 def _add_nilm_assignment_options(
@@ -1422,6 +1496,7 @@ def _nilm_workspace_history_payload(
     *,
     hours: Any,
     entry_id: str | None = None,
+    helper_configs: Iterable[CircuitConfig] = (),
 ) -> dict[str, Any]:
     requested_hours = _bounded_float(
         hours,
@@ -1434,6 +1509,7 @@ def _nilm_workspace_history_payload(
         config,
         known_load_overlays,
         solar_overlays,
+        helper_configs,
     )
     history_query_values = {
         "circuit_id": config.circuit_id,
@@ -1471,6 +1547,7 @@ def _nilm_workspace_history_entities(
     config: CircuitConfig,
     _known_load_overlays: list[dict[str, Any]],
     _solar_overlays: list[dict[str, Any]],
+    helper_configs: Iterable[CircuitConfig] = (),
 ) -> list[str]:
     sensors = tuple(getattr(config, "sensors", ()) or ())
     real_power_ids = _unique_strings(
@@ -1480,8 +1557,19 @@ def _nilm_workspace_history_entities(
         and getattr(sensor, "entity_id", None)
     )
     if real_power_ids or any(getattr(sensor, "role", None) for sensor in sensors):
-        return real_power_ids[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
-    return _sensor_entity_ids(config)[:MAX_NILM_WORKSPACE_HISTORY_ENTITIES]
+        source_ids = real_power_ids[:1]
+    else:
+        source_ids = _sensor_entity_ids(config)[:1]
+    helper_ids = [
+        entity_id
+        for helper in helper_configs
+        for entity_id in _unique_strings(
+            sensor.entity_id
+            for sensor in getattr(helper, "sensors", ()) or ()
+            if getattr(sensor, "role", None) == SensorRole.REAL_POWER
+        )[:1]
+    ]
+    return _unique_strings((*source_ids, *helper_ids))[:5]
 
 
 def _sensor_entity_ids(config: Any) -> list[str]:

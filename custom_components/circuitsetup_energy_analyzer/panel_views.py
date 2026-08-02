@@ -211,5 +211,10 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
+            helper_circuit_ids=(
+                request.query.getall("helper_circuit_id", [])
+                if hasattr(request.query, "getall")
+                else []
+            ),
         )
         return panel.web.json_response(payload)

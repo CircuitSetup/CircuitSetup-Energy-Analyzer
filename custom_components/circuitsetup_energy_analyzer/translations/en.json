@@ -1936,7 +1936,16 @@
         "nilm_edge": "NILM edge",
         "nilm_session": "NILM session",
         "displayed_power_samples": "displayed power samples",
-        "sensor_count": "{count} {noun}"
+        "sensor_count": "{count} {noun}",
+        "helper_evidence": "Helper circuit evidence",
+        "helper_toggle": "Show {name} real-power overlay",
+        "helper_matched_starts": "Matched {matched} of {total} {name} starts",
+        "helper_start_delay": "Typical start delay {seconds} seconds",
+        "helper_relationship": "Relationship",
+        "helper_relationship_corroborates": "Evidence only — use this circuit to corroborate the NILM estimate.",
+        "helper_relationship_direct_component": "Direct component — treat this circuit as a measured component of the NILM assignment.",
+        "helper_confirm": "Confirm helper",
+        "helper_remove": "Remove helper"
       },
       "chart": {
           "accessible_summary": "Alert evidence chart with {series_count} series and {point_count} points. Values range from {min}{unit} to {max}{unit}, from {start} to {end}.",

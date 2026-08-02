@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-3"
+    assert PANEL_MODULE_VERSION == "20260802-4"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -2111,6 +2111,65 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     )
 
 
+def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    source = CircuitConfig(
+        circuit_id="mains", name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM, mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+    )
+    helper = CircuitConfig(
+        circuit_id="ac2", name="AC2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.ac2_w", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=source, configs=(source, helper))
+    coordinator.entry_id = "entry-1"
+    evidence = {
+        "helper_circuit_id": "ac2", "matched_on_count": 9, "source_on_count": 10,
+        "matched_off_count": 8, "source_off_count": 10, "source_coverage": 0.85,
+        "start_coverage": 0.9, "stop_coverage": 0.8, "helper_precision": 0.95,
+        "start_lag_seconds": 42.0, "stop_lag_seconds": -18.0,
+        "start_lag_mad_seconds": 5.0, "stop_lag_mad_seconds": 7.0,
+        "confidence": 0.91, "last_observed": "2026-08-02T12:00:00+00:00",
+        "suggested": True,
+    }
+    coordinator.store_data.nilm_signatures = {"mains": [{
+        "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
+        "helper_candidates": [evidence],
+    }]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [{
+        "assignment_id": "assignment-1", "display_name": "Air handler",
+        "signature_fingerprints": ["fp-1"], "lifecycle_state": "assigned",
+        "helper_links": [{
+            **evidence, "relationship": "direct_component", "status": "confirmed",
+        }],
+    }]}
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-1"
+    )
+    candidate = payload["assignments"][0]["helper_candidates"][0]
+    link = payload["assignments"][0]["helper_links"][0]
+
+    assert {key: candidate[key] for key in evidence} == evidence
+    assert candidate["state"] == "suggested"
+    assert candidate["relationship_options"] == ["corroborates", "direct_component"]
+    assert candidate["actions"]["set"]["data"] == {
+        "entry_id": "entry-1", "circuit_id": "mains",
+        "assignment_id": "assignment-1", "helper_circuit_id": "ac2",
+    }
+    assert candidate["actions"]["set"]["requires"] == ["relationship"]
+    assert link["state"] == "confirmed"
+    assert link["actions"]["remove"]["data"] == {
+        "entry_id": "entry-1", "circuit_id": "mains",
+        "assignment_id": "assignment-1", "helper_circuit_id": "ac2",
+    }
+
+
 def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
@@ -2530,6 +2589,99 @@ async def test_nilm_workspace_history_view_queries_mixed_source_entity(
     await panel.NilmWorkspaceHistoryView().get(request)
 
     assert queried == ["sensor.fridge_power"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_view_forwards_repeated_helper_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    class Query(dict):
+        def getall(self, key, default):
+            return ["helper-a", "helper-b"] if key == "helper_circuit_id" else default
+
+    captured = None
+
+    async def history_payload(_hass, _coordinators, **kwargs):
+        nonlocal captured
+        captured = kwargs
+        return []
+
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: SimpleNamespace()}, query=Query(circuit_id="mains")
+    )
+    monkeypatch.setattr(panel, "nilm_workspace_history_payload", history_payload)
+    monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    await panel.NilmWorkspaceHistoryView().get(request)
+
+    assert captured["helper_circuit_ids"] == ["helper-a", "helper-b"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    source = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+    )
+    helpers = tuple(
+        CircuitConfig(
+            circuit_id=f"helper-{index}",
+            name=f"Helper {index}",
+            appliance_profile=ApplianceProfile.MOTOR_LOAD,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(
+                SensorRef(f"sensor.helper_{index}_w", SensorRole.REAL_POWER),
+                SensorRef(f"sensor.helper_{index}_pf", SensorRole.POWER_FACTOR),
+            ),
+        )
+        for index in range(1, 6)
+    )
+    coordinator = _coordinator(config=source, configs=(source, *helpers))
+    coordinator.entry_id = "entry-1"
+    other = _nilm_workspace_coordinator(
+        entry_id="entry-2", name="Other", entity_id="sensor.other"
+    )
+    other.circuit_configs += (
+        CircuitConfig(
+            circuit_id="cross-entry",
+            name="Cross entry",
+            appliance_profile=ApplianceProfile.MOTOR_LOAD,
+            mode=CircuitMode.SINGLE_PHASE,
+            sensors=(SensorRef("sensor.cross_entry_w", SensorRole.REAL_POWER),),
+        ),
+    )
+    queried = []
+
+    async def history_rows(_hass, _start, _end, entity_ids):
+        queried.extend(entity_ids)
+        return []
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+    await panel.nilm_workspace_history_payload(
+        SimpleNamespace(),
+        [coordinator, other],
+        circuit_id="mains",
+        entry_id="entry-1",
+        helper_circuit_ids=[
+            "helper-2", "mains", "unknown", "helper-2", "cross-entry",
+            "helper-1", "helper-3", "helper-4", "helper-5",
+        ],
+    )
+
+    assert queried == [
+        "sensor.mains_w", "sensor.helper_2_w", "sensor.helper_1_w",
+        "sensor.helper_3_w", "sensor.helper_4_w",
+    ]
 
 
 def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
