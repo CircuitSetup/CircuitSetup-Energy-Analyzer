@@ -3504,6 +3504,49 @@ test("no-mains energy history waits for an appliance selection", async ({ page }
   await expect(card.locator('[data-cost-source="current"]')).toHaveCount(0);
 });
 
+test("re-entering the dashboard defaults its date range to today", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-08-02T12:00:00.000Z") });
+  await mockPanelApi(page);
+  const historicalRange = {
+    start: "2026-07-30T00:00:00.000Z",
+    end: "2026-07-31T23:59:59.999Z",
+    compare: true,
+  };
+  await openDashboardCard(
+    page,
+    "circuitsetup-energy-analyzer-date-range",
+    {},
+    {},
+    { time_zone: "UTC" },
+    historicalRange,
+  );
+
+  await page.evaluate(() => {
+    window.__dashboardCard.remove();
+    const card = document.createElement("circuitsetup-energy-analyzer-date-range");
+    card.panel = window.__panel._panel;
+    card.setConfig({});
+    card.hass = window.__dashboardHass;
+    document.body.append(card);
+    window.__dashboardCard = card;
+  });
+
+  const reentered = page.locator("circuitsetup-energy-analyzer-date-range");
+  const todayRange = {
+    start: "2026-08-02T00:00:00.000Z",
+    end: "2026-08-02T23:59:59.999Z",
+    compare: false,
+  };
+  await expect.poll(() => reentered.locator("ha-date-range-picker").evaluate((picker) => ({
+    start: picker.startDate.toISOString(),
+    end: picker.endDate.toISOString(),
+    compare: false,
+  }))).toEqual(todayRange);
+  await expect.poll(() => page.evaluate(() => (
+    JSON.parse(localStorage.getItem("circuitsetup-energy-analyzer-dashboard-range"))
+  ))).toEqual(todayRange);
+});
+
 test("Now resets the dashboard date range shared with graph history requests", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-24T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
