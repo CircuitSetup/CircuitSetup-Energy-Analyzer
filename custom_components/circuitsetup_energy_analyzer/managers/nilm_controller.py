@@ -1361,6 +1361,79 @@ class NilmController:
         await self.async_save_assignment_change()
         return dict(assignment)
 
+    async def async_set_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *,
+        helper_circuit_id: str, relationship: str,
+    ) -> dict[str, Any]:
+        """Confirm one direct-circuit relationship for a NILM assignment."""
+        registry = self._coordinator.circuit_registry
+        if registry.config_for_circuit(circuit_id) is None:
+            raise ValueError(f"Missing NILM source circuit '{circuit_id}'.")
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        helper_id = str(helper_circuit_id or "").strip()
+        if helper_id == circuit_id:
+            raise ValueError("A NILM source cannot link to itself.")
+        helper_config = registry.config_for_circuit(helper_id)
+        if helper_config is None:
+            raise ValueError(f"Missing helper circuit '{helper_id}'.")
+        if relationship not in {"corroborates", "direct_component"}:
+            raise ValueError(f"Unsupported helper relationship '{relationship}'.")
+        direct_eligible = supports_direct_appliance_analysis(helper_config)
+        if relationship == "direct_component" and not direct_eligible:
+            raise ValueError(
+                f"Helper circuit '{helper_id}' is not direct-appliance eligible."
+            )
+        links = [dict(link) for link in assignment.get("helper_links", ())
+                 if isinstance(link, Mapping)
+                 and link.get("helper_circuit_id") != helper_id]
+        if len(links) >= 4:
+            raise ValueError(
+                "A NILM assignment can have at most four confirmed helper links."
+            )
+        if relationship == "direct_component" and any(
+            link.get("relationship") == "direct_component" for link in links
+        ):
+            raise ValueError(
+                "A NILM assignment can have only one direct_component link."
+            )
+        fingerprints = set(self._clean_string_list(
+            assignment.get("signature_fingerprints")
+        ))
+        candidate = next((candidate for signature in
+            self._coordinator.store_data.nilm_signatures.get(circuit_id, ())
+            if isinstance(signature, Mapping)
+            and str(signature.get("feedback_fingerprint") or "") in fingerprints
+            for candidate in signature.get("helper_candidates", ())
+            if isinstance(candidate, Mapping)
+            and candidate.get("helper_circuit_id") == helper_id), None)
+        link = dict(candidate or {})
+        link.update(helper_circuit_id=helper_id, relationship=relationship,
+                    status="confirmed")
+        link["confirmed_matched_on_count"] = int(link.get("matched_on_count") or 0)
+        link["confirmed_matched_off_count"] = int(link.get("matched_off_count") or 0)
+        links.append(link)
+        links.sort(key=lambda item: (float(item.get("confidence") or 0),
+                                     str(item.get("last_observed") or "")),
+                   reverse=True)
+        assignment["helper_links"] = links[:4]
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
+    async def async_remove_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *, helper_circuit_id: str,
+    ) -> dict[str, Any]:
+        """Remove one confirmed helper relationship."""
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        helper_id = str(helper_circuit_id or "").strip()
+        assignment["helper_links"] = [dict(link)
+            for link in assignment.get("helper_links", ())
+            if isinstance(link, Mapping)
+            and link.get("helper_circuit_id") != helper_id]
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
     async def async_convert_nilm_assignment_to_direct_meter(
         self,
         circuit_id: str,

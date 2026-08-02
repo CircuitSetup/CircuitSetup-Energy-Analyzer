@@ -856,6 +856,64 @@ merge_nilm_assignments:
       example: assignment-target
       selector:
         text:
+set_nilm_helper_link:
+  name: Set NILM helper link
+  description: Confirm a configured circuit as evidence for one NILM appliance assignment.
+  fields:
+    circuit_id:
+      name: Source circuit ID
+      required: true
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      required: true
+      selector:
+        text:
+    helper_circuit_id:
+      name: Helper circuit ID
+      required: true
+      selector:
+        text:
+    relationship:
+      name: Relationship
+      required: true
+      selector:
+        select:
+          options:
+            - label: Runs with this load (evidence only)
+              value: corroborates
+            - label: Directly measures this load (included in source)
+              value: direct_component
+    entry_id:
+      name: Config entry ID
+      required: false
+      selector:
+        text:
+remove_nilm_helper_link:
+  name: Remove NILM helper link
+  description: Remove a confirmed circuit relationship from one NILM appliance assignment.
+  fields:
+    circuit_id:
+      name: Source circuit ID
+      required: true
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      required: true
+      selector:
+        text:
+    helper_circuit_id:
+      name: Helper circuit ID
+      required: true
+      selector:
+        text:
+    entry_id:
+      name: Config entry ID
+      required: false
+      selector:
+        text:
 publish_nilm_appliance_assignment:
   name: Publish NILM appliance assignment
   description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."

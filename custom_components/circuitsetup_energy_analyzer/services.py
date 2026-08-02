@@ -49,6 +49,8 @@ SERVICE_MERGE_NILM_ASSIGNMENTS = "merge_nilm_assignments"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
 SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
+SERVICE_SET_NILM_HELPER_LINK = "set_nilm_helper_link"
+SERVICE_REMOVE_NILM_HELPER_LINK = "remove_nilm_helper_link"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
@@ -141,6 +143,8 @@ ATTR_TARGET_ASSIGNMENT_ID = "target_assignment_id"
 ATTR_DIRECT_CIRCUIT_ID = "direct_circuit_id"
 ATTR_KEEP_ASSIGNMENT_FOR_MASKING = "keep_assignment_for_masking"
 ATTR_KEEP_PUBLISHED_ESTIMATE = "keep_published_estimate"
+ATTR_HELPER_CIRCUIT_ID = "helper_circuit_id"
+ATTR_RELATIONSHIP = "relationship"
 ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
@@ -426,6 +430,28 @@ NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     required=(ATTR_ASSIGNMENT_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
+
+def _nilm_helper_link_schema(*, relationship: bool) -> Callable:
+    required = {ATTR_CIRCUIT_ID, ATTR_ASSIGNMENT_ID, ATTR_HELPER_CIRCUIT_ID}
+    if relationship:
+        required.add(ATTR_RELATIONSHIP)
+    allowed = required | {ATTR_ENTRY_ID}
+    def validate(data: Mapping[str, Any] | None) -> dict[str, Any]:
+        values = dict(data or {})
+        missing, extra = required - values.keys(), values.keys() - allowed
+        if missing:
+            raise ValueError(f"Missing required field: {', '.join(sorted(missing))}")
+        if extra:
+            raise ValueError(f"Unsupported field: {', '.join(sorted(extra))}")
+        if relationship and values[ATTR_RELATIONSHIP] not in {
+            "corroborates", "direct_component"
+        }:
+            raise ValueError("relationship must be corroborates or direct_component")
+        return values
+    return validate
+
+NILM_SET_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=True)
+NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=False)
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
@@ -499,6 +525,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
+    SERVICE_SET_NILM_HELPER_LINK: NILM_SET_HELPER_LINK_SERVICE_SCHEMA,
+    SERVICE_REMOVE_NILM_HELPER_LINK: NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
@@ -1061,6 +1089,23 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         return
 
+    if service in {SERVICE_SET_NILM_HELPER_LINK, SERVICE_REMOVE_NILM_HELPER_LINK}:
+        circuit_id = str(data.get(ATTR_CIRCUIT_ID) or "").strip()
+        target = _target_nilm_helper_link_coordinator(
+            hass, circuit_id, str(data.get(ATTR_ASSIGNMENT_ID) or "").strip(),
+            str(data.get(ATTR_HELPER_CIRCUIT_ID) or "").strip(),
+            data.get(ATTR_ENTRY_ID),
+        )
+        kwargs = {"helper_circuit_id": data.get(ATTR_HELPER_CIRCUIT_ID)}
+        method = "async_remove_nilm_helper_link"
+        if service == SERVICE_SET_NILM_HELPER_LINK:
+            method = "async_set_nilm_helper_link"
+            kwargs["relationship"] = data.get(ATTR_RELATIONSHIP)
+        await _call_if_present(
+            target, method, circuit_id, data.get(ATTR_ASSIGNMENT_ID), **kwargs
+        )
+        return
+
     if service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
         circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_signature_coordinators(
@@ -1473,6 +1518,26 @@ def _target_entry_circuit_coordinator(
             f"Unknown circuit_id '{circuit_id}' for entry_id '{entry_id}'."
         )
     return [coordinator]
+
+def _target_nilm_helper_link_coordinator(
+    hass: Any, circuit_id: str, assignment_id: str,
+    helper_circuit_id: str, entry_id: Any = None,
+) -> Any:
+    """Require one entry that owns both assignment and helper circuit."""
+    candidates = (_target_entry_circuit_coordinator(
+        hass, entry_id.strip(), circuit_id
+    ) if isinstance(entry_id, str) and entry_id.strip()
+        else _loaded_coordinators(hass))
+    matched = [coordinator for coordinator in candidates
+        if any(item.get("assignment_id") == assignment_id for item in getattr(
+            getattr(coordinator, "store_data", None),
+            "nilm_appliance_assignments_by_circuit", {}
+        ).get(circuit_id, ()) if isinstance(item, Mapping))
+        and helper_circuit_id in _known_circuit_ids(coordinator)]
+    if len(matched) != 1:
+        reason = "ambiguous" if len(matched) > 1 else "not found"
+        raise HomeAssistantError(f"NILM helper link target is {reason}.")
+    return matched[0]
 
 
 def _unknown_circuit_message(circuit_id: str, coordinators: list[Any]) -> str:

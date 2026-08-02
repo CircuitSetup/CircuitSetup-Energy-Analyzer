@@ -1428,6 +1428,24 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             appliance_profile=appliance_profile,
         )
 
+    async def async_set_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *,
+        helper_circuit_id: str, relationship: str,
+    ) -> dict[str, Any]:
+        """Persist one confirmed NILM helper relationship."""
+        return await self.nilm_controller.async_set_nilm_helper_link(
+            circuit_id, assignment_id, helper_circuit_id=helper_circuit_id,
+            relationship=relationship,
+        )
+
+    async def async_remove_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *, helper_circuit_id: str,
+    ) -> dict[str, Any]:
+        """Remove one confirmed NILM helper relationship."""
+        return await self.nilm_controller.async_remove_nilm_helper_link(
+            circuit_id, assignment_id, helper_circuit_id=helper_circuit_id,
+        )
+
     async def async_convert_nilm_assignment_to_direct_meter(
         self: Self,
         circuit_id: str,
