@@ -106,6 +106,36 @@ def test_infer_sensor_role_from_circuitsetup_live_sensor_names() -> None:
         assert infer_sensor_role(entity_id, friendly_name) is role
 
 
+def test_infer_sensor_role_uses_device_class_and_unit_for_generic_names() -> None:
+    assert (
+        infer_sensor_role(
+            "sensor.channel_1",
+            "Channel 1",
+            device_class="voltage",
+            unit="V",
+        )
+        is SensorRole.VOLTAGE
+    )
+    assert (
+        infer_sensor_role(
+            "sensor.channel_2",
+            "Channel 2",
+            device_class=None,
+            unit="kvar",
+        )
+        is SensorRole.REACTIVE_POWER
+    )
+    assert (
+        infer_sensor_role(
+            "sensor.channel_3",
+            "Channel 3",
+            device_class="reactive_energy",
+            unit="kvarh",
+        )
+        is None
+    )
+
+
 def test_async_discover_energy_sources_includes_generic_sensors() -> None:
     import custom_components.circuitsetup_energy_analyzer.discovery as discovery
 

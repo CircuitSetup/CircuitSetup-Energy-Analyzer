@@ -19,6 +19,7 @@ from .discovery import friendly_source_name
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
 )
+from .managers.source_samples import normalized_leg
 from .models import (
     ApplianceProfile,
     CircuitConfig,
@@ -48,6 +49,8 @@ def retention_mode_from_sources(
 def circuit_configs_from_entry_data(
     entry_data: dict[str, Any],
     options: dict[str, Any] | None = None,
+    *,
+    mains_sensor_roles: Mapping[str, SensorRole | str | None] | None = None,
 ) -> tuple[CircuitConfig, ...]:
     configs: list[CircuitConfig] = []
     options = options or {}
@@ -67,6 +70,12 @@ def circuit_configs_from_entry_data(
         options,
         configs,
     )
+    configs = _configs_with_merged_mains_entity_refs(
+        entry_data,
+        options,
+        configs,
+        mains_sensor_roles=mains_sensor_roles,
+    )
     configs.extend(
         _source_entity_configs_from_sources(
             entry_data,
@@ -81,7 +90,11 @@ def circuit_configs_from_entry_data(
         or config.circuit_id == "mains"
         for config in configs
     ):
-        mains_config = mains_context_config_from_sources(entry_data, options)
+        mains_config = mains_context_config_from_sources(
+            entry_data,
+            options,
+            mains_sensor_roles=mains_sensor_roles,
+        )
         if mains_config is not None:
             configs.append(mains_config)
     return tuple(configs)
@@ -116,6 +129,8 @@ def _configs_with_merged_source_entity_refs(
     source_circuit_ids = source_circuit_ids_from_entity_ids(
         [*existing_source_entity_list, *source_entities],
         sensor_roles={sensor.entity_id: sensor.role for sensor in existing_sensor_refs},
+        sensor_legs={sensor.entity_id: sensor.leg for sensor in existing_sensor_refs},
+        reserved_circuit_ids=config_index,
     )
     for entity_id in source_entities:
         if (
@@ -135,7 +150,7 @@ def _configs_with_merged_source_entity_refs(
                 SensorRef(
                     entity_id=entity_id,
                     role=sensor_role_from_entity_id(entity_id),
-                    leg=_entity_id_leg_hint(entity_id),
+                    leg=source_entity_leg_hint(entity_id),
                 ),
             ),
         )
@@ -153,6 +168,97 @@ def _config_index_by_source_circuit_id(
             if circuit_id:
                 config_index.setdefault(circuit_id, index)
     return config_index
+
+
+def _configs_with_merged_mains_entity_refs(
+    entry_data: dict[str, Any],
+    options: dict[str, Any],
+    configs: list[CircuitConfig],
+    *,
+    mains_sensor_roles: Mapping[str, SensorRole | str | None] | None = None,
+) -> list[CircuitConfig]:
+    mains_entities = _string_list_from_sources(
+        entry_data,
+        options,
+        CONF_MAINS_SOURCE_ENTITIES,
+    )
+    if not mains_entities:
+        return configs
+    mains_index = next(
+        (
+            index
+            for index, config in enumerate(configs)
+            if config.mode is CircuitMode.MAINS_NILM
+        ),
+        None,
+    )
+    if mains_index is None:
+        mains_index = next(
+            (
+                index
+                for index, config in enumerate(configs)
+                if config.circuit_id == "mains"
+            ),
+            None,
+        )
+    if mains_index is None:
+        return configs
+
+    config = configs[mains_index]
+    existing_refs = tuple(
+        resolved
+        for sensor in config.sensors
+        if (
+            resolved := _mains_sensor_ref(
+                sensor.entity_id,
+                mains_sensor_roles,
+                existing=sensor,
+            )
+        )
+        is not None
+    )
+    existing_entities = {sensor.entity_id for sensor in existing_refs}
+    additions = tuple(
+        sensor
+        for entity_id in mains_entities
+        if (sensor := _mains_sensor_ref(entity_id, mains_sensor_roles)) is not None
+        if entity_id not in existing_entities
+    )
+    sensors = _deduplicated_sensor_refs((*existing_refs, *additions))
+    if sensors != config.sensors:
+        configs[mains_index] = replace(
+            config,
+            sensors=sensors,
+        )
+    return configs
+
+
+def _mains_sensor_ref(
+    entity_id: str,
+    sensor_roles: Mapping[str, SensorRole | str | None] | None,
+    *,
+    existing: SensorRef | None = None,
+) -> SensorRef | None:
+    if _harmonic_source_entity_excluded(entity_id):
+        return None
+    if sensor_roles is not None and entity_id in sensor_roles:
+        try:
+            role = SensorRole(sensor_roles[entity_id])
+        except (TypeError, ValueError):
+            return None
+    elif existing is not None:
+        return existing
+    else:
+        if untyped_source_entity_excluded(entity_id):
+            return None
+        role = sensor_role_from_entity_id(entity_id)
+    if existing is not None:
+        return replace(existing, role=role)
+    return SensorRef(
+        entity_id=entity_id,
+        role=role,
+        leg=source_entity_leg_hint(entity_id),
+    )
 
 
 def _source_entity_configs_from_sources(
@@ -192,7 +298,7 @@ def _source_entity_configs_from_sources(
             SensorRef(
                 entity_id=entity_id,
                 role=sensor_role_from_entity_id(entity_id),
-                leg=_entity_id_leg_hint(entity_id),
+                leg=source_entity_leg_hint(entity_id),
             )
         )
 
@@ -219,6 +325,25 @@ def _automatic_source_entity_excluded(entity_id: str) -> bool:
 
 def untyped_source_entity_excluded(entity_id: str) -> bool:
     object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
+    reactive_energy_measurement = (
+        re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
+        or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
+    )
+    terminal_reactive_energy = _has_metric_suffix(
+        object_id,
+        ("reactive_energy", "kvarh", "varh"),
+    )
+    return _harmonic_source_entity_excluded(entity_id) or (
+        reactive_energy_measurement
+        and (
+            terminal_reactive_energy
+            or explicit_sensor_role_from_entity_id(entity_id) is None
+        )
+    )
+
+
+def _harmonic_source_entity_excluded(entity_id: str) -> bool:
+    object_id = re.sub(r"[^a-z0-9]+", "_", _entity_object_id(entity_id)).strip("_")
     harmonic_object_id = re.sub(
         r"_\d+$", "", _strip_trailing_source_qualifiers(object_id)
     )
@@ -229,26 +354,11 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
         r"|distortion|energy|frequency|current|voltage|power"
         r"|watts?|amps?|volts?|[km]?(?:w|wh|var|va|a|v)|hz))?$"
     )
-    harmonic_measurement = any(
+    return any(
         re.search(harmonic_pattern, candidate) is not None
         for candidate in (
             harmonic_object_id,
             re.sub(r"_[ab]$", "", harmonic_object_id),
-        )
-    )
-    reactive_energy_measurement = (
-        re.search(r"(?:^|_)reactive_energy(?:_|$)", object_id) is not None
-        or re.search(r"(?:^|_)(?:kvarh|varh)(?:_|$)", object_id) is not None
-    )
-    terminal_reactive_energy = _has_metric_suffix(
-        object_id,
-        ("reactive_energy", "kvarh", "varh"),
-    )
-    return harmonic_measurement or (
-        reactive_energy_measurement
-        and (
-            terminal_reactive_energy
-            or explicit_sensor_role_from_entity_id(entity_id) is None
         )
     )
 
@@ -256,6 +366,8 @@ def untyped_source_entity_excluded(entity_id: str) -> bool:
 def mains_context_config_from_sources(
     entry_data: dict[str, Any],
     options: dict[str, Any] | None,
+    *,
+    mains_sensor_roles: Mapping[str, SensorRole | str | None] | None = None,
 ) -> CircuitConfig | None:
     mains_entities = _string_list_from_sources(
         entry_data,
@@ -270,14 +382,10 @@ def mains_context_config_from_sources(
         name="Mains NILM",
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
-        sensors=tuple(
-            SensorRef(
-                entity_id=entity_id,
-                role=sensor_role_from_entity_id(entity_id),
-                leg=_entity_id_leg_hint(entity_id),
-            )
+        sensors=_deduplicated_sensor_refs(
+            sensor
             for entity_id in mains_entities
-            if not untyped_source_entity_excluded(entity_id)
+            if (sensor := _mains_sensor_ref(entity_id, mains_sensor_roles)) is not None
         ),
         retention_mode=retention_mode_from_sources(entry_data, options),
         power_flow=PowerFlowMode.MAINS_NET,
@@ -425,7 +533,27 @@ def _sensor_refs_from_raw(raw_circuit: dict[str, Any]) -> tuple[SensorRef, ...]:
         ref = _sensor_ref_from_raw(raw_sensor)
         if ref is not None:
             refs.append(ref)
-    return tuple(refs)
+    return _deduplicated_sensor_refs(refs)
+
+
+def _deduplicated_sensor_refs(refs: Iterable[SensorRef]) -> tuple[SensorRef, ...]:
+    ref_list = list(refs)
+    circuit_ids = source_circuit_ids_from_entity_ids(
+        (ref.entity_id for ref in ref_list),
+        sensor_roles={ref.entity_id: ref.role for ref in ref_list},
+        sensor_legs={ref.entity_id: ref.leg for ref in ref_list},
+    )
+    seen: set[str] = set()
+    deduplicated: list[SensorRef] = []
+    for ref in ref_list:
+        if ref.entity_id in seen:
+            continue
+        seen.add(ref.entity_id)
+        if circuit_ids[ref.entity_id] == _source_circuit_id_from_entity_id(
+            ref.entity_id
+        ):
+            deduplicated.append(ref)
+    return tuple(deduplicated)
 
 
 def _positive_int_from_raw(
@@ -496,7 +624,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         return SensorRef(
             entity_id=raw_sensor,
             role=sensor_role_from_entity_id(raw_sensor),
-            leg=_entity_id_leg_hint(raw_sensor),
+            leg=source_entity_leg_hint(raw_sensor),
         )
     if not isinstance(raw_sensor, dict):
         return None
@@ -504,7 +632,13 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     entity_id = raw_sensor.get("entity_id")
     if not entity_id:
         return None
+    if _harmonic_source_entity_excluded(str(entity_id)):
+        return None
     raw_role = raw_sensor.get("role")
+    if raw_role == SensorRole.REAL_POWER.value and untyped_source_entity_excluded(
+        str(entity_id)
+    ):
+        return None
     if raw_role is None:
         if untyped_source_entity_excluded(str(entity_id)):
             return None
@@ -660,6 +794,17 @@ def explicit_sensor_role_from_entity_id(entity_id: str) -> SensorRole | None:
     return None
 
 
+def source_entity_leg_hint(entity_id: str) -> str | None:
+    """Return explicit leg metadata, including terminal metric A/B aliases."""
+    hint = _entity_id_leg_hint(entity_id)
+    if hint is not None:
+        return hint
+    object_id = _entity_object_id(entity_id)
+    if _strip_terminal_phase_letter(object_id) == object_id:
+        return None
+    return "a" if object_id.endswith("_a") else "b"
+
+
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = _entity_object_id(entity_id)
     return _canonical_source_circuit_id(
@@ -671,6 +816,8 @@ def source_circuit_ids_from_entity_ids(
     entity_ids: Iterable[str],
     *,
     sensor_roles: Mapping[str, SensorRole | str] | None = None,
+    sensor_legs: Mapping[str, str | None] | None = None,
+    reserved_circuit_ids: Iterable[str] = (),
 ) -> dict[str, str]:
     """Return circuit IDs without collapsing duplicate role measurements."""
     entity_id_list = list(dict.fromkeys(entity_ids))
@@ -688,7 +835,8 @@ def source_circuit_ids_from_entity_ids(
             (
                 circuit_ids[entity_id],
                 role,
-                _entity_id_leg_hint(entity_id),
+                normalized_leg((sensor_legs or {}).get(entity_id))
+                or source_entity_leg_hint(entity_id),
             ),
             [],
         ).append(entity_id)
@@ -697,7 +845,10 @@ def source_circuit_ids_from_entity_ids(
         suffix.removeprefix("_"): index
         for index, suffix in enumerate(_SOURCE_METRIC_SUFFIXES)
     }
-    reserved_circuit_ids = set(circuit_ids.values())
+    reserved_ids = set(circuit_ids.values()) | {
+        _canonical_source_circuit_id(circuit_id)
+        for circuit_id in reserved_circuit_ids
+    }
     for (base_circuit_id, _, _), collided_entities in entities_by_collision.items():
         if len(collided_entities) < 2:
             continue
@@ -717,18 +868,18 @@ def source_circuit_ids_from_entity_ids(
                 entity_id,
             ),
         )
-        for entity_id in collided_entities:
+        for entity_id in sorted(collided_entities):
             if entity_id == primary_entity:
                 continue
             detail = qualifiers[entity_id] or metrics[entity_id]
             candidate_base = f"{base_circuit_id}_{detail or 'source'}"
             candidate = candidate_base
             suffix = 2
-            while candidate in reserved_circuit_ids:
+            while candidate in reserved_ids:
                 candidate = f"{candidate_base}_{suffix}"
                 suffix += 1
             circuit_ids[entity_id] = candidate
-            reserved_circuit_ids.add(candidate)
+            reserved_ids.add(candidate)
     return circuit_ids
 
 
@@ -744,7 +895,9 @@ def _canonical_source_circuit_id(value: Any) -> str:
 
 
 def strip_trailing_source_detail_tokens(object_id: str) -> str:
-    stripped = _strip_trailing_source_qualifiers(object_id)
+    stripped = _strip_terminal_phase_letter(
+        _strip_trailing_source_qualifiers(object_id)
+    )
     direction = next(
         (
             token

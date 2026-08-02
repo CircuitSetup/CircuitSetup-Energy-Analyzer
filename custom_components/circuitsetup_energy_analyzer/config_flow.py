@@ -127,6 +127,7 @@ from .config_parsing import (
     explicit_sensor_role_from_entity_id,
     sensor_role_from_entity_id,
     source_circuit_ids_from_entity_ids,
+    source_entity_leg_hint,
     strip_trailing_source_detail_tokens,
     untyped_source_entity_excluded,
 )
@@ -199,6 +200,7 @@ from .entity import (
 )
 from .entity_catalog import EntityGroup
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
+from .managers.source_samples import normalized_leg
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -2537,6 +2539,7 @@ def _default_mode_for_assignment_profile(profile: str) -> str:
 def _assignment_mode_for_profile_and_entities(
     profile: str,
     entity_ids: Iterable[str],
+    sensor_legs: Mapping[str, Any] | None = None,
 ) -> str:
     default_mode = _default_mode_for_assignment_profile(profile)
     if profile == ApplianceProfile.SOLAR_INVERTER.value:
@@ -2545,15 +2548,20 @@ def _assignment_mode_for_profile_and_entities(
         return default_mode
     return (
         CircuitMode.DUAL_PHASE.value
-        if _assignment_entities_have_both_legs(entity_ids)
+        if _assignment_entities_have_both_legs(entity_ids, sensor_legs)
         else CircuitMode.SINGLE_PHASE.value
     )
 
 
-def _assignment_entities_have_both_legs(entity_ids: Iterable[str]) -> bool:
+def _assignment_entities_have_both_legs(
+    entity_ids: Iterable[str],
+    sensor_legs: Mapping[str, Any] | None = None,
+) -> bool:
     legs = {
         leg
-        for leg in (_assignment_leg_hint(entity_id) for entity_id in entity_ids)
+        for leg in (
+            _assignment_sensor_leg(entity_id, sensor_legs) for entity_id in entity_ids
+        )
         if leg in {"a", "b"}
     }
     return legs == {"a", "b"}
@@ -2590,6 +2598,14 @@ def assignment_groups_from_sources(
     existing_circuit_list = [
         circuit for circuit in existing_circuits if isinstance(circuit, Mapping)
     ]
+    saved_source_legs = {
+        str(sensor["entity_id"]): sensor.get("leg")
+        for circuit in existing_circuit_list
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping)
+        and sensor.get("entity_id")
+        and sensor.get("leg")
+    }
     retained_existing_sensor_entities = {
         entity_id
         for circuit in existing_circuit_list
@@ -2615,6 +2631,17 @@ def assignment_groups_from_sources(
     inferred_circuit_ids = source_circuit_ids_from_entity_ids(
         grouped_entities,
         sensor_roles=source_role_by_entity,
+        sensor_legs=saved_source_legs,
+        reserved_circuit_ids=(
+            value
+            for circuit in existing_circuit_list
+            for value in (
+                circuit.get("circuit_id"),
+                circuit.get("id"),
+                circuit.get("name"),
+            )
+            if value
+        ),
     )
 
     owners_by_entity: dict[str, set[int]] = {}
@@ -2634,6 +2661,13 @@ def assignment_groups_from_sources(
     claimed_entities: set[str] = set()
     for index, saved_circuit in enumerate(existing_circuit_list):
         saved_sensor_entities = _sensor_entity_ids_from_circuit(saved_circuit)
+        saved_sensor_legs = {
+            str(sensor["entity_id"]): sensor.get("leg")
+            for sensor in saved_circuit.get("sensors", ())
+            if isinstance(sensor, Mapping)
+            and sensor.get("entity_id")
+            and sensor.get("leg")
+        }
         entity_ids = [
             entity_id
             for entity_id in grouped_entities
@@ -2682,6 +2716,7 @@ def assignment_groups_from_sources(
                     else _assignment_mode_for_profile_and_entities(
                         saved_profile,
                         selected_entity_ids,
+                        saved_sensor_legs,
                     )
                 ),
                 "saved_mode": str(saved_circuit.get("mode") or ""),
@@ -2694,6 +2729,7 @@ def assignment_groups_from_sources(
                     and sensor.get("entity_id")
                     and sensor.get("role")
                 },
+                "sensor_legs": saved_sensor_legs,
                 "power_flow": _normalize_power_flow(
                     str(saved_circuit.get("power_flow") or "")
                 ),
@@ -3089,7 +3125,11 @@ def _circuit_from_assignment_group(
             ApplianceProfile.MAINS_NILM.value,
             ApplianceProfile.SOLAR_INVERTER.value,
         }
-        or _assignment_entities_have_both_legs(entity_ids) and not legacy_mixed
+        or _assignment_entities_have_both_legs(
+            entity_ids,
+            group.get("sensor_legs"),
+        )
+        and not legacy_mixed
     ):
         raise SetupValidationError(ERROR_MIXED_DUAL_PHASE_NOT_SUPPORTED)
     if profile not in _GUIDED_ASSIGNMENT_PROFILE_OPTIONS:
@@ -3097,7 +3137,11 @@ def _circuit_from_assignment_group(
     mode = (
         CircuitMode.MIXED.value
         if shared
-        else _assignment_mode_for_profile_and_entities(profile, entity_ids)
+        else _assignment_mode_for_profile_and_entities(
+            profile,
+            entity_ids,
+            group.get("sensor_legs"),
+        )
     )
     power_flow = _default_power_flow_for_assignment(profile, mode)
     sensors = [
@@ -3107,7 +3151,7 @@ def _circuit_from_assignment_group(
                 entity_id,
                 group.get("sensor_roles"),
             ).value,
-            "leg": _assignment_leg_hint(entity_id),
+            "leg": _assignment_sensor_leg(entity_id, group.get("sensor_legs")),
         }
         for entity_id in entity_ids
     ]
@@ -3418,19 +3462,17 @@ def _assignment_sensor_role(
     return sensor_role_from_entity_id(entity_id)
 
 
+def _assignment_sensor_leg(
+    entity_id: str,
+    sensor_legs: Mapping[str, Any] | None = None,
+) -> str | None:
+    return normalized_leg((sensor_legs or {}).get(entity_id)) or _assignment_leg_hint(
+        entity_id
+    )
+
+
 def _assignment_leg_hint(entity_id: str) -> str | None:
-    object_id = str(entity_id).split(".")[-1].lower()
-    if re.search(
-        r"(?:^|_)(?:l1|leg_a|line_a|phase_a|leg_1|line_1|phase_1|ct1)(?:_|$)",
-        object_id,
-    ):
-        return "a"
-    if re.search(
-        r"(?:^|_)(?:l2|leg_b|line_b|phase_b|leg_2|line_2|phase_2|ct2)(?:_|$)",
-        object_id,
-    ):
-        return "b"
-    return None
+    return source_entity_leg_hint(entity_id)
 
 
 def _assignment_circuit_id_from_entity_id(entity_id: str) -> str:
@@ -5517,9 +5559,19 @@ def _circuits_with_merged_source_circuit_sensors(
         and sensor.get("entity_id")
         and sensor.get("role")
     }
+    saved_sensor_legs = {
+        str(sensor["entity_id"]): sensor.get("leg")
+        for circuit in circuits
+        for sensor in circuit.get("sensors", ())
+        if isinstance(sensor, Mapping)
+        and sensor.get("entity_id")
+        and sensor.get("leg")
+    }
     inferred_circuit_ids = source_circuit_ids_from_entity_ids(
         [*assigned_source_entity_list, *eligible_source_entities],
         sensor_roles=saved_sensor_roles,
+        sensor_legs=saved_sensor_legs,
+        reserved_circuit_ids=circuit_index,
     )
 
     changed = False

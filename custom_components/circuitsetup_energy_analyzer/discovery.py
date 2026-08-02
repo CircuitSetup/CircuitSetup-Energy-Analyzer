@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,6 +19,37 @@ ENERGY_SOURCE_DEVICE_CLASSES = (
     "voltage",
 )
 _DEVICE_CLASSES = set(ENERGY_SOURCE_DEVICE_CLASSES)
+_DEVICE_CLASS_ROLES = {
+    "apparent_power": SensorRole.APPARENT_POWER,
+    "current": SensorRole.CURRENT,
+    "energy": SensorRole.ENERGY,
+    "frequency": SensorRole.FREQUENCY,
+    "power": SensorRole.REAL_POWER,
+    "power_factor": SensorRole.POWER_FACTOR,
+    "reactive_power": SensorRole.REACTIVE_POWER,
+    "voltage": SensorRole.VOLTAGE,
+}
+_UNIT_ROLES = {
+    "a": SensorRole.CURRENT,
+    "ka": SensorRole.CURRENT,
+    "ma": SensorRole.CURRENT,
+    "hz": SensorRole.FREQUENCY,
+    "va": SensorRole.APPARENT_POWER,
+    "kva": SensorRole.APPARENT_POWER,
+    "mva": SensorRole.APPARENT_POWER,
+    "var": SensorRole.REACTIVE_POWER,
+    "kvar": SensorRole.REACTIVE_POWER,
+    "mvar": SensorRole.REACTIVE_POWER,
+    "v": SensorRole.VOLTAGE,
+    "kv": SensorRole.VOLTAGE,
+    "mv": SensorRole.VOLTAGE,
+    "w": SensorRole.REAL_POWER,
+    "kw": SensorRole.REAL_POWER,
+    "mw": SensorRole.REAL_POWER,
+    "wh": SensorRole.ENERGY,
+    "kwh": SensorRole.ENERGY,
+    "mwh": SensorRole.ENERGY,
+}
 _ENERGY_SOURCE_UNITS = {
     "a",
     "hz",
@@ -84,7 +116,13 @@ class DiscoveredSensor:
     integration_domain: str | None
 
 
-def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole | None:
+def infer_sensor_role(
+    entity_id: str,
+    friendly_name: str | None,
+    *,
+    device_class: str | None = None,
+    unit: str | None = None,
+) -> SensorRole | None:
     """Infer the analysis role from common energy meter sensor names."""
     text = _normalize_text(entity_id, friendly_name)
 
@@ -98,6 +136,12 @@ def infer_sensor_role(entity_id: str, friendly_name: str | None) -> SensorRole |
         return SensorRole.REAL_POWER
     if re.search(r"\bpeak\s+(?:current|amps?|a)\b", text):
         return SensorRole.PEAK_CURRENT
+    if "reactive energy" in text or re.search(r"\b(?:kvarh|varh)\b", text):
+        return None
+    if role := _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower()):
+        return role
+    if role := _UNIT_ROLES.get(str(unit or "").strip().lower()):
+        return role
     if "voltage" in text:
         return SensorRole.VOLTAGE
     if "current" in text or re.search(r"\bamps?\b", text):
@@ -132,6 +176,34 @@ def is_energy_source_sensor(sensor: DiscoveredSensor) -> bool:
         return True
     unit = (sensor.unit or "").strip().lower()
     return unit in _ENERGY_SOURCE_UNITS
+
+
+def discovered_sensor_roles(
+    hass: Any,
+    entity_ids: Iterable[str] | None = None,
+) -> dict[str, SensorRole | None]:
+    """Return resolved roles for current Home Assistant sensor metadata."""
+    if entity_ids is not None:
+        selected = {str(entity_id) for entity_id in entity_ids if entity_id}
+        registry_entries = _get_entity_registry_entries(hass)
+        states = getattr(hass, "states", None)
+        state_get = getattr(states, "get", None)
+        roles: dict[str, SensorRole | None] = {}
+        for entity_id in sorted(selected):
+            state = state_get(entity_id) if callable(state_get) else None
+            entry = registry_entries.get(entity_id)
+            if state is None and entry is None:
+                continue
+            roles[entity_id] = _build_discovered_sensor(
+                entity_id,
+                state,
+                entry,
+            ).role
+        return roles
+    return {
+        sensor.entity_id: sensor.role
+        for sensor in _build_discovered_sensors(hass)
+    }
 
 
 async def async_discover_energy_source_entities(hass: Any) -> list[str]:
@@ -322,7 +394,12 @@ def _build_discovered_sensor(
     return DiscoveredSensor(
         entity_id=entity_id,
         name=name,
-        role=infer_sensor_role(entity_id, name),
+        role=infer_sensor_role(
+            entity_id,
+            name,
+            device_class=device_class,
+            unit=attributes.get("unit_of_measurement"),
+        ),
         device_id=getattr(entry, "device_id", None) or attributes.get("device_id"),
         unit=attributes.get("unit_of_measurement"),
         device_class=device_class,

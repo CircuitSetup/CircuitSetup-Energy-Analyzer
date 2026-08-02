@@ -100,13 +100,13 @@ def build_circuit_sample(
     for sensor in config.sensors:
         source = states.get(sensor.entity_id)
         if source is None:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} missing")
             continue
 
         timestamp_issue = _timestamp_issue(now, source.last_updated)
         if timestamp_issue is not None:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} {timestamp_issue}")
             continue
 
@@ -118,27 +118,27 @@ def build_circuit_sample(
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} unavailable")
             continue
         if is_stale:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             continue
 
         try:
             value = float(state)
         except ValueError:
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_numeric")
             continue
         if not math.isfinite(value):
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
         value = normalize_sensor_value(value, sensor.role, source.unit)
         if not math.isfinite(value):
-            values[sensor.role] = None
+            values.setdefault(sensor.role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 

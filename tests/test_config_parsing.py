@@ -77,6 +77,47 @@ def test_config_parser_preserves_numbered_channel_basename() -> None:
     assert [config.circuit_id for config in configs] == ["hvac_1", "hvac_2"]
 
 
+def test_config_parser_groups_terminal_phase_aliases() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_SOURCE_ENTITIES: [
+                "sensor.panel_power_a",
+                "sensor.panel_power_b",
+                "sensor.panel_voltage_a",
+                "sensor.panel_voltage_b",
+            ]
+        }
+    )
+
+    assert [config.circuit_id for config in configs] == ["panel"]
+    assert [(sensor.role, sensor.leg) for sensor in configs[0].sensors] == [
+        (SensorRole.REAL_POWER, "a"),
+        (SensorRole.REAL_POWER, "b"),
+        (SensorRole.VOLTAGE, "a"),
+        (SensorRole.VOLTAGE, "b"),
+    ]
+
+
+def test_source_alias_ids_are_input_order_invariant() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        source_circuit_ids_from_entity_ids,
+    )
+
+    entity_ids = [
+        "sensor.pump_power",
+        "sensor.pump_power_max",
+        "sensor.pump_power_max_2",
+    ]
+
+    assert source_circuit_ids_from_entity_ids(
+        entity_ids
+    ) == source_circuit_ids_from_entity_ids(reversed(entity_ids))
+
+
 def test_config_parser_preserves_metric_free_numbered_channels() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
@@ -232,6 +273,111 @@ def test_config_parser_uses_saved_sensors_for_alias_collisions() -> None:
     ]
 
 
+def test_config_parser_does_not_merge_alias_into_reserved_saved_circuit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "pump",
+                    "name": "Pump",
+                    "sensors": [
+                        {"entity_id": "sensor.pump_power", "role": "real_power"}
+                    ],
+                },
+                {
+                    "circuit_id": "pump_kw",
+                    "name": "Basement",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.basement_power",
+                            "role": "real_power",
+                        }
+                    ],
+                },
+            ],
+            CONF_SOURCE_ENTITIES: [
+                "sensor.pump_power",
+                "sensor.pump_kw",
+                "sensor.basement_power",
+            ],
+        }
+    )
+
+    assert [[sensor.entity_id for sensor in config.sensors] for config in configs] == [
+        ["sensor.pump_power"],
+        ["sensor.basement_power"],
+    ]
+
+
+def test_config_parser_merges_supported_mains_sources_and_drops_harmonics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains NILM",
+                    "appliance_profile": "mains_nilm",
+                    "mode": "mains_nilm",
+                    "sensors": [
+                        {"entity_id": "sensor.mains_power", "role": "real_power"},
+                        {"entity_id": "sensor.mains_kw", "role": "real_power"},
+                        {
+                            "entity_id": "sensor.mains_reactive_energy",
+                            "role": "real_power",
+                        },
+                        {
+                            "entity_id": "sensor.mains_harmonic_active_power",
+                            "role": "real_power",
+                        },
+                    ],
+                }
+            ],
+            CONF_MAINS_SOURCE_ENTITIES: [
+                "sensor.mains_power",
+                "sensor.mains_kw",
+                "sensor.mains_voltage",
+                "sensor.mains_frequency",
+                "sensor.mains_harmonic_active_power",
+            ],
+        }
+    )
+
+    assert [(sensor.entity_id, sensor.role) for sensor in configs[0].sensors] == [
+        ("sensor.mains_power", SensorRole.REAL_POWER),
+        ("sensor.mains_voltage", SensorRole.VOLTAGE),
+        ("sensor.mains_frequency", SensorRole.FREQUENCY),
+    ]
+
+
+def test_config_parser_uses_runtime_metadata_for_generic_mains_sources() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    entities = ["sensor.channel_1", "sensor.channel_2", "sensor.channel_3"]
+    configs = circuit_configs_from_entry_data(
+        {CONF_MAINS_SOURCE_ENTITIES: entities},
+        mains_sensor_roles={
+            entities[0]: SensorRole.REAL_POWER,
+            entities[1]: SensorRole.VOLTAGE,
+            entities[2]: None,
+        },
+    )
+
+    assert [(sensor.entity_id, sensor.role) for sensor in configs[0].sensors] == [
+        (entities[0], SensorRole.REAL_POWER),
+        (entities[1], SensorRole.VOLTAGE),
+    ]
+
+
 def test_config_parser_keeps_supported_metrics_on_reactive_energy_devices() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
@@ -348,11 +494,7 @@ def test_config_parser_infers_missing_roles_and_ignores_harmonics() -> None:
         ("sensor.harmonic_filter_power", SensorRole.REAL_POWER),
         ("sensor.high_voltage_panel_active_power", SensorRole.REAL_POWER),
         ("sensor.current_pump_active_power", SensorRole.REAL_POWER),
-        ("sensor.current_pump", SensorRole.REAL_POWER),
-        ("sensor.current_pump_watt", SensorRole.REAL_POWER),
-        ("sensor.current_pump_kw", SensorRole.REAL_POWER),
         ("sensor.voltage_panel_mw", SensorRole.REAL_POWER),
-        ("sensor.high_voltage_panel_active_power_1", SensorRole.REAL_POWER),
         ("sensor.current_pump_kva", SensorRole.APPARENT_POWER),
         ("sensor.voltage_panel_kvar", SensorRole.REACTIVE_POWER),
         ("sensor.voltage_panel_ka", SensorRole.CURRENT),

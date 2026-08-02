@@ -11038,6 +11038,29 @@ async def test_runtime_creates_mains_nilm_config_from_mains_source_entities() ->
     assert coordinator.circuit_configs[0].power_flow is PowerFlowMode.MAINS_NET
 
 
+def test_runtime_uses_metadata_for_generic_mains_sensor_names() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    entity_id = "sensor.channel_a"
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda requested: SimpleNamespace(
+                    attributes={"device_class": "voltage", "unit_of_measurement": "V"}
+                )
+                if requested == entity_id
+                else None
+            ),
+            data={},
+        ),
+        options={CONF_MAINS_SOURCE_ENTITIES: [entity_id]},
+    )
+
+    assert coordinator.circuit_configs[0].sensors[0].role is SensorRole.VOLTAGE
+
+
 @pytest.mark.asyncio
 async def test_demo_source_entities_are_treated_as_current_for_data_quality() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

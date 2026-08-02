@@ -144,6 +144,36 @@ def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:
     assert "sensor.fridge_power stale" in sample.quality_issues
 
 
+def test_missing_duplicate_role_does_not_clear_valid_value() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        sensors=(
+            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.fridge_power_backup", SensorRole.REAL_POWER),
+        ),
+    )
+
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.fridge_power": SourceState(
+                "sensor.fridge_power",
+                "180",
+                "W",
+                now,
+            )
+        },
+        now,
+    )
+
+    assert sample.real_power == 180.0
+    assert "sensor.fridge_power_backup missing" in sample.quality_issues
+
+
 def test_build_circuit_sample_treats_stale_numeric_power_as_unavailable() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     config = CircuitConfig(

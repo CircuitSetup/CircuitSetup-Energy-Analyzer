@@ -3778,6 +3778,42 @@ def test_assignment_groups_separate_duplicate_metric_aliases() -> None:
     )
 
 
+def test_assignment_groups_preserve_explicit_saved_legs() -> None:
+    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
+
+    entity_ids = ("sensor.panel_power", "sensor.panel_w")
+    group = config_flow.assignment_groups_from_sources(
+        entity_ids,
+        existing_circuits=[
+            {
+                "circuit_id": "panel",
+                "name": "Panel",
+                "appliance_profile": "ev_charger",
+                "mode": "dual_phase",
+                "sensors": [
+                    {"entity_id": entity_ids[0], "role": "real_power", "leg": "a"},
+                    {"entity_id": entity_ids[1], "role": "real_power", "leg": "b"},
+                ],
+            }
+        ],
+    )[0]
+
+    circuit = config_flow._circuit_from_assignment_group(
+        group,
+        {
+            "include_circuit": True,
+            "circuit_name": "Panel",
+            "appliance_profile": "ev_charger",
+            "included_sensors": entity_ids,
+        },
+    )
+
+    assert group["mode"] == "dual_phase"
+    assert circuit is not None
+    assert circuit["mode"] == "dual_phase"
+    assert [sensor["leg"] for sensor in circuit["sensors"]] == ["a", "b"]
+
+
 def test_assignment_groups_exclude_untyped_reactive_energy() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         assignment_groups_from_sources,

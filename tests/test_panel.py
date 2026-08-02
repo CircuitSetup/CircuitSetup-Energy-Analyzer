@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260801-14"
+    assert PANEL_MODULE_VERSION == "20260801-15"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
