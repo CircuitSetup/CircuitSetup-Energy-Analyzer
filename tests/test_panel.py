@@ -2238,6 +2238,57 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
 
 
+def _nilm_service_actions(payload: object) -> list[dict[str, object]]:
+    if isinstance(payload, dict):
+        actions = (
+            [payload]
+            if payload.get("domain") == DOMAIN
+            and isinstance(payload.get("service"), str)
+            and isinstance(payload.get("data"), dict)
+            else []
+        )
+        return actions + [
+            action
+            for value in payload.values()
+            for action in _nilm_service_actions(value)
+        ]
+    if isinstance(payload, list):
+        return [action for value in payload for action in _nilm_service_actions(value)]
+    return []
+
+
+def test_nilm_payload_actions_keep_selected_entry_id() -> None:
+    """Catches nested workspace actions dropping their selected config entry."""
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_payload_for_circuit,
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+    coordinator.store_data.nilm_signatures = {
+        "mains": [{"signature_id": "signature-1"}]
+    }
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [{"interval_id": "interval-1"}]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [{"assignment_id": "assignment-1", "lifecycle_state": "assigned"}]
+    }
+
+    workspace = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-2"
+    )
+    summary = _nilm_payload_for_circuit(coordinator, "mains")
+    actions = _nilm_service_actions(workspace) + _nilm_service_actions(summary)
+
+    assert actions
+    assert all(action["data"]["entry_id"] == "entry-2" for action in actions)
+
+
 def test_nilm_workspace_payload_rejects_missing_source_in_requested_entry() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,

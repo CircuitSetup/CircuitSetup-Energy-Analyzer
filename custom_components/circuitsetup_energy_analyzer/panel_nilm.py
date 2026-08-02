@@ -202,7 +202,7 @@ def nilm_workspace_payload(
         assignments,
     )
     lanes = _nilm_workspace_lanes(signatures, assignments, label_intervals)
-    return {
+    payload = {
         "status": "ok",
         "circuit": _circuit_payload(config),
         "source": _nilm_workspace_source(coordinator, config, include_path=False),
@@ -242,6 +242,7 @@ def nilm_workspace_payload(
         "sessions": sessions,
         "session_count": len(all_sessions),
     }
+    return _scope_nilm_actions(payload, selected_entry_id)
 
 
 def _nilm_payload_for_circuit(
@@ -262,7 +263,7 @@ def _nilm_payload_for_circuit(
         signatures if include_all_nilm else signatures[:MAX_NILM_PANEL_SIGNATURES]
     )
     workspace_paths = _nilm_workspace_paths(coordinator, circuit_id)
-    return {
+    payload = {
         "signatures": [
             {
                 **_nilm_signature_payload(signature),
@@ -288,6 +289,29 @@ def _nilm_payload_for_circuit(
         ),
         **workspace_paths,
     }
+    return _scope_nilm_actions(
+        payload,
+        str(getattr(coordinator, "entry_id", "") or ""),
+    )
+
+
+def _scope_nilm_actions(payload: Any, entry_id: str) -> Any:
+    """Add the selected entry to nested NILM service actions."""
+    if not entry_id:
+        return payload
+    if isinstance(payload, dict):
+        if (
+            payload.get("domain") == DOMAIN
+            and isinstance(payload.get("service"), str)
+            and isinstance(payload.get("data"), dict)
+        ):
+            payload["data"].setdefault(ATTR_ENTRY_ID, entry_id)
+        for value in payload.values():
+            _scope_nilm_actions(value, entry_id)
+    elif isinstance(payload, list):
+        for value in payload:
+            _scope_nilm_actions(value, entry_id)
+    return payload
 
 
 def _nilm_signatures_for_circuit(
