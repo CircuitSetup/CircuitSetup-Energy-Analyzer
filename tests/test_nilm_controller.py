@@ -473,13 +473,13 @@ async def test_nilm_helper_links_validate_persist_replace_and_remove() -> None:
         relationship="corroborates",
     )
     link = linked["helper_links"][0]
-    assert link == {
-        "helper_circuit_id": "helper", "relationship": "corroborates",
-        "status": "confirmed", "confidence": 0.91,
-        "matched_on_count": 4, "matched_off_count": 5,
-        "last_observed": "2026-06-02T11:00:00+00:00",
-        "confirmed_matched_on_count": 4, "confirmed_matched_off_count": 5,
-    }
+    assert link["helper_circuit_id"] == "helper"
+    assert link["relationship"] == "corroborates"
+    assert link["status"] == "confirmed"
+    assert link["confidence"] == 0.91
+    assert link["matched_on_count"] == link["confirmed_matched_on_count"] == 4
+    assert link["matched_off_count"] == link["confirmed_matched_off_count"] == 5
+    assert link["last_observed"] == "2026-06-02T11:00:00+00:00"
     forbidden = {"conversion_state", "direct_circuit_id",
                  "keep_assignment_for_masking", "publish_entities"}
     assert not forbidden & assignment.keys()
@@ -532,6 +532,79 @@ async def test_nilm_helper_links_reject_fifth_and_second_direct_component() -> N
             "mixed", "assignment-load", helper_circuit_id="helper-2",
             relationship="direct_component",
         )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source", "helper", "error"), (
+    ("missing", "helper", "source"),
+    ("mixed", "mixed", "itself"),
+    ("mixed", "missing", "helper"),
+))
+async def test_remove_nilm_helper_link_validates_resources(
+    source: str, helper: str, error: str,
+) -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["helper_links"] = [{"helper_circuit_id": "helper"}]
+
+    with pytest.raises(ValueError, match=error):
+        await controller.async_remove_nilm_helper_link(
+            source, "assignment-load", helper_circuit_id=helper,
+        )
+
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_uses_newest_candidate_across_fingerprints() -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["signature_fingerprints"] = ["older", "newer"]
+    controller._coordinator.store_data.nilm_signatures["mixed"] = [
+        {"feedback_fingerprint": "older", "helper_candidates": [{
+            "helper_circuit_id": "helper", "confidence": 0.99,
+            "matched_on_count": 9, "matched_off_count": 9,
+            "last_observed": "2026-06-01T12:00:00+00:00",
+        }]},
+        {"feedback_fingerprint": "newer", "helper_candidates": [{
+            "helper_circuit_id": "helper", "confidence": 0.8,
+            "matched_on_count": 5, "matched_off_count": 6,
+            "last_observed": "2026-06-02T11:00:00+00:00",
+        }]},
+    ]
+
+    linked = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="corroborates",
+    )
+
+    assert linked["helper_links"][0]["matched_on_count"] == 5
+    assert linked["helper_links"][0]["confirmed_matched_off_count"] == 6
+
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_normalizes_malformed_candidate_and_link_values(
+) -> None:
+    controller, assignment = _helper_link_controller()
+    controller._coordinator.store_data.nilm_signatures["mixed"][0][
+        "helper_candidates"
+    ][0].update({
+        "confidence": "bad", "matched_on_count": "bad",
+        "matched_off_count": None, "start_lag_seconds": "bad",
+        "last_observed": "not-a-date",
+    })
+    assignment["helper_links"] = [{
+        "helper_circuit_id": "old", "relationship": "corroborates",
+        "confidence": {"bad": True}, "last_observed": ["bad"],
+    }]
+
+    linked = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="corroborates",
+    )
+
+    helper = next(link for link in linked["helper_links"]
+                  if link["helper_circuit_id"] == "helper")
+    assert helper["confidence"] == 0.0
+    assert helper["matched_on_count"] == 0
+    assert helper["matched_off_count"] == 0
+    assert helper["start_lag_seconds"] is None
+    assert helper["last_observed"] is None
 
 def _helper_link_controller() -> tuple[NilmController, dict[str, object]]:
     async def noop(*_args: object) -> None: pass
