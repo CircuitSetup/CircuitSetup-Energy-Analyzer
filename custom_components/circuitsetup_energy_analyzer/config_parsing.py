@@ -15,6 +15,7 @@ from .const import (
 from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
+from .demand import MAX_DEMAND_WINDOW_MINUTES
 from .discovery import friendly_source_name
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
@@ -613,10 +614,13 @@ def _circuit_config_from_raw(
             "cost_cycle_start_day",
             default=1,
         ),
-        demand_window_minutes=_positive_int_from_raw(
-            raw_circuit,
-            "demand_window_minutes",
-            default=15,
+        demand_window_minutes=min(
+            _positive_int_from_raw(
+                raw_circuit,
+                "demand_window_minutes",
+                default=15,
+            ),
+            MAX_DEMAND_WINDOW_MINUTES,
         ),
         demand_limit_w=_optional_positive_float_from_raw(
             raw_circuit,

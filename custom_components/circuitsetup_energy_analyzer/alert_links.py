@@ -4,6 +4,7 @@ import math
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
+from .demand import MAX_DEMAND_WINDOW_MINUTES
 from .models import AlertEvidence, CircuitConfig, SensorRole
 
 DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer-evidence"
@@ -167,7 +168,10 @@ def alert_graph_window(alert: AlertEvidence) -> tuple[datetime, datetime]:
             )
         except (TypeError, ValueError):
             demand_window_minutes = 0.0
-        if math.isfinite(demand_window_minutes) and 0.0 < demand_window_minutes <= 240:
+        if (
+            math.isfinite(demand_window_minutes)
+            and 0.0 < demand_window_minutes <= MAX_DEMAND_WINDOW_MINUTES
+        ):
             try:
                 start = min(
                     start,
