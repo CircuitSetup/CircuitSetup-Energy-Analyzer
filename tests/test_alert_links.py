@@ -361,6 +361,16 @@ def test_alert_graph_window_uses_only_valid_demand_measurement_windows() -> None
             datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
             datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
         ),
+        (
+            1_000_000.0,
+            datetime(2026, 6, 5, 12, 15, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 45, tzinfo=UTC),
+        ),
+        (
+            240.0,
+            datetime(2026, 6, 5, 8, 20, tzinfo=UTC),
+            datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
+        ),
     )
     for demand_window_minutes, expected_start, expected_end in cases:
         alert = replace(
