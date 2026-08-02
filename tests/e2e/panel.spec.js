@@ -6142,6 +6142,9 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
     host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth
   ));
   expect(horizontalOverflow).toBe(false);
+  const graphControls = panel.locator("[data-appliance-history-graph]");
+  await expect(graphControls.locator(".labeled-graph-controls")).toHaveCount(0);
+  await expect(graphControls.locator("button")).toHaveText(["", "", "", ""]);
 
   await panel.locator('[data-appliance-history-graph-zoom="0.5"]').click();
   await expect.poll(() => page.evaluate(() => {
@@ -6160,6 +6163,7 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   const period = panel.locator('[data-appliance-history-period="24"]');
   await period.click();
   await expect(period).toHaveAttribute("aria-pressed", "true");
+  await toHaveNoViolations(page);
 });
 
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {

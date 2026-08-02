@@ -2478,8 +2478,8 @@ for (const expected of [
   'data-appliance-history-period',
   'data-appliance-history-graph-zoom="0.5"',
   'data-appliance-history-graph-pan="-0.5"',
-  ">Zoom In<",
-  ">Pan Earlier<",
+  'aria-label="Zoom In"',
+  'aria-label="Pan Earlier"',
   'data-chart-point="1"',
   'data-chart-tooltip',
 ]) {

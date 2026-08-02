@@ -882,7 +882,7 @@ export function createEvidenceViewMethods({
     }
   }
 
-  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false, labeled = false) {
+  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false) {
     if (!window) {
       return "";
     }
@@ -898,11 +898,11 @@ export function createEvidenceViewMethods({
     const panEarlierLabel = this._panelText("actions.labels.pan_earlier");
     const panLaterLabel = this._panelText("actions.labels.pan_later");
     return `<div ${containerAttribute}>
-      <div class="actions nilm-graph-controls${labeled ? " labeled-graph-controls" : ""}">
-        <button type="button" class="secondary icon-button" data-${prefix}-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon>${labeled ? `<span>${this._escape(zoomInLabel)}</span>` : ""}</button>
-        <button type="button" class="secondary icon-button" data-${prefix}-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon>${labeled ? `<span>${this._escape(zoomOutLabel)}</span>` : ""}</button>
-        <button type="button" class="secondary icon-button" data-${prefix}-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon>${labeled ? `<span>${this._escape(panEarlierLabel)}</span>` : ""}</button>
-        <button type="button" class="secondary icon-button" data-${prefix}-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon>${labeled ? `<span>${this._escape(panLaterLabel)}</span>` : ""}</button>
+      <div class="actions nilm-graph-controls">
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="0.5" title="${this._escape(zoomInLabel)}" aria-label="${this._escape(zoomInLabel)}" ${zoomInDisabled}><ha-icon icon="mdi:magnify-plus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-zoom="2" title="${this._escape(zoomOutLabel)}" aria-label="${this._escape(zoomOutLabel)}" ${zoomOutDisabled}><ha-icon icon="mdi:magnify-minus-outline"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="-0.5" title="${this._escape(panEarlierLabel)}" aria-label="${this._escape(panEarlierLabel)}" ${panEarlierDisabled}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+        <button type="button" class="secondary icon-button" data-${prefix}-pan="0.5" title="${this._escape(panLaterLabel)}" aria-label="${this._escape(panLaterLabel)}" ${panLaterDisabled}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
       </div>
       <p class="muted" data-${prefix}-window>${this._escape(windowText)}</p>
     </div>`;

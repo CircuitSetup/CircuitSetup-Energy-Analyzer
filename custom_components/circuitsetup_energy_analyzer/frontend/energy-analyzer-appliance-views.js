@@ -1689,7 +1689,6 @@ export function createApplianceViewMethods({
       "data-appliance-history-graph",
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
       canLoadMore,
-      true,
     );
   }
 
