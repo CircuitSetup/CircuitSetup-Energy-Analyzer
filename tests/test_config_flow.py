@@ -3189,8 +3189,16 @@ async def test_options_assignment_preserves_advanced_settings() -> None:
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
 
+    shared_thermostat = "climate.main_floor"
+    temperature_sensor = "sensor.main_floor_temperature"
     advanced_settings = {
-        "hvac": {CONF_LINKED_THERMOSTAT_ENTITIES: ["climate.main_floor"]}
+        circuit_id: {
+            CONF_LINKED_THERMOSTAT_ENTITIES: [shared_thermostat],
+            CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP: {
+                shared_thermostat: temperature_sensor
+            },
+        }
+        for circuit_id in ("ac_1", "ac_2")
     }
     entry = SimpleNamespace(
         data={},
@@ -3199,12 +3207,19 @@ async def test_options_assignment_preserves_advanced_settings() -> None:
             CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
             CONF_CIRCUITS: [
                 {
-                    "circuit_id": "hvac",
-                    "name": "HVAC",
+                    "circuit_id": "ac_1",
+                    "name": "AC 1",
                     "appliance_profile": "hvac",
                     "mode": "single_phase",
                     "sensors": ["sensor.hvac_power"],
-                }
+                },
+                {
+                    "circuit_id": "ac_2",
+                    "name": "AC 2",
+                    "appliance_profile": "hvac",
+                    "mode": "single_phase",
+                    "sensors": ["sensor.ac_2_power"],
+                },
             ],
             CONF_ADVANCED_SETTINGS: advanced_settings,
         },
@@ -3212,12 +3227,12 @@ async def test_options_assignment_preserves_advanced_settings() -> None:
     flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
 
     await flow.async_step_assign()
-    await flow.async_step_select_assignment({"selected_assignment": "hvac"})
+    await flow.async_step_select_assignment({"selected_assignment": "ac_1"})
     result = await flow.async_step_assign(
         {
             "include_circuit": True,
             "included_sensors": ["sensor.hvac_power"],
-            "circuit_name": "HVAC",
+            "circuit_name": "AC 1",
             "appliance_profile": "hvac",
             "circuit_retention_mode": "standard",
         }
