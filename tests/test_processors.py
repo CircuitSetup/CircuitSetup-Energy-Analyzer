@@ -8841,6 +8841,274 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
     )
 
 
+def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        cluster_recurring_signatures,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    edges = [
+        NilmEdge(
+            now + timedelta(minutes=index),
+            300.0 if index % 2 == 0 else -300.0,
+            0.0,
+            300.0,
+            0.0,
+            "on" if index % 2 == 0 else "off",
+        )
+        for index in range(6)
+    ]
+    events = [
+        CircuitEvent(
+            edge.timestamp,
+            "hvac-2",
+            EventType.START if edge.direction == "on" else EventType.STOP,
+            features={},
+        )
+        for edge in edges
+    ]
+    context = ProcessingContext(
+        now=now + timedelta(minutes=6),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        helper_candidate_events=lambda _id, values: values,
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    processor.unmatched_edges_by_circuit["ac-2"] = edges
+    processor._helper_events_by_source["ac-2"] = events
+
+    payload = processor._nilm_signature_payloads(
+        "ac-2", cluster_recurring_signatures(edges), context
+    )[0]
+
+    candidate = payload["helper_candidates"][0]
+    assert candidate["helper_circuit_id"] == "hvac-2"
+    assert candidate["matched_on_count"] == candidate["matched_off_count"] == 3
+    context.store_data.nilm_signatures["ac-2"] = [payload]
+
+    config = CircuitConfig(
+        circuit_id="ac-2",
+        name="AC 2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now + timedelta(minutes=6),
+        circuit_id="ac-2",
+        real_power=100.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+    processor.process(sample, config, context, events=events)
+    processor.process(sample, config, context, events=events)
+
+    assert len(processor._helper_events_by_source["ac-2"]) == 6
+    retained_candidate = context.store_data.nilm_signatures["ac-2"][0][
+        "helper_candidates"
+    ][0]
+    assert retained_candidate["matched_on_count"] == 3
+    assert retained_candidate["matched_off_count"] == 3
+
+
+def test_nilm_helper_candidates_ignore_edges_before_observation_window() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        cluster_recurring_signatures,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 20, tzinfo=UTC)
+    old_edges = [
+        NilmEdge(
+            now - timedelta(minutes=20 - index),
+            300.0 if index % 2 == 0 else -300.0,
+            0.0,
+            300.0,
+            0.0,
+            "on" if index % 2 == 0 else "off",
+        )
+        for index in range(6)
+    ]
+    recent_edges = [
+        NilmEdge(
+            now - timedelta(minutes=5 - index),
+            300.0 if index % 2 == 0 else -300.0,
+            0.0,
+            300.0,
+            0.0,
+            "on" if index % 2 == 0 else "off",
+        )
+        for index in range(6)
+    ]
+    events = [
+        CircuitEvent(
+            edge.timestamp,
+            "hvac-2",
+            EventType.START if edge.direction == "on" else EventType.STOP,
+            features={},
+        )
+        for edge in recent_edges
+    ]
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        helper_candidate_events=lambda _id, values: values,
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    edges = [*old_edges, *recent_edges]
+    processor.unmatched_edges_by_circuit["ac-2"] = edges
+    processor._helper_events_by_source["ac-2"] = events
+
+    payload = processor._nilm_signature_payloads(
+        "ac-2", cluster_recurring_signatures(edges), context
+    )[0]
+
+    candidate = payload["helper_candidates"][0]
+    assert candidate["source_event_count"] == 6
+    assert candidate["source_coverage"] == 1.0
+    assert candidate["suggested"] is True
+
+
+def test_confirmed_helper_link_refresh_preserves_relationship() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _refresh_confirmed_helper_links,
+    )
+
+    link = {
+        "helper_circuit_id": "hvac-2",
+        "relationship": "tracks_runtime",
+        "status": "confirmed",
+        "matched_on_count": 4,
+        "matched_off_count": 5,
+        "confidence": 0.9,
+    }
+    assignments = [{"signature_fingerprints": ["fingerprint"], "helper_links": [link]}]
+    low_confidence = {
+        "helper_circuit_id": "hvac-2",
+        "matched_on_count": 6,
+        "matched_off_count": 8,
+        "confidence": 0.7,
+        "start_lag_seconds": 8.0,
+        "stop_lag_seconds": 12.0,
+    }
+
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [low_confidence])
+
+    assert link["relationship"] == "tracks_runtime"
+    assert link["status"] == "confirmed"
+    assert link["confidence"] == 0.7
+    assert link["confirmed_matched_on_count"] == 4
+    assert link["confirmed_matched_off_count"] == 5
+
+    low_confidence["matched_on_count"] = 7
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [low_confidence])
+
+    assert link["status"] == "degraded"
+
+
+def test_confirmed_helper_link_refresh_normalizes_malformed_metrics() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _refresh_confirmed_helper_links,
+    )
+
+    link = {
+        "helper_circuit_id": "hvac-2",
+        "relationship": "tracks_runtime",
+        "status": "confirmed",
+        "matched_on_count": "invalid",
+        "matched_off_count": {},
+        "confirmed_matched_on_count": 10**10_000,
+        "confirmed_matched_off_count": -4,
+        "confidence": "NaN",
+    }
+    assignments = [{"signature_fingerprints": ["fingerprint"], "helper_links": [link]}]
+    candidate = {
+        "helper_circuit_id": "hvac-2",
+        "matched_on_count": "7",
+        "matched_off_count": 8.5,
+        "confidence": float("nan"),
+    }
+
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [candidate])
+
+    assert link["matched_on_count"] == 7
+    assert link["matched_off_count"] == 8
+    assert link["confirmed_matched_on_count"] == 0
+    assert link["confirmed_matched_off_count"] == 0
+    assert link["confidence"] == 0.0
+
+
+def test_confirmed_helper_link_unavailability_does_not_degrade() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _refresh_confirmed_helper_links,
+    )
+
+    link = {
+        "helper_circuit_id": "hvac-2",
+        "relationship": "tracks_runtime",
+        "status": "confirmed",
+        "matched_on_count": 3,
+        "matched_off_count": 3,
+        "confidence": 0.9,
+    }
+    assignments = [{"signature_fingerprints": ["fingerprint"], "helper_links": [link]}]
+
+    _refresh_confirmed_helper_links(assignments, "fingerprint", [])
+
+    assert link["status"] == "confirmed"
+    assert "confirmed_matched_on_count" not in link
+
+
 @pytest.mark.parametrize(
     ("profile", "mode", "expected_events"),
     [

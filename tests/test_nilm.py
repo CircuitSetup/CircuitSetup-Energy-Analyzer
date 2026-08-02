@@ -14,11 +14,15 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdge,
     NilmEdgeDetector,
+    NilmHelperCandidate,
     NilmSignature,
     classify_signature,
     cluster_recurring_signatures,
+    discover_nilm_helper_candidates,
     mask_known_loads,
+    nilm_helper_candidate_to_dict,
     pair_nilm_sessions_for_signatures,
+    score_nilm_helper_candidate,
     unmatched_load_percentage,
 )
 from custom_components.circuitsetup_energy_analyzer.normalize import (
@@ -104,6 +108,126 @@ def edge(
         split_phase_type=split_phase_type,
         dominant_leg=dominant_leg,
     )
+
+
+def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
+    return CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=seconds),
+        circuit_id="helper",
+        event_type=event_type,
+    )
+
+
+def test_nilm_helper_candidate_scores_one_to_one_directional_pairs() -> None:
+    candidates = discover_nilm_helper_candidates(
+        [
+            edge(0, 500), edge(100, 500), edge(200, 500), edge(300, -500),
+            edge(400, -500), edge(500, -500), edge(2000, 500),
+        ],
+        {
+            "helper": [
+                helper_event(10, EventType.START),
+                helper_event(130, EventType.START),
+                helper_event(250, EventType.START),
+                helper_event(320, EventType.STOP),
+                helper_event(420, EventType.STOP),
+                helper_event(520, EventType.STOP),
+                helper_event(900, EventType.START),
+            ],
+        },
+    )
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.matched_on_count == candidate.matched_off_count == 3
+    assert candidate.unmatched_source_count == candidate.unmatched_helper_count == 1
+    assert candidate.source_coverage == pytest.approx(6 / 7)
+    assert candidate.start_coverage == 0.75
+    assert candidate.stop_coverage == 1.0
+    assert candidate.helper_precision == pytest.approx(6 / 7)
+    assert candidate.start_lag_seconds == 30.0
+    assert candidate.stop_lag_seconds == 20.0
+    assert candidate.start_lag_mad_seconds == 20.0
+    assert candidate.stop_lag_mad_seconds == 0.0
+    assert candidate.confidence == pytest.approx(0.869047619)
+    assert nilm_helper_candidate_to_dict(candidate)["suggested"] is True
+
+
+def test_nilm_helper_candidate_uses_exact_window_and_diagnostic_gate() -> None:
+    source_edges = [
+        edge(0, 500), edge(2000, 500), edge(4000, 500),
+        edge(6000, -500), edge(8000, -500), edge(10000, -500),
+    ]
+    candidates = discover_nilm_helper_candidates(
+        source_edges,
+        {
+            "inside": [
+                helper_event(600, EventType.START), helper_event(2600, EventType.START),
+                helper_event(4600, EventType.START), helper_event(6600, EventType.STOP),
+                helper_event(8600, EventType.STOP), helper_event(10600, EventType.STOP),
+            ],
+            "outside": [
+                helper_event(601, EventType.START), helper_event(2601, EventType.START),
+                helper_event(4601, EventType.START), helper_event(6601, EventType.STOP),
+                helper_event(8601, EventType.STOP), helper_event(10601, EventType.STOP),
+            ],
+            "few": [
+                helper_event(1, EventType.START), helper_event(2001, EventType.START),
+                helper_event(6001, EventType.STOP), helper_event(8001, EventType.STOP),
+            ],
+        },
+    )
+
+    by_id = {candidate.helper_circuit_id: candidate for candidate in candidates}
+    assert by_id["inside"].confidence == 1.0
+    assert nilm_helper_candidate_to_dict(by_id["inside"])["suggested"] is True
+    assert by_id["outside"].matched_on_count == by_id["outside"].matched_off_count == 0
+    assert by_id["few"].confidence == 0.0
+    assert nilm_helper_candidate_to_dict(by_id["few"])["suggested"] is False
+    assert score_nilm_helper_candidate(0.9, 0.8, 30.0) == pytest.approx(0.835)
+    assert score_nilm_helper_candidate(1.0, 1.0, 0.0) == 1.0
+    threshold = NilmHelperCandidate(
+        helper_circuit_id="threshold",
+        matched_on_count=3,
+        matched_off_count=3,
+        unmatched_source_count=0,
+        unmatched_helper_count=0,
+        source_event_count=6,
+        helper_event_count=6,
+        source_coverage=1.0,
+        start_coverage=1.0,
+        stop_coverage=1.0,
+        helper_precision=1.0,
+        start_lag_seconds=0.0,
+        stop_lag_seconds=0.0,
+        start_lag_mad_seconds=0.0,
+        stop_lag_mad_seconds=0.0,
+        confidence=0.75,
+        last_observed=BASE_TIME,
+    )
+    assert nilm_helper_candidate_to_dict(threshold)["suggested"] is True
+
+
+def test_nilm_helper_candidates_sort_and_cap_by_confidence_then_recency() -> None:
+    source_edges = [edge(index * 1000, 500) for index in range(3)] + [
+        edge((index + 3) * 1000, -500) for index in range(3)
+    ]
+    events = {
+        f"helper-{index}": [
+            helper_event(
+                int((edge_.timestamp - BASE_TIME).total_seconds()) + index,
+                EventType.START if edge_.direction == "on" else EventType.STOP,
+            )
+            for edge_ in source_edges
+        ]
+        for index in range(9)
+    }
+    candidates = discover_nilm_helper_candidates(source_edges, events)
+
+    assert len(candidates) == 8
+    assert [candidate.helper_circuit_id for candidate in candidates] == [
+        f"helper-{index}" for index in range(8, 0, -1)
+    ]
 
 
 def test_edge_detector_emits_on_and_off_edges_from_current_sample_fields() -> None:

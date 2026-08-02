@@ -4385,6 +4385,51 @@ def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> Non
         _boolean_value("sometimes")
 
 
+def test_nilm_helper_link_service_schemas_are_exact() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+    set_schema = services._SERVICE_SCHEMAS[services.SERVICE_SET_NILM_HELPER_LINK]
+    remove = services._SERVICE_SCHEMAS[services.SERVICE_REMOVE_NILM_HELPER_LINK]
+    data = {"circuit_id": "mixed", "assignment_id": "assignment-load",
+            "helper_circuit_id": "helper", "relationship": "corroborates",
+            "entry_id": "entry-1"}
+    assert set_schema(data) == data
+    assert remove({k: v for k, v in data.items() if k != "relationship"})
+    assert set_schema({**data, "relationship": "direct_component"})
+    with pytest.raises(ValueError):
+        set_schema({**data, "relationship": "other"})
+    with pytest.raises(ValueError):
+        set_schema({**data, "extra": "no"})
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_services_are_entry_isolated() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+    def coordinator(helper: bool = True) -> SimpleNamespace:
+        configs = [SimpleNamespace(circuit_id="mixed")]
+        if helper:
+            configs.append(SimpleNamespace(circuit_id="helper"))
+        return SimpleNamespace(async_set_updated_data=lambda _: None,
+            circuit_configs=configs,
+            store_data=FeatureStoreData(nilm_appliance_assignments_by_circuit={
+                "mixed": [{"assignment_id": "assignment-load"}]}),
+            async_set_nilm_helper_link=AsyncMock(),
+            async_remove_nilm_helper_link=AsyncMock())
+    first, second = coordinator(), coordinator()
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    data = {"circuit_id": "mixed", "assignment_id": "assignment-load",
+            "helper_circuit_id": "helper"}
+    with pytest.raises(services.HomeAssistantError, match="ambiguous"):
+        await services._dispatch_service(hass, services.SERVICE_SET_NILM_HELPER_LINK,
+            {**data, "relationship": "corroborates"})
+    first.async_set_nilm_helper_link.assert_not_awaited()
+    await services._dispatch_service(hass, services.SERVICE_SET_NILM_HELPER_LINK,
+        {**data, "relationship": "corroborates", "entry_id": "entry-2"})
+    second.async_set_nilm_helper_link.assert_awaited_once()
+    hass.data[DOMAIN] = {"entry-1": coordinator(False), "entry-2": second}
+    await services._dispatch_service(hass, services.SERVICE_REMOVE_NILM_HELPER_LINK,
+                                     data)
+    second.async_remove_nilm_helper_link.assert_awaited_once()
+
+
 def test_mark_circuit_mixed_uses_dedicated_entry_scoped_schema() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         _SERVICE_SCHEMAS,

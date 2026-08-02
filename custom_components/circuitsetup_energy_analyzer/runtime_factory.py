@@ -329,6 +329,7 @@ def initialize_runtime(
         unmatched_edges_by_circuit=self._nilm_unmatched_edges,
         ignored_signatures=self.ignored_nilm_signatures,
         known_load_events=self.nilm_controller.known_load_events,
+        helper_candidate_events=self.nilm_controller.helper_candidate_events,
         observe_topology=(
             lambda config, match, context: [
                 alert

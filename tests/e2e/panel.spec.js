@@ -5897,6 +5897,60 @@ test("NILM workspace renders kW history as watts", async ({ page }) => {
   await expect(panel.locator("svg.chart")).toHaveAttribute("data-nilm-chart-select", "1");
 });
 
+test("NILM assignment helpers reload history and ignore stale toggle responses", async ({ page }) => {
+  const historyQueries = [];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      const helpers = url.searchParams.getAll("helper_circuit_id");
+      historyQueries.push(helpers);
+      if (helpers.length === 2) await new Promise((resolve) => setTimeout(resolve, 200));
+      await route.fulfill({ json: [[{
+        entity_id: helpers.length === 2 ? "sensor.stale" : `sensor.${helpers[0] || "source"}`,
+        state: "1", last_changed: "2026-07-13T20:00:00Z",
+      }]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    const helper = (id, confirmed = true) => ({
+      helper_circuit_id: id,
+      helper_name: id.toUpperCase(),
+      state: confirmed ? "confirmed" : "suggested",
+      matched_on_count: 9,
+      source_on_count: 10,
+      start_lag_seconds: 42,
+      relationship: "corroborates",
+      relationship_options: ["corroborates", "direct_component"],
+      actions: {},
+    });
+    payload.assignments = [
+      { ...payload.assignments[0], assignment_id: "first", display_name: "First", helper_links: [helper("helper-a")], helper_candidates: [] },
+      { ...payload.assignments[0], assignment_id: "second", display_name: "Second", helper_links: [helper("helper-b")], helper_candidates: [helper("helper-c", false)] },
+    ];
+    payload.lanes.assigned.assignment_ids = ["first", "second"];
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-review-item="assignment:second"]').click();
+  await expect.poll(() => historyQueries.some((ids) => ids.join() === "helper-b")).toBe(true);
+
+  await panel.locator('[data-nilm-helper-circuit-id="helper-c"] button[aria-pressed]').click();
+  await panel.locator('[data-nilm-helper-circuit-id="helper-b"] button[aria-pressed]').click();
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmWorkspaceHistorySeries[0][0].entity_id
+  ))).toBe("sensor.helper-c");
+  await panel.locator('[data-nilm-review-item="assignment:first"]').click();
+  await panel.locator('[data-nilm-review-item="assignment:second"]').click();
+  await expect.poll(() => historyQueries.at(-1).join()).toBe("helper-c");
+});
+
 test("major panel routes pass automated accessibility checks", async ({ page }) => {
   await mockPanelApi(page);
   for (const query of [

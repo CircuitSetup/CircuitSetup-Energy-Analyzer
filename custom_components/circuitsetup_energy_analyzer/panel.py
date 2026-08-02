@@ -1929,6 +1929,7 @@ async def nilm_workspace_history_payload(
     circuit_id: str | None = None,
     hours: Any = None,
     entry_id: str | None = None,
+    helper_circuit_ids: Iterable[str] = (),
 ) -> list[list[dict[str, Any]]]:
     """Return capped HA history rows for the NILM workspace."""
 
@@ -1940,6 +1941,46 @@ async def nilm_workspace_history_payload(
     if target is None:
         return []
     coordinator, config, _sources = target
+    store_data = getattr(coordinator, "store_data", None)
+    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
+    assignments_by_circuit = getattr(
+        store_data, "nilm_appliance_assignments_by_circuit", {}
+    )
+    surfaced_helper_ids = {
+        str(item.get("helper_circuit_id") or "").strip()
+        for collection in (
+            signatures_by_circuit.get(config.circuit_id, ())
+            if isinstance(signatures_by_circuit, Mapping)
+            else (),
+            assignments_by_circuit.get(config.circuit_id, ())
+            if isinstance(assignments_by_circuit, Mapping)
+            else (),
+        )
+        for parent in collection
+        if isinstance(parent, Mapping)
+        for key in ("helper_candidates", "helper_links")
+        for item in _iter_items(parent.get(key))
+        if isinstance(item, Mapping) and item.get("helper_circuit_id")
+    }
+    requested_helpers = list(
+        dict.fromkeys(
+            str(value or "").strip()
+            for value in helper_circuit_ids
+            if str(value or "").strip()
+            and str(value or "").strip() != config.circuit_id
+            and str(value or "").strip() in surfaced_helper_ids
+        )
+    )
+    configs_by_id = {
+        candidate.circuit_id: candidate
+        for candidate in getattr(coordinator, "circuit_configs", ()) or ()
+        if isinstance(candidate, CircuitConfig)
+    }
+    helper_configs = [
+        configs_by_id[value]
+        for value in requested_helpers
+        if value in configs_by_id
+    ][:4]
     known_load_overlays = _nilm_known_load_overlays(
         coordinator,
         config.circuit_id,
@@ -1951,6 +1992,7 @@ async def nilm_workspace_history_payload(
         solar_overlays,
         hours=hours,
         entry_id=str(getattr(coordinator, "entry_id", "") or ""),
+        helper_configs=helper_configs,
     )
     return await _async_history_rows(
         hass,

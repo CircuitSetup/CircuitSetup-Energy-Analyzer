@@ -18,6 +18,7 @@ export function createNilmWorkspaceMethods({
     }
 
     this._invalidateNilmFocusedHistoryRequests();
+    this._invalidateNilmHelperHistoryRequests();
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
@@ -31,6 +32,7 @@ export function createNilmWorkspaceMethods({
         return;
       }
       this._nilmWorkspace = workspace;
+      this._nilmSyncHelperSelection(workspace);
       await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
       const routeUrl = new URL(routeKey, window.location.origin);
       const sessionId = routeUrl.searchParams.get("session_id") || "";
@@ -150,9 +152,15 @@ export function createNilmWorkspaceMethods({
     if (!this._routeRequestsNilmWorkspace(routeKey)) {
       return;
     }
-    const historyPath = workspace && workspace.history && workspace.history.api_path;
+    this._invalidateNilmFocusedHistoryRequests();
+    const token = (this._nilmHelperHistoryToken || 0) + 1;
+    this._nilmHelperHistoryToken = token;
+    const isCurrent = () => token === this._nilmHelperHistoryToken
+      && this._isCurrentRequest(requestId, routeKey);
+    const historyPath = this._nilmHistoryPathWithHelpers(workspace && workspace.history && workspace.history.api_path);
     const historyFetchPath = (workspace && workspace.history && workspace.history.fetch_path)
-      || (historyPath ? `/api/${historyPath}` : "");
+      ? this._nilmHistoryPathWithHelpers(workspace.history.fetch_path)
+      : (historyPath ? `/api/${historyPath}` : "");
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
     this._nilmWorkspaceHistorySeries = [];
@@ -163,19 +171,19 @@ export function createNilmWorkspaceMethods({
     this._render();
     try {
       const history = await this._requestJson(historyPath, historyFetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrent()) {
         return;
       }
       this._nilmWorkspaceHistorySeries = Array.isArray(history) ? history : [];
       this._nilmWorkspaceHistoryError = "";
       this._nilmWorkspaceHistoryFailedRequest = null;
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrent()) {
         return;
       }
       this._nilmWorkspaceHistoryError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrent()) {
         this._nilmWorkspaceHistoryLoading = false;
         this._render();
       }
@@ -520,6 +528,10 @@ export function createNilmWorkspaceMethods({
     const workspace = this._nilmWorkspace;
     const items = workspace && workspace[collectionKey];
     const item = items && items[index];
+    if (collectionKey === "assignments" && actionKey.startsWith("helper_")) {
+      await this._handleNilmHelperAction(item, index, actionKey);
+      return;
+    }
     const action = item && item.actions && item.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
       return;
@@ -833,6 +845,10 @@ export function createNilmWorkspaceMethods({
 
   _invalidateNilmFocusedHistoryRequests() {
     this._nilmFocusedHistoryToken += 1;
+  }
+
+  _invalidateNilmHelperHistoryRequests() {
+    this._nilmHelperHistoryToken = (this._nilmHelperHistoryToken || 0) + 1;
   }
 
   _isCurrentNilmFocusedHistoryRequest(token, requestId, routeKey) {
@@ -1262,6 +1278,7 @@ export function createNilmWorkspaceMethods({
   }
 
   async _loadNilmWorkspaceHistoryForWindow(window, failedRequest = null) {
+    this._invalidateNilmHelperHistoryRequests();
     const workspace = this._nilmWorkspace;
     const history = workspace && workspace.history;
     if (!history || !history.api_path) {
@@ -1354,6 +1371,84 @@ export function createNilmWorkspaceMethods({
     url.searchParams.set("hours", String(hours));
     const nextPath = `${url.pathname}${url.search}`;
     return path.startsWith("/") ? nextPath : nextPath.replace(/^\//, "");
+  }
+
+  _nilmSyncHelperSelection(workspace) {
+    this._nilmSelectedHelpers ||= {};
+    const selected = this._nilmSelectedReviewItem(workspace);
+    if (!selected || selected.kind !== "assignment") return;
+    const id = selected.item.assignment_id;
+    if (!(id in this._nilmSelectedHelpers)) {
+      this._nilmSelectedHelpers[id] = (selected.item.helper_links || [])
+        .map((link) => link.helper_circuit_id).slice(0, 4);
+    }
+  }
+
+  _nilmHistoryPathWithHelpers(path) {
+    if (!path) return path;
+    this._nilmSyncHelperSelection(this._nilmWorkspace);
+    const selected = this._nilmSelectedReviewItem(this._nilmWorkspace);
+    const ids = selected && selected.kind === "assignment"
+      ? (this._nilmSelectedHelpers && this._nilmSelectedHelpers[selected.item.assignment_id]) || []
+      : [];
+    const url = new URL(path.startsWith("/") ? path : `/${path}`, window.location.origin);
+    url.searchParams.delete("helper_circuit_id");
+    ids.slice(0, 4).forEach((id) => url.searchParams.append("helper_circuit_id", id));
+    const result = `${url.pathname}${url.search}`;
+    return path.startsWith("/") ? result : result.replace(/^\//, "");
+  }
+
+  async _handleNilmHelperAction(assignment, index, actionKey) {
+    const [kind, offset] = actionKey.slice(7).split("_");
+    const items = (kind === "remove" || kind === "togglelink") ? assignment.helper_links : assignment.helper_candidates;
+    const evidence = items && items[Number(offset)];
+    if (!evidence) return;
+    if (kind === "toggle" || kind === "togglelink") {
+      this._nilmSelectedHelpers ||= {};
+      const selected = new Set(this._nilmSelectedHelpers[assignment.assignment_id] || []);
+      selected.has(evidence.helper_circuit_id) ? selected.delete(evidence.helper_circuit_id) : selected.add(evidence.helper_circuit_id);
+      this._nilmSelectedHelpers[assignment.assignment_id] = [...selected].slice(0, 4);
+      await this._loadNilmWorkspaceHistory();
+      return;
+    }
+    const action = kind === "remove"
+      ? evidence.actions && evidence.actions.remove
+      : evidence.actions && evidence.actions.set;
+    if (!this._guardActionCall(action, `NILM helper ${kind}`)) return;
+    const data = { ...(action.data || {}) };
+    if (kind === "set") {
+      const select = this.shadowRoot.querySelector(`#nilm_helper_relationship_${index}_${offset}`);
+      data.relationship = select && select.value;
+    }
+    await this._hass.callService(action.domain, action.service, data);
+    const selected = new Set(this._nilmSelectedHelpers[assignment.assignment_id] || []);
+    kind === "remove"
+      ? selected.delete(evidence.helper_circuit_id)
+      : selected.add(evidence.helper_circuit_id);
+    this._nilmSelectedHelpers[assignment.assignment_id] = [...selected].slice(0, 4);
+    await this._refreshNilmWorkspaceData();
+    await this._loadNilmWorkspaceHistory();
+    this._render();
+  }
+
+  _renderNilmHelperEvidence(assignment, index) {
+    this._nilmSyncHelperSelection(this._nilmWorkspace);
+    const selectedIds = new Set((this._nilmSelectedHelpers && this._nilmSelectedHelpers[assignment.assignment_id]) || []);
+    const confirmedIds = new Set((assignment.helper_links || []).map((item) => item.helper_circuit_id));
+    const renderEvidence = (item, offset, confirmed) => {
+      const selected = selectedIds.has(item.helper_circuit_id);
+      const name = item.helper_name || item.helper_circuit_id;
+      return `<div class="nilm-helper-evidence" style="display:grid;gap:8px;min-width:0" data-nilm-helper-circuit-id="${this._escape(item.helper_circuit_id)}">
+        <button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_${confirmed ? "togglelink" : "toggle"}_${offset}" aria-pressed="${selected}" aria-label="${this._escape(this._panelTextFormat("nilm_workspace.helper_toggle", { name }))}">${this._escape(name)}</button>
+        <span>${this._escape(this._panelTextFormat("nilm_workspace.helper_matched_starts", { matched: item.matched_on_count, total: item.source_on_count, name }))}</span>
+        <span>${this._escape(this._panelTextFormat("nilm_workspace.helper_start_delay", { seconds: this._formatMetricValue(item.start_lag_seconds) }))}</span>
+        ${confirmed ? `<span>${this._escape(this._panelText(`nilm_workspace.helper_relationship_${item.relationship}`))}</span><button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_remove_${offset}">${this._escape(this._panelText("nilm_workspace.helper_remove"))}</button>` : `<label for="nilm_helper_relationship_${index}_${offset}">${this._escape(this._panelText("nilm_workspace.helper_relationship"))}</label><select style="max-width:100%" id="nilm_helper_relationship_${index}_${offset}">${(item.relationship_options || []).map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("")}</select><button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_set_${offset}">${this._escape(this._panelText("nilm_workspace.helper_confirm"))}</button>`}
+      </div>`;
+    };
+    const candidates = (assignment.helper_candidates || [])
+      .map((item, offset) => ({ item, offset }))
+      .filter(({ item }) => !confirmedIds.has(item.helper_circuit_id));
+    return `<div class="nilm-helper-list"><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}</div>`;
   }
 
   _zoomNilmGraph(factor) {
@@ -1742,6 +1837,7 @@ export function createNilmWorkspaceMethods({
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
+        ${this._renderNilmHelperEvidence(item, reviewItem.index)}
         ${this._renderNilmAssignmentEditFields(item, reviewItem.index)}
         ${this._renderNilmAssignmentActions(item, reviewItem.index)}
         ${this._renderInlineFeedback(this._nilmReviewKey(reviewItem))}

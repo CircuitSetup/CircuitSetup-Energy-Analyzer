@@ -16,6 +16,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitConfig,
     CircuitMode,
     NilmSourceKind,
+    PowerFlowMode,
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.storage import (
@@ -47,6 +48,27 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+def test_nilm_controller_filters_helpers_to_current_direct_loads() -> None:
+    configs = {
+        "mixed": _config(ApplianceProfile.MIXED, CircuitMode.MIXED),
+        "hvac-2": _config(ApplianceProfile.HVAC_BLOWER),
+        "solar": _config(
+            ApplianceProfile.MOTOR_LOAD,
+            power_flow=PowerFlowMode.GENERATION,
+        ),
+    }
+    controller = _nilm_controller(SimpleNamespace(
+        circuit_registry=SimpleNamespace(config_for_circuit=configs.get)
+    ))
+    events = [SimpleNamespace(circuit_id=value) for value in (
+        "mixed", "hvac-2", "solar", "other-entry"
+    )]
+
+    assert [event.circuit_id for event in controller.helper_candidate_events(
+        "mixed", events
+    )] == ["hvac-2"]
 
 
 @pytest.mark.parametrize(
@@ -443,19 +465,223 @@ def test_assignment_history_prefers_explicit_session_owner() -> None:
 
     assert controller.assignment_session_history("mains", "assignment-one") == []
 
+@pytest.mark.asyncio
+async def test_nilm_helper_links_validate_persist_replace_and_remove() -> None:
+    controller, assignment = _helper_link_controller()
+    linked = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="corroborates",
+    )
+    link = linked["helper_links"][0]
+    assert link["helper_circuit_id"] == "helper"
+    assert link["relationship"] == "corroborates"
+    assert link["status"] == "confirmed"
+    assert link["confidence"] == 0.91
+    assert link["matched_on_count"] == link["confirmed_matched_on_count"] == 4
+    assert link["matched_off_count"] == link["confirmed_matched_off_count"] == 5
+    assert link["last_observed"] == "2026-06-02T11:00:00+00:00"
+    forbidden = {"conversion_state", "direct_circuit_id",
+                 "keep_assignment_for_masking", "publish_entities"}
+    assert not forbidden & assignment.keys()
+    replaced = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="direct_component",
+    )
+    assert len(replaced["helper_links"]) == 1
+    assert replaced["helper_links"][0]["relationship"] == "direct_component"
+    removed = await controller.async_remove_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+    )
+    assert removed["helper_links"] == []
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source", "assignment", "helper", "relationship", "error"), (
+    ("missing", "assignment-load", "helper", "corroborates", "source"),
+    ("mixed", "missing", "helper", "corroborates", "assignment"),
+    ("mixed", "assignment-load", "mixed", "corroborates", "itself"),
+    ("mixed", "assignment-load", "missing", "corroborates", "helper"),
+    ("mixed", "assignment-load", "helper", "unsupported", "relationship"),
+    ("mixed", "assignment-load", "aggregate", "direct_component", "direct-appliance"),
+))
+async def test_nilm_helper_links_reject_invalid_relationships(
+    source: str, assignment: str, helper: str, relationship: str, error: str,
+) -> None:
+    controller, _ = _helper_link_controller()
+    with pytest.raises(ValueError, match=error):
+        await controller.async_set_nilm_helper_link(
+            source, assignment, helper_circuit_id=helper,
+            relationship=relationship,
+        )
+
+@pytest.mark.asyncio
+async def test_nilm_helper_links_reject_fifth_and_second_direct_component() -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["helper_links"] = [{
+        "helper_circuit_id": f"old-{index}", "relationship": "corroborates"
+    } for index in range(4)]
+    with pytest.raises(ValueError, match="four"):
+        await controller.async_set_nilm_helper_link(
+            "mixed", "assignment-load", helper_circuit_id="helper",
+            relationship="direct_component",
+        )
+    assignment["helper_links"] = [{
+        "helper_circuit_id": "helper", "relationship": "direct_component"
+    }]
+    with pytest.raises(ValueError, match="direct_component"):
+        await controller.async_set_nilm_helper_link(
+            "mixed", "assignment-load", helper_circuit_id="helper-2",
+            relationship="direct_component",
+        )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source", "helper", "error"), (
+    ("missing", "helper", "source"),
+    ("mixed", "mixed", "itself"),
+    ("mixed", "missing", "helper"),
+))
+async def test_remove_nilm_helper_link_validates_resources(
+    source: str, helper: str, error: str,
+) -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["helper_links"] = [{"helper_circuit_id": "helper"}]
+
+    with pytest.raises(ValueError, match=error):
+        await controller.async_remove_nilm_helper_link(
+            source, "assignment-load", helper_circuit_id=helper,
+        )
+
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_uses_newest_candidate_across_fingerprints() -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["signature_fingerprints"] = ["older", "newer"]
+    controller._coordinator.store_data.nilm_signatures["mixed"] = [
+        {"feedback_fingerprint": "older", "helper_candidates": [{
+            "helper_circuit_id": "helper", "confidence": 0.99,
+            "matched_on_count": 9, "matched_off_count": 9,
+            "last_observed": "2026-06-01T12:00:00+00:00",
+        }]},
+        {"feedback_fingerprint": "newer", "helper_candidates": [{
+            "helper_circuit_id": "helper", "confidence": 0.8,
+            "matched_on_count": 5, "matched_off_count": 6,
+            "last_observed": "2026-06-02T11:00:00+00:00",
+        }]},
+    ]
+
+    linked = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="corroborates",
+    )
+
+    assert linked["helper_links"][0]["matched_on_count"] == 5
+    assert linked["helper_links"][0]["confirmed_matched_off_count"] == 6
+
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_candidate_tie_is_storage_order_independent() -> None:
+    async def selected_lag(reverse: bool) -> float:
+        controller, assignment = _helper_link_controller()
+        assignment["signature_fingerprints"] = ["alpha", "zeta"]
+        signatures = [
+            {"feedback_fingerprint": "alpha", "helper_candidates": [{
+                "helper_circuit_id": "helper", "confidence": 0.8,
+                "matched_on_count": 5, "matched_off_count": 6,
+                "start_lag_seconds": 11,
+                "last_observed": "2026-06-02T11:00:00+00:00",
+            }]},
+            {"feedback_fingerprint": "zeta", "helper_candidates": [{
+                "helper_circuit_id": "helper", "confidence": 0.8,
+                "matched_on_count": 5, "matched_off_count": 6,
+                "start_lag_seconds": 22,
+                "last_observed": "2026-06-02T11:00:00+00:00",
+            }]},
+        ]
+        controller._coordinator.store_data.nilm_signatures["mixed"] = (
+            list(reversed(signatures)) if reverse else signatures
+        )
+        linked = await controller.async_set_nilm_helper_link(
+            "mixed", "assignment-load", helper_circuit_id="helper",
+            relationship="corroborates",
+        )
+        return linked["helper_links"][0]["start_lag_seconds"]
+
+    assert await selected_lag(False) == await selected_lag(True) == 22
+
+
+@pytest.mark.asyncio
+async def test_nilm_helper_link_normalizes_malformed_candidate_and_link_values(
+) -> None:
+    controller, assignment = _helper_link_controller()
+    controller._coordinator.store_data.nilm_signatures["mixed"][0][
+        "helper_candidates"
+    ][0].update({
+        "confidence": "bad", "matched_on_count": "bad",
+        "matched_off_count": None, "start_lag_seconds": "bad",
+        "last_observed": "not-a-date",
+    })
+    assignment["helper_links"] = [{
+        "helper_circuit_id": "old", "relationship": "corroborates",
+        "confidence": {"bad": True}, "last_observed": ["bad"],
+    }]
+
+    linked = await controller.async_set_nilm_helper_link(
+        "mixed", "assignment-load", helper_circuit_id="helper",
+        relationship="corroborates",
+    )
+
+    helper = next(link for link in linked["helper_links"]
+                  if link["helper_circuit_id"] == "helper")
+    assert helper["confidence"] == 0.0
+    assert helper["matched_on_count"] == 0
+    assert helper["matched_off_count"] == 0
+    assert helper["start_lag_seconds"] is None
+    assert helper["last_observed"] is None
+
+def _helper_link_controller() -> tuple[NilmController, dict[str, object]]:
+    async def noop(*_args: object) -> None: pass
+    assignment: dict[str, object] = {
+        "assignment_id": "assignment-load",
+        "signature_fingerprints": ["load-fingerprint"],
+    }
+    configs = {
+        "mixed": _config(ApplianceProfile.MIXED, CircuitMode.MIXED, "mixed"),
+        "helper": _config(ApplianceProfile.HVAC_BLOWER, circuit_id="helper"),
+        "helper-2": _config(ApplianceProfile.MOTOR_LOAD, circuit_id="helper-2"),
+        "aggregate": _config(ApplianceProfile.MIXED, CircuitMode.MIXED, "aggregate"),
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        circuit_registry=SimpleNamespace(config_for_circuit=configs.get),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_signatures={"mixed": [{
+                "feedback_fingerprint": "load-fingerprint",
+                "helper_candidates": [{"helper_circuit_id": "helper",
+                    "confidence": 0.91, "matched_on_count": 4,
+                    "matched_off_count": 5,
+                    "last_observed": "2026-06-02T11:00:00+00:00"}],
+            }]},
+        ), state=SimpleNamespace(), async_set_updated_data=lambda _: None,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None,
+            async_save_if_dirty=noop),
+        config_entry_controller=SimpleNamespace(async_reload=noop),
+    )
+    return _nilm_controller(coordinator), assignment
+
 
 def _config(
-    *,
     profile: ApplianceProfile,
-    mode: CircuitMode,
+    mode: CircuitMode = CircuitMode.SINGLE_PHASE,
     circuit_id: str = "source",
     name: str = "Source",
+    power_flow: PowerFlowMode = PowerFlowMode.LOAD,
 ) -> CircuitConfig:
     return CircuitConfig(
         circuit_id=circuit_id,
         name=name,
         appliance_profile=profile,
         mode=mode,
+        power_flow=power_flow,
     )
 
 

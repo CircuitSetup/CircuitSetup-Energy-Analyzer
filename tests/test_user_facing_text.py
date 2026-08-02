@@ -408,6 +408,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "entity_id": "Analyzer Entity",
     "goal_alert_ratio": "Goal Alert Ratio",
     "ground_truth_entity_id": "Ground Truth Entity",
+    "helper_circuit_id": "Helper circuit ID",
     "label": "Label",
     "keep_assignment_for_masking": "Keep Assignment For Masking",
     "keep_published_estimate": "Keep Published Estimate",
@@ -431,6 +432,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "power_factor_tolerance": "Power Factor Tolerance",
     "preset": "Preset",
     "recommendation_id": "Recommendation ID",
+    "relationship": "Relationship",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
@@ -7608,6 +7610,36 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
     assert "Core/default visible" in readme_text
     assert "Standard feature entity" in readme_text
     assert "Advanced diagnostic, hidden by default." not in readme_text
+
+
+def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
+    translations = json.loads(
+        Path("custom_components/circuitsetup_energy_analyzer/translations/en.json")
+        .read_text(encoding="utf-8")
+    )["config_panel"]["panel"]["nilm_workspace"]
+
+    assert translations["helper_matched_starts"] == (
+        "Matched {matched} of {total} {name} starts"
+    )
+    assert translations["helper_start_delay"] == (
+        "Typical start delay {seconds} seconds"
+    )
+    assert translations["helper_relationship_corroborates"].startswith("Evidence only")
+    assert translations["helper_relationship_direct_component"].startswith(
+        "Direct component"
+    )
+
+    script = Path(
+        "custom_components/circuitsetup_energy_analyzer/frontend/"
+        "energy-analyzer-nilm-workspace.js"
+    ).read_text(encoding="utf-8")
+    assert 'aria-pressed="${selected}"' in script
+    assert "data-nilm-helper-circuit-id=" in script
+    assert 'searchParams.append("helper_circuit_id"' in script
+    assert "evidence.actions && evidence.actions.set" in script
+    assert "evidence.actions && evidence.actions.remove" in script
+    assert "set_nilm_helper_link" not in script
+    assert "remove_nilm_helper_link" not in script
 
 
 def test_readme_describes_current_nilm_workspace_flow() -> None:

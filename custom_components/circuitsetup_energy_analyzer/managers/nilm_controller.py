@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from statistics import median
@@ -11,7 +12,7 @@ from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
 from ..nilm import NilmEdge
-from ..profiles import nilm_source_kind
+from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
 
 
 class NilmController:
@@ -149,6 +150,18 @@ class NilmController:
             result.state_updates,
         )
         return result.alerts[0] if result.alerts else None
+
+    def helper_candidate_events(
+        self, nilm_circuit_id: str, events: Iterable[Any]
+    ) -> Iterable[Any]:
+        """Yield current-entry direct-load events as correlation evidence."""
+        registry = self._coordinator.circuit_registry
+        for event in events:
+            if event.circuit_id == nilm_circuit_id:
+                continue
+            config = registry.config_for_circuit(event.circuit_id)
+            if config is not None and supports_direct_appliance_analysis(config):
+                yield event
 
     def signature_payloads(
         self,
@@ -1349,6 +1362,97 @@ class NilmController:
         await self.async_save_assignment_change()
         return dict(assignment)
 
+    async def async_set_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *,
+        helper_circuit_id: str, relationship: str,
+    ) -> dict[str, Any]:
+        """Confirm one direct-circuit relationship for a NILM assignment."""
+        assignment, helper_id, helper_config = self._helper_link_resources(
+            circuit_id, assignment_id, helper_circuit_id
+        )
+        if relationship not in {"corroborates", "direct_component"}:
+            raise ValueError(f"Unsupported helper relationship '{relationship}'.")
+        direct_eligible = supports_direct_appliance_analysis(helper_config)
+        if relationship == "direct_component" and not direct_eligible:
+            raise ValueError(
+                f"Helper circuit '{helper_id}' is not direct-appliance eligible."
+            )
+        links = [_normalized_helper_link(link)
+                 for link in assignment.get("helper_links", ())
+                 if isinstance(link, Mapping)
+                 and link.get("helper_circuit_id") != helper_id]
+        if len(links) >= 4:
+            raise ValueError(
+                "A NILM assignment can have at most four confirmed helper links."
+            )
+        if relationship == "direct_component" and any(
+            link.get("relationship") == "direct_component" for link in links
+        ):
+            raise ValueError(
+                "A NILM assignment can have only one direct_component link."
+            )
+        fingerprints = set(self._clean_string_list(
+            assignment.get("signature_fingerprints")
+        ))
+        candidates = [(str(signature.get("feedback_fingerprint") or ""), candidate)
+            for signature in
+            self._coordinator.store_data.nilm_signatures.get(circuit_id, ())
+            if isinstance(signature, Mapping)
+            and str(signature.get("feedback_fingerprint") or "") in fingerprints
+            for candidate in signature.get("helper_candidates", ())
+            if isinstance(candidate, Mapping)
+            and candidate.get("helper_circuit_id") == helper_id]
+        selected = max(
+            candidates,
+            key=lambda item: (*_helper_candidate_sort_key(item[1]), item[0]),
+            default=None,
+        )
+        candidate = selected[1] if selected else None
+        link = _normalized_helper_link(candidate or {})
+        link.update(helper_circuit_id=helper_id, relationship=relationship,
+                    status="confirmed")
+        link["confirmed_matched_on_count"] = int(link.get("matched_on_count") or 0)
+        link["confirmed_matched_off_count"] = int(link.get("matched_off_count") or 0)
+        links.append(link)
+        links.sort(key=lambda item: (
+            _nonnegative_float_value(item.get("confidence"), default=0.0),
+            _helper_link_recency(item)),
+                   reverse=True)
+        assignment["helper_links"] = links[:4]
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
+    async def async_remove_nilm_helper_link(
+        self, circuit_id: str, assignment_id: str, *, helper_circuit_id: str,
+    ) -> dict[str, Any]:
+        """Remove one confirmed helper relationship."""
+        assignment, helper_id, _ = self._helper_link_resources(
+            circuit_id, assignment_id, helper_circuit_id
+        )
+        assignment["helper_links"] = [dict(link)
+            for link in assignment.get("helper_links", ())
+            if isinstance(link, Mapping)
+            and link.get("helper_circuit_id") != helper_id]
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
+    def _helper_link_resources(
+        self, circuit_id: str, assignment_id: str, helper_circuit_id: str,
+    ) -> tuple[dict[str, Any], str, Any]:
+        registry = self._coordinator.circuit_registry
+        if registry.config_for_circuit(circuit_id) is None:
+            raise ValueError(f"Missing NILM source circuit '{circuit_id}'.")
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        helper_id = str(helper_circuit_id or "").strip()
+        if helper_id == circuit_id:
+            raise ValueError("A NILM source cannot link to itself.")
+        helper_config = registry.config_for_circuit(helper_id)
+        if helper_config is None:
+            raise ValueError(f"Missing helper circuit '{helper_id}'.")
+        return assignment, helper_id, helper_config
+
     async def async_convert_nilm_assignment_to_direct_meter(
         self,
         circuit_id: str,
@@ -1757,6 +1861,53 @@ def _float_or_none(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed
+
+
+def _helper_link_recency(link: Mapping[str, Any]) -> float:
+    observed = _datetime_or_none(link.get("last_observed"))
+    if observed is None:
+        return float("-inf")
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=UTC)
+    return observed.timestamp()
+
+
+def _helper_candidate_sort_key(
+    link: Mapping[str, Any],
+) -> tuple[float, float, int, int]:
+    normalized = _normalized_helper_link(link)
+    return (
+        _helper_link_recency(normalized),
+        normalized["confidence"],
+        normalized["matched_on_count"],
+        normalized["matched_off_count"],
+    )
+
+
+def _normalized_helper_link(link: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(link)
+    for key in (
+        "matched_on_count", "matched_off_count", "unmatched_source_count",
+        "unmatched_helper_count", "source_event_count", "helper_event_count",
+        "confirmed_matched_on_count", "confirmed_matched_off_count",
+    ):
+        count = _nonnegative_float_value(normalized.get(key), default=0.0)
+        normalized[key] = int(count) if math.isfinite(count) else 0
+    confidence = _nonnegative_float_value(
+        normalized.get("confidence"), default=0.0
+    )
+    normalized["confidence"] = (
+        min(confidence, 1.0) if math.isfinite(confidence) else 0.0
+    )
+    for key in (
+        "start_lag_seconds", "stop_lag_seconds",
+        "start_lag_mad_seconds", "stop_lag_mad_seconds",
+    ):
+        value = _float_or_none(normalized.get(key))
+        normalized[key] = value if value is not None and math.isfinite(value) else None
+    observed = _datetime_or_none(normalized.get("last_observed"))
+    normalized["last_observed"] = observed.isoformat() if observed else None
+    return normalized
 
 
 def _round_optional_number(value: Any) -> float | None:
