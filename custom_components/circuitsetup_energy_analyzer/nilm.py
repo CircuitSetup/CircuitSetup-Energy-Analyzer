@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
+from enum import StrEnum
 from statistics import median, multimode
 from typing import Any
 from urllib.parse import urlencode
@@ -320,6 +321,215 @@ class NilmEdge:
     leg_balance_ratio: float | None = None
     dominant_leg: str = "unknown"
     split_phase_type: str = "unknown"
+
+
+class NilmHelperRelationship(StrEnum):
+    """How a circuit's events may support a NILM load."""
+
+    CORROBORATES = "corroborates"
+    DIRECT_COMPONENT = "direct_component"
+
+
+@dataclass(frozen=True, slots=True)
+class NilmHelperCandidate:
+    """Bounded evidence that a circuit tracks NILM transitions."""
+
+    helper_circuit_id: str
+    matched_on_count: int
+    matched_off_count: int
+    unmatched_source_count: int
+    unmatched_helper_count: int
+    source_event_count: int
+    helper_event_count: int
+    source_coverage: float
+    start_coverage: float
+    stop_coverage: float
+    helper_precision: float
+    start_lag_seconds: float | None
+    stop_lag_seconds: float | None
+    start_lag_mad_seconds: float | None
+    stop_lag_mad_seconds: float | None
+    confidence: float
+    last_observed: datetime | None
+
+
+def score_nilm_helper_candidate(
+    source_coverage: float,
+    helper_precision: float,
+    lag_mad_seconds: float,
+) -> float:
+    """Score helper evidence from coverage, precision, and timing stability."""
+    stability = 1.0 - min(max(float(lag_mad_seconds), 0.0) / 120.0, 1.0)
+    return (0.45 * source_coverage) + (0.35 * helper_precision) + (0.20 * stability)
+
+
+def discover_nilm_helper_candidates(
+    source_edges: Iterable[NilmEdge],
+    helper_events_by_circuit: Mapping[str, Iterable[CircuitEvent]],
+    *,
+    max_lag: timedelta = timedelta(minutes=10),
+) -> tuple[NilmHelperCandidate, ...]:
+    """Return the eight strongest same-direction circuit-event matches."""
+    source_edges = tuple(source_edges)
+    source_by_type = {
+        EventType.START: tuple(edge for edge in source_edges if edge.direction == "on"),
+        EventType.STOP: tuple(edge for edge in source_edges if edge.direction == "off"),
+    }
+    source_event_count = sum(len(edges) for edges in source_by_type.values())
+    candidates: list[NilmHelperCandidate] = []
+    for circuit_id, iterable in helper_events_by_circuit.items():
+        helper_events = tuple(
+            event
+            for event in iterable
+            if event.event_type in {EventType.START, EventType.STOP}
+        )
+        matched_by_type = {
+            event_type: _pair_nilm_helper_events(
+                source_by_type[event_type],
+                tuple(
+                    event
+                    for event in helper_events
+                    if event.event_type == event_type
+                ),
+                max_lag=max_lag,
+            )
+            for event_type in (EventType.START, EventType.STOP)
+        }
+        matched_on = matched_by_type[EventType.START]
+        matched_off = matched_by_type[EventType.STOP]
+        matched_count = len(matched_on) + len(matched_off)
+        helper_event_count = len(helper_events)
+        start_lags = [lag for _, _, lag in matched_on]
+        stop_lags = [lag for _, _, lag in matched_off]
+        start_lag = _median_or_none(start_lags)
+        stop_lag = _median_or_none(stop_lags)
+        start_mad = _lag_mad(start_lags, start_lag)
+        stop_mad = _lag_mad(stop_lags, stop_lag)
+        source_coverage = (
+            matched_count / source_event_count if source_event_count else 0.0
+        )
+        helper_precision = (
+            matched_count / helper_event_count if helper_event_count else 0.0
+        )
+        sufficient_matches = len(matched_on) >= 3 and len(matched_off) >= 3
+        lag_mad = _median_or_none(
+            value for value in (start_mad, stop_mad) if value is not None
+        )
+        confidence = (
+            score_nilm_helper_candidate(
+                source_coverage, helper_precision, lag_mad or 0.0
+            )
+            if sufficient_matches
+            else 0.0
+        )
+        observed = [
+            timestamp
+            for edge, event, _ in (*matched_on, *matched_off)
+            for timestamp in (edge.timestamp, event.timestamp)
+        ]
+        candidates.append(
+            NilmHelperCandidate(
+                helper_circuit_id=str(circuit_id),
+                matched_on_count=len(matched_on),
+                matched_off_count=len(matched_off),
+                unmatched_source_count=source_event_count - matched_count,
+                unmatched_helper_count=helper_event_count - matched_count,
+                source_event_count=source_event_count,
+                helper_event_count=helper_event_count,
+                source_coverage=source_coverage,
+                start_coverage=(
+                    len(matched_on) / len(source_by_type[EventType.START])
+                    if source_by_type[EventType.START]
+                    else 0.0
+                ),
+                stop_coverage=(
+                    len(matched_off) / len(source_by_type[EventType.STOP])
+                    if source_by_type[EventType.STOP]
+                    else 0.0
+                ),
+                helper_precision=helper_precision,
+                start_lag_seconds=start_lag,
+                stop_lag_seconds=stop_lag,
+                start_lag_mad_seconds=start_mad,
+                stop_lag_mad_seconds=stop_mad,
+                confidence=confidence,
+                last_observed=max(observed) if observed else None,
+            )
+        )
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda candidate: (
+                -candidate.confidence,
+                -(
+                    candidate.last_observed or datetime.min.replace(tzinfo=UTC)
+                ).timestamp(),
+                candidate.helper_circuit_id,
+            ),
+        )[:8]
+    )
+
+
+def nilm_helper_candidate_to_dict(candidate: NilmHelperCandidate) -> dict[str, Any]:
+    """Return compact helper evidence with an explicit suggestion gate."""
+    return {
+        field: getattr(candidate, field)
+        for field in candidate.__dataclass_fields__
+    } | {
+        "last_observed": (
+            candidate.last_observed.isoformat() if candidate.last_observed else None
+        ),
+        "suggested": (
+            candidate.matched_on_count >= 3
+            and candidate.matched_off_count >= 3
+            and candidate.confidence >= 0.75
+        ),
+    }
+
+
+def _pair_nilm_helper_events(
+    edges: tuple[NilmEdge, ...],
+    events: tuple[CircuitEvent, ...],
+    *,
+    max_lag: timedelta,
+) -> tuple[tuple[NilmEdge, CircuitEvent, float], ...]:
+    candidates = sorted(
+        (
+            (
+                abs((event.timestamp - edge.timestamp).total_seconds()),
+                edge_index,
+                event_index,
+            )
+            for edge_index, edge in enumerate(edges)
+            for event_index, event in enumerate(events)
+            if abs(event.timestamp - edge.timestamp) <= max_lag
+        ),
+    )
+    used_edges: set[int] = set()
+    used_events: set[int] = set()
+    matches: list[tuple[NilmEdge, CircuitEvent, float]] = []
+    for _, edge_index, event_index in candidates:
+        if edge_index in used_edges or event_index in used_events:
+            continue
+        edge, event = edges[edge_index], events[event_index]
+        matches.append(
+            (edge, event, (event.timestamp - edge.timestamp).total_seconds())
+        )
+        used_edges.add(edge_index)
+        used_events.add(event_index)
+    return tuple(matches)
+
+
+def _median_or_none(values: Iterable[float]) -> float | None:
+    values = tuple(values)
+    return float(median(values)) if values else None
+
+
+def _lag_mad(values: Iterable[float], center: float | None) -> float | None:
+    values = tuple(values)
+    if not values or center is None:
+        return None
+    return float(median(abs(value - center) for value in values))
 
 
 @dataclass(frozen=True, slots=True)
