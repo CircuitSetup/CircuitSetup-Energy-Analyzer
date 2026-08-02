@@ -110,6 +110,190 @@ def edge(
     )
 
 
+def transition(
+    assignment_id: str,
+    delta_w: float,
+    *,
+    spread_w: float = 5.0,
+    sample_count: int = 3,
+) -> nilm_domain.NilmTransitionPrototype:
+    on = delta_w > 0
+    return nilm_domain.NilmTransitionPrototype(
+        assignment_id=assignment_id,
+        direction="on" if on else "off",
+        from_state_w=0.0 if on else abs(delta_w),
+        to_state_w=abs(delta_w) if on else 0.0,
+        delta_w=delta_w,
+        spread_w=spread_w,
+        sample_count=sample_count,
+    )
+
+
+def assignment_model(
+    assignment_id: str,
+    *prototypes: nilm_domain.NilmTransitionPrototype,
+    lifecycle_state: str = "validated",
+    last_observed: datetime | None = BASE_TIME,
+    model_confidence: float = 0.9,
+) -> nilm_domain.NilmAssignmentModel:
+    return nilm_domain.NilmAssignmentModel(
+        assignment_id=assignment_id,
+        power_states_w=(0.0, abs(prototypes[0].delta_w)),
+        transition_prototypes=tuple(prototypes),
+        model_confidence=model_confidence,
+        lifecycle_state=lifecycle_state,
+        last_observed=last_observed,
+    )
+
+
+def reconcile(
+    candidate_edge: NilmEdge,
+    models: list[nilm_domain.NilmAssignmentModel],
+    states: dict[str, float | None],
+    *,
+    helpers: dict[str, float | None] | None = None,
+    durations: dict[str, float | None] | None = None,
+    validations: dict[str, float | None] | None = None,
+) -> nilm_domain.NilmReconciliationResult:
+    return nilm_domain.reconcile_nilm_edge(
+        candidate_edge,
+        models,
+        states,
+        helpers or {},
+        durations or {},
+        validations or {},
+    )
+
+
+def test_nilm_transition_tolerance_and_conservation_tolerance_are_exact() -> None:
+    assert (
+        nilm_domain.nilm_transition_tolerance_w(transition("a", 50, spread_w=2)) == 15
+    )
+    assert (
+        nilm_domain.nilm_transition_tolerance_w(transition("a", 100, spread_w=8)) == 24
+    )
+    assert (
+        nilm_domain.nilm_transition_tolerance_w(transition("a", -200, spread_w=4)) == 40
+    )
+    assert nilm_domain.conservation_tolerance_w(100, 2) == 25
+    assert nilm_domain.conservation_tolerance_w(400, 10) == 40
+
+
+def test_nilm_transition_score_uses_electrical_fit_and_renormalizes() -> None:
+    prototype = transition("a", 100, spread_w=5)
+    assert (
+        nilm_domain.score_nilm_transition(
+            edge(0, 120),
+            prototype,
+            helper_score=None,
+            duration_state_score=None,
+            validation_score=None,
+        )
+        == 0.0
+    )
+    assert nilm_domain.score_nilm_transition(
+        edge(0, 110),
+        prototype,
+        helper_score=0.8,
+        duration_state_score=0.5,
+        validation_score=1.0,
+    ) == pytest.approx(0.55 * 0.5 + 0.25 * 0.8 + 0.1 * 0.5 + 0.1)
+    assert nilm_domain.score_nilm_transition(
+        edge(0, 100),
+        prototype,
+        helper_score=None,
+        duration_state_score=None,
+        validation_score=None,
+        optional_electrical_fit=0.0,
+    ) == pytest.approx(0.7)
+
+
+def test_nilm_single_candidate_applies_threshold_and_lead_gates() -> None:
+    strong = assignment_model("strong", transition("strong", 100))
+    weak = assignment_model("weak", transition("weak", 111))
+    result = reconcile(edge(0, 100), [strong, weak], {"strong": 0.0, "weak": 0.0})
+    assert result.accepted and result.reason == "single"
+    assert result.transitions == strong.transition_prototypes
+    tied = assignment_model("tied", transition("tied", 101))
+    result = reconcile(edge(0, 100), [strong, tied], {"strong": 0.0, "tied": 0.0})
+    assert not result.accepted and result.reason == "ambiguous"
+    result = reconcile(edge(0, 110), [strong], {"strong": 0.0})
+    assert not result.accepted and result.reason == "below_threshold"
+
+
+def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_stop() -> (
+    None
+):
+    on = transition("a", 100)
+    off = transition("a", -100)
+    for lifecycle in ("hidden", "rejected", "ignored", "converted"):
+        result = reconcile(
+            edge(0, 100),
+            [assignment_model("a", on, lifecycle_state=lifecycle)],
+            {"a": 0.0},
+        )
+        assert not result.accepted
+    assert not reconcile(
+        edge(0, 100), [assignment_model("a", on)], {"a": 100.0}
+    ).accepted
+    retired = assignment_model("a", on, off, lifecycle_state="retired")
+    assert not reconcile(edge(0, 100), [retired], {"a": 0.0}).accepted
+    assert reconcile(edge(0, -100), [retired], {"a": 100.0}).reason == "single"
+
+
+def test_nilm_helper_unavailability_renormalizes_and_conflict_stays_unknown() -> None:
+    a = assignment_model("a", transition("a", 100))
+    b = assignment_model("b", transition("b", 101))
+    result = reconcile(edge(0, 100), [a], {"a": 0.0}, helpers={"a": None})
+    assert result.reason == "single"
+    result = reconcile(
+        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0}, helpers={"a": 0.9, "b": 0.9}
+    )
+    assert not result.accepted and result.reason == "helper_conflict"
+
+
+def test_nilm_compound_requires_two_different_learned_assignments_and_improvement() -> (
+    None
+):
+    a = assignment_model("a", transition("a", 60))
+    b = assignment_model("b", transition("b", 40))
+    result = reconcile(edge(0, 100), [a, b], {"a": 0.0, "b": 0.0})
+    assert result.accepted and result.compound and result.reason == "compound"
+    assert {item.assignment_id for item in result.transitions} == {"a", "b"}
+    unlearned = assignment_model("b", transition("b", 40, sample_count=2))
+    assert not reconcile(edge(0, 100), [a, unlearned], {"a": 0.0, "b": 0.0}).accepted
+
+
+def test_nilm_compound_is_bounded_to_twenty_recent_models() -> None:
+    old = assignment_model("old", transition("old", 40), last_observed=BASE_TIME)
+    recent = [
+        assignment_model(
+            f"recent-{index}",
+            transition(f"recent-{index}", 5),
+            last_observed=BASE_TIME + timedelta(seconds=index + 1),
+        )
+        for index in range(20)
+    ]
+    result = reconcile(
+        edge(0, 100),
+        [old, *recent],
+        {model.assignment_id: 0.0 for model in [old, *recent]},
+    )
+    assert not result.accepted
+
+
+def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> None:
+    models = [
+        assignment_model(name, transition(name, watts))
+        for name, watts in (("a", 40), ("b", 30), ("c", 30))
+    ]
+    result = reconcile(
+        edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
+    )
+    assert not result.accepted and result.reason == "compound_unknown"
+    assert result.consistent is False and result.energy_allocation_allowed is False
+
+
 def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
     return CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=seconds),
@@ -121,8 +305,13 @@ def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
 def test_nilm_helper_candidate_scores_one_to_one_directional_pairs() -> None:
     candidates = discover_nilm_helper_candidates(
         [
-            edge(0, 500), edge(100, 500), edge(200, 500), edge(300, -500),
-            edge(400, -500), edge(500, -500), edge(2000, 500),
+            edge(0, 500),
+            edge(100, 500),
+            edge(200, 500),
+            edge(300, -500),
+            edge(400, -500),
+            edge(500, -500),
+            edge(2000, 500),
         ],
         {
             "helper": [
@@ -155,25 +344,37 @@ def test_nilm_helper_candidate_scores_one_to_one_directional_pairs() -> None:
 
 def test_nilm_helper_candidate_uses_exact_window_and_diagnostic_gate() -> None:
     source_edges = [
-        edge(0, 500), edge(2000, 500), edge(4000, 500),
-        edge(6000, -500), edge(8000, -500), edge(10000, -500),
+        edge(0, 500),
+        edge(2000, 500),
+        edge(4000, 500),
+        edge(6000, -500),
+        edge(8000, -500),
+        edge(10000, -500),
     ]
     candidates = discover_nilm_helper_candidates(
         source_edges,
         {
             "inside": [
-                helper_event(600, EventType.START), helper_event(2600, EventType.START),
-                helper_event(4600, EventType.START), helper_event(6600, EventType.STOP),
-                helper_event(8600, EventType.STOP), helper_event(10600, EventType.STOP),
+                helper_event(600, EventType.START),
+                helper_event(2600, EventType.START),
+                helper_event(4600, EventType.START),
+                helper_event(6600, EventType.STOP),
+                helper_event(8600, EventType.STOP),
+                helper_event(10600, EventType.STOP),
             ],
             "outside": [
-                helper_event(601, EventType.START), helper_event(2601, EventType.START),
-                helper_event(4601, EventType.START), helper_event(6601, EventType.STOP),
-                helper_event(8601, EventType.STOP), helper_event(10601, EventType.STOP),
+                helper_event(601, EventType.START),
+                helper_event(2601, EventType.START),
+                helper_event(4601, EventType.START),
+                helper_event(6601, EventType.STOP),
+                helper_event(8601, EventType.STOP),
+                helper_event(10601, EventType.STOP),
             ],
             "few": [
-                helper_event(1, EventType.START), helper_event(2001, EventType.START),
-                helper_event(6001, EventType.STOP), helper_event(8001, EventType.STOP),
+                helper_event(1, EventType.START),
+                helper_event(2001, EventType.START),
+                helper_event(6001, EventType.STOP),
+                helper_event(8001, EventType.STOP),
             ],
         },
     )
@@ -411,9 +612,7 @@ def test_edge_detector_honors_confirmation_tolerance_near_threshold() -> None:
         confirmation_tolerance_ratio=0.15,
     )
 
-    edges = detector.process_many(
-        [sample(0, 0.0), sample(10, 100.0), sample(20, 51.0)]
-    )
+    edges = detector.process_many([sample(0, 0.0), sample(10, 100.0), sample(20, 51.0)])
 
     assert edges == []
 
@@ -823,42 +1022,54 @@ def test_classify_signature_is_conservative_and_allows_user_label_override() -> 
         )
         == "Dehumidifier"
     )
-    assert classify_signature(
-        NilmSignature("resistive", 500.0, 10.0, 501.0, 0.0, 4, 0.7)
-    ) == "possible resistive load"
-    assert classify_signature(
-        NilmSignature(
-            "balanced",
-            500.0,
-            10.0,
-            501.0,
-            0.0,
-            4,
-            0.7,
-            split_phase_type="balanced_240v",
+    assert (
+        classify_signature(NilmSignature("resistive", 500.0, 10.0, 501.0, 0.0, 4, 0.7))
+        == "possible resistive load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                "balanced",
+                500.0,
+                10.0,
+                501.0,
+                0.0,
+                4,
+                0.7,
+                split_phase_type="balanced_240v",
+            )
         )
-    ) == "possible 240 V resistive load"
-    assert classify_signature(
-        NilmSignature(
-            "single",
-            500.0,
-            220.0,
-            548.0,
-            -0.18,
-            4,
-            0.7,
-            split_phase_type="single_leg_b",
+        == "possible 240 V resistive load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                "single",
+                500.0,
+                220.0,
+                548.0,
+                -0.18,
+                4,
+                0.7,
+                split_phase_type="single_leg_b",
+            )
         )
-    ) == "possible 120 V motor-like load"
-    assert classify_signature(
-        NilmSignature("motor", 500.0, 220.0, 548.0, -0.18, 4, 0.7)
-    ) == "possible motor-like load"
-    assert classify_signature(
-        NilmSignature("electronics", 80.0, 90.0, 125.0, -0.25, 4, 0.7)
-    ) == "possible power-electronics load"
-    assert classify_signature(
-        NilmSignature("unknown", 120.0, 30.0, 124.0, 0.01, 4, 0.7)
-    ) == "unknown recurring load"
+        == "possible 120 V motor-like load"
+    )
+    assert (
+        classify_signature(NilmSignature("motor", 500.0, 220.0, 548.0, -0.18, 4, 0.7))
+        == "possible motor-like load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature("electronics", 80.0, 90.0, 125.0, -0.25, 4, 0.7)
+        )
+        == "possible power-electronics load"
+    )
+    assert (
+        classify_signature(NilmSignature("unknown", 120.0, 30.0, 124.0, 0.01, 4, 0.7))
+        == "unknown recurring load"
+    )
 
 
 def test_unmatched_load_percentage_returns_zero_for_zero_total() -> None:
@@ -927,8 +1138,7 @@ def test_global_session_pairing_does_not_replace_better_unassigned_match() -> No
 
 def test_global_session_pairing_keeps_open_below_ambiguous_pair_confidence() -> None:
     sessions = pair_nilm_sessions_for_signatures(
-        [edge(0, 500.0)]
-        + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
+        [edge(0, 500.0)] + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
         mains_circuit_id="mains",
         signature_specs=[
             {
@@ -1076,8 +1286,7 @@ def test_global_session_pairing_clears_owner_across_assignment_alternates() -> N
 
 def test_global_session_pairing_keeps_open_below_penalized_confidence() -> None:
     sessions = pair_nilm_sessions_for_signatures(
-        [edge(0, 500.0)]
-        + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
+        [edge(0, 500.0)] + [edge(seconds, -500.0) for seconds in range(300, 1801, 300)],
         mains_circuit_id="mains",
         signature_specs=[
             {
@@ -1220,8 +1429,9 @@ def _dishwasher_assignment() -> dict[str, object]:
     }
 
 
-def test_nilm_appliance_identity_keeps_logical_assignment_and_source_ids_separate(
-) -> None:
+def test_nilm_appliance_identity_keeps_logical_assignment_and_source_ids_separate() -> (
+    None
+):
     identity_type = _required_nilm_api("NilmApplianceIdentity")
     build_identity = _required_nilm_api("build_nilm_appliance_identity")
 
@@ -1240,8 +1450,9 @@ def test_nilm_appliance_identity_keeps_logical_assignment_and_source_ids_separat
     assert identity.mains_source_entity_id == "sensor.panel_mains_power"
 
 
-def test_nilm_assignment_session_summary_excludes_the_mains_and_other_assignments(
-) -> None:
+def test_nilm_assignment_session_summary_excludes_the_mains_and_other_assignments() -> (
+    None
+):
     summarize_sessions = _required_nilm_api("summarize_nilm_assignment_sessions")
     now = datetime(2026, 7, 13, 16, 0, tzinfo=UTC)
     sessions = [
@@ -1435,8 +1646,9 @@ def test_nilm_runtime_uses_elapsed_time_across_dst_days(
     assert summary["runtime_today_seconds"] == expected_seconds
 
 
-def test_nilm_alert_payload_targets_appliance_and_keeps_source_evidence_context(
-) -> None:
+def test_nilm_alert_payload_targets_appliance_and_keeps_source_evidence_context() -> (
+    None
+):
     build_identity = _required_nilm_api("build_nilm_appliance_identity")
     build_alert_payload = _required_nilm_api("build_nilm_appliance_alert_payload")
     detail_path = _required_nilm_api("nilm_appliance_detail_path")
@@ -1464,8 +1676,9 @@ def test_nilm_alert_payload_targets_appliance_and_keeps_source_evidence_context(
     assert payload["appliance_detail_path"] == detail_path(identity)
 
 
-def test_nilm_appliance_detail_route_targets_assignment_instead_of_mains_detail(
-) -> None:
+def test_nilm_appliance_detail_route_targets_assignment_instead_of_mains_detail() -> (
+    None
+):
     build_identity = _required_nilm_api("build_nilm_appliance_identity")
     detail_path = _required_nilm_api("nilm_appliance_detail_path")
     identity = build_identity(
