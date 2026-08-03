@@ -8746,6 +8746,145 @@ def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> N
     assert merged[0]["off_edge_id"] == "edge-off"
 
 
+def test_nilm_runtime_reconciles_overlapping_components_and_conserves_power() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        {
+            "assignment_id": assignment_id,
+            "lifecycle_state": "validated",
+            "power_states_w": [0.0, watts],
+            "transition_prototypes": [
+                {"direction": "on", "from_state_w": 0.0, "to_state_w": watts,
+                 "delta_w": watts, "spread_w": 2.0, "sample_count": 3},
+                {"direction": "off", "from_state_w": watts, "to_state_w": 0.0,
+                 "delta_w": -watts, "spread_w": 2.0, "sample_count": 3},
+            ],
+            "model_confidence": 0.9,
+        }
+        for assignment_id, watts in (("blower", 100.0), ("pump", 80.0))
+    ]
+    runtime = {
+        assignment_id: {
+            "status": "off", "state_power_w": 0.0, "estimated_power_w": 0.0,
+            "session_id": None, "session_start": None, "confidence": 0.9,
+            "consistent": True, "last_observed": now.isoformat(),
+            "energy_kwh": 0.0,
+        }
+        for assignment_id in ("blower", "pump")
+    }
+    edges = [
+        NilmEdge(now + timedelta(seconds=10), 180.0, 0.0, 180.0, 0.0, "on"),
+        NilmEdge(now + timedelta(seconds=20), -100.0, 0.0, -100.0, 0.0, "off"),
+    ]
+
+    runtime, first, completed, accepted = reconcile_component_runtime(
+        source_power_w=200.0, timestamp=now + timedelta(seconds=10),
+        assignments=assignments, runtime=runtime, edges=edges[:1],
+        standby_w=0.0, noise_spread_w=2.0,
+    )
+    assert accepted == edges[:1]
+    assert {key: item["status"] for key, item in runtime.items()} == {
+        "blower": "on", "pump": "on"
+    }
+    assert completed == []
+    assert first["residual_w"] == 20.0
+    assert first["source_power_w"] == pytest.approx(
+        first["standby_w"]
+        + sum(item["estimated_power_w"] for item in runtime.values())
+        + first["residual_w"]
+    )
+
+    runtime, second, completed, accepted = reconcile_component_runtime(
+        source_power_w=80.0, timestamp=now + timedelta(seconds=20),
+        assignments=assignments, runtime=runtime, edges=edges[1:],
+        standby_w=0.0, noise_spread_w=2.0, previous_reconciliation=first,
+    )
+    assert accepted == edges[1:]
+    assert runtime["blower"]["status"] == "off"
+    assert runtime["pump"]["status"] == "on"
+    assert completed[0]["assignment_id"] == "blower"
+    assert completed[0]["on_delta_w"] == 100.0
+    assert completed[0]["off_delta_w"] == -100.0
+    assert completed[0]["energy_kwh"] == pytest.approx(100.0 * 10 / 3_600_000)
+    assert second["allocated_power_w"] == 80.0
+
+
+def test_nilm_runtime_suspends_overallocation_without_fake_close() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    runtime = {"pump": {
+        "status": "on", "state_power_w": 80.0, "estimated_power_w": 80.0,
+        "session_id": "open", "session_start": now.isoformat(),
+        "confidence": 0.9, "consistent": True,
+        "last_observed": now.isoformat(), "energy_kwh": 0.0,
+    }}
+
+    runtime, reconciliation, completed, accepted = reconcile_component_runtime(
+        source_power_w=10.0, timestamp=now + timedelta(seconds=10),
+        assignments=[], runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == completed == []
+    assert runtime["pump"]["status"] == "uncertain"
+    assert runtime["pump"]["session_id"] == "open"
+    assert reconciliation["conflict"] == "over_allocation"
+    assert reconciliation["energy_allocation_allowed"] is False
+    assert reconciliation["review_item"]["type"] == "model_conflict"
+
+
+def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        {
+            "assignment_id": assignment_id,
+            "lifecycle_state": "validated",
+            "power_states_w": [0.0, 100.0],
+            "transition_prototypes": [{
+                "direction": "on", "from_state_w": 0.0, "to_state_w": 100.0,
+                "delta_w": 100.0, "spread_w": 2.0, "sample_count": 3,
+            }],
+            "model_confidence": 0.9,
+            "helper_links": [{
+                "helper_circuit_id": "helper", "relationship": "corroborates",
+                "status": "confirmed", "confidence": 0.9,
+            }],
+        }
+        for assignment_id in ("first", "second")
+    ]
+    runtime = {
+        key: {"status": "off", "state_power_w": 0.0,
+              "estimated_power_w": 0.0, "consistent": True,
+              "last_observed": now.isoformat()}
+        for key in ("first", "second")
+    }
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+    helper_event = CircuitEvent(now, "helper", EventType.START, features={})
+
+    runtime, reconciliation, completed, accepted = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now, assignments=assignments,
+        runtime=runtime, edges=(edge,), standby_w=0.0, noise_spread_w=0.0,
+        helper_events=(helper_event,),
+    )
+
+    assert accepted == completed == []
+    assert all(item["status"] == "off" for item in runtime.values())
+    assert reconciliation["conflict"] == "helper_conflict"
+
+
 @pytest.mark.parametrize(
     ("event_sample", "noisy_confirmation", "older_unmatched"),
     [(1, False, False), (2, False, False), (1, True, False), (1, False, True)],

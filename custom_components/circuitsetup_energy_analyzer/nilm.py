@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
@@ -1180,11 +1181,20 @@ class NilmEdgeDetector:
         self.confirmation_max_interval = confirmation_max_interval
         self._previous: CircuitSample | None = None
         self._pending: tuple[CircuitSample, CircuitSample, int] | None = None
+        self._stable_changes_w: deque[float] = deque(maxlen=64)
 
     @property
     def has_pending_transition(self) -> bool:
         """Return whether a transition still needs confirmation."""
         return self._pending is not None
+
+    @property
+    def noise_spread_w(self) -> float:
+        """Return the MAD of the last 64 changes that were below threshold."""
+        if not self._stable_changes_w:
+            return 0.0
+        center = median(self._stable_changes_w)
+        return float(median(abs(value - center) for value in self._stable_changes_w))
 
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
@@ -1198,6 +1208,9 @@ class NilmEdgeDetector:
 
         previous = self._previous
         self._previous = sample
+        change_w = float(sample.real_power) - float(previous.real_power)
+        if abs(change_w) < self.min_delta_w:
+            self._stable_changes_w.append(change_w)
 
         if self.confirmation_samples > 1:
             return self._process_confirmed(previous, sample)

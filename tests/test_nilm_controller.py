@@ -361,6 +361,31 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     assert dirty == [True]
 
 
+def test_component_runtime_state_is_runtime_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+
+    state = AnalyzerState()
+    reducer = StateReducer()
+    reducer.apply_update(
+        state,
+        ("nilm_component_runtime_by_circuit", "mixed"),
+        {"pump": {"status": "on"}},
+    )
+    reducer.apply_update(
+        state,
+        ("nilm_reconciliation_by_circuit", "mixed"),
+        {"consistent": True},
+    )
+
+    payload = feature_store_data_to_dict(FeatureStoreData())
+
+    assert "nilm_component_runtime_by_circuit" not in payload
+    assert "nilm_reconciliation_by_circuit" not in payload
+
+
 def test_hydration_normalizes_malformed_optional_model_fields() -> None:
     assignment = {
         "assignment_id": "pump", "role": None,

@@ -5,24 +5,30 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from itertools import combinations
 from math import isfinite
 from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
+    NilmAssignmentModel,
+    NilmComponentStatus,
     NilmEdge,
     NilmEdgeDetector,
     NilmSignature,
+    NilmTransitionPrototype,
     _nilm_signature_edge_score,
     classify_signature,
     cluster_recurring_signatures,
+    conservation_tolerance_w,
     discover_nilm_helper_candidates,
     mask_known_loads,
     nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     pair_nilm_sessions_for_signatures,
+    reconcile_nilm_edge,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -140,6 +146,60 @@ class NilmSampleProcessor:
         if defer_known_events and known_events:
             self._pending_known_load_events[circuit_id] = known_events
 
+        assignments = tuple(
+            item
+            for item in context.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            )
+            if isinstance(item, Mapping)
+        )
+        runtime = _initial_component_runtime(
+            assignments,
+            context.state.nilm_component_runtime_by_circuit.get(circuit_id, {}),
+            sample.timestamp,
+        )
+        reconciliation = None
+        completed_sessions: list[dict[str, Any]] = []
+        if runtime:
+            standby_w = _finite_float(
+                context.state.always_on_power_w_by_circuit.get(circuit_id)
+            ) or 0.0
+            _apply_direct_helpers(assignments, runtime, context.state)
+            _restore_unique_component_state(
+                sample.real_power, standby_w, detector.noise_spread_w,
+                assignments, runtime
+            )
+            masked_ids = {id(match.edge) for match in matched_edges}
+            new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
+            runtime, reconciliation, completed_sessions, accepted = (
+                reconcile_component_runtime(
+                    source_power_w=sample.real_power,
+                    timestamp=sample.timestamp,
+                    assignments=assignments,
+                    runtime=runtime,
+                    edges=new_unmasked,
+                    standby_w=standby_w,
+                    noise_spread_w=detector.noise_spread_w,
+                    previous_reconciliation=(
+                        context.state.nilm_reconciliation_by_circuit.get(circuit_id)
+                    ),
+                    helper_events=self._helper_events_by_source[circuit_id],
+                )
+            )
+            accepted_ids = {id(edge) for edge in accepted}
+            next_unmatched = [
+                edge for edge in next_unmatched if id(edge) not in accepted_ids
+            ]
+            if completed_sessions:
+                history = (
+                    context.store_data.nilm_session_history_by_circuit.setdefault(
+                        circuit_id, []
+                    )
+                )
+                history.extend(completed_sessions)
+                del history[:-512]
+                store_dirty = True
+
         next_unmatched = _newest_nilm_edges(
             next_unmatched,
             self._unmatched_edges_max_items,
@@ -193,12 +253,28 @@ class NilmSampleProcessor:
         return FeatureResult(
             alerts=alerts,
             notifications=list(alerts),
-            state_updates=nilm_state_updates(
-                circuit_id,
-                context,
-                total_events_by_circuit=self.total_events_by_circuit,
-                unmatched_edges_by_circuit=self.unmatched_edges_by_circuit,
-            ),
+            state_updates=[
+                *nilm_state_updates(
+                    circuit_id,
+                    context,
+                    total_events_by_circuit=self.total_events_by_circuit,
+                    unmatched_edges_by_circuit=self.unmatched_edges_by_circuit,
+                ),
+                *(
+                    [
+                        StateUpdate(
+                            ("nilm_component_runtime_by_circuit", circuit_id),
+                            runtime,
+                        ),
+                        StateUpdate(
+                            ("nilm_reconciliation_by_circuit", circuit_id),
+                            reconciliation,
+                        ),
+                    ]
+                    if reconciliation is not None
+                    else []
+                ),
+            ],
             store_dirty=store_dirty,
         )
 
@@ -380,6 +456,410 @@ class NilmSampleProcessor:
                 payloads.append(signature)
 
         return payloads
+
+
+def reconcile_component_runtime(
+    *,
+    source_power_w: float | None,
+    timestamp: datetime,
+    assignments: Iterable[Mapping[str, Any]],
+    runtime: Mapping[str, Mapping[str, Any]],
+    edges: Iterable[NilmEdge],
+    standby_w: float,
+    noise_spread_w: float,
+    previous_reconciliation: Mapping[str, Any] | None = None,
+    helper_events: Iterable[CircuitEvent] = (),
+) -> tuple[
+    dict[str, dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[NilmEdge]
+]:
+    """Apply bounded assignment transitions and enforce source conservation."""
+    assignments = tuple(assignments)
+    models = tuple(_runtime_assignment_model(item) for item in assignments)
+    next_runtime = {key: dict(value) for key, value in runtime.items()}
+    _integrate_runtime_energy(next_runtime, timestamp, previous_reconciliation)
+    accepted: list[NilmEdge] = []
+    completed: list[dict[str, Any]] = []
+    conflict: str | None = None
+
+    if source_power_w is None or not isfinite(source_power_w):
+        _suspend_runtime(next_runtime)
+        return next_runtime, _runtime_reconciliation(
+            None, standby_w, next_runtime, noise_spread_w,
+            "source_unavailable", timestamp
+        ), completed, accepted
+
+    for edge in edges:
+        before = {key: dict(value) for key, value in next_runtime.items()}
+        current = {
+            key: _finite_float(value.get("state_power_w"))
+            if value.get("status") in {
+                NilmComponentStatus.ON, NilmComponentStatus.OFF
+            }
+            else None
+            for key, value in next_runtime.items()
+        }
+        result = reconcile_nilm_edge(
+            edge,
+            models,
+            current,
+            _confirmed_helper_scores(assignments, helper_events, edge),
+            {},
+            {},
+        )
+        if not result.accepted:
+            if result.reason == "helper_conflict":
+                conflict = result.reason
+            continue
+        pending_sessions: list[dict[str, Any]] = []
+        for transition in result.transitions:
+            payload = next_runtime[transition.assignment_id]
+            if transition.direction == "on":
+                payload.update({
+                    "status": NilmComponentStatus.ON,
+                    "state_power_w": transition.to_state_w,
+                    "estimated_power_w": transition.to_state_w,
+                    "session_id": (
+                        f"{transition.assignment_id}|{edge.timestamp.isoformat()}"
+                    ),
+                    "session_start": edge.timestamp.isoformat(),
+                    "confidence": _model_confidence(models, transition.assignment_id),
+                    "consistent": True,
+                    "last_observed": edge.timestamp.isoformat(),
+                    "energy_kwh": 0.0,
+                    "on_delta_w": transition.delta_w,
+                })
+            else:
+                if payload.get("session_id") and payload.get("session_start"):
+                    pending_sessions.append(_completed_runtime_session(
+                        transition.assignment_id,
+                        payload,
+                        transition,
+                        edge,
+                        assignments,
+                    ))
+                payload.update({
+                    "status": NilmComponentStatus.OFF,
+                    "state_power_w": transition.to_state_w,
+                    "estimated_power_w": 0.0,
+                    "session_id": None,
+                    "session_start": None,
+                    "energy_kwh": 0.0,
+                })
+        tolerance = conservation_tolerance_w(source_power_w, noise_spread_w)
+        if (
+            _runtime_allocated_power(next_runtime)
+            > source_power_w - standby_w + tolerance
+        ):
+            next_runtime = before
+            _suspend_runtime(next_runtime)
+            conflict = "over_allocation"
+            continue
+        accepted.append(edge)
+        completed.extend(pending_sessions)
+
+    tolerance = conservation_tolerance_w(source_power_w, noise_spread_w)
+    if _runtime_allocated_power(next_runtime) > source_power_w - standby_w + tolerance:
+        _suspend_runtime(next_runtime)
+        conflict = "over_allocation"
+    consistent = conflict is None
+    for payload in next_runtime.values():
+        payload["consistent"] = consistent
+        payload["last_observed"] = timestamp.isoformat()
+    return next_runtime, _runtime_reconciliation(
+        source_power_w, standby_w, next_runtime, noise_spread_w,
+        conflict, timestamp
+    ), completed, accepted
+
+
+def _initial_component_runtime(
+    assignments: Iterable[Mapping[str, Any]],
+    current: Mapping[str, Mapping[str, Any]],
+    timestamp: datetime,
+) -> dict[str, dict[str, Any]]:
+    runtime = {key: dict(value) for key, value in current.items()}
+    for assignment in assignments:
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
+        if not assignment_id:
+            continue
+        runtime.setdefault(assignment_id, {
+            "status": NilmComponentStatus.UNKNOWN,
+            "state_power_w": None,
+            "estimated_power_w": None,
+            "session_id": None,
+            "session_start": None,
+            "confidence": 0.0,
+            "consistent": False,
+            "last_observed": timestamp.isoformat(),
+            "energy_kwh": 0.0,
+        })
+    return runtime
+
+
+def _restore_unique_component_state(
+    source_power_w: Any,
+    standby_w: float,
+    noise_spread_w: float,
+    assignments: Iterable[Mapping[str, Any]],
+    runtime: dict[str, dict[str, Any]],
+) -> None:
+    source = _finite_float(source_power_w)
+    if source is None:
+        return
+    models = tuple(_runtime_assignment_model(item) for item in assignments)
+    unknown = [
+        model for model in models
+        if runtime[model.assignment_id]["status"] == NilmComponentStatus.UNKNOWN
+    ]
+    if not unknown:
+        return
+    known = _runtime_allocated_power(runtime)
+    tolerance = conservation_tolerance_w(source, noise_spread_w)
+    fits: list[tuple[str, ...]] = []
+    for count in range(min(2, len(unknown)) + 1):
+        for group in combinations(unknown, count):
+            allocated = known + sum(
+                max(model.power_states_w, default=0.0) for model in group
+            )
+            if abs(source - standby_w - allocated) <= tolerance:
+                fits.append(tuple(model.assignment_id for model in group))
+    if len(fits) != 1:
+        return
+    active = set(fits[0])
+    for model in unknown:
+        power = (
+            max(model.power_states_w, default=0.0)
+            if model.assignment_id in active else 0.0
+        )
+        runtime[model.assignment_id].update({
+            "status": NilmComponentStatus.ON if power else NilmComponentStatus.OFF,
+            "state_power_w": power,
+            "estimated_power_w": power,
+            "confidence": model.model_confidence,
+            "consistent": True,
+        })
+
+
+def _apply_direct_helpers(
+    assignments: Iterable[Mapping[str, Any]],
+    runtime: dict[str, dict[str, Any]],
+    state: Any,
+) -> None:
+    for assignment in assignments:
+        direct = next((
+            link for link in _list_items(assignment.get("helper_links"))
+            if isinstance(link, Mapping)
+            and link.get("status") == "confirmed"
+            and link.get("relationship") == "direct_component"
+        ), None)
+        if direct is None:
+            continue
+        power = _finite_float(state.latest_real_power_w_by_circuit.get(
+            str(direct.get("helper_circuit_id") or "")
+        ))
+        if power is None:
+            continue
+        runtime[str(assignment.get("assignment_id"))].update({
+            "status": (
+                NilmComponentStatus.ON
+                if power > 0.0
+                else NilmComponentStatus.OFF
+            ),
+            "state_power_w": power,
+            "estimated_power_w": power,
+            "confidence": _finite_float(direct.get("confidence")) or 0.0,
+        })
+
+
+def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentModel:
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    prototypes = tuple(
+        NilmTransitionPrototype(
+            assignment_id=assignment_id,
+            direction=str(item.get("direction") or ""),
+            from_state_w=float(item.get("from_state_w") or 0.0),
+            to_state_w=float(item.get("to_state_w") or 0.0),
+            delta_w=float(item.get("delta_w") or 0.0),
+            spread_w=float(item.get("spread_w") or 0.0),
+            sample_count=int(item.get("sample_count") or 0),
+        )
+        for item in _list_items(assignment.get("transition_prototypes"))
+        if isinstance(item, Mapping)
+    )
+    return NilmAssignmentModel(
+        assignment_id=assignment_id,
+        power_states_w=tuple(
+            float(value)
+            for value in _list_items(assignment.get("power_states_w"))
+            if _finite_float(value) is not None
+        ),
+        transition_prototypes=prototypes,
+        model_confidence=_finite_float(assignment.get("model_confidence")) or 0.0,
+        lifecycle_state=str(assignment.get("lifecycle_state") or ""),
+        last_observed=_runtime_datetime(assignment.get("updated_at")),
+    )
+
+
+def _confirmed_helper_scores(
+    assignments: Iterable[Mapping[str, Any]],
+    events: Iterable[CircuitEvent],
+    edge: NilmEdge,
+) -> dict[str, float | None]:
+    events = tuple(events)
+    scores: dict[str, float | None] = {}
+    expected = "start" if edge.direction == "on" else "stop"
+    for assignment in assignments:
+        matched = [
+            _finite_float(link.get("confidence")) or 0.0
+            for link in _list_items(assignment.get("helper_links"))
+            if isinstance(link, Mapping)
+            and link.get("status") == "confirmed"
+            and any(
+                event.circuit_id == str(link.get("helper_circuit_id") or "")
+                and event.event_type.value == expected
+                and abs(event.timestamp - edge.timestamp) <= timedelta(minutes=10)
+                for event in events
+            )
+        ]
+        if matched:
+            scores[str(assignment.get("assignment_id") or "")] = (
+                sum(matched) / len(matched)
+            )
+    return scores
+
+
+def _integrate_runtime_energy(
+    runtime: dict[str, dict[str, Any]],
+    timestamp: datetime,
+    reconciliation: Mapping[str, Any] | None,
+) -> None:
+    if not reconciliation or not reconciliation.get("energy_allocation_allowed"):
+        return
+    for payload in runtime.values():
+        observed = _runtime_datetime(payload.get("last_observed"))
+        power = _finite_float(payload.get("estimated_power_w"))
+        if (
+            observed is None
+            or power is None
+            or payload.get("status") != NilmComponentStatus.ON
+        ):
+            continue
+        seconds = max((timestamp - observed).total_seconds(), 0.0)
+        payload["energy_kwh"] = (
+            (_finite_float(payload.get("energy_kwh")) or 0.0)
+            + power * seconds / 3_600_000.0
+        )
+
+
+def _completed_runtime_session(
+    assignment_id: str,
+    runtime: Mapping[str, Any],
+    transition: NilmTransitionPrototype,
+    edge: NilmEdge,
+    assignments: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    assignment = next(
+        item for item in assignments if item.get("assignment_id") == assignment_id
+    )
+    return {
+        "session_id": runtime.get("session_id"),
+        "assignment_id": assignment_id,
+        "start": runtime.get("session_start"),
+        "end": edge.timestamp.isoformat(),
+        "on_delta_w": runtime.get("on_delta_w"),
+        "off_delta_w": transition.delta_w,
+        "energy_kwh": _finite_float(runtime.get("energy_kwh")) or 0.0,
+        "confidence": min(
+            _finite_float(runtime.get("confidence")) or 0.0,
+            _finite_float(assignment.get("model_confidence")) or 0.0,
+        ),
+        "helper_evidence": [
+            dict(link)
+            for link in _list_items(assignment.get("helper_links"))
+            if isinstance(link, Mapping) and link.get("status") == "confirmed"
+        ],
+        "consistent": True,
+    }
+
+
+def _runtime_reconciliation(
+    source_power_w: float | None,
+    standby_w: float,
+    runtime: Mapping[str, Mapping[str, Any]],
+    noise_spread_w: float,
+    conflict: str | None,
+    timestamp: datetime,
+) -> dict[str, Any]:
+    allocated = _runtime_allocated_power(runtime)
+    residual = (
+        source_power_w - standby_w - allocated
+        if source_power_w is not None
+        else 0.0
+    )
+    consistent = source_power_w is not None and conflict is None
+    payload = {
+        "source_power_w": source_power_w,
+        "standby_w": standby_w,
+        "allocated_power_w": allocated,
+        "residual_w": residual,
+        "tolerance_w": conservation_tolerance_w(
+            source_power_w or 0.0, noise_spread_w
+        ),
+        "consistent": consistent,
+        "energy_allocation_allowed": consistent,
+        "conflict": conflict,
+        "last_observed": timestamp.isoformat(),
+    }
+    if conflict:
+        payload["review_item"] = {
+            "type": "model_conflict",
+            "reason": conflict,
+            "timestamp": timestamp.isoformat(),
+        }
+    return payload
+
+
+def _runtime_allocated_power(runtime: Mapping[str, Mapping[str, Any]]) -> float:
+    return sum(
+        _finite_float(payload.get("estimated_power_w")) or 0.0
+        for payload in runtime.values()
+        if payload.get("status") == NilmComponentStatus.ON
+    )
+
+
+def _suspend_runtime(runtime: Mapping[str, dict[str, Any]]) -> None:
+    for payload in runtime.values():
+        if payload.get("status") == NilmComponentStatus.ON:
+            payload["status"] = NilmComponentStatus.UNCERTAIN
+        payload["consistent"] = False
+
+
+def _model_confidence(
+    models: Iterable[NilmAssignmentModel], assignment_id: str
+) -> float:
+    return next(
+        model.model_confidence for model in models
+        if model.assignment_id == assignment_id
+    )
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _runtime_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _record_assignment_model_drift(
