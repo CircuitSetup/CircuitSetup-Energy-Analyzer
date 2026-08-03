@@ -2851,7 +2851,10 @@ NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
     NilmVirtualSensorDescription(
         key="activity_summary",
         name_suffix="Activity Summary",
-        value_fn=lambda state: "Running" if state.is_running else "Idle",
+        value_fn=lambda state: (
+            None if state.is_running is None
+            else "Running" if state.is_running else "Idle"
+        ),
         icon="mdi:run-fast",
     ),
     NilmVirtualSensorDescription(
@@ -2933,6 +2936,14 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the estimated NILM value."""
         return self.entity_description.value_fn(self._current_nilm_state())
+
+    @property
+    def available(self) -> bool:
+        """Return whether a live NILM value is currently known."""
+        return not (
+            self.entity_description.key in {"activity_summary", "estimated_power"}
+            and self.native_value is None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

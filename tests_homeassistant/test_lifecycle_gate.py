@@ -741,7 +741,7 @@ async def test_config_entry_setup_registers_published_nilm_device(
     assert registry_entry.config_entry_id == entry_id
     state = hass.states.get(registry_entry.entity_id)
     assert state is not None
-    assert state.attributes["assignment_id"] == "assignment-washer"
+    assert state.state == "unavailable"
     assert dr.async_get(hass).async_get_device(
         identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
     ) is not None

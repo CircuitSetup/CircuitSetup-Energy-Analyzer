@@ -34,8 +34,8 @@ class NilmVirtualApplianceState:
     appliance_id: str
     assignment_id: str
     display_name: str
-    is_running: bool
-    estimated_power_w: float
+    is_running: bool | None
+    estimated_power_w: float | None
     estimated_energy_kwh_today: float
     confidence: float
     last_seen: datetime | None
@@ -427,7 +427,7 @@ def _nilm_virtual_appliance_state(
     time_zone = _nilm_time_zone(coordinator)
     session_summary = summarize_nilm_assignment_sessions(
         assignment,
-        session_payloads,
+        [session for session in session_payloads if session.get("end")],
         now=now,
         time_zone=time_zone,
     )
@@ -435,14 +435,22 @@ def _nilm_virtual_appliance_state(
         assignment,
         mains_source_entity_id=_mains_source_entity_id(coordinator, circuit_id),
     )
-    open_session = next(
-        (
-            session
-            for session in session_summary["sessions"]
-            if str(session.get("session_id") or "")
-            == session_summary["current_session_id"]
-        ),
-        None,
+    runtime, reconciliation = _nilm_live_runtime(
+        coordinator, circuit_id, assignment_id
+    )
+    live_available = bool(
+        runtime
+        and runtime.get("consistent") is True
+        and reconciliation
+        and reconciliation.get("consistent") is True
+        and not reconciliation.get("conflict")
+        and runtime.get("status") in {"on", "off"}
+    )
+    is_running = runtime.get("status") == "on" if live_available else None
+    live_power = (
+        round(_clamped_float(runtime.get("estimated_power_w")), 3)
+        if live_available
+        else None
     )
     rejected_session_ids = {
         str(value or "").strip()
@@ -461,29 +469,29 @@ def _nilm_virtual_appliance_state(
         appliance_id=identity.appliance_id,
         assignment_id=assignment_id,
         display_name=identity.display_name,
-        is_running=open_session is not None,
-        estimated_power_w=(
-            round(_clamped_float(open_session.get("median_power_w")), 3)
-            if open_session
-            else 0.0
+        is_running=is_running,
+        estimated_power_w=live_power,
+        estimated_energy_kwh_today=round(
+            session_summary["estimated_energy_today_kwh"]
+            + (_clamped_float(runtime.get("energy_kwh")) if live_available else 0.0),
+            6,
         ),
-        estimated_energy_kwh_today=session_summary[
-            "estimated_energy_today_kwh"
-        ],
         confidence=_clamped_float(assignment.get("confidence"), upper=1.0),
         last_seen=_session_payload_seen(latest_session),
         active_signature_id=(
-            str(open_session.get("signature_fingerprint") or "") or None
-            if open_session
+            str(runtime.get("signature_fingerprint") or "") or None
+            if live_available
             else None
         ),
-        active_session_id=session_summary["current_session_id"],
+        active_session_id=(
+            str(runtime.get("session_id") or "") or None if live_available else None
+        ),
         latest_session_id=(
             str(latest_session.get("session_id") or "") or None
             if latest_session
             else None
         ),
-        model_status=str(assignment.get("lifecycle_state") or "candidate"),
+        model_status=_nilm_model_status(assignment, reconciliation),
         mains_circuit_id=identity.mains_circuit_id or circuit_id,
         mains_source=identity.mains_source_entity_id,
         appliance_profile=identity.appliance_profile,
@@ -496,10 +504,12 @@ def _nilm_virtual_appliance_state(
         sessions=tuple(session_summary["sessions"]),
         runtime_today_seconds=session_summary["runtime_today_seconds"],
         run_count_today=session_summary["run_count_today"],
-        current_session_duration_seconds=session_summary[
-            "current_session_duration_seconds"
-        ],
-        current_session_id=session_summary["current_session_id"],
+        current_session_duration_seconds=(
+            _runtime_duration_seconds(runtime, now) if is_running else None
+        ),
+        current_session_id=(
+            str(runtime.get("session_id") or "") or None if live_available else None
+        ),
         last_matched_session_id=session_summary["last_matched_session_id"],
         latest_signature_id=(
             str(latest_session.get("signature_fingerprint") or "") or None
@@ -529,6 +539,43 @@ def _nilm_virtual_appliance_state(
         reference_time=now,
         time_zone=time_zone,
     )
+
+
+def _nilm_live_runtime(
+    coordinator: Any, circuit_id: str, assignment_id: str
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    state = getattr(coordinator, "data", None) or getattr(coordinator, "state", None)
+    runtime_by_circuit = getattr(state, "nilm_component_runtime_by_circuit", {})
+    reconciliation_by_circuit = getattr(state, "nilm_reconciliation_by_circuit", {})
+    runtime = runtime_by_circuit.get(circuit_id, {}).get(assignment_id, {})
+    reconciliation = reconciliation_by_circuit.get(circuit_id, {})
+    return (
+        runtime if isinstance(runtime, Mapping) else {},
+        reconciliation if isinstance(reconciliation, Mapping) else {},
+    )
+
+
+def _nilm_model_status(
+    assignment: Mapping[str, Any], reconciliation: Mapping[str, Any]
+) -> str:
+    if reconciliation.get("conflict"):
+        return "conflict"
+    if any(
+        isinstance(link, Mapping) and link.get("status") == "degraded"
+        for link in _iter_items(assignment.get("helper_links"))
+    ):
+        return "degraded"
+    return str(assignment.get("lifecycle_state") or "candidate")
+
+
+def _runtime_duration_seconds(
+    runtime: Mapping[str, Any], now: datetime
+) -> float | None:
+    try:
+        started = datetime.fromisoformat(str(runtime.get("session_start")))
+    except (TypeError, ValueError):
+        started = None
+    return max((now - started).total_seconds(), 0.0) if started else None
 
 
 def _merged_assignment_session_payloads(
