@@ -9247,6 +9247,9 @@ def test_nilm_sample_processor_preserves_delayed_overallocation_conflict() -> No
     reconciliation = state.nilm_reconciliation_by_circuit["mixed"]
     assert reconciliation["conflict"] == "over_allocation"
     assert reconciliation["energy_allocation_allowed"] is False
+    assert reconciliation["total_event_count"] == 1
+    assert reconciliation["ambiguous_event_count"] == 0
+    assert reconciliation["conservation_violations"] == 1
     assert reconciliation["component_energy_kwh"] == pytest.approx(
         energy_before_rejection
     )
@@ -9254,6 +9257,110 @@ def test_nilm_sample_processor_preserves_delayed_overallocation_conflict() -> No
         "uncertain"
     )
     assert processor.unmatched_edges_by_circuit["mixed"]
+
+
+@pytest.mark.parametrize(
+    ("candidate_watts", "expected_ambiguous"),
+    [
+        ((80.0, 80.0), 1),
+        ((200.0,), 0),
+    ],
+)
+def test_nilm_reconciliation_counts_only_equal_candidates_as_ambiguous(
+    candidate_watts: tuple[float, ...], expected_ambiguous: int
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        _reconciliation_assignment(f"load-{index}", watts)
+        for index, watts in enumerate(candidate_watts)
+    ]
+    runtime = {
+        str(assignment["assignment_id"]): {
+            "status": "off",
+            "state_power_w": 0.0,
+            "estimated_power_w": 0.0,
+            "consistent": True,
+            "last_observed": now.isoformat(),
+        }
+        for assignment in assignments
+    }
+
+    _, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=80.0,
+        timestamp=now,
+        assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(now, 80.0, 0.0, 80.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == []
+    assert reconciliation["total_event_count"] == 1
+    assert reconciliation["ambiguous_event_count"] == expected_ambiguous
+
+
+def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    _, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=None,
+        timestamp=now,
+        assignments=(),
+        runtime={},
+        edges=(NilmEdge(now, 80.0, 0.0, 80.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation={
+            "source_energy_kwh": 0.02,
+            "component_energy_kwh": 0.01,
+            "residual_energy_kwh": 0.01,
+            "total_event_count": 2,
+            "ambiguous_event_count": 1,
+            "conservation_violations": 1,
+        },
+    )
+
+    assert reconciliation["source_energy_kwh"] == 0.02
+    assert reconciliation["component_energy_kwh"] == 0.01
+    assert reconciliation["residual_energy_kwh"] == 0.01
+    assert reconciliation["total_event_count"] == 3
+    assert reconciliation["ambiguous_event_count"] == 1
+    assert reconciliation["conservation_violations"] == 1
+
+
+def test_nilm_reconciliation_ignores_malformed_prior_counters() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    _, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        assignments=(),
+        runtime={},
+        edges=(),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation={
+            "total_event_count": "bad",
+            "ambiguous_event_count": {},
+            "conservation_violations": float("nan"),
+        },
+    )
+
+    assert reconciliation["total_event_count"] == 0
+    assert reconciliation["ambiguous_event_count"] == 0
+    assert reconciliation["conservation_violations"] == 0
 
 
 def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:

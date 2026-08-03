@@ -533,6 +533,7 @@ def reconcile_component_runtime(
 ]:
     """Apply bounded assignment transitions and enforce source conservation."""
     assignments = tuple(assignments)
+    edges = tuple(edges)
     models = tuple(
         model
         for item in assignments
@@ -545,12 +546,14 @@ def reconcile_component_runtime(
     completed: list[dict[str, Any]] = []
     session_closes: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
     conflict: str | None = None
+    ambiguous_event_increment = 0
 
     if source_power_w is None or not isfinite(source_power_w):
         _suspend_runtime(next_runtime)
         return next_runtime, _runtime_reconciliation(
             None, standby_w, next_runtime, noise_spread_w,
-            "source_unavailable", timestamp
+            "source_unavailable", timestamp, previous_reconciliation,
+            total_event_increment=len(edges),
         ), completed, accepted
 
     direct_closes, direct_unavailable = _apply_direct_component_sample(
@@ -588,6 +591,8 @@ def reconcile_component_runtime(
             ),
         )
         if not result.accepted:
+            if result.reason == "ambiguous":
+                ambiguous_event_increment += 1
             if result.reason == "helper_conflict":
                 conflict = result.reason
             continue
@@ -703,6 +708,8 @@ def reconcile_component_runtime(
         source_interval if conflict is None else 0.0,
         standby_interval if conflict is None else 0.0,
         component_interval if conflict is None else 0.0,
+        len(edges),
+        ambiguous_event_increment,
     ), completed, accepted
 
 
@@ -1092,6 +1099,8 @@ def _runtime_reconciliation(
     source_interval_energy_kwh: float = 0.0,
     standby_interval_energy_kwh: float = 0.0,
     component_interval_energy_kwh: float = 0.0,
+    total_event_increment: int = 0,
+    ambiguous_event_increment: int = 0,
 ) -> dict[str, Any]:
     allocated = _runtime_allocated_power(runtime)
     residual = (
@@ -1100,6 +1109,8 @@ def _runtime_reconciliation(
         else 0.0
     )
     consistent = source_power_w is not None and conflict is None
+    conservation_conflicts = {"over_allocation", "energy_over_allocation"}
+    previous_conflict = (previous or {}).get("conflict")
     payload = {
         "source_power_w": source_power_w,
         "standby_w": standby_w,
@@ -1112,6 +1123,21 @@ def _runtime_reconciliation(
         "energy_allocation_allowed": consistent,
         "conflict": conflict,
         "last_observed": timestamp.isoformat(),
+        "total_event_count": _nonnegative_int(
+            (previous or {}).get("total_event_count")
+        )
+        + total_event_increment,
+        "ambiguous_event_count": _nonnegative_int(
+            (previous or {}).get("ambiguous_event_count")
+        )
+        + ambiguous_event_increment,
+        "conservation_violations": _nonnegative_int(
+            (previous or {}).get("conservation_violations")
+        )
+        + int(
+            conflict in conservation_conflicts
+            and previous_conflict not in conservation_conflicts
+        ),
         "source_energy_kwh": (
             (_finite_float((previous or {}).get("source_energy_kwh")) or 0.0)
             + source_interval_energy_kwh
