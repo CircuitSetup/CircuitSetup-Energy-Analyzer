@@ -354,8 +354,27 @@ def test_independent_mixed_replay_scenarios(
         assert reconciliations[conflict_index]["component_energy_kwh"] == pytest.approx(
             reconciliations[conflict_index - 1]["component_energy_kwh"]
         )
+        assert reconciliation["conflict"] is None
+        assert reconciliation["conservation_violations"] == 1
+        component_energy = [
+            item["component_energy_kwh"] for item in reconciliations if item
+        ]
+        assert component_energy == sorted(component_energy)
+        assert component_energy[-1] == pytest.approx(
+            reconciliations[conflict_index]["component_energy_kwh"]
+        )
         assert not result.store_data.nilm_session_history_by_circuit.get("mixed")
     else:
+        first_reconciliation = result.state_snapshots[0][
+            "nilm_reconciliation_by_circuit"
+        ]["mixed"]
+        first_runtime = result.state_snapshots[0][
+            "nilm_component_runtime_by_circuit"
+        ]["mixed"]
+        assert first_reconciliation["conflict"] == "source_unavailable"
+        assert all(
+            component["status"] == "unknown" for component in first_runtime.values()
+        )
         runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]
         assert all(component["status"] == "unknown" for component in runtime.values())
         assert reconciliation["allocated_power_w"] == 0
@@ -814,7 +833,7 @@ labels:
     pump:
       edges:
         - {event_type: start, around_t: 60, tolerance_seconds: 5}
-        - {event_type: stop, around_t: 180, tolerance_seconds: 5}
+        - {event_type: start, around_t: 120, tolerance_seconds: 5}
       sessions:
         - {start_t: 60, end_t: 180, tolerance_seconds: 5}
       energy_kwh: 0.01
@@ -842,7 +861,8 @@ calibration_expectations: {}
     metrics = evaluate_replay_result(fixture, result)
 
     assert fixture.source_kind == "pure_mixed"
-    assert metrics.component_metrics["pump"].edge_precision == 1.0
+    assert metrics.component_metrics["pump"].edge_precision == 0.5
+    assert metrics.component_metrics["pump"].edge_recall == 0.5
     assert metrics.component_metrics["pump"].session_f1 == 1.0
     assert metrics.component_metrics["pump"].median_start_error_seconds == 2.0
     assert metrics.component_metrics["pump"].energy_absolute_error_kwh == 0.001

@@ -193,6 +193,8 @@ scenarios:
       - {t: 30, states: {sensor.mixed: 80}}
       - {t: 40, states: {sensor.mixed: 40}}
       - {t: 50, states: {sensor.mixed: 40}}
+      - {t: 60, states: {sensor.mixed: 40}}
+      - {t: 70, states: {sensor.mixed: 40}}
     labels: {component_truth: {pump: {}}}
     calibration_expectations: {}
 
@@ -204,8 +206,9 @@ scenarios:
         - {<<: *pump, assignment_id: restored_a}
         - {<<: *pump, assignment_id: restored_b}
     samples:
-      - {t: 0, states: {sensor.mixed: 80}}
+      - {t: 0, states: {sensor.mixed: unknown}}
       - {t: 10, states: {sensor.mixed: 80}}
       - {t: 20, states: {sensor.mixed: 80}}
+      - {t: 30, states: {sensor.mixed: 80}}
     labels: {component_truth: {restored_a: {}, restored_b: {}}}
     calibration_expectations: {}

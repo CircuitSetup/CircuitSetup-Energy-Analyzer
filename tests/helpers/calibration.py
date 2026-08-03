@@ -1082,7 +1082,25 @@ def _component_metrics(
             )
             for expected, actual in matched
         ]
-        matched_edges = min(len(matched) * 2, len(truth.edges))
+        predicted_edges = [
+            (event_type, _parse_datetime(str(actual[key])))
+            for actual in predicted
+            for event_type, key in (
+                (EventType.START, "start"),
+                (EventType.STOP, "end"),
+            )
+        ]
+        unmatched_edges = list(predicted_edges)
+        matched_edges = 0
+        for expected in truth.edges:
+            for actual in unmatched_edges:
+                if actual[0] is expected.event_type and abs(
+                    (actual[1] - fixture.start_time).total_seconds()
+                    - expected.around_t
+                ) <= expected.tolerance_seconds:
+                    matched_edges += 1
+                    unmatched_edges.remove(actual)
+                    break
         actual_energy = sum(float(item.get("energy_kwh", 0.0)) for item in predicted)
         absolute_error = (
             abs(actual_energy - truth.energy_kwh)
@@ -1090,7 +1108,7 @@ def _component_metrics(
             else None
         )
         metrics[component_id] = ComponentReplayMetrics(
-            edge_precision=_ratio_or_none(matched_edges, len(predicted) * 2),
+            edge_precision=_ratio_or_none(matched_edges, len(predicted_edges)),
             edge_recall=_ratio_or_none(matched_edges, len(truth.edges)),
             session_precision=session_precision,
             session_recall=session_recall,
