@@ -187,10 +187,15 @@ class NilmSampleProcessor:
                 context.state.latest_real_power_w_by_circuit
             )
             direct_helper_powers = {
-                helper_id: context.state.latest_real_power_w_by_circuit.get(
-                    helper_id
+                helper_id: (
+                    runtime.get(str(item.get("assignment_id") or ""), {}).get(
+                        "estimated_power_w"
+                    )
+                    if pending_confirmation
+                    else context.state.latest_real_power_w_by_circuit.get(helper_id)
                 )
-                for helper_id in _direct_helper_ids(assignments)
+                for item in assignments
+                if (helper_id := _direct_helper_id(item)) is not None
             }
             if not pending_confirmation or source_power_w is not None:
                 edge_timestamp = (
@@ -599,6 +604,13 @@ def reconcile_component_runtime(
         pending_sessions: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
         for transition in result.transitions:
             payload = next_runtime[transition.assignment_id]
+            matched_helper_evidence = _matched_corroborating_links(
+                assignments,
+                transition.assignment_id,
+                helper_events,
+                edge,
+                available_helper_ids,
+            )
             if transition.direction == "on":
                 payload.update({
                     "status": NilmComponentStatus.ON,
@@ -613,8 +625,22 @@ def reconcile_component_runtime(
                     "last_observed": edge.timestamp.isoformat(),
                     "energy_kwh": 0.0,
                     "on_delta_w": transition.delta_w,
+                    "helper_evidence": matched_helper_evidence,
                 })
             else:
+                existing_helper_ids = {
+                    item.get("helper_circuit_id")
+                    for item in _list_items(payload.get("helper_evidence"))
+                    if isinstance(item, Mapping)
+                }
+                payload["helper_evidence"] = [
+                    *_list_items(payload.get("helper_evidence")),
+                    *(
+                        item
+                        for item in matched_helper_evidence
+                        if item.get("helper_circuit_id") not in existing_helper_ids
+                    ),
+                ]
                 if payload.get("session_id") and payload.get("session_start"):
                     pending_sessions.append(
                         (transition.assignment_id, transition, edge)
@@ -697,6 +723,7 @@ def reconcile_component_runtime(
                 "session_id": None,
                 "session_start": None,
                 "energy_kwh": 0.0,
+                "helper_evidence": [],
             })
     consistent = conflict is None
     for payload in next_runtime.values():
@@ -1023,6 +1050,31 @@ def _confirmed_helper_link_evidence(
     return helper_id, confidence, matched
 
 
+def _matched_corroborating_links(
+    assignments: Iterable[Mapping[str, Any]],
+    assignment_id: str,
+    events: Iterable[CircuitEvent],
+    edge: NilmEdge,
+    available_helper_ids: set[str] | frozenset[str],
+) -> list[dict[str, Any]]:
+    assignment = next(
+        item for item in assignments if item.get("assignment_id") == assignment_id
+    )
+    expected = "start" if edge.direction == "on" else "stop"
+    return [
+        dict(link)
+        for link in _list_items(assignment.get("helper_links"))
+        if isinstance(link, Mapping)
+        and (
+            evidence := _confirmed_helper_link_evidence(
+                link, events, edge, available_helper_ids, expected
+            )
+        )
+        is not None
+        and evidence[2]
+    ]
+
+
 def _runtime_energy_increments(
     runtime: Mapping[str, Mapping[str, Any]],
     timestamp: datetime,
@@ -1080,9 +1132,18 @@ def _completed_runtime_session(
             _finite_float(assignment.get("model_confidence")) or 0.0,
         ),
         "helper_evidence": [
-            dict(link)
-            for link in _list_items(assignment.get("helper_links"))
-            if isinstance(link, Mapping) and link.get("status") == "confirmed"
+            *(
+                dict(link)
+                for link in _list_items(assignment.get("helper_links"))
+                if isinstance(link, Mapping)
+                and link.get("status") == "confirmed"
+                and link.get("relationship") == "direct_component"
+            ),
+            *(
+                dict(link)
+                for link in _list_items(runtime.get("helper_evidence"))
+                if isinstance(link, Mapping)
+            ),
         ],
         "consistent": True,
     }

@@ -47,7 +47,7 @@
         "properties": { "id": { "type": "string", "minLength": 1 } }
       }
     },
-    "labels": { "type": "object", "properties": { "component_truth": { "type": "object", "additionalProperties": { "type": "object", "properties": { "edges": { "type": "array" }, "sessions": { "type": "array" }, "energy_kwh": { "type": "number", "minimum": 0 } } } } } },
+    "labels": { "type": "object", "properties": { "component_truth": { "type": "object", "additionalProperties": { "type": "object", "properties": { "edges": { "type": "array" }, "sessions": { "type": "array" }, "energy_kwh": { "type": "number", "minimum": 0 }, "corroborating_helper_circuit_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true } } } } } },
     "calibration_expectations": { "type": "object" }
   }
 }

@@ -145,6 +145,7 @@ class ComponentTruth:
     edges: tuple[ExpectedEvent, ...] = ()
     sessions: tuple[ExpectedComponentSession, ...] = ()
     energy_kwh: float | None = None
+    corroborating_helper_circuit_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +431,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 source_states,
                 calibration_sample.timestamp,
             )
+            if normalized_sample.real_power is None:
+                state.latest_real_power_w_by_circuit.pop(
+                    circuit_config.circuit_id, None
+                )
+            else:
+                state.latest_real_power_w_by_circuit[circuit_config.circuit_id] = (
+                    normalized_sample.real_power
+                )
             setup_issues.extend(
                 {
                     "timestamp": calibration_sample.timestamp.isoformat(),
@@ -570,8 +579,8 @@ def evaluate_replay_result(
         source_kind=fixture.source_kind,
         component_metrics=_component_metrics(fixture, result),
         residual_energy_kwh=float(reconciliation.get("residual_energy_kwh", 0.0)),
-        false_helper_association_rate=_optional_float(
-            reconciliation.get("false_helper_association_rate")
+        false_helper_association_rate=_false_helper_association_rate(
+            fixture, result
         ),
         ambiguous_event_rate=_ratio_or_none(
             int(reconciliation.get("ambiguous_event_count", 0)),
@@ -874,6 +883,12 @@ def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
                     for item in _optional_list(value, "sessions")
                 ),
                 energy_kwh=_optional_float(value.get("energy_kwh")),
+                corroborating_helper_circuit_ids=frozenset(
+                    str(item)
+                    for item in _optional_list(
+                        value, "corroborating_helper_circuit_ids"
+                    )
+                ),
             )
             for component_id, value in _optional_mapping(raw, "component_truth").items()
             if isinstance(value, Mapping)
@@ -1135,16 +1150,52 @@ def _combined_reconciliation(result: ReplayResult) -> dict[str, Any]:
             "total_event_count",
             "conservation_violations",
         )
-    } | {
-        "false_helper_association_rate": next(
-            (
-                float(item["false_helper_association_rate"])
-                for item in items
-                if item.get("false_helper_association_rate") is not None
-            ),
-            None,
-        )
     }
+
+
+def _false_helper_association_rate(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> float | None:
+    records: list[bool] = []
+    unused_truth = {
+        component_id: list(truth.sessions)
+        for component_id, truth in fixture.labels.component_truth.items()
+    }
+    for sessions in result.store_data.nilm_session_history_by_circuit.values():
+        for session in sessions:
+            component_id = str(
+                session.get("assignment_id") or session.get("appliance_id") or ""
+            )
+            truth = fixture.labels.component_truth.get(component_id)
+            matching_truth = next((
+                expected
+                for expected in unused_truth.get(component_id, ())
+                if max(
+                    abs(
+                        (_parse_datetime(str(session["start"])) - fixture.start_time)
+                        .total_seconds()
+                        - expected.start_t
+                    ),
+                    abs(
+                        (_parse_datetime(str(session["end"])) - fixture.start_time)
+                        .total_seconds()
+                        - expected.end_t
+                    ),
+                )
+                <= expected.tolerance_seconds
+            ), None)
+            session_matches = matching_truth is not None
+            if matching_truth is not None:
+                unused_truth[component_id].remove(matching_truth)
+            for evidence in session.get("helper_evidence", ()):
+                if evidence.get("relationship") != "corroborates":
+                    continue
+                records.append(
+                    session_matches
+                    and str(evidence.get("helper_circuit_id") or "")
+                    in truth.corroborating_helper_circuit_ids
+                )
+    return _ratio_or_none(records.count(False), len(records))
 
 
 def _f1(precision: float | None, recall: float | None) -> float | None:

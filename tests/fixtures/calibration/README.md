@@ -19,8 +19,10 @@ PF, real-power, and current pulses.
 
 Mixed-load fixtures may add `source_kind` and `labels.component_truth`. Component
 truth is keyed by assignment ID and may contain bounded expected `edges`,
-`sessions`, and `energy_kwh`. Metrics are derived from replay output; fixtures
-without component truth retain the original report format.
+`sessions`, `energy_kwh`, and expected `corroborating_helper_circuit_ids`.
+Helper association rates use corroborating evidence on actual completed
+sessions; direct-component evidence is excluded. Fixtures without component
+truth retain the original report format.
 
 Related mixed-load cases may share one file through a top-level `scenarios`
 list. Each scenario has a unique `id` and may override the fixture defaults.

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.models import EventType
+from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
     assert_fixture_expectations,
@@ -393,6 +394,99 @@ def test_independent_mixed_replay_scenarios(
         assert assignments[1]["assignment_id"] == "pump"
 
 
+def test_helper_association_rate_uses_completed_session_evidence() -> None:
+    fixture = load_calibration_scenarios(
+        FIXTURE_DIR / "nilm_mixed_helpers.yaml"
+    )[0]
+    result = replay_fixture_processors(fixture)
+    session = result.store_data.nilm_session_history_by_circuit["mixed"][0]
+
+    assert result.metrics is not None
+    assert result.metrics.false_helper_association_rate == 0.0
+    session["helper_evidence"] = [{
+        "helper_circuit_id": "wrong-helper",
+        "relationship": "corroborates",
+        "status": "confirmed",
+    }]
+
+    from tests.helpers.calibration import evaluate_replay_result
+
+    assert evaluate_replay_result(
+        fixture, result
+    ).false_helper_association_rate == 1.0
+
+    session["helper_evidence"] = fixture.assignments_by_circuit["mixed"][0][
+        "helper_links"
+    ][:1]
+    result.store_data.nilm_session_history_by_circuit["mixed"].append(dict(session))
+    assert evaluate_replay_result(
+        fixture, result
+    ).false_helper_association_rate == 0.5
+
+
+def test_mixed_helper_replay_scenarios() -> None:
+    scenarios = load_calibration_scenarios(
+        FIXTURE_DIR / "nilm_mixed_helpers.yaml"
+    )
+
+    assert len(scenarios) == 4
+    assert all(
+        scenario.source_kind
+        == nilm_source_kind(
+            next(c for c in scenario.circuits if c.circuit_id == "mixed")
+        ).value
+        for scenario in scenarios
+    )
+    for fixture in scenarios:
+        result = replay_fixture_processors(fixture)
+        metrics = assert_fixture_expectations(fixture, result)
+        assert not any(
+            alert.feature.startswith(("electrical_", "control_"))
+            for alert in result.alerts
+        )
+        if fixture.id.endswith((
+            "helper_timing_drift",
+            "direct_component_counted_once",
+        )):
+            assert metrics.false_helper_association_rate is None
+        else:
+            assert metrics.false_helper_association_rate == 0.0
+        assert metrics.conservation_violations == 0
+
+        if fixture.id.endswith("helper_unavailable_return"):
+            sessions = result.store_data.nilm_session_history_by_circuit["mixed"]
+            assert len(sessions) == 2
+            unavailable, recovered = sorted(sessions, key=lambda item: item["start"])
+            assert unavailable["helper_evidence"] == []
+            assert recovered["helper_evidence"][0]["helper_circuit_id"] == "ac2"
+            component = metrics.component_metrics["blower"]
+            assert component.session_f1 == 1.0
+            assert component.edge_precision == component.edge_recall == 1.0
+            assert component.energy_absolute_error_kwh == pytest.approx(0.0)
+            assert metrics.residual_energy_kwh == pytest.approx(0.0)
+        elif fixture.id.endswith("helper_timing_drift"):
+            assert not result.store_data.nilm_session_history_by_circuit.get("mixed")
+        elif fixture.id.endswith("ac2_distinct_lag_disambiguates"):
+            sessions = result.store_data.nilm_session_history_by_circuit["mixed"]
+            assert [item["assignment_id"] for item in sessions] == ["blower"]
+            assert metrics.component_metrics["blower"].session_f1 == 1.0
+
+    direct = replay_fixture_processors(scenarios[-1])
+    sessions = direct.store_data.nilm_session_history_by_circuit["mixed"]
+    assert len(sessions) == 1
+    assert sessions[0]["helper_evidence"][0]["relationship"] == "direct_component"
+    assert direct.metrics is not None
+    assert direct.metrics.component_metrics["pump"].session_f1 == 1.0
+    assert direct.metrics.component_metrics["pump"].energy_absolute_error_kwh == 0.0
+    assert all(
+        snapshot["nilm_reconciliation_by_circuit"]["mixed"][
+            "conservation_violations"
+        ]
+        == 0
+        for snapshot in direct.state_snapshots
+    )
+
+
 def test_calibration_fixture_loader_expands_compact_segments() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "normal_refrigerator_week.yaml")
 
@@ -773,7 +867,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 24 |" in report
+    assert "| Fixtures | 28 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
@@ -790,6 +884,8 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "refrigerator_non_finite_power" in report
     assert "refrigerator_stale_power" in report
     assert "hvac_voltage_sag" in report
+    assert "nilm_mixed_helpers.ac2_distinct_lag_disambiguates" in report
+    assert "Helper FP rate" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:

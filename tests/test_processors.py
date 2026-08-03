@@ -9717,6 +9717,55 @@ def test_direct_component_uses_prior_power_and_closes_once() -> None:
     assert repeated == []
 
 
+def test_completed_session_records_only_matched_corroborating_helper() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        **_reconciliation_assignment("load", 100.0),
+        "helper_links": [{
+            "helper_circuit_id": "helper", "relationship": "corroborates",
+            "status": "confirmed", "confidence": 1.0,
+            "start_lag_seconds": 0.0, "start_lag_mad_seconds": 1.0,
+            "stop_lag_seconds": 0.0, "stop_lag_mad_seconds": 1.0,
+        }, {
+            "helper_circuit_id": "unmatched", "relationship": "corroborates",
+            "status": "confirmed", "confidence": 1.0,
+            "start_lag_seconds": 0.0, "start_lag_mad_seconds": 1.0,
+            "stop_lag_seconds": 0.0, "stop_lag_mad_seconds": 1.0,
+        }],
+    }
+    runtime = _initial_component_runtime((assignment,), {}, now)
+    runtime["load"].update({
+        "status": "off", "state_power_w": 0.0, "estimated_power_w": 0.0
+    })
+    runtime, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now, assignments=(assignment,),
+        runtime=runtime, edges=(NilmEdge(now, 100, 0, 0, 0, "on"),),
+        standby_w=0.0, noise_spread_w=0.0,
+        helper_events=(CircuitEvent(now, "helper", EventType.START, features={}),),
+        available_helper_ids={"helper"},
+    )
+    assert runtime["load"]["status"] == "on"
+    runtime, _, completed, _ = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now + timedelta(seconds=60),
+        assignments=(assignment,), runtime=runtime,
+        edges=(NilmEdge(now + timedelta(seconds=60), -100, 0, 0, 0, "off"),),
+        standby_w=0.0, noise_spread_w=0.0,
+        previous_reconciliation=reconciliation,
+        helper_events=(CircuitEvent(
+            now + timedelta(seconds=60), "helper", EventType.STOP, features={}
+        ),),
+        available_helper_ids={"helper"},
+    )
+
+    assert completed[0]["helper_evidence"] == [assignment["helper_links"][0]]
+
+
 def test_energy_interval_is_atomic_and_capped_to_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         reconcile_component_runtime,
