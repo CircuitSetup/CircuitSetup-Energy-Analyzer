@@ -8,7 +8,14 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
-from .models import ApplianceProfile, CircuitConfig, CircuitMode, SensorRole
+from .managers.nilm_controller import configured_primary_assignment_id
+from .models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    NilmSourceKind,
+    SensorRole,
+)
 from .nilm import (
     NilmEdge,
     NilmSession,
@@ -199,7 +206,10 @@ def nilm_workspace_payload(
         ),
         session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
-    _add_nilm_assignment_options(signatures, assignment_options)
+    _add_nilm_assignment_options(
+        signatures,
+        _nilm_assignment_options(assignments, config=config),
+    )
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
@@ -718,8 +728,18 @@ def _nilm_assignments_for_circuit(
 
 def _nilm_assignment_options(
     assignments: Iterable[Mapping[str, Any]],
+    *,
+    config: CircuitConfig | None = None,
 ) -> list[dict[str, str]]:
-    options: list[dict[str, str]] = []
+    options = (
+        [{
+            "value": configured_primary_assignment_id(config.circuit_id),
+            "label": f"Configured primary: {config.name}",
+        }]
+        if config is not None
+        and nilm_source_kind(config) is NilmSourceKind.PRIMARY_MIXED
+        else []
+    )
     for assignment in assignments:
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
         if (

@@ -3834,6 +3834,44 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
     assert running.available is False
 
 
+@pytest.mark.asyncio
+async def test_configured_primary_virtual_entity_ids_are_entry_scoped() -> None:
+    from custom_components.circuitsetup_energy_analyzer import sensor
+
+    config = CircuitConfig(
+        circuit_id="mixed", name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    assignment = {
+        "assignment_id": "mixed-configured-primary", "display_name": "Blower",
+        "appliance_profile": "hvac_blower", "mains_circuit_id": "mixed",
+        "lifecycle_state": "published", "publish_entities": True,
+        "created_device": True, "role": "primary",
+    }
+    hass = SimpleNamespace(data={DOMAIN: {}})
+    unique_ids: set[str] = set()
+    for entry_id in ("entry-1", "entry-2"):
+        coordinator = SimpleNamespace(
+            data=AnalyzerState(), circuit_configs=(config,), entry_data={}, options={},
+            store_data=FeatureStoreData(nilm_appliance_assignments_by_circuit={
+                "mixed": [dict(assignment)]
+            }), _nilm_unmatched_edges={},
+        )
+        hass.data[DOMAIN][entry_id] = coordinator
+        entities = []
+        await sensor.async_setup_entry(
+            hass, SimpleNamespace(entry_id=entry_id, data={}), entities.extend
+        )
+        unique_ids.update(
+            entity.unique_id for entity in entities
+            if "nilm_mixed-configured-primary" in entity.unique_id
+        )
+
+    assert "entry-1_nilm_mixed-configured-primary_estimated_power" in unique_ids
+    assert "entry-2_nilm_mixed-configured-primary_estimated_power" in unique_ids
+
+
 def test_nilm_virtual_device_info_inherits_real_appliance_area_metadata() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
         NilmVirtualApplianceState,

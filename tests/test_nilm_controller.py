@@ -10,6 +10,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
 )
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
     NilmController,
+    configured_primary_assignment_id,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -259,6 +260,76 @@ def test_nilm_controller_owns_assignment_helper_behavior() -> None:
     assert updated["session_ids"] == ["session-1"]
     assert updated["label_interval_ids"] == ["interval-1"]
     assert updated["confidence"] == 0.82
+    assert updated["role"] == "component"
+
+
+@pytest.mark.asyncio
+async def test_configured_primary_uses_configured_identity_and_role() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    config = _config(
+        ApplianceProfile.HVAC_BLOWER,
+        CircuitMode.MIXED,
+        "mixed",
+        "Upstairs Blower",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(nilm_signatures={"mixed": [{
+            "signature_id": "signature-1",
+            "feedback_fingerprint": "fingerprint-1",
+            "confidence": 0.91,
+        }]}),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.circuit_configs = (config,)
+    assignment_id = configured_primary_assignment_id("mixed")
+
+    first = await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-1", label="spoofed", appliance_profile="washer",
+        assignment_id=assignment_id,
+    )
+    second = await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-1", label="changed", assignment_id=assignment_id,
+    )
+
+    assert first["assignment_id"] == second["assignment_id"] == assignment_id
+    assert second["display_name"] == "Upstairs Blower"
+    assert second["appliance_profile"] == ApplianceProfile.HVAC_BLOWER.value
+    assert second["role"] == "primary"
+    assert second["signature_fingerprints"] == ["fingerprint-1"]
+    assert (
+        len(coordinator.store_data.nilm_appliance_assignments_by_circuit["mixed"])
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_reserved_primary_is_component_outside_primary_mixed() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(nilm_signatures={"mixed": [{
+            "signature_id": "signature-1", "feedback_fingerprint": "fingerprint-1",
+        }]}),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.circuit_configs = (
+        _config(ApplianceProfile.MIXED, CircuitMode.MIXED, "mixed", "Mixed"),
+    )
+
+    assignment = await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-1", label="Dishwasher",
+        assignment_id=configured_primary_assignment_id("mixed"),
+    )
+
+    assert assignment["display_name"] == "Dishwasher"
+    assert assignment["role"] == "component"
 
 
 def test_nilm_assignment_identity_and_history_survive_restart() -> None:

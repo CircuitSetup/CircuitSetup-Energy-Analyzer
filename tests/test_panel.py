@@ -2297,6 +2297,43 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
 
 
+@pytest.mark.parametrize(
+    ("profile", "mode", "expected"),
+    [
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.MIXED,
+         [{"value": "mixed-configured-primary",
+           "label": "Configured primary: Upstairs Blower"}]),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED, []),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, []),
+    ],
+)
+def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    expected: list[dict[str, str]],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed", name="Upstairs Blower", appliance_profile=profile,
+        mode=mode, sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {}
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mixed")
+
+    assert payload["signatures"][0]["actions"]["assign"].get(
+        "assignment_options", []
+    ) == expected
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {}
+    assert "assignment_id" not in coordinator.store_data.nilm_signatures["mixed"][0]
+
+
 def _nilm_service_actions(payload: object) -> list[dict[str, object]]:
     if isinstance(payload, dict):
         actions = (
