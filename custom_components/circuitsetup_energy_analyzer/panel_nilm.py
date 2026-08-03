@@ -15,6 +15,11 @@ from .nilm import (
     nilm_session_to_dict,
     pair_nilm_sessions_for_signatures,
 )
+from .nilm_virtual import (
+    nilm_live_runtime,
+    nilm_model_status,
+    nilm_runtime_available,
+)
 from .panel_common import (
     _circuit_payload,
     _datetime_from_iso,
@@ -201,6 +206,7 @@ def nilm_workspace_payload(
         assignments,
         sessions,
         edges,
+        coordinator=coordinator,
     )
     validation = _nilm_validation_payload(
         all_label_intervals,
@@ -211,6 +217,9 @@ def nilm_workspace_payload(
     payload = {
         "status": "ok",
         "circuit": _circuit_payload(config),
+        "reconciliation": _nilm_reconciliation_payload(
+            coordinator, config.circuit_id
+        ),
         "source": _nilm_workspace_source(coordinator, config, include_path=False),
         "sources": sources,
         "history": _nilm_workspace_history_payload(
@@ -956,6 +965,8 @@ def _nilm_virtual_appliances_for_assignments(
     assignments: list[dict[str, Any]],
     sessions: list[dict[str, Any]],
     edges: list[NilmEdge],
+    *,
+    coordinator: Any | None = None,
 ) -> list[dict[str, Any]]:
     reference_date = _nilm_workspace_reference_date(edges, sessions)
     virtual_appliances = []
@@ -978,6 +989,20 @@ def _nilm_virtual_appliances_for_assignments(
             session for session in assignment_sessions if not session.get("end")
         )
         latest_session = open_session or _latest_nilm_session(assignment_sessions)
+        runtime, reconciliation = nilm_live_runtime(
+            coordinator,
+            str(assignment.get("mains_circuit_id") or ""),
+            assignment_id,
+        )
+        live_available = nilm_runtime_available(runtime, reconciliation)
+        helper_status = (
+            "degraded"
+            if any(
+                isinstance(link, Mapping) and link.get("status") == "degraded"
+                for link in _iter_items(assignment.get("helper_links"))
+            )
+            else "healthy"
+        )
         virtual_appliances.append(
             {
                 "appliance_key": f"nilm:{assignment_id}",
@@ -988,11 +1013,13 @@ def _nilm_virtual_appliances_for_assignments(
                     or assignment.get("appliance_id")
                     or assignment_id
                 ),
-                "is_running": open_session is not None,
+                "is_running": (
+                    runtime.get("status") == "on" if live_available else None
+                ),
                 "estimated_power_w": (
-                    _round_float(open_session.get("median_power_w"))
-                    if open_session
-                    else 0.0
+                    _round_float(runtime.get("estimated_power_w"))
+                    if live_available
+                    else None
                 ),
                 "estimated_energy_kwh_today": _nilm_daily_energy(
                     assignment_sessions,
@@ -1005,14 +1032,15 @@ def _nilm_virtual_appliances_for_assignments(
                 ),
                 "last_seen": _nilm_session_last_seen(latest_session),
                 "active_signature_id": (
-                    str(open_session.get("signature_fingerprint") or "")
-                    if open_session
+                    str(runtime.get("signature_fingerprint") or "")
+                    if live_available
                     else None
                 ),
                 "active_session_id": (
-                    str(open_session.get("session_id") or "") if open_session else None
+                    str(runtime.get("session_id") or "") if live_available else None
                 ),
-                "model_status": str(assignment.get("lifecycle_state") or "candidate"),
+                "model_status": nilm_model_status(assignment, reconciliation),
+                "helper_status": helper_status,
                 "source_type": "nilm_estimate",
                 "source_label": _panel_text("source_labels", "nilm_estimate"),
                 "estimated": True,
@@ -1027,6 +1055,28 @@ def _nilm_virtual_appliances_for_assignments(
             }
         )
     return virtual_appliances
+
+
+def _nilm_reconciliation_payload(
+    coordinator: Any, circuit_id: str
+) -> dict[str, Any] | None:
+    _, reconciliation = nilm_live_runtime(coordinator, circuit_id, "")
+    if not reconciliation:
+        return None
+    conflict = reconciliation.get("conflict")
+    return {
+        "residual_w": reconciliation.get("residual_w"),
+        "residual_energy_kwh": reconciliation.get("residual_energy_kwh"),
+        "tolerance_w": reconciliation.get("tolerance_w"),
+        "state": (
+            "conflict"
+            if conflict
+            else "consistent"
+            if reconciliation.get("consistent")
+            else "unavailable"
+        ),
+        "review_action": reconciliation.get("review_item"),
+    }
 
 
 def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:

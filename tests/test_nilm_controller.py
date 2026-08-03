@@ -330,6 +330,121 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
     ]
 
 
+def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "pump", "confirmed_session_ids": ["session-1"],
+    }
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+        nilm_session_history_by_circuit={"mixed": [{
+            "session_id": "session-1", "assignment_id": "pump",
+            "start": "2026-06-01T10:00:00+00:00",
+            "end": "2026-06-01T10:05:00+00:00",
+            "median_power_w": 83.0, "confidence": 0.9,
+        }]},
+    )
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=store_data,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+    controller = _nilm_controller(coordinator)
+
+    controller.hydrate_state_from_store()
+    controller.hydrate_state_from_store()
+
+    assert assignment["role"] == "component"
+    assert assignment["power_states_w"] == [0.0, 83.0]
+    assert assignment["model_revision"] == 1
+    assert dirty == [True]
+
+
+def test_component_runtime_state_is_runtime_only() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        StateReducer,
+    )
+
+    state = AnalyzerState()
+    reducer = StateReducer()
+    reducer.apply_update(
+        state,
+        ("nilm_component_runtime_by_circuit", "mixed"),
+        {"pump": {"status": "on"}},
+    )
+    reducer.apply_update(
+        state,
+        ("nilm_reconciliation_by_circuit", "mixed"),
+        {"consistent": True},
+    )
+
+    payload = feature_store_data_to_dict(FeatureStoreData())
+
+    assert "nilm_component_runtime_by_circuit" not in payload
+    assert "nilm_reconciliation_by_circuit" not in payload
+
+
+def test_hydration_normalizes_malformed_optional_model_fields() -> None:
+    assignment = {
+        "assignment_id": "pump", "role": None,
+        "power_states_w": [float("nan")],
+        "transition_prototypes": None,
+        "model_confidence": float("nan"), "model_revision": "bad",
+    }
+    coordinator = SimpleNamespace(store_data=FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mixed": [assignment]}
+    ))
+
+    _nilm_controller(coordinator).hydrate_state_from_store()
+
+    assert assignment["role"] == "component"
+    assert assignment["power_states_w"] == []
+    assert assignment["transition_prototypes"] == []
+    assert assignment["model_confidence"] == assignment["model_revision"] == 0
+
+
+@pytest.mark.asyncio
+async def test_assignment_merge_reowns_history_before_model_rebuild() -> None:
+    async def noop(*_args: object) -> None:
+        return None
+
+    assignments = [
+        {"assignment_id": "source", "confirmed_session_ids": ["source-session"]},
+        {"assignment_id": "target", "confirmed_session_ids": ["target-session"]},
+    ]
+    history = [
+        {"session_id": "source-session", "assignment_id": "source",
+         "end": "2026-06-01T10:00:00+00:00", "on_delta_w": 100.0,
+         "off_delta_w": -100.0, "confidence": 0.9},
+        {"session_id": "target-session", "assignment_id": "target",
+         "end": "2026-06-02T10:00:00+00:00", "on_delta_w": 80.0,
+         "off_delta_w": -80.0, "confidence": 0.9},
+        {"session_id": "other", "assignment_id": "other",
+         "end": "2026-06-02T11:00:00+00:00", "on_delta_w": 500.0,
+         "off_delta_w": -500.0, "confidence": 1.0},
+    ]
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": assignments},
+            nilm_session_history_by_circuit={"mixed": history}),
+        state=SimpleNamespace(), async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(mark_dirty=lambda: None,
+            async_save_if_dirty=noop),
+        config_entry_controller=SimpleNamespace(async_reload=noop),
+    )
+    controller = NilmController(coordinator, label_interval_max_items=10,
+        assignment_max_items=10)
+
+    merged = await controller.async_merge_nilm_assignments("mixed", "source", "target")
+
+    assert history[0]["assignment_id"] == "target"
+    assert merged["power_states_w"] == [0.0, 90.0]
+    assert merged["transition_prototypes"][0]["sample_count"] == 2
+
+
 @pytest.mark.asyncio
 async def test_mixed_nilm_signature_review_keeps_stable_assignment_identity() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

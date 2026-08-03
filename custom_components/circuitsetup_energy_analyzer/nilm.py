@@ -1,15 +1,198 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
+from itertools import combinations
+from math import isfinite
 from statistics import median, multimode
 from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import CircuitEvent, CircuitSample, EventType
+
+
+def build_nilm_assignment_model(
+    assignment: Mapping[str, Any],
+    sessions: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build one assignment's transition model from reviewed complete sessions."""
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    confirmed = {
+        str(value or "").strip()
+        for value in assignment.get("confirmed_session_ids", ())
+        if str(value or "").strip()
+    }
+    rejected = {
+        str(value or "").strip()
+        for value in assignment.get("rejected_session_ids", ())
+        if str(value or "").strip()
+    }
+    eligible = []
+    for session in sessions:
+        session_id = str(session.get("session_id") or "").strip()
+        owner = str(session.get("assignment_id") or "").strip()
+        on_delta, off_delta = _session_transition_values(session)
+        if (
+            session_id in confirmed
+            and session_id not in rejected
+            and (not owner or owner == assignment_id)
+            and session.get("end") is not None
+            and session.get("ambiguous") is not True
+            and on_delta is not None
+            and on_delta > 0
+            and off_delta is not None
+            and off_delta < 0
+        ):
+            eligible.append((session, on_delta, off_delta))
+    eligible.sort(
+        key=lambda item: str(item[0].get("end") or item[0].get("start") or ""),
+        reverse=True,
+    )
+    eligible = eligible[:32]
+    on_values = [item[1] for item in eligible]
+    off_values = [item[2] for item in eligible]
+    confidences = [
+        value
+        if (value := _model_number(session.get("confidence"))) is not None
+        else 0.0
+        for session, _, _ in eligible
+    ]
+    normalized = normalize_nilm_assignment_model(assignment)
+    model: dict[str, Any] = {
+        "role": normalized["role"],
+        "power_states_w": [],
+        "transition_prototypes": [],
+        "model_confidence": 0.0,
+        "model_revision": normalized["model_revision"],
+    }
+    if not on_values or not off_values:
+        return model
+    on_median = median(on_values)
+    off_median = median(off_values)
+    active_state = round(max(on_median, abs(off_median)), 3)
+    model["power_states_w"] = [0.0, active_state]
+    model["transition_prototypes"] = [
+        _transition_prototype("on", 0.0, active_state, on_median, on_values),
+        _transition_prototype("off", active_state, 0.0, off_median, off_values),
+    ]
+    model["model_confidence"] = round(
+        min(max(median(confidences) if confidences else 0.0, 0.0), 1.0)
+        * min(len(eligible) / 3, 1),
+        3,
+    )
+    previous = {
+        "power_states_w": normalized["power_states_w"],
+        "transition_prototypes": normalized["transition_prototypes"],
+    }
+    current = {
+        "power_states_w": model["power_states_w"],
+        "transition_prototypes": model["transition_prototypes"],
+    }
+    if current != previous:
+        model["model_revision"] += 1
+    return model
+
+
+def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize optional persisted assignment model fields conservatively."""
+    role = assignment.get("role")
+    states = assignment.get("power_states_w")
+    confidence = _model_number(assignment.get("model_confidence"))
+    valid_states = (
+        [_model_number(value) for value in states]
+        if isinstance(states, list)
+        else []
+    )
+    prototypes = []
+    stored_prototypes = assignment.get("transition_prototypes")
+    for item in stored_prototypes if isinstance(stored_prototypes, list) else ():
+        if not isinstance(item, Mapping) or item.get("direction") not in {"on", "off"}:
+            continue
+        values = [
+            _model_number(item.get(key))
+            for key in ("from_state_w", "to_state_w", "delta_w", "spread_w")
+        ]
+        if any(value is None for value in values):
+            continue
+        prototypes.append({
+            "direction": item["direction"], "from_state_w": values[0],
+            "to_state_w": values[1], "delta_w": values[2],
+            "spread_w": max(values[3], 0.0),
+            "sample_count": _model_nonnegative_int(item.get("sample_count")),
+        })
+    return {
+        "role": role.strip() if isinstance(role, str) and role.strip() else "component",
+        "power_states_w": (
+            valid_states if all(value is not None for value in valid_states) else []
+        ),
+        "transition_prototypes": prototypes,
+        "model_confidence": min(max(confidence or 0.0, 0.0), 1.0),
+        "model_revision": _model_nonnegative_int(assignment.get("model_revision")),
+    }
+
+
+def nilm_assignment_model_is_compound_eligible(
+    assignment: Mapping[str, Any],
+) -> bool:
+    """Return whether both directions are learned and confidence is sufficient."""
+    prototypes = assignment.get("transition_prototypes")
+    if not isinstance(prototypes, list):
+        return False
+    learned = {
+        str(item.get("direction") or "")
+        for item in prototypes
+        if isinstance(item, Mapping)
+        and _model_nonnegative_int(item.get("sample_count")) >= 3
+    }
+    confidence = _model_number(assignment.get("model_confidence"))
+    return learned == {"on", "off"} and confidence is not None and confidence >= 0.70
+
+
+def _transition_prototype(
+    direction: str,
+    from_state_w: float,
+    to_state_w: float,
+    delta_w: float,
+    values: list[float],
+) -> dict[str, Any]:
+    center = median(values)
+    return {
+        "direction": direction,
+        "from_state_w": round(from_state_w, 3),
+        "to_state_w": round(to_state_w, 3),
+        "delta_w": round(delta_w, 3),
+        "spread_w": round(median(abs(value - center) for value in values), 3),
+        "sample_count": len(values),
+    }
+
+
+def _model_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _model_nonnegative_int(value: Any) -> int:
+    number = _model_number(value)
+    return int(number) if number is not None and number >= 0 else 0
+
+
+def _session_transition_values(
+    session: Mapping[str, Any],
+) -> tuple[float | None, float | None]:
+    legacy = _model_number(session.get("median_power_w"))
+    return (
+        _model_number(session.get("on_delta_w")) if "on_delta_w" in session else legacy,
+        _model_number(session.get("off_delta_w"))
+        if "off_delta_w" in session
+        else -abs(legacy) if legacy is not None else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,9 +341,7 @@ def summarize_nilm_assignment_sessions(
         runtime_today += overlap_duration
         total_duration = max(
             0.0,
-            (
-                session_end.astimezone(UTC) - start.astimezone(UTC)
-            ).total_seconds(),
+            (session_end.astimezone(UTC) - start.astimezone(UTC)).total_seconds(),
         )
         session_energy = max(
             _nilm_number(session.get("estimated_energy_kwh")) or 0.0,
@@ -180,9 +361,7 @@ def summarize_nilm_assignment_sessions(
         if open_start is not None:
             current_duration = max(
                 0.0,
-                (
-                    now.astimezone(UTC) - open_start.astimezone(UTC)
-                ).total_seconds(),
+                (now.astimezone(UTC) - open_start.astimezone(UTC)).total_seconds(),
             )
     return {
         "sessions": owned_sessions,
@@ -234,9 +413,7 @@ def evaluate_nilm_validation_readiness(
         and (start := _nilm_datetime(session.get("start"))) is not None
     }
     validation_total = len(confirmed_ids) + len(rejected_ids)
-    stored_false_positive_rate = _nilm_number(
-        assignment.get("false_positive_rate")
-    )
+    stored_false_positive_rate = _nilm_number(assignment.get("false_positive_rate"))
     false_positive_rate = (
         stored_false_positive_rate
         if stored_false_positive_rate is not None
@@ -323,6 +500,353 @@ class NilmEdge:
     split_phase_type: str = "unknown"
 
 
+class NilmComponentStatus(StrEnum):
+    """Runtime state confidence for one reconciled component."""
+
+    UNKNOWN = "unknown"
+    OFF = "off"
+    ON = "on"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True, slots=True)
+class NilmTransitionPrototype:
+    """Learned transition between two assignment power states."""
+
+    assignment_id: str
+    direction: str
+    from_state_w: float
+    to_state_w: float
+    delta_w: float
+    spread_w: float
+    sample_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class NilmAssignmentModel:
+    """Bounded transition model for one NILM assignment."""
+
+    assignment_id: str
+    power_states_w: tuple[float, ...]
+    transition_prototypes: tuple[NilmTransitionPrototype, ...]
+    model_confidence: float
+    lifecycle_state: str
+    last_observed: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class NilmReconciliationResult:
+    """Pure result of matching one source edge to assignment transitions."""
+
+    accepted: bool
+    transitions: tuple[NilmTransitionPrototype, ...]
+    residual_w: float
+    tolerance_w: float
+    compound: bool
+    consistent: bool
+    energy_allocation_allowed: bool
+    reason: str
+
+
+def nilm_transition_tolerance_w(prototype: NilmTransitionPrototype) -> float:
+    """Return the learned real-power tolerance for a transition."""
+    return max(15.0, 3.0 * prototype.spread_w, 0.20 * abs(prototype.delta_w))
+
+
+def conservation_tolerance_w(source_power_w: float, noise_spread_w: float) -> float:
+    """Return the permitted source/component conservation error."""
+    return max(25.0, 3.0 * noise_spread_w, 0.10 * abs(source_power_w))
+
+
+def score_nilm_transition(
+    edge: NilmEdge,
+    prototype: NilmTransitionPrototype,
+    *,
+    helper_score: float | None,
+    duration_state_score: float | None,
+    validation_score: float | None,
+    optional_electrical_fit: float | None = None,
+) -> float:
+    """Score a transition, omitting and renormalizing unavailable evidence."""
+    tolerance = nilm_transition_tolerance_w(prototype)
+    real_fit = max(0.0, 1.0 - abs(edge.delta_w - prototype.delta_w) / tolerance)
+    electrical_fit = real_fit
+    if optional_electrical_fit is not None and isfinite(optional_electrical_fit):
+        electrical_fit = 0.70 * real_fit + 0.30 * _nilm_unit(optional_electrical_fit)
+    terms = [(0.55, electrical_fit)]
+    terms.extend(
+        (weight, _nilm_unit(value))
+        for weight, value in (
+            (0.25, helper_score),
+            (0.10, duration_state_score),
+            (0.10, validation_score),
+        )
+        if value is not None and isfinite(value)
+    )
+    return sum(weight * value for weight, value in terms) / sum(
+        weight for weight, _ in terms
+    )
+
+
+def reconcile_nilm_edge(
+    edge: NilmEdge,
+    models: Iterable[NilmAssignmentModel],
+    current_states_w: Mapping[str, float | None],
+    helper_scores: Mapping[str, float | None],
+    duration_state_scores: Mapping[str, float | None],
+    validation_scores: Mapping[str, float | None],
+    *,
+    helper_conflict: bool = False,
+) -> NilmReconciliationResult:
+    """Match one edge to at most two legal assignment transitions."""
+    models = tuple(models)
+    legal = [
+        (model, prototype)
+        for model in models
+        for prototype in model.transition_prototypes
+        if _nilm_transition_legal(model, prototype, current_states_w)
+    ]
+    if helper_conflict:
+        return _nilm_reconciliation(edge, (), reason="helper_conflict")
+
+    singles = sorted(
+        [
+            (
+                _nilm_candidate_score(
+                    edge,
+                    prototype,
+                    helper_scores,
+                    duration_state_scores,
+                    validation_scores,
+                ),
+                prototype,
+            )
+            for _, prototype in legal
+            if abs(edge.delta_w - prototype.delta_w)
+            <= nilm_transition_tolerance_w(prototype)
+        ],
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    if singles and singles[0][0] >= 0.70:
+        if len(singles) == 1 or singles[0][0] - singles[1][0] >= 0.15:
+            return _nilm_reconciliation(edge, (singles[0][1],), reason="single")
+        single_reason = "ambiguous"
+    else:
+        single_reason = "below_threshold"
+
+    recent_ids = {
+        model.assignment_id
+        for model in sorted(
+            (
+                model
+                for model in models
+                if model.lifecycle_state.strip().lower() != "retired"
+            ),
+            key=lambda item: (
+                -_nilm_aware(item.last_observed).timestamp()
+                if item.last_observed is not None
+                else float("inf"),
+                item.assignment_id,
+            ),
+        )[:20]
+    }
+    per_assignment: dict[str, NilmTransitionPrototype] = {}
+    for model, prototype in legal:
+        if (
+            model.assignment_id in recent_ids
+            and model.lifecycle_state.strip().lower() != "retired"
+            and prototype.sample_count >= 3
+            and model.model_confidence >= 0.70
+        ):
+            previous = per_assignment.get(model.assignment_id)
+            if previous is None or _nilm_transition_choice_key(
+                edge, prototype
+            ) < _nilm_transition_choice_key(edge, previous):
+                per_assignment[model.assignment_id] = prototype
+    best_single_residual = min(
+        (abs(edge.delta_w - prototype.delta_w) for _, prototype in legal),
+        default=abs(edge.delta_w),
+    )
+    pairs: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
+    ordered_transitions = tuple(
+        per_assignment[assignment_id] for assignment_id in sorted(per_assignment)
+    )
+    for first, second in combinations(ordered_transitions, 2):
+        combined = _nilm_combined_transition(first, second)
+        residual = abs(edge.delta_w - combined.delta_w)
+        if residual > nilm_transition_tolerance_w(combined):
+            continue
+        improvement = (
+            1.0
+            if best_single_residual == 0.0 and residual == 0.0
+            else (best_single_residual - residual) / best_single_residual
+            if best_single_residual
+            else 0.0
+        )
+        score = _nilm_candidate_score(
+            edge,
+            combined,
+            {
+                combined.assignment_id: _nilm_mean_available(
+                    helper_scores, first, second
+                )
+            },
+            {
+                combined.assignment_id: _nilm_mean_available(
+                    duration_state_scores, first, second
+                )
+            },
+            {
+                combined.assignment_id: _nilm_mean_available(
+                    validation_scores, first, second
+                )
+            },
+        )
+        if score >= 0.75 and improvement >= 0.30:
+            pairs.append((score, (first, second)))
+    pairs.sort(reverse=True, key=lambda item: item[0])
+    if pairs and (len(pairs) == 1 or pairs[0][0] - pairs[1][0] >= 0.15):
+        return _nilm_reconciliation(edge, pairs[0][1], reason="compound")
+    if len(per_assignment) > 2 and _nilm_multi_transition_matches(
+        edge, ordered_transitions
+    ):
+        return _nilm_reconciliation(edge, (), reason="compound_unknown")
+    return _nilm_reconciliation(
+        edge,
+        (),
+        reason="ambiguous" if pairs or single_reason == "ambiguous" else single_reason,
+    )
+
+
+def _nilm_unit(value: float) -> float:
+    return min(max(float(value), 0.0), 1.0)
+
+
+def _nilm_transition_legal(
+    model: NilmAssignmentModel,
+    prototype: NilmTransitionPrototype,
+    current_states_w: Mapping[str, float | None],
+) -> bool:
+    lifecycle = model.lifecycle_state.strip().lower()
+    if lifecycle in {"hidden", "ignored", "expected", "rejected", "converted"}:
+        return False
+    current = current_states_w.get(model.assignment_id)
+    if current is None or not isfinite(current):
+        return False
+    if lifecycle == "retired" and not (prototype.direction == "off" and current):
+        return False
+    if prototype.direction != ("on" if prototype.delta_w > 0 else "off"):
+        return False
+    if not all(
+        any(abs(state - expected) <= 1e-6 for state in model.power_states_w)
+        for expected in (prototype.from_state_w, prototype.to_state_w)
+    ):
+        return False
+    return abs(current - prototype.from_state_w) <= 1e-6
+
+
+def _nilm_transition_choice_key(
+    edge: NilmEdge, prototype: NilmTransitionPrototype
+) -> tuple[float, str, float, float, float, float, int]:
+    return (
+        abs(edge.delta_w - prototype.delta_w),
+        prototype.direction,
+        prototype.from_state_w,
+        prototype.to_state_w,
+        prototype.delta_w,
+        prototype.spread_w,
+        prototype.sample_count,
+    )
+
+
+def _nilm_candidate_score(
+    edge: NilmEdge,
+    prototype: NilmTransitionPrototype,
+    helpers: Mapping[str, float | None],
+    durations: Mapping[str, float | None],
+    validations: Mapping[str, float | None],
+) -> float:
+    return score_nilm_transition(
+        edge,
+        prototype,
+        helper_score=helpers.get(prototype.assignment_id),
+        duration_state_score=durations.get(prototype.assignment_id),
+        validation_score=validations.get(prototype.assignment_id),
+    )
+
+
+def _nilm_combined_transition(
+    first: NilmTransitionPrototype, second: NilmTransitionPrototype
+) -> NilmTransitionPrototype:
+    return NilmTransitionPrototype(
+        assignment_id=f"{first.assignment_id}+{second.assignment_id}",
+        direction="on" if first.delta_w + second.delta_w > 0 else "off",
+        from_state_w=first.from_state_w + second.from_state_w,
+        to_state_w=first.to_state_w + second.to_state_w,
+        delta_w=first.delta_w + second.delta_w,
+        spread_w=first.spread_w + second.spread_w,
+        sample_count=min(first.sample_count, second.sample_count),
+    )
+
+
+def _nilm_mean_available(
+    scores: Mapping[str, float | None],
+    first: NilmTransitionPrototype,
+    second: NilmTransitionPrototype,
+) -> float | None:
+    values = [
+        value
+        for assignment_id in (first.assignment_id, second.assignment_id)
+        if (value := scores.get(assignment_id)) is not None and isfinite(value)
+    ]
+    return sum(values) / len(values) if values else None
+
+
+def _nilm_multi_transition_matches(
+    edge: NilmEdge, transitions: Iterable[NilmTransitionPrototype]
+) -> bool:
+    transitions = tuple(transitions)
+    return any(
+        abs(edge.delta_w - sum(item.delta_w for item in group))
+        <= max(15.0, 0.20 * abs(edge.delta_w))
+        for group in combinations(transitions, 3)
+    )
+
+
+def _nilm_reconciliation(
+    edge: NilmEdge,
+    transitions: tuple[NilmTransitionPrototype, ...],
+    *,
+    reason: str,
+) -> NilmReconciliationResult:
+    residual = edge.delta_w - sum(item.delta_w for item in transitions)
+    tolerance = (
+        nilm_transition_tolerance_w(
+            transitions[0]
+            if len(transitions) == 1
+            else _nilm_combined_transition(*transitions)
+        )
+        if transitions
+        else conservation_tolerance_w(edge.delta_w, 0.0)
+    )
+    accepted = bool(transitions)
+    consistent = abs(residual) <= tolerance
+    if accepted and not consistent:
+        reason = "conservation_conflict"
+        accepted = False
+    return NilmReconciliationResult(
+        accepted=accepted,
+        transitions=transitions if accepted else (),
+        residual_w=residual,
+        tolerance_w=tolerance,
+        compound=len(transitions) == 2 and accepted,
+        consistent=consistent,
+        energy_allocation_allowed=accepted and consistent,
+        reason=reason,
+    )
+
+
 class NilmHelperRelationship(StrEnum):
     """How a circuit's events may support a NILM load."""
 
@@ -387,9 +911,7 @@ def discover_nilm_helper_candidates(
             event_type: _pair_nilm_helper_events(
                 source_by_type[event_type],
                 tuple(
-                    event
-                    for event in helper_events
-                    if event.event_type == event_type
+                    event for event in helper_events if event.event_type == event_type
                 ),
                 max_lag=max_lag,
             )
@@ -473,8 +995,7 @@ def discover_nilm_helper_candidates(
 def nilm_helper_candidate_to_dict(candidate: NilmHelperCandidate) -> dict[str, Any]:
     """Return compact helper evidence with an explicit suggestion gate."""
     return {
-        field: getattr(candidate, field)
-        for field in candidate.__dataclass_fields__
+        field: getattr(candidate, field) for field in candidate.__dataclass_fields__
     } | {
         "last_observed": (
             candidate.last_observed.isoformat() if candidate.last_observed else None
@@ -590,6 +1111,8 @@ class NilmSession:
     known_load_masked: bool = False
     known_load_confidence: float | None = None
     assignment_id: str | None = None
+    on_delta_w: float | None = None
+    off_delta_w: float | None = None
 
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
@@ -612,6 +1135,8 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "known_load_masked": session.known_load_masked,
         "known_load_confidence": session.known_load_confidence,
         "assignment_id": session.assignment_id,
+        "on_delta_w": session.on_delta_w,
+        "off_delta_w": session.off_delta_w,
     }
 
 
@@ -651,11 +1176,20 @@ class NilmEdgeDetector:
         self.confirmation_max_interval = confirmation_max_interval
         self._previous: CircuitSample | None = None
         self._pending: tuple[CircuitSample, CircuitSample, int] | None = None
+        self._stable_changes_w: deque[float] = deque(maxlen=64)
 
     @property
     def has_pending_transition(self) -> bool:
         """Return whether a transition still needs confirmation."""
         return self._pending is not None
+
+    @property
+    def noise_spread_w(self) -> float:
+        """Return the MAD of the last 64 changes that were below threshold."""
+        if not self._stable_changes_w:
+            return 0.0
+        center = median(self._stable_changes_w)
+        return float(median(abs(value - center) for value in self._stable_changes_w))
 
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
@@ -669,6 +1203,9 @@ class NilmEdgeDetector:
 
         previous = self._previous
         self._previous = sample
+        change_w = float(sample.real_power) - float(previous.real_power)
+        if abs(change_w) < self.min_delta_w:
+            self._stable_changes_w.append(change_w)
 
         if self.confirmation_samples > 1:
             return self._process_confirmed(previous, sample)
@@ -1075,9 +1612,7 @@ def pair_nilm_sessions_for_signatures(
             and alternate.off_index not in used_off_indices
             and candidate.score - alternate.score <= ambiguity_margin
         ]
-        alternate_off_indices = {
-            alternate.off_index for alternate in close_alternates
-        }
+        alternate_off_indices = {alternate.off_index for alternate in close_alternates}
         pair = (candidate.on_index, candidate.off_index)
         pair_ambiguous = pair in ambiguous_pairs
         alternate_match_count = len(alternate_off_indices) + (
@@ -1556,6 +2091,7 @@ def _open_nilm_session(
             known_load_confidence,
         ),
         assignment_id=assignment_id,
+        on_delta_w=round(float(on_edge.delta_w), 3),
     )
 
 
@@ -1610,6 +2146,8 @@ def _closed_nilm_session(
             known_load_confidence,
         ),
         assignment_id=assignment_id,
+        on_delta_w=round(float(on_edge.delta_w), 3),
+        off_delta_w=round(float(off_edge.delta_w), 3),
     )
 
 
@@ -1718,7 +2256,7 @@ def _with_nilm_session_overlap(
     return replace(
         session,
         overlap_count=overlap_count,
-        confidence=round(_clamp(session.confidence * (0.9 ** overlap_count)), 3),
+        confidence=round(_clamp(session.confidence * (0.9**overlap_count)), 3),
     )
 
 

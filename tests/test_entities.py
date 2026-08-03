@@ -3771,9 +3771,9 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "entry-1_nilm_assignment-dishwasher_estimated_daily_energy"
     ]
     running = binary_by_id["entry-1_nilm_assignment-dishwasher_estimated_running"]
-    assert estimated_power.native_value == 0.0
+    assert estimated_power.native_value is None
     assert estimated_daily_energy.native_value == 0.818
-    assert running.is_on is False
+    assert running.is_on is None
     assert estimated_power.extra_state_attributes == {
         "estimated": True,
         "source": "nilm",
@@ -3812,8 +3812,26 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         ),
     )
 
+    assert estimated_power.native_value is None
+    assert running.is_on is None
+
+    coordinator.data.nilm_component_runtime_by_circuit["mains"] = {
+        "assignment-dishwasher": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 900.0,
+            "session_start": "2026-06-06T10:00:00+00:00",
+        }
+    }
+    coordinator.data.nilm_reconciliation_by_circuit["mains"] = {
+        "consistent": True,
+        "conflict": None,
+    }
+    coordinator.last_update_success = False
     assert estimated_power.native_value == 900.0
     assert running.is_on is True
+    assert estimated_power.available is False
+    assert running.available is False
 
 
 def test_nilm_virtual_device_info_inherits_real_appliance_area_metadata() -> None:
@@ -3911,8 +3929,206 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
         for state in nilm_virtual_appliance_states(coordinator)
     }
 
-    assert states["assignment-dishwasher"].is_running is False
-    assert states["assignment-washer"].is_running is True
+    assert states["assignment-dishwasher"].is_running is None
+    assert states["assignment-washer"].is_running is None
+
+
+def test_nilm_virtual_live_values_require_consistent_component_runtime() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    assignment = {
+        "assignment_id": "assignment-washer",
+        "display_name": "Washer",
+        "mains_circuit_id": "mains",
+        "lifecycle_state": "published",
+        "publish_entities": True,
+        "confidence": 0.9,
+    }
+    state = AnalyzerState()
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+            nilm_session_history_by_circuit={
+                "mains": [{
+                    "assignment_id": "assignment-washer",
+                    "session_id": "persisted-open",
+                    "start": "2026-08-02T12:00:00+00:00",
+                    "end": None,
+                    "median_power_w": 500.0,
+                }]
+            },
+        ),
+    )
+
+    restored = nilm_virtual_appliance_states(coordinator)[0]
+    assert restored.is_running is None
+    assert restored.estimated_power_w is None
+
+    state.nilm_component_runtime_by_circuit["mains"] = {
+        "assignment-washer": {
+            "status": "on",
+            "estimated_power_w": 510.0,
+            "energy_kwh": 0.125,
+            "consistent": True,
+            "session_id": "live",
+            "session_start": "2026-08-02T13:00:00+00:00",
+        }
+    }
+    state.nilm_reconciliation_by_circuit["mains"] = {
+        "consistent": True,
+        "conflict": None,
+    }
+    live = nilm_virtual_appliance_states(coordinator)[0]
+    assert live.is_running is True
+    assert live.estimated_power_w == 510.0
+    assert live.estimated_energy_kwh_today == 0.125
+
+    state.nilm_reconciliation_by_circuit["mains"]["conflict"] = "over_allocation"
+    conflicted = nilm_virtual_appliance_states(coordinator)[0]
+    assert conflicted.is_running is None
+    assert conflicted.estimated_power_w is None
+    assert conflicted.model_status == "conflict"
+
+    assignment["helper_links"] = [{"status": "degraded"}]
+    state.nilm_reconciliation_by_circuit["mains"]["conflict"] = None
+    assignment["lifecycle_state"] = "conflict"
+    assert nilm_virtual_appliance_states(coordinator)[0].model_status == "conflict"
+
+
+@pytest.mark.parametrize(
+    "runtime_by_circuit",
+    [None, "bad", [], {"mains": None}, {"mains": "bad"}],
+)
+def test_nilm_virtual_malformed_runtime_isolated(
+    runtime_by_circuit: object,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit = runtime_by_circuit  # type: ignore[assignment]
+    state.nilm_reconciliation_by_circuit = {"mains": {"consistent": True}}
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [{"assignment_id": "washer"}]
+            }
+        ),
+    )
+
+    appliance = nilm_virtual_appliance_states(coordinator)[0]
+    assert appliance.is_running is None
+    assert appliance.estimated_power_w is None
+
+
+def test_nilm_virtual_naive_session_start_does_not_break_sibling() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mains"] = {
+        "bad": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 100.0,
+            "energy_kwh": 0.1,
+            "session_id": "bad",
+            "session_start": "2026-08-02T12:00:00",
+        },
+        "good": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 200.0,
+            "energy_kwh": 0.2,
+            "session_id": "good",
+            "session_start": "2026-08-02T12:00:00+00:00",
+        },
+    }
+    state.nilm_reconciliation_by_circuit["mains"] = {"consistent": True}
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {"assignment_id": "bad"},
+                    {"assignment_id": "good"},
+                ]
+            }
+        ),
+    )
+
+    appliances = {
+        item.assignment_id: item
+        for item in nilm_virtual_appliance_states(coordinator)
+    }
+    assert appliances["bad"].is_running is None
+    assert appliances["bad"].estimated_energy_kwh_today == 0.0
+    assert appliances["good"].is_running is True
+    assert appliances["good"].estimated_energy_kwh_today == 0.2
+
+
+@pytest.mark.parametrize(
+    "bad_values",
+    [
+        {"energy_kwh": 0.1},
+        {"estimated_power_w": "bad", "energy_kwh": 0.1},
+        {"estimated_power_w": float("nan"), "energy_kwh": 0.1},
+        {"estimated_power_w": -1.0, "energy_kwh": 0.1},
+        {"estimated_power_w": 100.0, "energy_kwh": "bad"},
+    ],
+)
+def test_nilm_virtual_malformed_live_numbers_do_not_break_sibling(
+    bad_values: dict[str, object],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mains"] = {
+        "bad": {
+            "status": "on",
+            "consistent": True,
+            "session_start": "2026-08-02T12:00:00+00:00",
+            **bad_values,
+        },
+        "good": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 200.0,
+            "energy_kwh": 0.2,
+            "session_start": "2026-08-02T12:00:00+00:00",
+        },
+    }
+    state.nilm_reconciliation_by_circuit["mains"] = {"consistent": True}
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [{"assignment_id": "bad"}, {"assignment_id": "good"}]
+            }
+        ),
+    )
+
+    appliances = {
+        item.assignment_id: item
+        for item in nilm_virtual_appliance_states(coordinator)
+    }
+    assert appliances["bad"].is_running is None
+    assert appliances["bad"].estimated_power_w is None
+    assert appliances["bad"].estimated_energy_kwh_today == 0.0
+    assert appliances["good"].is_running is True
+    assert appliances["good"].estimated_power_w == 200.0
 
 
 @pytest.mark.parametrize("hidden_state", ["ignored", "expected"])
@@ -3971,10 +4187,7 @@ def test_nilm_virtual_states_assign_overlapping_signatures_once(
 
     states = nilm_virtual_appliance_states(coordinator)
 
-    assert sum(state.is_running for state in states) == 1
-    assert next(state for state in states if state.is_running).assignment_id == (
-        "assignment-120"
-    )
+    assert all(state.is_running is None for state in states)
 
 
 def test_published_nilm_virtual_state_ignores_retired_assignment() -> None:
@@ -4027,7 +4240,7 @@ def test_published_nilm_virtual_state_ignores_retired_assignment() -> None:
 
     assert len(states) == 1
     assert states[0].assignment_id == "published"
-    assert states[0].is_running is True
+    assert states[0].is_running is None
 
 
 @pytest.mark.asyncio

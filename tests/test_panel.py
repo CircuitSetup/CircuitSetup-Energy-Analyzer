@@ -1915,8 +1915,8 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "assignment-dishwasher"
     )
     assert payload["virtual_appliances"][0]["display_name"] == "Dishwasher"
-    assert payload["virtual_appliances"][0]["is_running"] is False
-    assert payload["virtual_appliances"][0]["estimated_power_w"] == 0.0
+    assert payload["virtual_appliances"][0]["is_running"] is None
+    assert payload["virtual_appliances"][0]["estimated_power_w"] is None
     assert (
         payload["virtual_appliances"][0]["estimated_energy_kwh_today"]
         == (payload["sessions"][0]["estimated_energy_kwh"])
@@ -2960,12 +2960,97 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
     virtual = payload["virtual_appliances"][0]
-    assert virtual["is_running"] is True
-    assert virtual["estimated_power_w"] == 820.0
+    assert virtual["is_running"] is None
+    assert virtual["estimated_power_w"] is None
     assert virtual["estimated_energy_kwh_today"] == 0.0
-    assert virtual["active_session_id"] == payload["sessions"][0]["session_id"]
+    assert virtual["active_session_id"] is None
     assert virtual["last_seen"] == "2026-06-06T08:00:00+00:00"
     assert virtual["model_status"] == "learning"
+
+
+def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=mains, configs=(mains,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [{
+            "assignment_id": "washer",
+            "display_name": "Washer",
+            "mains_circuit_id": "mains",
+            "lifecycle_state": "published",
+            "helper_links": [{"status": "degraded"}],
+        }]
+    }
+    coordinator.state.nilm_component_runtime_by_circuit = {"mains": {
+        "washer": {"status": "uncertain", "consistent": False}
+    }}
+    coordinator.state.nilm_reconciliation_by_circuit = {"mains": {
+        "residual_w": 42.0,
+        "residual_energy_kwh": 0.25,
+        "tolerance_w": 30.0,
+        "consistent": False,
+        "conflict": "over_allocation",
+        "review_item": {"type": "model_conflict", "reason": "over_allocation"},
+    }}
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+    virtual = payload["virtual_appliances"][0]
+    assert virtual["model_status"] == "conflict"
+    assert virtual["is_running"] is None
+    assert virtual["estimated_power_w"] is None
+    assert virtual["helper_status"] == "degraded"
+    assert payload["reconciliation"] == {
+        "residual_w": 42.0,
+        "residual_energy_kwh": 0.25,
+        "tolerance_w": 30.0,
+        "state": "conflict",
+        "review_action": {"type": "model_conflict", "reason": "over_allocation"},
+    }
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
+        "lifecycle_state"
+    ] = "conflict"
+    coordinator.state.nilm_reconciliation_by_circuit["mains"].update(
+        consistent=True, conflict=None
+    )
+    assert nilm_workspace_payload(
+        [coordinator], circuit_id="mains"
+    )["virtual_appliances"][0]["model_status"] == "conflict"
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
+        {
+            "assignment_id": "dryer",
+            "display_name": "Dryer",
+            "mains_circuit_id": "mains",
+            "lifecycle_state": "published",
+        }
+    )
+    coordinator.state.nilm_component_runtime_by_circuit["mains"] = {
+        "washer": "bad",
+        "dryer": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 700.0,
+            "session_start": "2026-08-02T12:00:00+00:00",
+        },
+    }
+    virtuals = {
+        item["assignment_id"]: item
+        for item in nilm_workspace_payload(
+            [coordinator], circuit_id="mains"
+        )["virtual_appliances"]
+    }
+    assert virtuals["washer"]["is_running"] is None
+    assert virtuals["dryer"]["is_running"] is True
 
 
 def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
@@ -3272,10 +3357,10 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
         appliance["assignment_id"]: appliance
         for appliance in payload["virtual_appliances"]
     }
-    assert appliances["assignment-dishwasher"]["is_running"] is False
-    assert appliances["assignment-dishwasher"]["estimated_power_w"] == 0.0
-    assert appliances["assignment-dryer"]["is_running"] is True
-    assert appliances["assignment-dryer"]["estimated_power_w"] == 420.0
+    assert appliances["assignment-dishwasher"]["is_running"] is None
+    assert appliances["assignment-dishwasher"]["estimated_power_w"] is None
+    assert appliances["assignment-dryer"]["is_running"] is None
+    assert appliances["assignment-dryer"]["estimated_power_w"] is None
 
 
 def test_nilm_workspace_pairs_overlapping_signatures_exclusively() -> None:

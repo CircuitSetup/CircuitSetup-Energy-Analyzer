@@ -75,6 +75,12 @@ class AnalyzerState:
     nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    nilm_component_runtime_by_circuit: dict[
+        str, dict[str, dict[str, Any]]
+    ] = field(default_factory=dict)
+    nilm_reconciliation_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     weather_context_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )

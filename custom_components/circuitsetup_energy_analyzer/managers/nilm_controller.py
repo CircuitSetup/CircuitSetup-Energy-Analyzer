@@ -11,7 +11,11 @@ from typing import Any
 from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..models import AlertEvidence, ApplianceProfile, CircuitMode
-from ..nilm import NilmEdge
+from ..nilm import (
+    NilmEdge,
+    build_nilm_assignment_model,
+    normalize_nilm_assignment_model,
+)
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
 
 
@@ -245,6 +249,26 @@ class NilmController:
     def hydrate_state_from_store(self) -> None:
         """Hydrate NILM runtime state from retained store data."""
         coordinator = self._coordinator
+        rebuilt = False
+        for circuit_id, assignments in (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.items()
+        ):
+            history = coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id, ()
+            )
+            for assignment in assignments:
+                missing = any(key not in assignment for key in (
+                    "role", "power_states_w", "transition_prototypes",
+                    "model_confidence", "model_revision",
+                ))
+                model = build_nilm_assignment_model(assignment, history)
+                if missing and model["transition_prototypes"]:
+                    assignment.update(model)
+                    rebuilt = True
+                else:
+                    assignment.update(normalize_nilm_assignment_model(assignment))
+        if rebuilt:
+            coordinator.store_persistence.mark_dirty()
         for circuit_id, signatures in coordinator.store_data.nilm_signatures.items():
             for signature in signatures:
                 if signature.get("ignored") is True:
@@ -252,6 +276,16 @@ class NilmController:
                         (circuit_id, str(signature.get("signature_id", "")))
                     )
             self.refresh_state(circuit_id)
+
+    def _rebuild_assignment_model(
+        self, circuit_id: str, assignment: dict[str, Any]
+    ) -> None:
+        assignment.update(build_nilm_assignment_model(
+            assignment,
+            self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id, ()
+            ),
+        ))
 
     def upsert_assignment(
         self,
@@ -317,6 +351,11 @@ class NilmController:
                 "updated_at": now,
                 "created_device": False,
                 "publish_entities": False,
+                "role": "component",
+                "power_states_w": [],
+                "transition_prototypes": [],
+                "model_confidence": 0.0,
+                "model_revision": 0,
             }
             assignment["appliance_key"] = (
                 f"nilm:{assignment['assignment_id']}"
@@ -844,6 +883,7 @@ class NilmController:
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
         self._update_assignment_duration_bounds(circuit_id, assignment)
+        self._rebuild_assignment_model(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -984,6 +1024,7 @@ class NilmController:
             assignment.get("energy_estimate_error"),
         )
         assignment["updated_at"] = now
+        self._rebuild_assignment_model(circuit_id, assignment)
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
@@ -1107,6 +1148,7 @@ class NilmController:
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
         self._update_assignment_duration_bounds(alert.circuit_id, assignment)
+        self._rebuild_assignment_model(alert.circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
         assignment["rejected_sessions"] = len(rejected)
         assignment["adjusted_sessions"] = len(
@@ -1341,6 +1383,7 @@ class NilmController:
             raise ValueError("Missing label.")
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["display_name"] = label_text
+        self._rebuild_assignment_model(circuit_id, assignment)
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
@@ -1358,6 +1401,7 @@ class NilmController:
             raise ValueError("Missing appliance_profile.")
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment["appliance_profile"] = profile_text
+        self._rebuild_assignment_model(circuit_id, assignment)
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
@@ -1641,7 +1685,13 @@ class NilmController:
         ):
             if interval.get("assignment_id") == source_id:
                 interval["assignment_id"] = target_id
+        for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id, []
+        ):
+            if session.get("assignment_id") == source_id:
+                session["assignment_id"] = target_id
         self._update_assignment_duration_bounds(circuit_id, target)
+        self._rebuild_assignment_model(circuit_id, target)
         await self.async_save_assignment_change()
         return dict(target)
 
