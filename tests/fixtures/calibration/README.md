@@ -22,6 +22,9 @@ truth is keyed by assignment ID and may contain bounded expected `edges`,
 `sessions`, and `energy_kwh`. Metrics are derived from replay output; fixtures
 without component truth retain the original report format.
 
+Related mixed-load cases may share one file through a top-level `scenarios`
+list. Each scenario has a unique `id` and may override the fixture defaults.
+
 A `cold_storage_signature` segment requires `start_t`, `duration_seconds`,
 `sample_interval_seconds`, `excursion_interval_seconds`, `base_power_w`,
 `base_current_a`, `base_power_factor`, `excursion_power_w`,

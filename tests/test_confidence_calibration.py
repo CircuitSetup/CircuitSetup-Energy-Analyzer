@@ -269,6 +269,111 @@ calibration_expectations: {}
     )
 
 
+@pytest.mark.parametrize(
+    ("scenario_name", "source_kind"),
+    [
+        ("pure_mixed", "pure_mixed"),
+        ("primary_unrelated_pump", "primary_mixed"),
+        ("pump_starts_while_blower_on", "pure_mixed"),
+        ("blower_starts_while_pump_on", "pure_mixed"),
+        ("learned_compound_edge", "pure_mixed"),
+        ("ambiguous_equal_power", "pure_mixed"),
+        ("over_allocation_rejected", "pure_mixed"),
+        ("restart_unknown", "pure_mixed"),
+    ],
+)
+def test_independent_mixed_replay_scenarios(
+    scenario_name: str,
+    source_kind: str,
+) -> None:
+    scenarios = {
+        fixture.id.rsplit(".", 1)[-1]: fixture
+        for fixture in load_calibration_scenarios(
+            FIXTURE_DIR / "nilm_mixed_independent.yaml"
+        )
+    }
+
+    assert set(scenarios) == {
+        "pure_mixed",
+        "primary_unrelated_pump",
+        "pump_starts_while_blower_on",
+        "blower_starts_while_pump_on",
+        "learned_compound_edge",
+        "ambiguous_equal_power",
+        "over_allocation_rejected",
+        "restart_unknown",
+    }
+    fixture = scenarios[scenario_name]
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+
+    assert fixture.source_kind == source_kind
+    reconciliation = result.final_state.nilm_reconciliation_by_circuit["mixed"]
+    assert reconciliation["source_power_w"] == pytest.approx(
+        reconciliation["standby_w"]
+        + reconciliation["allocated_power_w"]
+        + reconciliation["residual_w"]
+    )
+    if scenario_name in {
+        "pure_mixed",
+        "primary_unrelated_pump",
+        "pump_starts_while_blower_on",
+        "blower_starts_while_pump_on",
+        "learned_compound_edge",
+    }:
+        assert all(
+            component.session_f1 == 1.0
+            and component.edge_precision == 1.0
+            and component.edge_recall == 1.0
+            and component.energy_absolute_error_kwh
+            == pytest.approx(0.0, abs=0.000001)
+            for component in metrics.component_metrics.values()
+        )
+        assert metrics.residual_energy_kwh == pytest.approx(0.0)
+        assert metrics.conservation_violations == 0
+    elif scenario_name == "ambiguous_equal_power":
+        runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]
+        assert all(component["status"] == "off" for component in runtime.values())
+        assert not result.store_data.nilm_session_history_by_circuit.get("mixed")
+        assert reconciliation["allocated_power_w"] == 0
+        assert reconciliation["residual_w"] == 80
+        assert metrics.ambiguous_event_rate == 1.0
+    elif scenario_name == "over_allocation_rejected":
+        reconciliations = [
+            snapshot["nilm_reconciliation_by_circuit"].get("mixed", {})
+            for snapshot in result.state_snapshots
+        ]
+        conflict_index = next(
+            index
+            for index, item in enumerate(reconciliations)
+            if item.get("conflict") == "over_allocation"
+        )
+        assert metrics.conservation_violations == 1
+        assert metrics.ambiguous_event_rate == 0.0
+        assert reconciliations[conflict_index]["energy_allocation_allowed"] is False
+        assert reconciliations[conflict_index]["component_energy_kwh"] == pytest.approx(
+            reconciliations[conflict_index - 1]["component_energy_kwh"]
+        )
+        assert not result.store_data.nilm_session_history_by_circuit.get("mixed")
+    else:
+        runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]
+        assert all(component["status"] == "unknown" for component in runtime.values())
+        assert reconciliation["allocated_power_w"] == 0
+        assert reconciliation["residual_w"] == 80
+
+    if scenario_name == "learned_compound_edge":
+        assert all(
+            prototype["sample_count"] >= 3
+            for assignment in fixture.assignments_by_circuit["mixed"]
+            for prototype in assignment["transition_prototypes"]
+        )
+    if scenario_name == "primary_unrelated_pump":
+        assignments = fixture.assignments_by_circuit["mixed"]
+        assert assignments[0]["assignment_id"] == "mixed-configured-primary"
+        assert assignments[0]["role"] == "primary"
+        assert assignments[1]["assignment_id"] == "pump"
+
+
 def test_calibration_fixture_loader_expands_compact_segments() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "normal_refrigerator_week.yaml")
 
@@ -649,7 +754,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 16 |" in report
+    assert "| Fixtures | 24 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report

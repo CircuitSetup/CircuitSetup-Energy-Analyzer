@@ -1,0 +1,211 @@
+schema_version: 1
+id: nilm_mixed_independent
+description: Independent mixed-load reconciliation replays
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+min_delta_w: 20
+circuits:
+  - &pure_circuit
+    circuit_id: mixed
+    name: Mixed loads
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples: [{t: 0, states: {sensor.mixed: 0}}]
+labels: {}
+calibration_expectations: {}
+
+scenarios:
+  - id: pure_mixed
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments:
+      mixed:
+        - &blower
+          assignment_id: blower
+          lifecycle_state: validated
+          power_states_w: [0, 100]
+          model_confidence: 0.9
+          transition_prototypes:
+            - {direction: "on", from_state_w: 0, to_state_w: 100, delta_w: 100, spread_w: 2, sample_count: 3}
+            - {direction: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 3}
+        - &pump
+          assignment_id: pump
+          lifecycle_state: validated
+          power_states_w: [0, 80]
+          model_confidence: 0.9
+          transition_prototypes:
+            - {direction: "on", from_state_w: 0, to_state_w: 80, delta_w: 80, spread_w: 2, sample_count: 3}
+            - {direction: "off", from_state_w: 80, to_state_w: 0, delta_w: -80, spread_w: 2, sample_count: 3}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 100}}
+      - {t: 20, states: {sensor.mixed: 100}}
+      - {t: 30, states: {sensor.mixed: 100}}
+      - {t: 40, states: {sensor.mixed: 0}}
+      - {t: 50, states: {sensor.mixed: 0}}
+      - {t: 60, states: {sensor.mixed: 0}}
+      - {t: 70, states: {sensor.mixed: 80}}
+      - {t: 80, states: {sensor.mixed: 80}}
+      - {t: 90, states: {sensor.mixed: 80}}
+      - {t: 100, states: {sensor.mixed: 0}}
+      - {t: 110, states: {sensor.mixed: 0}}
+      - {t: 120, states: {sensor.mixed: 0}}
+    labels:
+      component_truth:
+        blower:
+          edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 40}]
+          sessions: [{start_t: 10, end_t: 40}]
+          energy_kwh: 0.000833
+        pump:
+          edges: [{event_type: start, around_t: 70}, {event_type: stop, around_t: 100}]
+          sessions: [{start_t: 70, end_t: 100}]
+          energy_kwh: 0.000667
+    calibration_expectations: {}
+
+  - id: primary_unrelated_pump
+    source_kind: primary_mixed
+    circuits:
+      - circuit_id: mixed
+        name: HVAC blower and pump
+        appliance_profile: hvac_blower
+        circuit_mode: mixed
+        sources: {power: sensor.mixed}
+    assignments:
+      mixed:
+        - {<<: *blower, assignment_id: mixed-configured-primary, role: primary}
+        - *pump
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 100}}
+      - {t: 20, states: {sensor.mixed: 100}}
+      - {t: 30, states: {sensor.mixed: 100}}
+      - {t: 40, states: {sensor.mixed: 180}}
+      - {t: 50, states: {sensor.mixed: 180}}
+      - {t: 60, states: {sensor.mixed: 180}}
+      - {t: 70, states: {sensor.mixed: 100}}
+      - {t: 80, states: {sensor.mixed: 100}}
+      - {t: 90, states: {sensor.mixed: 100}}
+      - {t: 100, states: {sensor.mixed: 0}}
+      - {t: 110, states: {sensor.mixed: 0}}
+      - {t: 120, states: {sensor.mixed: 0}}
+    labels:
+      component_truth:
+        mixed-configured-primary:
+          edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 100}]
+          sessions: [{start_t: 10, end_t: 100}]
+          energy_kwh: 0.0025
+        pump:
+          edges: [{event_type: start, around_t: 40}, {event_type: stop, around_t: 70}]
+          sessions: [{start_t: 40, end_t: 70}]
+          energy_kwh: 0.000667
+    calibration_expectations: {}
+
+  - id: pump_starts_while_blower_on
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments: {mixed: [*blower, *pump]}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 100}}
+      - {t: 20, states: {sensor.mixed: 100}}
+      - {t: 30, states: {sensor.mixed: 100}}
+      - {t: 40, states: {sensor.mixed: 180}}
+      - {t: 50, states: {sensor.mixed: 180}}
+      - {t: 60, states: {sensor.mixed: 180}}
+      - {t: 70, states: {sensor.mixed: 100}}
+      - {t: 80, states: {sensor.mixed: 100}}
+      - {t: 90, states: {sensor.mixed: 100}}
+      - {t: 100, states: {sensor.mixed: 0}}
+      - {t: 110, states: {sensor.mixed: 0}}
+      - {t: 120, states: {sensor.mixed: 0}}
+    labels:
+      component_truth:
+        blower: {edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 100}], sessions: [{start_t: 10, end_t: 100}], energy_kwh: 0.0025}
+        pump: {edges: [{event_type: start, around_t: 40}, {event_type: stop, around_t: 70}], sessions: [{start_t: 40, end_t: 70}], energy_kwh: 0.000667}
+    calibration_expectations: {}
+
+  - id: blower_starts_while_pump_on
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments: {mixed: [*blower, *pump]}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 80}}
+      - {t: 20, states: {sensor.mixed: 80}}
+      - {t: 30, states: {sensor.mixed: 80}}
+      - {t: 40, states: {sensor.mixed: 180}}
+      - {t: 50, states: {sensor.mixed: 180}}
+      - {t: 60, states: {sensor.mixed: 180}}
+      - {t: 70, states: {sensor.mixed: 80}}
+      - {t: 80, states: {sensor.mixed: 80}}
+      - {t: 90, states: {sensor.mixed: 80}}
+      - {t: 100, states: {sensor.mixed: 0}}
+      - {t: 110, states: {sensor.mixed: 0}}
+      - {t: 120, states: {sensor.mixed: 0}}
+    labels:
+      component_truth:
+        pump: {edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 100}], sessions: [{start_t: 10, end_t: 100}], energy_kwh: 0.002}
+        blower: {edges: [{event_type: start, around_t: 40}, {event_type: stop, around_t: 70}], sessions: [{start_t: 40, end_t: 70}], energy_kwh: 0.000833}
+    calibration_expectations: {}
+
+  - id: learned_compound_edge
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments: {mixed: [*blower, *pump]}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 180}}
+      - {t: 20, states: {sensor.mixed: 180}}
+      - {t: 30, states: {sensor.mixed: 180}}
+      - {t: 40, states: {sensor.mixed: 0}}
+      - {t: 50, states: {sensor.mixed: 0}}
+      - {t: 60, states: {sensor.mixed: 0}}
+    labels:
+      component_truth:
+        blower: {edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 40}], sessions: [{start_t: 10, end_t: 40}], energy_kwh: 0.000833}
+        pump: {edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 40}], sessions: [{start_t: 10, end_t: 40}], energy_kwh: 0.000667}
+    calibration_expectations: {}
+
+  - id: ambiguous_equal_power
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments:
+      mixed:
+        - {<<: *pump, assignment_id: pump_a}
+        - {<<: *pump, assignment_id: pump_b}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 80}}
+      - {t: 20, states: {sensor.mixed: 80}}
+      - {t: 30, states: {sensor.mixed: 80}}
+    labels: {component_truth: {pump_a: {}, pump_b: {}}}
+    calibration_expectations: {}
+
+  - id: over_allocation_rejected
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments: {mixed: [*pump]}
+    samples:
+      - {t: 0, states: {sensor.mixed: 0}}
+      - {t: 10, states: {sensor.mixed: 80}}
+      - {t: 20, states: {sensor.mixed: 80}}
+      - {t: 30, states: {sensor.mixed: 80}}
+      - {t: 40, states: {sensor.mixed: 40}}
+      - {t: 50, states: {sensor.mixed: 40}}
+    labels: {component_truth: {pump: {}}}
+    calibration_expectations: {}
+
+  - id: restart_unknown
+    source_kind: pure_mixed
+    circuits: [*pure_circuit]
+    assignments:
+      mixed:
+        - {<<: *pump, assignment_id: restored_a}
+        - {<<: *pump, assignment_id: restored_b}
+    samples:
+      - {t: 0, states: {sensor.mixed: 80}}
+      - {t: 10, states: {sensor.mixed: 80}}
+      - {t: 20, states: {sensor.mixed: 80}}
+    labels: {component_truth: {restored_a: {}, restored_b: {}}}
+    calibration_expectations: {}

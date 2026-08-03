@@ -18,6 +18,7 @@
     "description": { "type": "string", "minLength": 1 },
     "scenario_type": { "enum": ["normal", "abnormal"] },
     "source_kind": { "enum": ["mains", "pure_mixed", "primary_mixed"] },
+    "min_delta_w": { "type": "number", "minimum": 0 },
     "start_time": { "type": "string", "format": "date-time" },
     "circuits": {
       "type": "array",
@@ -37,6 +38,15 @@
     },
     "samples": { "type": "array" },
     "segments": { "type": "array" },
+    "assignments": { "type": "object" },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": { "id": { "type": "string", "minLength": 1 } }
+      }
+    },
     "labels": { "type": "object", "properties": { "component_truth": { "type": "object", "additionalProperties": { "type": "object", "properties": { "edges": { "type": "array" }, "sessions": { "type": "array" }, "energy_kwh": { "type": "number", "minimum": 0 } } } } } },
     "calibration_expectations": { "type": "object" }
   }

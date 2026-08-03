@@ -953,6 +953,19 @@ def _snapshot_state(state: AnalyzerState) -> dict[str, Any]:
         "energy_usage_evidence_by_circuit": dict(
             state.energy_usage_evidence_by_circuit
         ),
+        "nilm_component_runtime_by_circuit": {
+            circuit_id: {
+                assignment_id: dict(component)
+                for assignment_id, component in runtime.items()
+            }
+            for circuit_id, runtime in state.nilm_component_runtime_by_circuit.items()
+        },
+        "nilm_reconciliation_by_circuit": {
+            circuit_id: dict(reconciliation)
+            for circuit_id, reconciliation in (
+                state.nilm_reconciliation_by_circuit.items()
+            )
+        },
     }
 
 
