@@ -4076,6 +4076,61 @@ def test_nilm_virtual_naive_session_start_does_not_break_sibling() -> None:
     assert appliances["good"].estimated_energy_kwh_today == 0.2
 
 
+@pytest.mark.parametrize(
+    "bad_values",
+    [
+        {"energy_kwh": 0.1},
+        {"estimated_power_w": "bad", "energy_kwh": 0.1},
+        {"estimated_power_w": float("nan"), "energy_kwh": 0.1},
+        {"estimated_power_w": -1.0, "energy_kwh": 0.1},
+        {"estimated_power_w": 100.0, "energy_kwh": "bad"},
+    ],
+)
+def test_nilm_virtual_malformed_live_numbers_do_not_break_sibling(
+    bad_values: dict[str, object],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mains"] = {
+        "bad": {
+            "status": "on",
+            "consistent": True,
+            "session_start": "2026-08-02T12:00:00+00:00",
+            **bad_values,
+        },
+        "good": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 200.0,
+            "energy_kwh": 0.2,
+            "session_start": "2026-08-02T12:00:00+00:00",
+        },
+    }
+    state.nilm_reconciliation_by_circuit["mains"] = {"consistent": True}
+    coordinator = SimpleNamespace(
+        data=state,
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [{"assignment_id": "bad"}, {"assignment_id": "good"}]
+            }
+        ),
+    )
+
+    appliances = {
+        item.assignment_id: item
+        for item in nilm_virtual_appliance_states(coordinator)
+    }
+    assert appliances["bad"].is_running is None
+    assert appliances["bad"].estimated_power_w is None
+    assert appliances["bad"].estimated_energy_kwh_today == 0.0
+    assert appliances["good"].is_running is True
+    assert appliances["good"].estimated_power_w == 200.0
+
+
 @pytest.mark.parametrize("hidden_state", ["ignored", "expected"])
 def test_nilm_virtual_states_assign_overlapping_signatures_once(
     hidden_state: str,

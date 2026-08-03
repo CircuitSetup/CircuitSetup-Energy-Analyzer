@@ -571,6 +571,11 @@ def nilm_runtime_available(
         and reconciliation.get("consistent") is True
         and not reconciliation.get("conflict")
         and runtime.get("status") in {"on", "off"}
+        and _optional_nonnegative_float(runtime.get("estimated_power_w")) is not None
+        and (
+            "energy_kwh" not in runtime
+            or _optional_nonnegative_float(runtime.get("energy_kwh")) is not None
+        )
         and (
             runtime.get("status") == "off"
             or _runtime_start(runtime) is not None
@@ -904,6 +909,14 @@ def _clamped_float(value: Any, *, upper: float | None = None) -> float:
     if upper is not None:
         return min(number, upper)
     return number
+
+
+def _optional_nonnegative_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return number if isfinite(number) and number >= 0 else None
 
 
 def _optional_positive_float(value: Any) -> float | None:
