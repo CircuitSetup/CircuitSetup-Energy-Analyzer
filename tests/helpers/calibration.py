@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 from types import SimpleNamespace
 from typing import Any
 
@@ -128,6 +129,21 @@ class CalibrationLabels:
     expected_alerts: tuple[ExpectedAlert, ...] = ()
     expected_no_alerts: tuple[ExpectedNoAlert, ...] = ()
     abnormal_condition_start_t: int | None = None
+    component_truth: dict[str, ComponentTruth] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedComponentSession:
+    start_t: int
+    end_t: int
+    tolerance_seconds: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentTruth:
+    edges: tuple[ExpectedEvent, ...] = ()
+    sessions: tuple[ExpectedComponentSession, ...] = ()
+    energy_kwh: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +168,7 @@ class CalibrationFixture:
     labels: CalibrationLabels
     expectations: CalibrationExpectations
     path: Path
+    source_kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -182,7 +199,26 @@ class CalibrationMetrics:
     confidence_bins: dict[str, dict[str, float]]
     brier_score: float | None
     expected_calibration_error: float | None
+    source_kind: str | None = None
+    component_metrics: dict[str, ComponentReplayMetrics] = field(default_factory=dict)
+    residual_energy_kwh: float = 0.0
+    false_helper_association_rate: float | None = None
+    ambiguous_event_rate: float = 0.0
+    conservation_violations: int = 0
     expectation_failures: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentReplayMetrics:
+    edge_precision: float | None
+    edge_recall: float | None
+    session_precision: float | None
+    session_recall: float | None
+    session_f1: float | None
+    median_start_error_seconds: float | None
+    median_stop_error_seconds: float | None
+    energy_absolute_error_kwh: float | None
+    energy_percentage_error: float | None
 
 
 def load_calibration_fixture(path: Path) -> CalibrationFixture:
@@ -199,8 +235,7 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
         raise CalibrationFixtureError(msg)
 
     samples = [
-        _parse_sample(item, start_time)
-        for item in _optional_list(raw, "samples")
+        _parse_sample(item, start_time) for item in _optional_list(raw, "samples")
     ]
     for segment in _optional_list(raw, "segments"):
         samples.extend(_expand_segment(segment, start_time, circuits))
@@ -224,6 +259,7 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
         labels=labels,
         expectations=expectations,
         path=path,
+        source_kind=(str(raw["source_kind"]) if raw.get("source_kind") else None),
     )
 
 
@@ -261,9 +297,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     energy_usage_processor = EnergyUsageProcessor(
         settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
             window_days=config.energy_usage_window_days if config else 7,
-            daily_spike_ratio=(
-                config.daily_energy_spike_ratio if config else 0.25
-            ),
+            daily_spike_ratio=(config.daily_energy_spike_ratio if config else 0.25),
         ),
         retention_days_for_circuit=lambda _circuit_id: 45,
         alert_policy_for_circuit=lambda circuit_id: alert_policies.setdefault(
@@ -404,15 +438,12 @@ def evaluate_replay_result(
 
     true_positive_alerts = len(matched_alert_indexes)
     false_positive_alerts = len(result.alerts) - true_positive_alerts
-    false_negative_alerts = (
-        len(fixture.labels.expected_alerts) - true_positive_alerts
-    )
+    false_negative_alerts = len(fixture.labels.expected_alerts) - true_positive_alerts
     true_negative_windows = sum(
         1
         for window in fixture.labels.expected_no_alerts
         if not any(
-            _alert_in_no_alert_window(fixture, alert, window)
-            for alert in result.alerts
+            _alert_in_no_alert_window(fixture, alert, window) for alert in result.alerts
         )
     )
     precision = _ratio_or_none(
@@ -434,6 +465,7 @@ def evaluate_replay_result(
         result.alerts,
         matched_alert_indexes,
     )
+    reconciliation = _combined_reconciliation(result)
     return CalibrationMetrics(
         fixture_id=fixture.id,
         true_positive_alerts=true_positive_alerts,
@@ -449,6 +481,18 @@ def evaluate_replay_result(
         confidence_bins=confidence_bins,
         brier_score=brier,
         expected_calibration_error=ece,
+        source_kind=fixture.source_kind,
+        component_metrics=_component_metrics(fixture, result),
+        residual_energy_kwh=float(reconciliation.get("residual_energy_kwh", 0.0)),
+        false_helper_association_rate=_optional_float(
+            reconciliation.get("false_helper_association_rate")
+        ),
+        ambiguous_event_rate=_ratio_or_none(
+            int(reconciliation.get("ambiguous_event_count", 0)),
+            int(reconciliation.get("total_event_count", 0)),
+        )
+        or 0.0,
+        conservation_violations=int(reconciliation.get("conservation_violations", 0)),
     )
 
 
@@ -646,14 +690,10 @@ def _expand_cold_storage_signature_segment(
                 raw["excursion_power_w"] if excursion else raw["base_power_w"]
             ),
             SensorRole.CURRENT: float(
-                raw["excursion_current_a"]
-                if excursion
-                else raw["base_current_a"]
+                raw["excursion_current_a"] if excursion else raw["base_current_a"]
             ),
             SensorRole.POWER_FACTOR: float(
-                raw["excursion_power_factor"]
-                if excursion
-                else raw["base_power_factor"]
+                raw["excursion_power_factor"] if excursion else raw["base_power_factor"]
             ),
         }
         for role, value in values.items():
@@ -728,6 +768,30 @@ def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
             if raw.get("abnormal_condition_start_t") is not None
             else None
         ),
+        component_truth={
+            str(component_id): ComponentTruth(
+                edges=tuple(
+                    ExpectedEvent(
+                        circuit_id=str(component_id),
+                        event_type=EventType(str(item["event_type"])),
+                        around_t=int(item["around_t"]),
+                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+                    )
+                    for item in _optional_list(value, "edges")
+                ),
+                sessions=tuple(
+                    ExpectedComponentSession(
+                        start_t=int(item["start_t"]),
+                        end_t=int(item["end_t"]),
+                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+                    )
+                    for item in _optional_list(value, "sessions")
+                ),
+                energy_kwh=_optional_float(value.get("energy_kwh")),
+            )
+            for component_id, value in _optional_mapping(raw, "component_truth").items()
+            if isinstance(value, Mapping)
+        },
     )
 
 
@@ -860,6 +924,118 @@ def _event_match_counts(
     return matches, misses
 
 
+def _component_metrics(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> dict[str, ComponentReplayMetrics]:
+    sessions = [
+        item
+        for history in result.store_data.nilm_session_history_by_circuit.values()
+        for item in history
+        if isinstance(item, Mapping)
+    ]
+    metrics: dict[str, ComponentReplayMetrics] = {}
+    for component_id, truth in fixture.labels.component_truth.items():
+        predicted = [
+            item
+            for item in sessions
+            if str(item.get("assignment_id") or item.get("appliance_id") or "")
+            == component_id
+            and item.get("start")
+            and item.get("end")
+        ]
+        matched: list[tuple[ExpectedComponentSession, Mapping[str, Any]]] = []
+        unused = list(predicted)
+        for expected in truth.sessions:
+            for actual in unused:
+                start_error = abs(
+                    (
+                        _parse_datetime(str(actual["start"])) - fixture.start_time
+                    ).total_seconds()
+                    - expected.start_t
+                )
+                stop_error = abs(
+                    (
+                        _parse_datetime(str(actual["end"])) - fixture.start_time
+                    ).total_seconds()
+                    - expected.end_t
+                )
+                if max(start_error, stop_error) <= expected.tolerance_seconds:
+                    matched.append((expected, actual))
+                    unused.remove(actual)
+                    break
+        session_precision = _ratio_or_none(len(matched), len(predicted))
+        session_recall = _ratio_or_none(len(matched), len(truth.sessions))
+        start_errors = [
+            abs(
+                (
+                    _parse_datetime(str(actual["start"])) - fixture.start_time
+                ).total_seconds()
+                - expected.start_t
+            )
+            for expected, actual in matched
+        ]
+        stop_errors = [
+            abs(
+                (
+                    _parse_datetime(str(actual["end"])) - fixture.start_time
+                ).total_seconds()
+                - expected.end_t
+            )
+            for expected, actual in matched
+        ]
+        matched_edges = min(len(matched) * 2, len(truth.edges))
+        actual_energy = sum(float(item.get("energy_kwh", 0.0)) for item in predicted)
+        absolute_error = (
+            abs(actual_energy - truth.energy_kwh)
+            if truth.energy_kwh is not None
+            else None
+        )
+        metrics[component_id] = ComponentReplayMetrics(
+            edge_precision=_ratio_or_none(matched_edges, len(predicted) * 2),
+            edge_recall=_ratio_or_none(matched_edges, len(truth.edges)),
+            session_precision=session_precision,
+            session_recall=session_recall,
+            session_f1=_f1(session_precision, session_recall),
+            median_start_error_seconds=median(start_errors) if start_errors else None,
+            median_stop_error_seconds=median(stop_errors) if stop_errors else None,
+            energy_absolute_error_kwh=round(absolute_error, 6)
+            if absolute_error is not None
+            else None,
+            energy_percentage_error=round(absolute_error / truth.energy_kwh * 100, 3)
+            if absolute_error is not None and truth.energy_kwh
+            else None,
+        )
+    return metrics
+
+
+def _combined_reconciliation(result: ReplayResult) -> dict[str, Any]:
+    items = list(result.final_state.nilm_reconciliation_by_circuit.values())
+    return {
+        key: sum(float(item.get(key, 0)) for item in items)
+        for key in (
+            "residual_energy_kwh",
+            "ambiguous_event_count",
+            "total_event_count",
+            "conservation_violations",
+        )
+    } | {
+        "false_helper_association_rate": next(
+            (
+                float(item["false_helper_association_rate"])
+                for item in items
+                if item.get("false_helper_association_rate") is not None
+            ),
+            None,
+        )
+    }
+
+
+def _f1(precision: float | None, recall: float | None) -> float | None:
+    if precision is None or recall is None or precision + recall == 0:
+        return None
+    return round(2 * precision * recall / (precision + recall), 3)
+
+
 def _confidence_calibration(
     alerts: list[AlertEvidence],
     matched_alert_indexes: set[int],
@@ -929,11 +1105,7 @@ def _calibration_score(alert: AlertEvidence) -> float:
             min(max(daily_usage_share / threshold_ratio, 0.0) / 2.0, 1.0),
         )
     baseline_confidence = _baseline_confidence(alert)
-    score = (
-        0.35 * repeated_score
-        + 0.35 * ratio_score
-        + 0.30 * baseline_confidence
-    )
+    score = 0.35 * repeated_score + 0.35 * ratio_score + 0.30 * baseline_confidence
     return round(min(max(score, 0.0), 1.0), 3)
 
 
@@ -1063,6 +1235,14 @@ def _optional_list(raw: Mapping[str, Any], key: str) -> list[Any]:
         return []
     if not isinstance(value, list):
         msg = f"{key} must be a list"
+        raise CalibrationFixtureError(msg)
+    return value
+
+
+def _optional_mapping(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = raw.get(key, {})
+    if not isinstance(value, Mapping):
+        msg = f"{key} must be a mapping"
         raise CalibrationFixtureError(msg)
     return value
 

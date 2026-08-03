@@ -107,6 +107,24 @@ def build_markdown_report(
         )
         for metrics in metrics_list
     )
+    component_metrics = [
+        (metrics, component_id, component)
+        for metrics in metrics_list
+        for component_id, component in metrics.component_metrics.items()
+    ]
+    if component_metrics:
+        lines.extend(
+            [
+                "",
+                "## Component replay metrics",
+                "",
+                "| Fixture | Source kind | Component | Edge P/R | Session P/R/F1 | "
+                "Start/stop error s | Energy abs/% error | Residual kWh | "
+                "Helper FP rate | Ambiguous rate | Conservation violations |",
+                "|---|---|---|---|---|---|---|---:|---:|---:|---:|",
+            ]
+        )
+        lines.extend(_component_row(*item) for item in component_metrics)
 
     failures = [metrics for metrics in metrics_list if metrics.expectation_failures]
     if failures:
@@ -175,6 +193,25 @@ def _fixture_paths(fixtures_path: Path, fixture_name: str | None) -> list[Path]:
 
 def _metrics_to_json(metrics: CalibrationMetrics) -> dict[str, Any]:
     return asdict(metrics)
+
+
+def _component_row(
+    metrics: CalibrationMetrics, component_id: str, component: Any
+) -> str:
+    values = (
+        metrics.fixture_id,
+        metrics.source_kind or "n/a",
+        component_id,
+        f"{_format_metric(component.edge_precision)}/{_format_metric(component.edge_recall)}",
+        f"{_format_metric(component.session_precision)}/{_format_metric(component.session_recall)}/{_format_metric(component.session_f1)}",
+        f"{_format_metric(component.median_start_error_seconds)}/{_format_metric(component.median_stop_error_seconds)}",
+        f"{_format_metric(component.energy_absolute_error_kwh)}/{_format_metric(component.energy_percentage_error)}",
+        f"{metrics.residual_energy_kwh:g}",
+        _format_metric(metrics.false_helper_association_rate),
+        f"{metrics.ambiguous_event_rate:g}",
+        str(metrics.conservation_violations),
+    )
+    return "| " + " | ".join(values) + " |"
 
 
 def _ratio_or_none(numerator: int, denominator: int) -> float | None:

@@ -17,6 +17,11 @@ expectations. The first harness supports explicit samples plus
 `cold_storage_signature` segments for fixed-interval refrigerator/freezer
 PF, real-power, and current pulses.
 
+Mixed-load fixtures may add `source_kind` and `labels.component_truth`. Component
+truth is keyed by assignment ID and may contain bounded expected `edges`,
+`sessions`, and `energy_kwh`. Metrics are derived from replay output; fixtures
+without component truth retain the original report format.
+
 A `cold_storage_signature` segment requires `start_t`, `duration_seconds`,
 `sample_interval_seconds`, `excursion_interval_seconds`, `base_power_w`,
 `base_current_a`, `base_power_factor`, `excursion_power_w`,

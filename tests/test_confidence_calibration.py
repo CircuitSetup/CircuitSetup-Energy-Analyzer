@@ -86,9 +86,7 @@ def test_abnormal_fixture_detects_expected_alert_with_latency() -> None:
     result = replay_fixture_processors(fixture)
     metrics = assert_fixture_expectations(fixture, result)
 
-    assert [alert.feature for alert in result.alerts] == [
-        "daily_energy_usage_spike"
-    ]
+    assert [alert.feature for alert in result.alerts] == ["daily_energy_usage_spike"]
     assert metrics.true_positive_alerts == 1
     assert metrics.false_negative_alerts == 0
     assert metrics.detection_latency_seconds == 172800.0
@@ -107,9 +105,7 @@ def test_washer_fixture_exercises_pause_without_split_cycle() -> None:
 
     result = replay_fixture_processors(fixture)
     event_types = [
-        event.event_type
-        for event in result.events
-        if event.circuit_id == "washer"
+        event.event_type for event in result.events if event.circuit_id == "washer"
     ]
 
     assert pause_samples
@@ -126,8 +122,7 @@ def test_dishwasher_fixture_exercises_wash_and_dry_cycle_without_alerts() -> Non
     assert fixture.circuits[0].name == "Dishwasher"
     assert [event.event_type for event in events] == [EventType.START, EventType.STOP]
     assert [
-        int((event.timestamp - fixture.start_time).total_seconds())
-        for event in events
+        int((event.timestamp - fixture.start_time).total_seconds()) for event in events
     ] == [60, 3600]
     assert result.alerts == []
     assert metrics.false_positive_alerts == 0
@@ -239,9 +234,7 @@ def test_direct_meter_validation_fixture_masks_known_load_from_nilm() -> None:
     result = replay_fixture_processors(fixture)
     metrics = assert_fixture_expectations(fixture, result)
     dishwasher_events = [
-        event.event_type
-        for event in result.events
-        if event.circuit_id == "dishwasher"
+        event.event_type for event in result.events if event.circuit_id == "dishwasher"
     ]
 
     assert dishwasher_events == [
@@ -263,9 +256,7 @@ def test_ev_charger_fixture_exercises_long_session_without_alerts() -> None:
     result = replay_fixture_processors(fixture)
     metrics = evaluate_replay_result(fixture, result)
     event_types = [
-        event.event_type
-        for event in result.events
-        if event.circuit_id == "ev_charger"
+        event.event_type for event in result.events if event.circuit_id == "ev_charger"
     ]
     event_offsets = [
         int((event.timestamp - fixture.start_time).total_seconds())
@@ -286,9 +277,7 @@ def test_dryer_fixture_exercises_heat_cycle_without_alerts() -> None:
     result = replay_fixture_processors(fixture)
     metrics = evaluate_replay_result(fixture, result)
     event_types = [
-        event.event_type
-        for event in result.events
-        if event.circuit_id == "dryer"
+        event.event_type for event in result.events if event.circuit_id == "dryer"
     ]
     event_offsets = [
         int((event.timestamp - fixture.start_time).total_seconds())
@@ -340,9 +329,7 @@ def test_stale_numeric_fixture_records_quality_issue_and_recovers() -> None:
 
     assert result.setup_issues == [
         {
-            "timestamp": (
-                fixture.start_time + timedelta(seconds=60)
-            ).isoformat(),
+            "timestamp": (fixture.start_time + timedelta(seconds=60)).isoformat(),
             "circuit_id": "refrigerator_stale",
             "issue": "sensor.refrigerator_stale_power stale",
         }
@@ -364,8 +351,7 @@ def test_voltage_sag_fixture_emits_power_quality_event_without_alerts() -> None:
         EventType.STOP,
     ]
     assert [
-        int((event.timestamp - fixture.start_time).total_seconds())
-        for event in events
+        int((event.timestamp - fixture.start_time).total_seconds()) for event in events
     ] == [60, 180, 300]
     assert events[1].features["voltage"] == pytest.approx(220.0)
     assert events[1].features["nominal_voltage"] == pytest.approx(240.0)
@@ -393,8 +379,7 @@ def test_out_of_window_expected_feature_alert_counts_as_false_positive() -> None
     result.alerts.append(
         replace(
             result.alerts[0],
-            timestamp=fixture.start_time
-            + timedelta(seconds=expected.latest_t + 60),
+            timestamp=fixture.start_time + timedelta(seconds=expected.latest_t + 60),
         )
     )
 
@@ -449,6 +434,80 @@ def test_calibration_report_script_runs_directly() -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert "# Confidence Calibration Report" in completed.stdout
+
+
+def test_component_truth_is_optional_and_evaluates_reconciliation_metrics(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "mixed.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: mixed_metrics
+description: component metric contract
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+source_kind: pure_mixed
+circuits:
+  - circuit_id: mixed
+    name: Mixed
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples:
+  - {t: 0, states: {sensor.mixed: 0}}
+labels:
+  component_truth:
+    pump:
+      edges:
+        - {event_type: start, around_t: 60, tolerance_seconds: 5}
+        - {event_type: stop, around_t: 180, tolerance_seconds: 5}
+      sessions:
+        - {start_t: 60, end_t: 180, tolerance_seconds: 5}
+      energy_kwh: 0.01
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+    fixture = load_calibration_fixture(fixture_path)
+    result = replay_fixture_processors(fixture)
+    result.store_data.nilm_session_history_by_circuit["mixed"] = [
+        {
+            "assignment_id": "pump",
+            "start": (fixture.start_time + timedelta(seconds=62)).isoformat(),
+            "end": (fixture.start_time + timedelta(seconds=179)).isoformat(),
+            "energy_kwh": 0.009,
+        }
+    ]
+    result.final_state.nilm_reconciliation_by_circuit["mixed"] = {
+        "residual_energy_kwh": 0.002,
+        "ambiguous_event_count": 1,
+        "total_event_count": 4,
+        "conservation_violations": 0,
+    }
+
+    metrics = evaluate_replay_result(fixture, result)
+
+    assert fixture.source_kind == "pure_mixed"
+    assert metrics.component_metrics["pump"].edge_precision == 1.0
+    assert metrics.component_metrics["pump"].session_f1 == 1.0
+    assert metrics.component_metrics["pump"].median_start_error_seconds == 2.0
+    assert metrics.component_metrics["pump"].energy_absolute_error_kwh == 0.001
+    assert metrics.component_metrics["pump"].energy_percentage_error == 10.0
+    assert metrics.residual_energy_kwh == 0.002
+    assert metrics.ambiguous_event_rate == 0.25
+    assert metrics.conservation_violations == 0
+
+
+def test_old_fixture_report_header_is_unchanged() -> None:
+    from scripts.calibrate_confidence import build_markdown_report
+
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_kettle_cycle.yaml")
+    report = build_markdown_report(
+        [evaluate_replay_result(fixture, replay_fixture_processors(fixture))]
+    )
+
+    assert "| Fixture | TP | FP | FN | Precision | Recall | Latency seconds |" in report
+    assert "Source kind" not in report
 
 
 def test_repository_keeps_appliance_qa_docs_local_only() -> None:
