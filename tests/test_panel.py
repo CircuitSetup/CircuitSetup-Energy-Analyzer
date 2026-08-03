@@ -2334,6 +2334,78 @@ def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
     assert "assignment_id" not in coordinator.store_data.nilm_signatures["mixed"][0]
 
 
+def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed", name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
+        "assignment_id": "mixed-configured-primary", "display_name": "Blower",
+        "lifecycle_state": "assigned", "role": "primary",
+    }]}
+
+    options = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed",
+    )["signatures"][0]["actions"]["assign"]["assignment_options"]
+
+    assert options == [{
+        "value": "mixed-configured-primary",
+        "label": "Configured primary: Blower",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_configured_primary_service_creation_is_entry_scoped() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+        _dispatch_service,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+    coordinators = {}
+    for entry_id, name in (("entry-1", "First Blower"), ("entry-2", "Second Blower")):
+        config = CircuitConfig(
+            circuit_id="mixed", name=name,
+            appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        )
+        coordinator = EnergyAnalyzerCoordinator(
+            SimpleNamespace(data={}), entry_id=entry_id,
+            store_data=FeatureStoreData(nilm_signatures={"mixed": [{
+                "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
+            }]}),
+        )
+        coordinator.circuit_configs = (config,)
+        coordinators[entry_id] = coordinator
+
+    await _dispatch_service(
+        SimpleNamespace(data={DOMAIN: coordinators}),
+        SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+        {
+            "entry_id": "entry-2", "circuit_id": "mixed",
+            "signature_id": "sig-1", "label": "spoofed",
+            "assignment_id": "mixed-configured-primary",
+        },
+    )
+
+    first_store = coordinators["entry-1"].store_data
+    second_store = coordinators["entry-2"].store_data
+    assert first_store.nilm_appliance_assignments_by_circuit == {}
+    assignment = second_store.nilm_appliance_assignments_by_circuit["mixed"][0]
+    assert assignment["display_name"] == "Second Blower"
+    assert assignment["role"] == "primary"
+
+
 def _nilm_service_actions(payload: object) -> list[dict[str, object]]:
     if isinstance(payload, dict):
         actions = (

@@ -305,9 +305,20 @@ class NilmController:
         label_interval_id: str | None = None,
         lifecycle_state: str = "assigned",
         confidence: Any = 1.0,
-        role: str = "component",
+        role: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a durable NILM appliance assignment."""
+        assignment_id_text = str(assignment_id or "").strip()
+        if assignment_id_text == configured_primary_assignment_id(circuit_id):
+            config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
+            if nilm_source_kind(config) is not NilmSourceKind.PRIMARY_MIXED:
+                raise ValueError(
+                    f"Circuit '{circuit_id}' has no configured primary assignment."
+                )
+            label = config.name
+            appliance_id = config.circuit_id
+            appliance_profile = config.appliance_profile.value
+            role = "primary"
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
@@ -321,7 +332,6 @@ class NilmController:
                 [],
             )
         )
-        assignment_id_text = str(assignment_id or "").strip()
         assignment = next(
             (
                 item
@@ -357,7 +367,7 @@ class NilmController:
                 "updated_at": now,
                 "created_device": False,
                 "publish_entities": False,
-                "role": role,
+                "role": role or "component",
                 "power_states_w": [],
                 "transition_prototypes": [],
                 "model_confidence": 0.0,
@@ -374,7 +384,8 @@ class NilmController:
             if appliance_profile:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
             assignment["lifecycle_state"] = lifecycle_state
-            assignment["role"] = role
+            if role is not None:
+                assignment["role"] = role
             assignment["updated_at"] = now
             assignment["appliance_key"] = f"nilm:{assignment['assignment_id']}"
 
@@ -607,15 +618,6 @@ class NilmController:
         coordinator = self._coordinator
         signature = self.signature_for_review(circuit_id, signature_id)
         fingerprint = self._signature_fingerprint_value(signature, signature_id)
-        config = coordinator.circuit_registry.config_for_circuit(circuit_id)
-        is_configured_primary = (
-            assignment_id == configured_primary_assignment_id(circuit_id)
-            and nilm_source_kind(config) is NilmSourceKind.PRIMARY_MIXED
-        )
-        if is_configured_primary:
-            label = config.name
-            appliance_id = config.circuit_id
-            appliance_profile = config.appliance_profile.value
         assignment = self.upsert_assignment(
             circuit_id,
             label=label,
@@ -625,7 +627,6 @@ class NilmController:
             signature_fingerprint=fingerprint,
             lifecycle_state="assigned",
             confidence=signature.get("confidence", 1.0),
-            role="primary" if is_configured_primary else "component",
         )
         signature["assignment_id"] = assignment["assignment_id"]
         signature["review_state"] = "assigned"

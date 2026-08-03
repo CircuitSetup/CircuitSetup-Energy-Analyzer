@@ -752,6 +752,8 @@ def _nilm_assignment_options(
             or assignment.get("appliance_id")
             or assignment_id,
         ).strip()
+        if any(option["value"] == assignment_id for option in options):
+            continue
         options.append({"value": assignment_id, "label": label})
     return options
 
