@@ -9080,17 +9080,22 @@ def test_nilm_future_pending_truth_defers_then_confirms_without_double_energy() 
     process(0)
     assert state.nilm_reconciliation_by_circuit["mixed"] is future_previous
     process(10)
-    assert state.nilm_component_runtime_by_circuit["mixed"]["pump"]["status"] == "on"
+    pump = state.nilm_component_runtime_by_circuit["mixed"]["pump"]
+    assert pump["status"] == "on"
+    assert pump["session_start"] == start.isoformat()
     assert state.nilm_reconciliation_by_circuit["mixed"]["last_observed"] == (
         start + timedelta(seconds=10)
     ).isoformat()
+    assert state.nilm_reconciliation_by_circuit["mixed"][
+        "component_energy_kwh"
+    ] == pytest.approx(80.0 * 10 / 3_600_000)
     process(20)
     reconciliation = state.nilm_reconciliation_by_circuit["mixed"]
     assert reconciliation["last_observed"] == (
         start + timedelta(seconds=20)
     ).isoformat()
     assert reconciliation["component_energy_kwh"] == pytest.approx(
-        80.0 * 10 / 3_600_000
+        80.0 * 20 / 3_600_000
     )
 
 

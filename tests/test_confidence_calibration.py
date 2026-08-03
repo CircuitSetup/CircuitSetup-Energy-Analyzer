@@ -255,6 +255,7 @@ calibration_expectations: {}
     )
     assert result.metrics is not None
     assert result.metrics.component_metrics["pump"].session_f1 == 1.0
+    assert result.metrics.component_metrics["pump"].median_stop_error_seconds == 0.0
     energy_error = result.metrics.component_metrics["pump"].energy_absolute_error_kwh
     assert energy_error == pytest.approx(0.0, abs=0.000001)
     runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]["pump"]

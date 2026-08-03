@@ -183,29 +183,60 @@ class NilmSampleProcessor:
                 if pending_confirmation
                 else sample.real_power
             )
+            available_helper_ids = set(
+                context.state.latest_real_power_w_by_circuit
+            )
+            direct_helper_powers = {
+                helper_id: context.state.latest_real_power_w_by_circuit.get(
+                    helper_id
+                )
+                for helper_id in _direct_helper_ids(assignments)
+            }
             if not pending_confirmation or source_power_w is not None:
+                edge_timestamp = (
+                    max(edge.timestamp for edge in new_unmasked)
+                    if new_unmasked
+                    else sample.timestamp
+                )
+                reconciliation_previous = (
+                    _reconciliation_at_or_before(
+                        previous_reconciliation, edge_timestamp
+                    )
+                    if new_unmasked
+                    else previous_reconciliation
+                )
                 runtime, reconciliation, completed_sessions, accepted = (
                     reconcile_component_runtime(
                     source_power_w=source_power_w,
-                    timestamp=sample.timestamp,
+                    timestamp=edge_timestamp,
                     assignments=assignments,
                     runtime=runtime,
                     edges=new_unmasked,
                     standby_w=standby_w,
                     noise_spread_w=detector.noise_spread_w,
-                    previous_reconciliation=previous_reconciliation,
+                    previous_reconciliation=reconciliation_previous,
                     helper_events=self._helper_events_by_source[circuit_id],
-                    available_helper_ids=set(
-                        context.state.latest_real_power_w_by_circuit
-                    ),
-                    direct_helper_powers={
-                        helper_id: context.state.latest_real_power_w_by_circuit.get(
-                            helper_id
-                        )
-                        for helper_id in _direct_helper_ids(assignments)
-                    },
+                    available_helper_ids=available_helper_ids,
+                    direct_helper_powers=direct_helper_powers,
                     )
                 )
+                if edge_timestamp < sample.timestamp:
+                    runtime, reconciliation, followup_completed, _ = (
+                        reconcile_component_runtime(
+                            source_power_w=sample.real_power,
+                            timestamp=sample.timestamp,
+                            assignments=assignments,
+                            runtime=runtime,
+                            edges=(),
+                            standby_w=standby_w,
+                            noise_spread_w=detector.noise_spread_w,
+                            previous_reconciliation=reconciliation,
+                            helper_events=self._helper_events_by_source[circuit_id],
+                            available_helper_ids=available_helper_ids,
+                            direct_helper_powers=direct_helper_powers,
+                        )
+                    )
+                    completed_sessions.extend(followup_completed)
             else:
                 accepted = ()
             accepted_ids = {id(edge) for edge in accepted}
@@ -1152,6 +1183,15 @@ def _pending_reconciliation_source(
         if source is not None and observed is not None and observed <= pending_timestamp
         else None
     )
+
+
+def _reconciliation_at_or_before(
+    previous: Any, timestamp: datetime
+) -> Mapping[str, Any] | None:
+    if not isinstance(previous, Mapping):
+        return None
+    valid = _pending_reconciliation_source(previous, timestamp)
+    return previous if valid is not None else None
 
 
 def _runtime_datetime(value: Any) -> datetime | None:
