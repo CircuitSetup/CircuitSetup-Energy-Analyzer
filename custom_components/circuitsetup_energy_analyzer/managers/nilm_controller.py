@@ -477,6 +477,7 @@ class NilmController:
         interval_id: str | None = None,
         source: str = "manual",
         confidence: float = 1.0,
+        observed_transition_w: Any = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         label_text = str(label or "").strip()
@@ -530,6 +531,14 @@ class NilmController:
             "created_at": str(existing.get("created_at") if existing else now),
             "updated_at": now,
         }
+        if observed_transition_w is not None:
+            try:
+                transition_w = float(observed_transition_w)
+            except (TypeError, ValueError) as err:
+                raise ValueError("Invalid observed transition watts.") from err
+            if not math.isfinite(transition_w) or transition_w < 0.0:
+                raise ValueError("Invalid observed transition watts.")
+            payload["observed_transition_w"] = transition_w
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text

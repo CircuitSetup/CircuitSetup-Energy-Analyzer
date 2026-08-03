@@ -1269,6 +1269,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         interval_id: str | None = None,
         source: str = "manual",
         confidence: float = 1.0,
+        observed_transition_w: Any = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         return await self.nilm_controller.async_label_nilm_interval(
@@ -1286,6 +1287,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             interval_id=interval_id,
             source=source,
             confidence=confidence,
+            observed_transition_w=observed_transition_w,
         )
 
     async def async_delete_nilm_label_interval(

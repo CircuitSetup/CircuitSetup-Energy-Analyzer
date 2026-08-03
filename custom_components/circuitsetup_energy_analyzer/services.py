@@ -99,6 +99,7 @@ ATTR_MAINS_ENTITY_ID = "mains_entity_id"
 ATTR_GROUND_TRUTH_ENTITY_ID = "ground_truth_entity_id"
 ATTR_SOURCE = "source"
 ATTR_CONFIDENCE = "confidence"
+ATTR_OBSERVED_TRANSITION_W = "observed_transition_w"
 ATTR_THRESHOLD_W = "threshold_w"
 ATTR_PRESET = "preset"
 ATTR_WINDOW_DAYS = "window_days"
@@ -348,6 +349,7 @@ NILM_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
         ATTR_GROUND_TRUTH_ENTITY_ID,
         ATTR_SOURCE,
         ATTR_CONFIDENCE,
+        ATTR_OBSERVED_TRANSITION_W,
     ),
 )
 NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
@@ -816,6 +818,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 interval_id=data.get(ATTR_INTERVAL_ID),
                 source=data.get(ATTR_SOURCE, "manual"),
                 confidence=data.get(ATTR_CONFIDENCE, 1.0),
+                observed_transition_w=data.get(ATTR_OBSERVED_TRANSITION_W),
             )
         return
 

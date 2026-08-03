@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-4"
+    assert PANEL_MODULE_VERSION == "20260802-5"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -1734,6 +1734,10 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         config=mains_config,
         configs=(mains_config, known_config, solar_config),
     )
+    coordinator.settings_controller = SimpleNamespace(
+        sensitivity_for_circuit=lambda _circuit_id: "balanced",
+        nilm_min_delta_w=lambda _circuit_id: 100.0,
+    )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
         "mains": [
             {
@@ -1748,7 +1752,25 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
                 "mains_entity_id": "sensor.mains_power",
                 "created_at": "2026-06-06T09:00:00+00:00",
                 "updated_at": "2026-06-06T09:00:00+00:00",
-            }
+                "assignment_id": "assignment-dishwasher",
+                "observed_transition_w": 80.0,
+            },
+            {
+                "interval_id": "label-2",
+                "label": "Dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-06-06T10:10:00+00:00",
+                "end": "2026-06-06T10:40:00+00:00",
+                "observed_transition_w": 83.0,
+            },
+            {
+                "interval_id": "label-3",
+                "label": "Dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-06-06T11:10:00+00:00",
+                "end": "2026-06-06T11:40:00+00:00",
+                "observed_transition_w": 86.0,
+            },
         ]
     }
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -1810,6 +1832,19 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     payload = nilm_workspace_payload([coordinator], circuit_id="mains", hours="72")
 
     assert payload["status"] == "ok"
+    assert payload["sensitivity"] == {
+        "current": "balanced",
+        "effective_minimum_edge_w": 100.0,
+        "recommendation": "sensitive",
+        "action": {
+            "domain": DOMAIN,
+            "service": "set_circuit_sensitivity",
+                "data": {
+                    "circuit_id": "mains",
+                    "preset": "sensitive",
+            },
+        },
+    }
     assert payload["history"]["hours"] == 24.0
     assert payload["history"]["entities"] == ["sensor.mains_power"]
     assert payload["history"]["api_path"].startswith(
@@ -4220,6 +4255,44 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     }
     assert payload["checklist_total_count"] == 10
     assert payload["open_path"].startswith("/config/integrations/")
+
+
+def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_ENABLE_EXPERIMENTAL_NILM,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config)
+    coordinator.entry_id = "entry-1"
+    coordinator.options = {CONF_ENABLE_EXPERIMENTAL_NILM: True}
+    coordinator.data = SimpleNamespace()
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.store_data.nilm_reconciliation_by_circuit = {
+        "mixed": {"status": "conflict", "conflict_reason": "over_allocation"}
+    }
+
+    payload = setup_health_payload([coordinator])
+    nilm_issues = [
+        item for item in payload["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    assert {item["issue"] for item in nilm_issues} == {
+        "nilm_model_conflict",
+        "nilm_unreviewed_signatures",
+    }
+    assert all(item["severity"] == "review" for item in nilm_issues)
+    assert all("entry_id=entry-1" in item["open_path"] for item in nilm_issues)
+    assert all("circuit_id=mixed" in item["open_path"] for item in nilm_issues)
 
 
 def test_setup_health_payload_links_actions_to_supported_integration_page() -> None:

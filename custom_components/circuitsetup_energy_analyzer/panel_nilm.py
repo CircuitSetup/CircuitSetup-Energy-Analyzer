@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from statistics import median
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -50,6 +52,7 @@ from .services import (
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
+    ATTR_PRESET,
     ATTR_RELATIONSHIP,
     ATTR_SESSION_ID,
     ATTR_SIGNATURE_FINGERPRINT,
@@ -74,6 +77,7 @@ from .services import (
     SERVICE_REMOVE_NILM_HELPER_LINK,
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
@@ -231,6 +235,9 @@ def nilm_workspace_payload(
             coordinator, config.circuit_id
         ),
         "source": _nilm_workspace_source(coordinator, config, include_path=False),
+        "sensitivity": _nilm_workspace_sensitivity(
+            coordinator, config.circuit_id, all_label_intervals
+        ),
         "sources": sources,
         "history": _nilm_workspace_history_payload(
             config,
@@ -268,6 +275,67 @@ def nilm_workspace_payload(
         "session_count": len(all_sessions),
     }
     return _scope_nilm_actions(payload, selected_entry_id)
+
+
+def _nilm_workspace_sensitivity(
+    coordinator: Any,
+    circuit_id: str,
+    label_intervals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    settings = getattr(coordinator, "settings_controller", None)
+    if settings is None:
+        current = "balanced"
+        threshold = 100.0
+    else:
+        current = settings.sensitivity_for_circuit(circuit_id)
+        threshold = settings.nilm_min_delta_w(circuit_id)
+    recommendation = _nilm_sensitivity_recommendation(
+        current, threshold, label_intervals
+    )
+    action = {
+        "domain": DOMAIN,
+        "service": SERVICE_SET_CIRCUIT_SENSITIVITY,
+        "data": {ATTR_CIRCUIT_ID: circuit_id},
+    }
+    if recommendation is not None:
+        action["data"][ATTR_PRESET] = recommendation
+    return {
+        "current": current,
+        "effective_minimum_edge_w": threshold,
+        "recommendation": recommendation,
+        "action": action,
+    }
+
+
+def _nilm_sensitivity_recommendation(
+    current: str,
+    threshold_w: float,
+    intervals: list[dict[str, Any]],
+) -> str | None:
+    next_setting = {"quiet": "balanced", "balanced": "sensitive"}.get(current)
+    if next_setting is None:
+        return None
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for interval in intervals:
+        assignment = str(interval.get("assignment_id") or "").strip()
+        label = str(interval.get("label") or "").strip().casefold()
+        value = interval.get("observed_transition_w")
+        if not assignment or not label or not isinstance(value, (int, float)):
+            continue
+        value = abs(float(value))
+        if not math.isfinite(value):
+            continue
+        grouped.setdefault((assignment, label), []).append(value)
+    for values in grouped.values():
+        recent = values[-3:]
+        if len(recent) < 3:
+            continue
+        typical = median(recent)
+        if typical < threshold_w and all(
+            abs(value - typical) <= typical * 0.2 for value in recent
+        ):
+            return next_setting
+    return None
 
 
 def _nilm_payload_for_circuit(

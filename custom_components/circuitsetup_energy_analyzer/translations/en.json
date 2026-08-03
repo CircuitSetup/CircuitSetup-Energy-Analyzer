@@ -1826,6 +1826,8 @@
       },
       "nilm_workspace": {
         "source_picker_label": "Load Separation source",
+        "sensitivity": "Detection sensitivity and effective minimum edge",
+        "use_sensitivity": "Use {setting}",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",
         "no_source": "No Load Separation source is available for this workspace.",

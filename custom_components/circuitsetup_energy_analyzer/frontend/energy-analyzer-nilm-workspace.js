@@ -1633,6 +1633,9 @@ export function createNilmWorkspaceMethods({
           ${sources.map((source) => `<option value="${this._escape(source.path || "")}" ${source.circuit_id === circuit.circuit_id ? "selected" : ""}>${this._escape(source.name || source.circuit_id || "")}</option>`).join("")}
         </select>
       </label>` : "";
+    const sensitivity = workspace.sensitivity || {};
+    const sensitivityAction = sensitivity.action && sensitivity.recommendation ? `
+      <button type="button" class="secondary" data-nilm-sensitivity-action>${this._escape(this._panelTextFormat("nilm_workspace.use_sensitivity", { setting: this._friendlyFeature(sensitivity.recommendation) }))}</button>` : "";
     return `
       <section class="workspace-summary section-surface" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
         <div class="workspace-summary-item">
@@ -1640,6 +1643,11 @@ export function createNilmWorkspaceMethods({
           <strong>${this._escape(circuit.name || circuit.circuit_id || this._panelText("common.unknown"))}</strong>
         </div>
         ${sourcePicker}
+        <div class="workspace-summary-item" data-nilm-sensitivity>
+          <span>${this._escape(this._panelText("nilm_workspace.sensitivity"))}</span>
+          <strong>${this._escape(this._friendlyFeature(sensitivity.current || "balanced"))} · ${this._escape(this._formatMetricValue(sensitivity.effective_minimum_edge_w))} W</strong>
+          ${sensitivityAction}
+        </div>
         <div class="workspace-summary-item">
           <span>${this._escape(this._panelText("nilm_workspace.lane_needs_review"))}</span>
           <strong>${needsReview}</strong>
@@ -1651,6 +1659,14 @@ export function createNilmWorkspaceMethods({
         </label>
       </section>
     `;
+  }
+
+  async _applyNilmSensitivity() {
+    const action = this._nilmWorkspace && this._nilmWorkspace.sensitivity && this._nilmWorkspace.sensitivity.action;
+    if (!this._guardActionCall(action, "NILM sensitivity", "nilm-sensitivity")) return;
+    await this._hass.callService(action.domain || "circuitsetup_energy_analyzer", action.service, { ...(action.data || {}) });
+    await this._refreshNilmWorkspaceData();
+    this._render();
   }
 
   _renderNilmGraph(workspace, graphWindow, graphBands) {

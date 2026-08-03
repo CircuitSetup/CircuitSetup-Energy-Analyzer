@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -261,6 +262,43 @@ def test_nilm_controller_owns_assignment_helper_behavior() -> None:
     assert updated["label_interval_ids"] == ["interval-1"]
     assert updated["confidence"] == 0.82
     assert updated["role"] == "component"
+
+
+@pytest.mark.asyncio
+async def test_label_intervals_validate_and_retain_observed_transition_w() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Condensate pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:05:00+00:00",
+        observed_transition_w=83.0,
+    )
+
+    assert saved["observed_transition_w"] == 83.0
+    for invalid in (-1, float("inf"), float("nan"), "unknown"):
+        with pytest.raises(ValueError, match="observed transition"):
+            await controller.async_label_nilm_interval(
+                "mixed",
+                label="Condensate pump",
+                start="2026-06-02T11:00:00+00:00",
+                end="2026-06-02T11:05:00+00:00",
+                observed_transition_w=invalid,
+            )
 
 
 def test_upsert_assignment_preserves_existing_role_when_omitted() -> None:
