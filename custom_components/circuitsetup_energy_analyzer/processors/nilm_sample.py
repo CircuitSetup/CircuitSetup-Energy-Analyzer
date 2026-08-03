@@ -598,9 +598,18 @@ def reconcile_component_runtime(
         or previous_component_energy + component_interval
         > previous_source_energy + source_interval + energy_tolerance
     ):
+        changed_assignments = {
+            assignment_id
+            for assignment_id, payload in next_runtime.items()
+            if payload != before_sample.get(assignment_id)
+        }
         next_runtime = before_sample
         _suspend_runtime(next_runtime)
+        for assignment_id in changed_assignments:
+            next_runtime[assignment_id]["status"] = NilmComponentStatus.UNCERTAIN
         conflict = "energy_over_allocation"
+        accepted.clear()
+        session_closes.clear()
         completed.clear()
     elif conflict is None:
         for assignment_id, increment in increments.items():
@@ -772,7 +781,9 @@ def _apply_direct_component_sample(
         assignment_id = str(assignment.get("assignment_id") or "")
         payload = runtime[assignment_id]
         previous_power = _finite_float(payload.get("estimated_power_w")) or 0.0
-        was_on = payload.get("status") == NilmComponentStatus.ON
+        has_open_session = bool(
+            payload.get("session_id") and payload.get("session_start")
+        )
         is_on = power > 0.0
         link = next(
             link for link in _list_items(assignment.get("helper_links"))
@@ -780,14 +791,14 @@ def _apply_direct_component_sample(
             and str(link.get("helper_circuit_id") or "") == helper_id
             and link.get("relationship") == "direct_component"
         )
-        if is_on and not was_on:
+        if is_on and not has_open_session:
             payload.update({
                 "session_id": f"{assignment_id}|{timestamp.isoformat()}",
                 "session_start": timestamp.isoformat(),
                 "energy_kwh": 0.0,
                 "on_delta_w": power - previous_power,
             })
-        elif was_on and not is_on:
+        elif has_open_session and not is_on:
             closes.append((assignment_id, NilmTransitionPrototype(
                 assignment_id=assignment_id,
                 direction="off",

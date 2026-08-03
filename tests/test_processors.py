@@ -9052,15 +9052,17 @@ def test_direct_component_uses_prior_power_and_closes_once() -> None:
 
     runtime, second, completed, _ = reconcile_component_runtime(
         source_power_w=20.0, timestamp=now + timedelta(seconds=10),
-        assignments=(assignment,), runtime=runtime, edges=(), standby_w=0.0,
-        noise_spread_w=0.0, previous_reconciliation=first,
+        assignments=(assignment,), runtime=suspended, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=unavailable,
         direct_helper_powers={"meter": 0.0},
     )
     assert runtime["pump"]["status"] == "off"
     assert completed[0]["on_delta_w"] == 60.0
     assert completed[0]["off_delta_w"] == -60.0
-    assert completed[0]["energy_kwh"] == pytest.approx(60.0 * 10 / 3_600_000)
+    assert completed[0]["energy_kwh"] == 0.0
     assert completed[0]["helper_evidence"][0]["relationship"] == "direct_component"
+    assert runtime["pump"]["session_id"] is None
+    assert runtime["pump"]["session_start"] is None
 
     runtime, _, repeated, _ = reconcile_component_runtime(
         source_power_w=20.0, timestamp=now + timedelta(seconds=10),
@@ -9099,6 +9101,47 @@ def test_energy_interval_is_atomic_and_capped_to_source() -> None:
     assert sum(item["energy_kwh"] for item in runtime.values()) == 0.0
     assert reconciliation["conflict"] == "energy_over_allocation"
     assert reconciliation["residual_energy_kwh"] == 0.0
+
+
+def test_energy_rollback_keeps_the_transition_edge_unknown() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = _reconciliation_assignment("pump", 100.0)
+    runtime = {
+        "pump": {
+            "status": "off", "state_power_w": 0.0, "estimated_power_w": 0.0,
+            "session_id": None, "session_start": None, "confidence": 0.9,
+            "consistent": True, "last_observed": now.isoformat(),
+            "energy_kwh": 0.0,
+        }
+    }
+    edge = NilmEdge(
+        now + timedelta(seconds=10), 100.0, 0.0, 100.0, 0.0, "on"
+    )
+    previous = {
+        "source_power_w": 100.0, "source_energy_kwh": 0.0,
+        "component_energy_kwh": 1.0, "standby_w": 0.0,
+        "consistent": True, "energy_allocation_allowed": True,
+    }
+
+    runtime, reconciliation, completed, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=now + timedelta(seconds=10),
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(edge,),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation=previous,
+    )
+
+    assert accepted == completed == []
+    assert runtime["pump"]["status"] == "uncertain"
+    assert reconciliation["conflict"] == "energy_over_allocation"
 
 
 def test_processor_keeps_only_rejected_reconciliation_edges_unknown() -> None:
