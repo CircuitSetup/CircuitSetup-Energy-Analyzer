@@ -3016,6 +3016,42 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
         "review_action": {"type": "model_conflict", "reason": "over_allocation"},
     }
 
+    coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
+        "lifecycle_state"
+    ] = "conflict"
+    coordinator.state.nilm_reconciliation_by_circuit["mains"].update(
+        consistent=True, conflict=None
+    )
+    assert nilm_workspace_payload(
+        [coordinator], circuit_id="mains"
+    )["virtual_appliances"][0]["model_status"] == "conflict"
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
+        {
+            "assignment_id": "dryer",
+            "display_name": "Dryer",
+            "mains_circuit_id": "mains",
+            "lifecycle_state": "published",
+        }
+    )
+    coordinator.state.nilm_component_runtime_by_circuit["mains"] = {
+        "washer": "bad",
+        "dryer": {
+            "status": "on",
+            "consistent": True,
+            "estimated_power_w": 700.0,
+            "session_start": "2026-08-02T12:00:00+00:00",
+        },
+    }
+    virtuals = {
+        item["assignment_id"]: item
+        for item in nilm_workspace_payload(
+            [coordinator], circuit_id="mains"
+        )["virtual_appliances"]
+    }
+    assert virtuals["washer"]["is_running"] is None
+    assert virtuals["dryer"]["is_running"] is True
+
 
 def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge

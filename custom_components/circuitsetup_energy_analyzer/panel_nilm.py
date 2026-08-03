@@ -15,6 +15,11 @@ from .nilm import (
     nilm_session_to_dict,
     pair_nilm_sessions_for_signatures,
 )
+from .nilm_virtual import (
+    nilm_live_runtime,
+    nilm_model_status,
+    nilm_runtime_available,
+)
 from .panel_common import (
     _circuit_payload,
     _datetime_from_iso,
@@ -984,22 +989,12 @@ def _nilm_virtual_appliances_for_assignments(
             session for session in assignment_sessions if not session.get("end")
         )
         latest_session = open_session or _latest_nilm_session(assignment_sessions)
-        state = getattr(coordinator, "data", None) or getattr(
-            coordinator, "state", None
+        runtime, reconciliation = nilm_live_runtime(
+            coordinator,
+            str(assignment.get("mains_circuit_id") or ""),
+            assignment_id,
         )
-        runtime = getattr(state, "nilm_component_runtime_by_circuit", {}).get(
-            str(assignment.get("mains_circuit_id") or ""), {}
-        ).get(assignment_id, {})
-        reconciliation = getattr(state, "nilm_reconciliation_by_circuit", {}).get(
-            str(assignment.get("mains_circuit_id") or ""), {}
-        )
-        live_available = bool(
-            runtime
-            and runtime.get("consistent") is True
-            and reconciliation.get("consistent") is True
-            and not reconciliation.get("conflict")
-            and runtime.get("status") in {"on", "off"}
-        )
+        live_available = nilm_runtime_available(runtime, reconciliation)
         helper_status = (
             "degraded"
             if any(
@@ -1044,11 +1039,7 @@ def _nilm_virtual_appliances_for_assignments(
                 "active_session_id": (
                     str(runtime.get("session_id") or "") if live_available else None
                 ),
-                "model_status": (
-                    "conflict" if reconciliation.get("conflict")
-                    else "degraded" if helper_status == "degraded"
-                    else str(assignment.get("lifecycle_state") or "candidate")
-                ),
+                "model_status": nilm_model_status(assignment, reconciliation),
                 "helper_status": helper_status,
                 "source_type": "nilm_estimate",
                 "source_label": _panel_text("source_labels", "nilm_estimate"),
@@ -1069,13 +1060,8 @@ def _nilm_virtual_appliances_for_assignments(
 def _nilm_reconciliation_payload(
     coordinator: Any, circuit_id: str
 ) -> dict[str, Any] | None:
-    state = getattr(coordinator, "data", None) or getattr(
-        coordinator, "state", None
-    )
-    reconciliation = getattr(state, "nilm_reconciliation_by_circuit", {}).get(
-        circuit_id
-    )
-    if not isinstance(reconciliation, Mapping):
+    _, reconciliation = nilm_live_runtime(coordinator, circuit_id, "")
+    if not reconciliation:
         return None
     conflict = reconciliation.get("conflict")
     return {

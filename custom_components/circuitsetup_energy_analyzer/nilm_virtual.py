@@ -435,17 +435,10 @@ def _nilm_virtual_appliance_state(
         assignment,
         mains_source_entity_id=_mains_source_entity_id(coordinator, circuit_id),
     )
-    runtime, reconciliation = _nilm_live_runtime(
+    runtime, reconciliation = nilm_live_runtime(
         coordinator, circuit_id, assignment_id
     )
-    live_available = bool(
-        runtime
-        and runtime.get("consistent") is True
-        and reconciliation
-        and reconciliation.get("consistent") is True
-        and not reconciliation.get("conflict")
-        and runtime.get("status") in {"on", "off"}
-    )
+    live_available = nilm_runtime_available(runtime, reconciliation)
     is_running = runtime.get("status") == "on" if live_available else None
     live_power = (
         round(_clamped_float(runtime.get("estimated_power_w")), 3)
@@ -491,7 +484,7 @@ def _nilm_virtual_appliance_state(
             if latest_session
             else None
         ),
-        model_status=_nilm_model_status(assignment, reconciliation),
+        model_status=nilm_model_status(assignment, reconciliation),
         mains_circuit_id=identity.mains_circuit_id or circuit_id,
         mains_source=identity.mains_source_entity_id,
         appliance_profile=identity.appliance_profile,
@@ -541,40 +534,69 @@ def _nilm_virtual_appliance_state(
     )
 
 
-def _nilm_live_runtime(
+def nilm_live_runtime(
     coordinator: Any, circuit_id: str, assignment_id: str
 ) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
     state = getattr(coordinator, "data", None) or getattr(coordinator, "state", None)
     runtime_by_circuit = getattr(state, "nilm_component_runtime_by_circuit", {})
     reconciliation_by_circuit = getattr(state, "nilm_reconciliation_by_circuit", {})
-    runtime = runtime_by_circuit.get(circuit_id, {}).get(assignment_id, {})
-    reconciliation = reconciliation_by_circuit.get(circuit_id, {})
-    return (
-        runtime if isinstance(runtime, Mapping) else {},
-        reconciliation if isinstance(reconciliation, Mapping) else {},
+    circuit_runtime = _mapping_item(runtime_by_circuit, circuit_id)
+    return _mapping_item(circuit_runtime, assignment_id), _mapping_item(
+        reconciliation_by_circuit, circuit_id
     )
 
 
-def _nilm_model_status(
+def nilm_model_status(
     assignment: Mapping[str, Any], reconciliation: Mapping[str, Any]
 ) -> str:
-    if reconciliation.get("conflict"):
+    lifecycle_state = str(assignment.get("lifecycle_state") or "candidate")
+    if lifecycle_state == "conflict" or reconciliation.get("conflict"):
         return "conflict"
     if any(
         isinstance(link, Mapping) and link.get("status") == "degraded"
         for link in _iter_items(assignment.get("helper_links"))
     ):
         return "degraded"
-    return str(assignment.get("lifecycle_state") or "candidate")
+    return lifecycle_state
+
+
+def nilm_runtime_available(
+    runtime: Mapping[str, Any], reconciliation: Mapping[str, Any]
+) -> bool:
+    """Return whether current component state is safe to expose live."""
+    return bool(
+        runtime
+        and runtime.get("consistent") is True
+        and reconciliation
+        and reconciliation.get("consistent") is True
+        and not reconciliation.get("conflict")
+        and runtime.get("status") in {"on", "off"}
+        and (
+            runtime.get("status") == "off"
+            or _runtime_start(runtime) is not None
+        )
+    )
+
+
+def _mapping_item(value: Any, key: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    item = value.get(key)
+    return item if isinstance(item, Mapping) else {}
+
+
+def _runtime_start(runtime: Mapping[str, Any]) -> datetime | None:
+    try:
+        started = datetime.fromisoformat(str(runtime.get("session_start")))
+    except (TypeError, ValueError):
+        return None
+    return started if started.tzinfo is not None else None
 
 
 def _runtime_duration_seconds(
     runtime: Mapping[str, Any], now: datetime
 ) -> float | None:
-    try:
-        started = datetime.fromisoformat(str(runtime.get("session_start")))
-    except (TypeError, ValueError):
-        started = None
+    started = _runtime_start(runtime)
     return max((now - started).total_seconds(), 0.0) if started else None
 
 

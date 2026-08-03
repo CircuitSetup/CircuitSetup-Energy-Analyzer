@@ -2940,7 +2940,7 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return whether a live NILM value is currently known."""
-        return not (
+        return super().available and not (
             self.entity_description.key in {"activity_summary", "estimated_power"}
             and self.native_value is None
         )
