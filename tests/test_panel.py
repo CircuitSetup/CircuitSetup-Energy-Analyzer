@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-5"
+    assert PANEL_MODULE_VERSION == "20260802-6"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -4293,6 +4293,87 @@ def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> 
     assert all(item["severity"] == "review" for item in nilm_issues)
     assert all("entry_id=entry-1" in item["open_path"] for item in nilm_issues)
     assert all("circuit_id=mixed" in item["open_path"] for item in nilm_issues)
+
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [{"signature_id": "sig-1", "assignment_id": "pump"}]
+    }
+    coordinator.store_data.nilm_reconciliation_by_circuit = {
+        "mixed": {"status": "consistent"}
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": []}
+
+    healthy = setup_health_payload([coordinator])
+    assert not [
+        item for item in healthy["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [{"helper_links": [{"status": "degraded"}]}]
+    }
+
+    reviewed = setup_health_payload([coordinator])
+    reviewed_nilm = [
+        item for item in reviewed["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    assert [item["issue"] for item in reviewed_nilm] == ["nilm_helper_degraded"]
+    assert reviewed_nilm[0]["severity"] == "review"
+    assert "safety" not in str(reviewed_nilm[0]).lower()
+
+
+def test_nilm_sensitivity_uses_latest_three_ordered_observations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": start,
+            "observed_transition_w": watts,
+        }
+        for start, watts in (
+            ("2026-08-02T12:00:00+00:00", 82.0),
+            ("2026-08-02T11:00:00+00:00", 80.0),
+            ("2026-08-02T10:00:00+00:00", 78.0),
+            ("2026-08-02T09:00:00+00:00", 140.0),
+        )
+    ]
+
+    assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == (
+        "sensitive"
+    )
+
+
+@pytest.mark.parametrize(
+    ("current", "watts"),
+    [
+        ("balanced", [80.0]),
+        ("balanced", [80.0, 82.0]),
+        ("balanced", [60.0, 80.0, 100.0]),
+        ("balanced", [0.0, 0.0, 0.0]),
+        ("sensitive", [80.0, 82.0, 84.0]),
+    ],
+)
+def test_nilm_sensitivity_does_not_recommend_insufficient_or_noisy_evidence(
+    current: str, watts: list[float]
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": f"2026-08-02T{index + 10:02d}:00:00+00:00",
+            "observed_transition_w": value,
+        }
+        for index, value in enumerate(watts)
+    ]
+
+    assert _nilm_sensitivity_recommendation(current, 100.0, intervals) is None
 
 
 def test_setup_health_payload_links_actions_to_supported_integration_page() -> None:

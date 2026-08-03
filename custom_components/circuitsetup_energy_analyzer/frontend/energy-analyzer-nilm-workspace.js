@@ -430,6 +430,12 @@ export function createNilmWorkspaceMethods({
           this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
           return;
         }
+        const transitionText = String(interval.observed_transition_w ?? "").trim();
+        const observedTransitionW = Number(transitionText);
+        if (transitionText && (!Number.isFinite(observedTransitionW) || observedTransitionW < 0)) {
+          this._setNilmIntervalError(this._panelText("errors.nilm_interval_transition_invalid"));
+          return;
+        }
         data = {
           ...action && action.data || {},
           label,
@@ -438,6 +444,7 @@ export function createNilmWorkspaceMethods({
           appliance_id: String(draft.appliance_id || label).trim(),
           appliance_profile: applianceProfile,
         };
+        if (transitionText) data.observed_transition_w = observedTransitionW;
         const intervalId = String(interval.interval_id || "").trim();
         if (intervalId) data.interval_id = intervalId;
         if (draft.assignment_id) data.assignment_id = draft.assignment_id;
@@ -1037,7 +1044,7 @@ export function createNilmWorkspaceMethods({
     }
     const field = input.dataset.nilmLabelIntervalInput;
     const index = Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10);
-    if (index >= 0 && ["start", "end"].includes(field)) {
+    if (index >= 0 && ["start", "end", "observed_transition_w"].includes(field)) {
       const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
       intervals[index] = { ...(intervals[index] || {}), [field]: input.value };
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
@@ -1602,6 +1609,7 @@ export function createNilmWorkspaceMethods({
     return `
       <div class="nilm-workspace">
         ${this._renderNilmWorkspaceSummary(workspace)}
+        ${this._renderNilmModelEvidence()}
         <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
@@ -1659,6 +1667,14 @@ export function createNilmWorkspaceMethods({
         </label>
       </section>
     `;
+  }
+
+  _renderNilmModelEvidence() {
+    return `<section class="workspace-section section-surface" data-nilm-model-evidence>
+      <h3>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h3>
+      <strong>${this._escape(this._panelText("nilm_workspace.lifecycle_flow"))}</strong>
+      ${["measured_vs_estimated", "residual_evidence", "ambiguous_evidence", "helper_conflict_evidence", "compound_evidence", "source_unavailable_evidence", "conservation_evidence"].map((key) => `<p class="muted">${this._escape(this._panelText(`nilm_workspace.${key}`))}</p>`).join("")}
+    </section>`;
   }
 
   async _applyNilmSensitivity() {
@@ -2135,6 +2151,7 @@ export function createNilmWorkspaceMethods({
             <div class="nilm-interval-form">
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span><input type="datetime-local" data-nilm-label-interval-input="start" data-nilm-interval-index="${index}" value="${this._escape(interval.start || "")}"></label>
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.end"))}</span><input type="datetime-local" data-nilm-label-interval-input="end" data-nilm-interval-index="${index}" value="${this._escape(interval.end || "")}"></label>
+              <label><span class="muted">${this._escape(this._panelText("nilm_workspace.observed_transition_w"))}</span><input type="number" min="0" step="any" inputmode="decimal" data-nilm-label-interval-input="observed_transition_w" data-nilm-interval-index="${index}" value="${this._escape(interval.observed_transition_w ?? "")}"></label>
             </div>
           </div>`).join("")}
         </div>

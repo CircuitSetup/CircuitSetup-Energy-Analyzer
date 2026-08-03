@@ -372,6 +372,16 @@ export const setupHealth = {
 export const nilmWorkspace = {
   status: "ok",
   circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  sensitivity: {
+    current: "balanced",
+    effective_minimum_edge_w: 100,
+    recommendation: "sensitive",
+    action: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "set_circuit_sensitivity",
+      data: { circuit_id: "mains", preset: "sensitive", entry_id: "entry-1" },
+    },
+  },
   history: {
     start: "2026-07-13T12:00:00Z",
     end: "2026-07-13T20:00:00Z",

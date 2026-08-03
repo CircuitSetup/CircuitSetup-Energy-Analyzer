@@ -315,7 +315,7 @@ def _nilm_sensitivity_recommendation(
     next_setting = {"quiet": "balanced", "balanced": "sensitive"}.get(current)
     if next_setting is None:
         return None
-    grouped: dict[tuple[str, str], list[float]] = {}
+    grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
     for interval in intervals:
         assignment = str(interval.get("assignment_id") or "").strip()
         label = str(interval.get("label") or "").strip().casefold()
@@ -325,13 +325,14 @@ def _nilm_sensitivity_recommendation(
         value = abs(float(value))
         if not math.isfinite(value):
             continue
-        grouped.setdefault((assignment, label), []).append(value)
-    for values in grouped.values():
-        recent = values[-3:]
+        observed_at = str(interval.get("start") or interval.get("created_at") or "")
+        grouped.setdefault((assignment, label), []).append((observed_at, value))
+    for observations in grouped.values():
+        recent = [value for _, value in sorted(observations)[-3:]]
         if len(recent) < 3:
             continue
         typical = median(recent)
-        if typical < threshold_w and all(
+        if 0.0 < typical < threshold_w and all(
             abs(value - typical) <= typical * 0.2 for value in recent
         ):
             return next_setting
