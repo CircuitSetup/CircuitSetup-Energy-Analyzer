@@ -899,7 +899,23 @@ Use the standby and Always On settings to set standby thresholds, Always On aler
 
 ### Experimental NILM
 
-Experimental NILM is opt-in. It can look for recurring unknown load signatures from mains or mixed circuits, especially when known directly monitored circuits are masked out. A mixed circuit keeps its aggregate analysis and requires a reviewed NILM assignment before the analyzer uses appliance-specific evidence; it does not automatically reclassify the configured primary appliance. With a mains source, the NILM workspace can also pair compatible on/off edges. It plots mains real power in watts, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. Confirmed sessions also teach conservative duration bounds for later matching. Graph interval selections can be turned directly into appliance assignments for review.
+Experimental NILM is opt-in. **Load Separation** supports three source compositions: a mains aggregate; a pure mixed circuit configured as **Several loads with no primary**; or a configured primary appliance plus mixed loads, configured as **A primary appliance plus other loads**. The aggregate source is directly measured. Separated component power and energy are estimates unless a component is linked to its own direct measurement. For a primary-plus-mixed source, **Configured primary: _name_** preserves the configured appliance's identity instead of treating it as a newly discovered load.
+
+Helper links explain related direct circuits without changing the measured aggregate. **Runs with this load (evidence only)** uses timing only to corroborate an estimate; it does not infer the component's state when the source is unavailable. **Directly measures this load (included in source)** makes that circuit the direct measurement for the linked component and prevents the same measured energy from being allocated again as an estimate.
+
+Choose **Sensitive** when the displayed effective minimum edge would otherwise be above a real smaller transition; use **Balanced** or **Quiet** to reject more small changes and noise. NILM keeps residual power and energy unexplained, leaves ambiguous edges unknown, and rejects reconciliation when allocated components would exceed measured source energy. After a restart, live component state is unknown or unavailable until source evidence re-establishes it. A compound edge can teach at most two learned transitions; more simultaneous transitions remain a compound unknown. Load Separation is estimation and review evidence, never safety or control evidence.
+
+For example, to separate a condensate pump from the blower on HVAC 2, using AC2 as corroborating evidence:
+
+1. Configure **HVAC 2** as **A primary appliance plus other loads** with appliance type **HVAC blower**.
+2. Open **Load Separation** for HVAC 2.
+3. Choose **Sensitive** if the effective minimum edge is above the condensate-pump transition.
+4. Assign the large signature to **Configured primary: HVAC 2**.
+5. Assign the smaller signature to a new condensate-pump appliance.
+6. Link **AC2** as **Runs with this load (evidence only)**.
+7. Validate the sessions and reconciliation evidence before publishing either estimate.
+
+The NILM workspace can also pair compatible on/off edges from a mains source. It plots mains real power in watts, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. Confirmed sessions also teach conservative duration bounds for later matching. Graph interval selections can be turned directly into appliance assignments for review.
 
 On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
@@ -1115,7 +1131,7 @@ The service actions below are optional. They are useful when you want to call an
 | Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
 | Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_confirmed`, `mark_alert_unhelpful` |
 | Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
-| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `convert_nilm_appliance_to_direct_meter`, `merge_nilm_assignments`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
+| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `convert_nilm_appliance_to_direct_meter`, `merge_nilm_assignments`, `set_nilm_helper_link`, `remove_nilm_helper_link`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment` |
 | Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
 | Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
 
