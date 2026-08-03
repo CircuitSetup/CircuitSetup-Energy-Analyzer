@@ -8888,6 +8888,100 @@ def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:
     assert reconciliation["conflict"] == "helper_conflict"
 
 
+def test_nilm_helper_conflict_ignores_illegal_assignment_state() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        {
+            **_reconciliation_assignment(assignment_id, 100.0),
+            "helper_links": [{
+                "helper_circuit_id": "helper", "relationship": "corroborates",
+                "status": "confirmed", "confidence": 0.9,
+                "start_lag_seconds": 0.0, "start_lag_mad_seconds": 0.0,
+            }],
+        }
+        for assignment_id in ("first", "second")
+    ]
+    runtime = {
+        "first": {"status": "off", "state_power_w": 0.0,
+                  "estimated_power_w": 0.0, "consistent": True},
+        "second": {"status": "on", "state_power_w": 100.0,
+                   "estimated_power_w": 100.0, "consistent": True},
+    }
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+
+    runtime, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=200.0, timestamp=now, assignments=assignments,
+        runtime=runtime, edges=(edge,), standby_w=0.0, noise_spread_w=0.0,
+        helper_events=(CircuitEvent(
+            now, "helper", EventType.START, features={}
+        ),),
+        available_helper_ids={"helper"},
+    )
+
+    assert accepted == [edge]
+    assert reconciliation["conflict"] is None
+    assert all(item["status"] == "on" for item in runtime.values())
+
+
+def test_nilm_helper_conflict_ignores_nonmatching_shared_link() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    first = {
+        **_reconciliation_assignment("first", 100.0),
+        "helper_links": [{
+            "helper_circuit_id": "shared", "relationship": "corroborates",
+            "status": "confirmed", "confidence": 0.9,
+            "start_lag_seconds": 0.0, "start_lag_mad_seconds": 0.0,
+        }],
+    }
+    second = {
+        **_reconciliation_assignment("second", 200.0),
+        "helper_links": [
+            {
+                "helper_circuit_id": "shared", "relationship": "corroborates",
+                "status": "confirmed", "confidence": 0.1,
+                "start_lag_seconds": 600.0, "start_lag_mad_seconds": 0.0,
+            },
+            {
+                "helper_circuit_id": "independent",
+                "relationship": "corroborates", "status": "confirmed",
+                "confidence": 1.0, "start_lag_seconds": 0.0,
+                "start_lag_mad_seconds": 0.0,
+            },
+        ],
+    }
+    runtime = {
+        assignment_id: {"status": "off", "state_power_w": 0.0,
+                        "estimated_power_w": 0.0, "consistent": True}
+        for assignment_id in ("first", "second")
+    }
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+
+    runtime, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now, assignments=(first, second),
+        runtime=runtime, edges=(edge,), standby_w=0.0, noise_spread_w=0.0,
+        helper_events=(
+            CircuitEvent(now, "shared", EventType.START, features={}),
+            CircuitEvent(now, "independent", EventType.START, features={}),
+        ),
+        available_helper_ids={"shared", "independent"},
+    )
+
+    assert accepted == [edge]
+    assert reconciliation["conflict"] is None
+    assert runtime["first"]["status"] == "on"
+    assert runtime["second"]["status"] == "off"
+
+
 def _reconciliation_assignment(
     assignment_id: str, watts: float
 ) -> dict[str, object]:

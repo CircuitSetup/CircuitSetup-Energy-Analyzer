@@ -532,7 +532,12 @@ def reconcile_component_runtime(
             {},
             {},
             helper_conflict=_confirmed_helper_conflict(
-                assignments, helper_events, edge, available_helper_ids
+                assignments,
+                helper_events,
+                edge,
+                available_helper_ids,
+                models,
+                current,
             ),
         )
         if not result.accepted:
@@ -867,34 +872,12 @@ def _confirmed_helper_scores(
     for assignment in assignments:
         evidence: list[tuple[float, float]] = []
         for link in _list_items(assignment.get("helper_links")):
-            if (
-                not isinstance(link, Mapping)
-                or link.get("status") != "confirmed"
-                or link.get("relationship") != "corroborates"
-            ):
-                continue
-            helper_id = str(link.get("helper_circuit_id") or "")
-            if helper_id not in available_helper_ids:
-                continue
-            confidence = _finite_float(link.get("confidence"))
-            lag = _finite_float(link.get(
-                "start_lag_seconds" if edge.direction == "on"
-                else "stop_lag_seconds"
-            ))
-            mad = _finite_float(link.get(
-                "start_lag_mad_seconds" if edge.direction == "on"
-                else "stop_lag_mad_seconds"
-            ))
-            if confidence is None or lag is None or mad is None:
-                continue
-            matched = any(
-                event.circuit_id == helper_id
-                and event.event_type.value == expected
-                and abs(
-                    (event.timestamp - edge.timestamp).total_seconds() - lag
-                ) <= max(120.0, 3.0 * mad)
-                for event in events
+            link_evidence = _confirmed_helper_link_evidence(
+                link, events, edge, available_helper_ids, expected
             )
+            if link_evidence is None:
+                continue
+            _, confidence, matched = link_evidence
             evidence.append((confidence, confidence if matched else 0.0))
         if evidence:
             scores[str(assignment.get("assignment_id") or "")] = round(
@@ -912,23 +895,78 @@ def _confirmed_helper_conflict(
     events: Iterable[CircuitEvent],
     edge: NilmEdge,
     available_helper_ids: set[str] | frozenset[str],
+    models: Iterable[NilmAssignmentModel],
+    current_states_w: Mapping[str, float | None],
 ) -> bool:
-    scores = _confirmed_helper_scores(assignments, events, edge, available_helper_ids)
-    helper_assignments: dict[str, int] = {}
+    events = tuple(events)
+    eligible = {
+        model.assignment_id
+        for model in models
+        if reconcile_nilm_edge(
+            edge,
+            (model,),
+            current_states_w,
+            {model.assignment_id: 1.0},
+            {},
+            {},
+        ).accepted
+    }
+    helper_assignments: dict[str, set[str]] = {}
+    expected = "start" if edge.direction == "on" else "stop"
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "")
-        if (scores.get(assignment_id) or 0.0) < 0.75:
+        if assignment_id not in eligible:
             continue
-        for helper_id in {
-            str(link.get("helper_circuit_id") or "")
-            for link in _list_items(assignment.get("helper_links"))
-            if isinstance(link, Mapping)
-            and link.get("status") == "confirmed"
-            and link.get("relationship") == "corroborates"
-            and str(link.get("helper_circuit_id") or "") in available_helper_ids
-        }:
-            helper_assignments[helper_id] = helper_assignments.get(helper_id, 0) + 1
-    return any(count > 1 for count in helper_assignments.values())
+        for link in _list_items(assignment.get("helper_links")):
+            evidence = _confirmed_helper_link_evidence(
+                link, events, edge, available_helper_ids, expected
+            )
+            if evidence is None:
+                continue
+            helper_id, confidence, matched = evidence
+            if matched and confidence >= 0.75:
+                helper_assignments.setdefault(helper_id, set()).add(assignment_id)
+    return any(
+        len(assignment_ids) > 1
+        for assignment_ids in helper_assignments.values()
+    )
+
+
+def _confirmed_helper_link_evidence(
+    link: Any,
+    events: Iterable[CircuitEvent],
+    edge: NilmEdge,
+    available_helper_ids: set[str] | frozenset[str],
+    expected: str,
+) -> tuple[str, float, bool] | None:
+    if (
+        not isinstance(link, Mapping)
+        or link.get("status") != "confirmed"
+        or link.get("relationship") != "corroborates"
+    ):
+        return None
+    helper_id = str(link.get("helper_circuit_id") or "")
+    if helper_id not in available_helper_ids:
+        return None
+    confidence = _finite_float(link.get("confidence"))
+    lag = _finite_float(link.get(
+        "start_lag_seconds" if edge.direction == "on" else "stop_lag_seconds"
+    ))
+    mad = _finite_float(link.get(
+        "start_lag_mad_seconds"
+        if edge.direction == "on"
+        else "stop_lag_mad_seconds"
+    ))
+    if confidence is None or lag is None or mad is None:
+        return None
+    matched = any(
+        event.circuit_id == helper_id
+        and event.event_type.value == expected
+        and abs((event.timestamp - edge.timestamp).total_seconds() - lag)
+        <= max(120.0, 3.0 * mad)
+        for event in events
+    )
+    return helper_id, confidence, matched
 
 
 def _runtime_energy_increments(
