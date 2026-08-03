@@ -95,6 +95,7 @@ class CalibrationSample:
     t: int
     states: dict[str, Any]
     completes_prior_energy_days: bool = False
+    restart_before_sample: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,65 +339,84 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
             for circuit_id, assignments in fixture.assignments_by_circuit.items()
         }
     )
-    event_processor = CircuitEventProcessor()
-    nilm_processor = NilmSampleProcessor(
-        nilm_enabled=lambda config: nilm_source_kind(config) is not None,
-        seed_demo_nilm_state=lambda _config, _now: None,
-        min_delta_w_for_circuit=lambda _circuit_id: fixture.min_delta_w,
-        detectors={},
-        total_events_by_circuit=defaultdict(int),
-        unmatched_edges_by_circuit=defaultdict(list),
-        ignored_signatures=set(),
-        known_load_events=lambda circuit_id, event_list: (
-            event
-            for event in event_list
-            if event.circuit_id != circuit_id
-            and next(
-                (
-                    nilm_source_kind(config).value
-                    for config in fixture.circuits
-                    if config.circuit_id == circuit_id
-                    and nilm_source_kind(config) is not None
+    def build_processors() -> tuple[
+        CircuitEventProcessor,
+        NilmSampleProcessor,
+        RunCycleProcessor,
+        EnergyUsageProcessor,
+    ]:
+        alert_policies: dict[str, ConservativeAlertPolicy] = {}
+        cycle_alert_policies: dict[str, ConservativeAlertPolicy] = {}
+        return (
+            CircuitEventProcessor(),
+            NilmSampleProcessor(
+                nilm_enabled=lambda config: nilm_source_kind(config) is not None,
+                seed_demo_nilm_state=lambda _config, _now: None,
+                min_delta_w_for_circuit=lambda _circuit_id: fixture.min_delta_w,
+                detectors={},
+                total_events_by_circuit=defaultdict(int),
+                unmatched_edges_by_circuit=defaultdict(list),
+                ignored_signatures=set(),
+                known_load_events=lambda circuit_id, event_list: (
+                    event
+                    for event in event_list
+                    if event.circuit_id != circuit_id
+                    and next(
+                        (
+                            nilm_source_kind(config).value
+                            for config in fixture.circuits
+                            if config.circuit_id == circuit_id
+                            and nilm_source_kind(config) is not None
+                        ),
+                        None,
+                    )
+                    == "mains"
                 ),
-                None,
-            )
-            == "mains"
-        ),
-        helper_candidate_events=lambda circuit_id, event_list: (
-            event for event in event_list if event.circuit_id != circuit_id
-        ),
-        observe_topology=lambda _config, _match, _context: [],
-    )
-    alert_policies: dict[str, ConservativeAlertPolicy] = {}
-    cycle_alert_policies: dict[str, ConservativeAlertPolicy] = {}
-    run_cycle_processor = RunCycleProcessor(
-        alert_policy_for_circuit=lambda circuit_id: cycle_alert_policies.setdefault(
-            circuit_id,
-            ConservativeAlertPolicy(
-                min_repeated=3,
-                min_total_score=4.5,
-                min_average_score=1.5,
-                min_baseline_confidence=0.6,
+                helper_candidate_events=lambda circuit_id, event_list: (
+                    event for event in event_list if event.circuit_id != circuit_id
+                ),
+                observe_topology=lambda _config, _match, _context: [],
             ),
-        ),
-        learning_mature=lambda _config, _now: False,
-    )
-    energy_usage_processor = EnergyUsageProcessor(
-        settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
-            window_days=config.energy_usage_window_days if config else 7,
-            daily_spike_ratio=(config.daily_energy_spike_ratio if config else 0.25),
-        ),
-        retention_days_for_circuit=lambda _circuit_id: 45,
-        alert_policy_for_circuit=lambda circuit_id: alert_policies.setdefault(
-            circuit_id,
-            ConservativeAlertPolicy(
-                min_repeated=3,
-                min_total_score=3.0,
-                min_average_score=1.0,
-                min_baseline_confidence=0.8,
+            RunCycleProcessor(
+                alert_policy_for_circuit=lambda circuit_id: (
+                    cycle_alert_policies.setdefault(
+                        circuit_id,
+                        ConservativeAlertPolicy(
+                            min_repeated=3,
+                            min_total_score=4.5,
+                            min_average_score=1.5,
+                            min_baseline_confidence=0.6,
+                        ),
+                    )
+                ),
+                learning_mature=lambda _config, _now: False,
             ),
-        ),
-    )
+            EnergyUsageProcessor(
+                settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
+                    window_days=config.energy_usage_window_days if config else 7,
+                    daily_spike_ratio=(
+                        config.daily_energy_spike_ratio if config else 0.25
+                    ),
+                ),
+                retention_days_for_circuit=lambda _circuit_id: 45,
+                alert_policy_for_circuit=lambda circuit_id: alert_policies.setdefault(
+                    circuit_id,
+                    ConservativeAlertPolicy(
+                        min_repeated=3,
+                        min_total_score=3.0,
+                        min_average_score=1.0,
+                        min_baseline_confidence=0.8,
+                    ),
+                ),
+            ),
+        )
+
+    (
+        event_processor,
+        nilm_processor,
+        run_cycle_processor,
+        energy_usage_processor,
+    ) = build_processors()
     hass = SimpleNamespace(data={DOMAIN: {}})
     events: list[CircuitEvent] = []
     alerts: list[AlertEvidence] = []
@@ -404,6 +424,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     snapshots: list[dict[str, Any]] = []
 
     for calibration_sample in fixture.samples:
+        if calibration_sample.restart_before_sample:
+            state = AnalyzerState()
+            (
+                event_processor,
+                nilm_processor,
+                run_cycle_processor,
+                energy_usage_processor,
+            ) = build_processors()
         context = ProcessingContext(
             now=calibration_sample.timestamp,
             hass=hass,
@@ -497,7 +525,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 active_alerts,
                 evaluated_circuit_ids=(circuit_config.circuit_id,),
             )
-        snapshots.append(_snapshot_state(state))
+        snapshots.append(_snapshot_state(state, nilm_processor, store_data))
 
     result = ReplayResult(
         events=events,
@@ -721,6 +749,7 @@ def _parse_sample(raw: Any, start_time: datetime) -> CalibrationSample:
         timestamp=start_time + timedelta(seconds=t),
         t=t,
         states={str(key): value for key, value in states.items()},
+        restart_before_sample=raw.get("restart") is True,
     )
 
 
@@ -962,8 +991,15 @@ def _apply_feature_result(
     return list(result.events), active_alerts
 
 
-def _snapshot_state(state: AnalyzerState) -> dict[str, Any]:
+def _snapshot_state(
+    state: AnalyzerState,
+    nilm_processor: NilmSampleProcessor,
+    store_data: FeatureStoreData,
+) -> dict[str, Any]:
     return {
+        "state_id": id(state),
+        "nilm_processor_id": id(nilm_processor),
+        "store_id": id(store_data),
         "daily_energy_usage_by_circuit": dict(state.daily_energy_usage_by_circuit),
         "energy_usage_evidence_by_circuit": dict(
             state.energy_usage_evidence_by_circuit

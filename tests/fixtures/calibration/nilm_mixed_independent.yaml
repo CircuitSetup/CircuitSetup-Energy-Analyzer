@@ -207,7 +207,7 @@ scenarios:
         - {<<: *pump, assignment_id: restored_b}
     samples:
       - {t: 0, states: {sensor.mixed: unknown}}
-      - {t: 10, states: {sensor.mixed: 80}}
+      - {t: 10, restart: true, states: {sensor.mixed: 80}}
       - {t: 20, states: {sensor.mixed: 80}}
       - {t: 30, states: {sensor.mixed: 80}}
     labels: {component_truth: {restored_a: {}, restored_b: {}}}

@@ -366,6 +366,13 @@ def test_independent_mixed_replay_scenarios(
         )
         assert not result.store_data.nilm_session_history_by_circuit.get("mixed")
     else:
+        restart_index = next(
+            index
+            for index, sample in enumerate(fixture.samples)
+            if sample.restart_before_sample
+        )
+        before_restart = result.state_snapshots[restart_index - 1]
+        after_restart = result.state_snapshots[restart_index]
         first_reconciliation = result.state_snapshots[0][
             "nilm_reconciliation_by_circuit"
         ]["mixed"]
@@ -376,6 +383,18 @@ def test_independent_mixed_replay_scenarios(
         assert all(
             component["status"] == "unknown" for component in first_runtime.values()
         )
+        assert after_restart["state_id"] != before_restart["state_id"]
+        assert after_restart["nilm_processor_id"] != before_restart[
+            "nilm_processor_id"
+        ]
+        assert after_restart["store_id"] == before_restart["store_id"]
+        assert after_restart["store_id"] == id(result.store_data)
+        assert [
+            item["assignment_id"]
+            for item in result.store_data.nilm_appliance_assignments_by_circuit[
+                "mixed"
+            ]
+        ] == ["restored_a", "restored_b"]
         runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]
         assert all(component["status"] == "unknown" for component in runtime.values())
         assert reconciliation["allocated_power_w"] == 0
