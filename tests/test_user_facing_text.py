@@ -7624,9 +7624,11 @@ def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
     assert translations["helper_start_delay"] == (
         "Typical start delay {seconds} seconds"
     )
-    assert translations["helper_relationship_corroborates"].startswith("Evidence only")
-    assert translations["helper_relationship_direct_component"].startswith(
-        "Direct component"
+    assert translations["helper_relationship_corroborates"] == (
+        "Runs with this load (evidence only)"
+    )
+    assert translations["helper_relationship_direct_component"] == (
+        "Directly measures this load (included in source)"
     )
 
     script = Path(

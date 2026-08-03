@@ -1955,8 +1955,8 @@
         "helper_matched_starts": "Matched {matched} of {total} {name} starts",
         "helper_start_delay": "Typical start delay {seconds} seconds",
         "helper_relationship": "Relationship",
-        "helper_relationship_corroborates": "Evidence only — use this circuit to corroborate the NILM estimate.",
-        "helper_relationship_direct_component": "Direct component — treat this circuit as a measured component of the NILM assignment.",
+        "helper_relationship_corroborates": "Runs with this load (evidence only)",
+        "helper_relationship_direct_component": "Directly measures this load (included in source)",
         "helper_confirm": "Confirm helper",
         "helper_remove": "Remove helper"
       },
