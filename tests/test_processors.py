@@ -8925,7 +8925,7 @@ def test_nilm_restart_excludes_ineligible_models(
     now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
     runtime = _initial_component_runtime((assignment,), {}, now)
 
-    _restore_unique_component_state(80.0, 0.0, 0.0, (assignment,), runtime)
+    _restore_unique_component_state(80.0, 0.0, 0.0, (assignment,), runtime, now)
 
     assert runtime["load"]["status"] == "unknown"
 
@@ -8940,15 +8940,36 @@ def test_nilm_restart_restores_only_one_unique_bounded_fit() -> None:
     one = _reconciliation_assignment("one", 80.0)
     one["lifecycle_state"] = "validated"
     runtime = _initial_component_runtime((one,), {}, now)
-    _restore_unique_component_state(100.0, 20.0, 0.0, (one,), runtime)
+    _restore_unique_component_state(100.0, 20.0, 0.0, (one,), runtime, now)
     assert runtime["one"]["status"] == "on"
+    assert runtime["one"]["session_id"] == f"one|{now.isoformat()}"
+    assert runtime["one"]["session_start"] == now.isoformat()
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mains"] = runtime
+    state.nilm_reconciliation_by_circuit["mains"] = {
+        "consistent": True, "conflict": None,
+    }
+    virtual_assignment = {**one, "mains_circuit_id": "mains"}
+    coordinator = SimpleNamespace(
+        data=state, circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mains": [virtual_assignment]}
+        ),
+    )
+    assert nilm_virtual_appliance_states(coordinator)[0].is_running is True
 
     equal = [
         {**_reconciliation_assignment(key, 80.0), "lifecycle_state": "validated"}
         for key in ("one", "two")
     ]
     runtime = _initial_component_runtime(equal, {}, now)
-    _restore_unique_component_state(80.0, 0.0, 0.0, equal, runtime)
+    _restore_unique_component_state(80.0, 0.0, 0.0, equal, runtime, now)
     assert {item["status"] for item in runtime.values()} == {"unknown"}
 
     compound = [
@@ -8956,8 +8977,15 @@ def test_nilm_restart_restores_only_one_unique_bounded_fit() -> None:
         {**_reconciliation_assignment("two", 100.0), "lifecycle_state": "validated"},
     ]
     runtime = _initial_component_runtime(compound, {}, now)
-    _restore_unique_component_state(180.0, 0.0, 0.0, compound, runtime)
+    _restore_unique_component_state(180.0, 0.0, 0.0, compound, runtime, now)
     assert {item["status"] for item in runtime.values()} == {"on"}
+    assert all(item["session_start"] == now.isoformat() for item in runtime.values())
+
+    runtime = _initial_component_runtime((one,), {}, now)
+    _restore_unique_component_state(20.0, 20.0, 0.0, (one,), runtime, now)
+    assert runtime["one"]["status"] == "off"
+    assert runtime["one"]["session_id"] is None
+    assert runtime["one"]["session_start"] is None
 
 
 def test_runtime_assignment_model_discards_malformed_values() -> None:
@@ -9101,6 +9129,36 @@ def test_energy_interval_is_atomic_and_capped_to_source() -> None:
     assert sum(item["energy_kwh"] for item in runtime.values()) == 0.0
     assert reconciliation["conflict"] == "energy_over_allocation"
     assert reconciliation["residual_energy_kwh"] == 0.0
+
+
+def test_energy_interval_uses_reconciliation_time_when_all_components_are_off() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    runtime = {"load": {
+        "status": "off", "state_power_w": 0.0, "estimated_power_w": 0.0,
+        "session_id": None, "session_start": None, "consistent": True,
+        "last_observed": now.isoformat(), "energy_kwh": 0.0,
+    }}
+    previous = {
+        "source_power_w": 120.0, "standby_w": 20.0, "tolerance_w": 25.0,
+        "last_observed": now.isoformat(), "source_energy_kwh": 0.0,
+        "component_energy_kwh": 0.0, "standby_energy_kwh": 0.0,
+        "consistent": True, "energy_allocation_allowed": True,
+    }
+
+    runtime, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=120.0, timestamp=now + timedelta(seconds=37),
+        assignments=(), runtime=runtime, edges=(), standby_w=20.0,
+        noise_spread_w=0.0, previous_reconciliation=previous,
+    )
+
+    assert runtime["load"]["energy_kwh"] == 0.0
+    assert reconciliation["source_energy_kwh"] == pytest.approx(120 * 37 / 3_600_000)
+    assert reconciliation["standby_energy_kwh"] == pytest.approx(20 * 37 / 3_600_000)
+    assert reconciliation["residual_energy_kwh"] == pytest.approx(100 * 37 / 3_600_000)
 
 
 def test_energy_rollback_keeps_the_transition_edge_unknown() -> None:

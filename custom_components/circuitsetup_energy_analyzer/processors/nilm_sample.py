@@ -168,7 +168,7 @@ class NilmSampleProcessor:
             ) or 0.0
             _restore_unique_component_state(
                 sample.real_power, standby_w, detector.noise_spread_w,
-                assignments, runtime
+                assignments, runtime, sample.timestamp
             )
             masked_ids = {id(match.edge) for match in matched_edges}
             new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
@@ -531,6 +531,9 @@ def reconcile_component_runtime(
             ),
             {},
             {},
+            helper_conflict=_confirmed_helper_conflict(
+                assignments, helper_events, edge, available_helper_ids
+            ),
         )
         if not result.accepted:
             if result.reason == "helper_conflict":
@@ -681,6 +684,7 @@ def _restore_unique_component_state(
     noise_spread_w: float,
     assignments: Iterable[Mapping[str, Any]],
     runtime: dict[str, dict[str, Any]],
+    timestamp: datetime,
 ) -> None:
     source = _finite_float(source_power_w)
     if source is None:
@@ -736,6 +740,10 @@ def _restore_unique_component_state(
             "estimated_power_w": power,
             "confidence": model.model_confidence,
             "consistent": True,
+            "session_id": (
+                f"{model.assignment_id}|{timestamp.isoformat()}" if power else None
+            ),
+            "session_start": timestamp.isoformat() if power else None,
         })
 
 
@@ -899,6 +907,30 @@ def _confirmed_helper_scores(
     return scores
 
 
+def _confirmed_helper_conflict(
+    assignments: Iterable[Mapping[str, Any]],
+    events: Iterable[CircuitEvent],
+    edge: NilmEdge,
+    available_helper_ids: set[str] | frozenset[str],
+) -> bool:
+    scores = _confirmed_helper_scores(assignments, events, edge, available_helper_ids)
+    helper_assignments: dict[str, int] = {}
+    for assignment in assignments:
+        assignment_id = str(assignment.get("assignment_id") or "")
+        if (scores.get(assignment_id) or 0.0) < 0.75:
+            continue
+        for helper_id in {
+            str(link.get("helper_circuit_id") or "")
+            for link in _list_items(assignment.get("helper_links"))
+            if isinstance(link, Mapping)
+            and link.get("status") == "confirmed"
+            and link.get("relationship") == "corroborates"
+            and str(link.get("helper_circuit_id") or "") in available_helper_ids
+        }:
+            helper_assignments[helper_id] = helper_assignments.get(helper_id, 0) + 1
+    return any(count > 1 for count in helper_assignments.values())
+
+
 def _runtime_energy_increments(
     runtime: Mapping[str, Mapping[str, Any]],
     timestamp: datetime,
@@ -907,7 +939,10 @@ def _runtime_energy_increments(
     if not reconciliation or not reconciliation.get("energy_allocation_allowed"):
         return {}, 0.0, 0.0, 0.0
     increments: dict[str, float] = {}
-    interval_seconds = 0.0
+    observed = _runtime_datetime(reconciliation.get("last_observed"))
+    interval_seconds = (
+        max((timestamp - observed).total_seconds(), 0.0) if observed else 0.0
+    )
     for assignment_id, payload in runtime.items():
         observed = _runtime_datetime(payload.get("last_observed"))
         power = _finite_float(payload.get("estimated_power_w"))
@@ -918,7 +953,6 @@ def _runtime_energy_increments(
         ):
             continue
         seconds = max((timestamp - observed).total_seconds(), 0.0)
-        interval_seconds = max(interval_seconds, seconds)
         increments[assignment_id] = power * seconds / 3_600_000.0
     source_power = _finite_float(reconciliation.get("source_power_w")) or 0.0
     standby_power = _finite_float(reconciliation.get("standby_w")) or 0.0
@@ -1000,6 +1034,10 @@ def _runtime_reconciliation(
         "component_energy_kwh": (
             (_finite_float((previous or {}).get("component_energy_kwh")) or 0.0)
             + component_interval_energy_kwh
+        ),
+        "standby_energy_kwh": (
+            (_finite_float((previous or {}).get("standby_energy_kwh")) or 0.0)
+            + standby_interval_energy_kwh
         ),
         "residual_energy_kwh": (
             (_finite_float((previous or {}).get("residual_energy_kwh")) or 0.0)

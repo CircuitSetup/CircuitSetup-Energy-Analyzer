@@ -275,6 +275,7 @@ def reconcile(
     helpers: dict[str, float | None] | None = None,
     durations: dict[str, float | None] | None = None,
     validations: dict[str, float | None] | None = None,
+    helper_conflict: bool = False,
 ) -> nilm_domain.NilmReconciliationResult:
     return nilm_domain.reconcile_nilm_edge(
         candidate_edge,
@@ -283,6 +284,7 @@ def reconcile(
         helpers or {},
         durations or {},
         validations or {},
+        helper_conflict=helper_conflict,
     )
 
 
@@ -362,15 +364,28 @@ def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_sto
     assert reconcile(edge(0, -100), [retired], {"a": 100.0}).reason == "single"
 
 
-def test_nilm_helper_unavailability_renormalizes_and_conflict_stays_unknown() -> None:
+def test_nilm_helper_unavailability_and_explicit_conflict() -> None:
     a = assignment_model("a", transition("a", 100))
     b = assignment_model("b", transition("b", 101))
     result = reconcile(edge(0, 100), [a], {"a": 0.0}, helpers={"a": None})
     assert result.reason == "single"
     result = reconcile(
-        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0}, helpers={"a": 0.9, "b": 0.9}
+        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0},
+        helpers={"a": 0.9, "b": 0.9}, helper_conflict=True,
     )
     assert not result.accepted and result.reason == "helper_conflict"
+
+
+def test_nilm_independent_helpers_may_support_a_compound() -> None:
+    a = assignment_model("a", transition("a", 60))
+    b = assignment_model("b", transition("b", 40))
+
+    result = reconcile(
+        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0},
+        helpers={"a": 0.9, "b": 0.9},
+    )
+
+    assert result.accepted and result.reason == "compound"
 
 
 def test_nilm_compound_requires_two_different_learned_assignments_and_improvement() -> (

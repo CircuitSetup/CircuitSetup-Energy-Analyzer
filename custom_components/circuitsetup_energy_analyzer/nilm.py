@@ -595,6 +595,8 @@ def reconcile_nilm_edge(
     helper_scores: Mapping[str, float | None],
     duration_state_scores: Mapping[str, float | None],
     validation_scores: Mapping[str, float | None],
+    *,
+    helper_conflict: bool = False,
 ) -> NilmReconciliationResult:
     """Match one edge to at most two legal assignment transitions."""
     models = tuple(models)
@@ -604,14 +606,7 @@ def reconcile_nilm_edge(
         for prototype in model.transition_prototypes
         if _nilm_transition_legal(model, prototype, current_states_w)
     ]
-    strong_helpers = {
-        prototype.assignment_id
-        for _, prototype in legal
-        if (helper_scores.get(prototype.assignment_id) or 0.0) >= 0.75
-        and abs(edge.delta_w - prototype.delta_w)
-        <= nilm_transition_tolerance_w(prototype)
-    }
-    if len(strong_helpers) > 1:
+    if helper_conflict:
         return _nilm_reconciliation(edge, (), reason="helper_conflict")
 
     singles = sorted(
