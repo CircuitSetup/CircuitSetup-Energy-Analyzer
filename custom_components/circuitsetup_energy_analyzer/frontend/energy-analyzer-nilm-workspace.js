@@ -1672,7 +1672,7 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmModelEvidence() {
     return `<section class="workspace-section section-surface" data-nilm-model-evidence>
-      <h3>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h3>
+      <h2>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h2>
       <strong>${this._escape(this._panelText("nilm_workspace.lifecycle_flow"))}</strong>
       ${["measured_vs_estimated", "residual_evidence", "ambiguous_evidence", "helper_conflict_evidence", "compound_evidence", "source_unavailable_evidence", "conservation_evidence"].map((key) => `<p class="muted">${this._escape(this._panelText(`nilm_workspace.${key}`))}</p>`).join("")}
     </section>`;
