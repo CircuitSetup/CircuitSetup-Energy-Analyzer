@@ -242,6 +242,7 @@ def load_calibration_scenarios(path: Path) -> tuple[CalibrationFixture, ...]:
     scenarios = _optional_list(raw, "scenarios")
     if not scenarios:
         return (_parse_fixture(raw, path),)
+    _validate_block_ids(scenarios, "id", "scenario")
     parsed = tuple(
         _parse_fixture(
             {**raw, **dict(scenario), "id": f"{raw['id']}.{scenario['id']}"},
@@ -264,6 +265,7 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
     start_time = _parse_datetime(str(raw["start_time"]))
     circuits = tuple(_parse_circuit(item) for item in _optional_list(raw, "circuits"))
     entries_raw = _optional_list(raw, "entries")
+    _validate_block_ids(entries_raw, "entry_id", "entry")
     if not circuits and not entries_raw:
         msg = f"{path}: at least one circuit is required"
         raise CalibrationFixtureError(msg)
@@ -1329,6 +1331,18 @@ def _optional_mapping(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
         msg = f"{key} must be a mapping"
         raise CalibrationFixtureError(msg)
     return value
+
+
+def _validate_block_ids(items: list[Any], key: str, label: str) -> None:
+    ids = [
+        str(item.get(key) or "").strip()
+        for item in items
+        if isinstance(item, Mapping)
+    ]
+    invalid = len(ids) != len(items) or any(not item for item in ids)
+    if invalid or len(set(ids)) != len(ids):
+        msg = f"{label} IDs must be nonempty and unique"
+        raise CalibrationFixtureError(msg)
 
 
 def _parse_datetime(value: str) -> datetime:

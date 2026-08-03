@@ -177,7 +177,9 @@ class NilmSampleProcessor:
             )
             pending_confirmation = detector.has_pending_transition and not edges
             source_power_w = (
-                _pending_reconciliation_source(previous_reconciliation)
+                _pending_reconciliation_source(
+                    previous_reconciliation, sample.timestamp
+                )
                 if pending_confirmation
                 else sample.real_power
             )
@@ -185,7 +187,7 @@ class NilmSampleProcessor:
                 runtime, reconciliation, completed_sessions, accepted = (
                     reconcile_component_runtime(
                     source_power_w=source_power_w,
-                    timestamp=(edges[-1].timestamp if edges else sample.timestamp),
+                    timestamp=sample.timestamp,
                     assignments=assignments,
                     runtime=runtime,
                     edges=new_unmasked,
@@ -1138,13 +1140,18 @@ def _finite_float(value: Any) -> float | None:
     return number if isfinite(number) else None
 
 
-def _pending_reconciliation_source(previous: Any) -> float | None:
+def _pending_reconciliation_source(
+    previous: Any, pending_timestamp: datetime
+) -> float | None:
     if not isinstance(previous, Mapping):
         return None
     source = _finite_float(previous.get("source_power_w"))
-    return source if source is not None and _runtime_datetime(
-        previous.get("last_observed")
-    ) else None
+    observed = _runtime_datetime(previous.get("last_observed"))
+    return (
+        source
+        if source is not None and observed is not None and observed <= pending_timestamp
+        else None
+    )
 
 
 def _runtime_datetime(value: Any) -> datetime | None:

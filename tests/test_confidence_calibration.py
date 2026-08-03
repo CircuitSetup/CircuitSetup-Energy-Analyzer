@@ -128,6 +128,66 @@ calibration_expectations: {}
     assert "first_load" not in str(second_result.store_data)
 
 
+@pytest.mark.parametrize(
+    "scenario_ids",
+    [("''", "valid"), ("duplicate", "duplicate")],
+)
+def test_mixed_fixture_rejects_empty_or_duplicate_scenario_ids(
+    tmp_path: Path, scenario_ids: tuple[str, str]
+) -> None:
+    first, second = scenario_ids
+    path = tmp_path / "invalid.yaml"
+    path.write_text(
+        f"""schema_version: 1
+id: invalid
+description: invalid ids
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+scenarios:
+  - id: {first}
+  - id: {second}
+labels: {{}}
+calibration_expectations: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="scenario IDs must be nonempty and unique"):
+        load_calibration_scenarios(path)
+
+
+@pytest.mark.parametrize(
+    "entry_ids",
+    [("''", "valid"), ("duplicate", "duplicate")],
+)
+def test_mixed_fixture_rejects_empty_or_duplicate_entry_ids(
+    tmp_path: Path, entry_ids: tuple[str, str]
+) -> None:
+    first, second = entry_ids
+    path = tmp_path / "invalid.yaml"
+    path.write_text(
+        f"""schema_version: 1
+id: invalid
+description: invalid ids
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+scenarios:
+  - id: isolation
+    entries:
+      - entry_id: {first}
+      - entry_id: {second}
+    labels: {{}}
+    calibration_expectations: {{}}
+labels: {{}}
+calibration_expectations: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="entry IDs must be nonempty and unique"):
+        load_calibration_scenarios(path)
+
+
 def test_mixed_replay_seeds_models_and_runs_production_source_classifier(
     tmp_path: Path,
 ) -> None:
@@ -195,6 +255,8 @@ calibration_expectations: {}
     )
     assert result.metrics is not None
     assert result.metrics.component_metrics["pump"].session_f1 == 1.0
+    energy_error = result.metrics.component_metrics["pump"].energy_absolute_error_kwh
+    assert energy_error == pytest.approx(0.0, abs=0.000001)
     runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]["pump"]
     reconciliation = result.final_state.nilm_reconciliation_by_circuit["mixed"]
     assert runtime["status"] == "off"
