@@ -8858,10 +8858,12 @@ def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:
                 "delta_w": 100.0, "spread_w": 2.0, "sample_count": 3,
             }],
             "model_confidence": 0.9,
-            "helper_links": [{
-                "helper_circuit_id": "helper", "relationship": "corroborates",
-                "status": "confirmed", "confidence": 0.9,
-            }],
+                "helper_links": [{
+                    "helper_circuit_id": "helper", "relationship": "corroborates",
+                    "status": "confirmed", "confidence": 0.9,
+                    "start_lag_seconds": 0.0,
+                    "start_lag_mad_seconds": 0.0,
+                }],
         }
         for assignment_id in ("first", "second")
     ]
@@ -8878,11 +8880,298 @@ def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:
         source_power_w=100.0, timestamp=now, assignments=assignments,
         runtime=runtime, edges=(edge,), standby_w=0.0, noise_spread_w=0.0,
         helper_events=(helper_event,),
+        available_helper_ids={"helper"},
     )
 
     assert accepted == completed == []
     assert all(item["status"] == "off" for item in runtime.values())
     assert reconciliation["conflict"] == "helper_conflict"
+
+
+def _reconciliation_assignment(
+    assignment_id: str, watts: float
+) -> dict[str, object]:
+    return {
+        "assignment_id": assignment_id,
+        "lifecycle_state": "validated",
+        "power_states_w": [0.0, watts],
+        "transition_prototypes": [
+            {"direction": "on", "from_state_w": 0.0, "to_state_w": watts,
+             "delta_w": watts, "spread_w": 2.0, "sample_count": 3},
+            {"direction": "off", "from_state_w": watts, "to_state_w": 0.0,
+             "delta_w": -watts, "spread_w": 2.0, "sample_count": 3},
+        ],
+        "model_confidence": 0.9,
+    }
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        {**_reconciliation_assignment("load", 80.0), "lifecycle_state": "retired"},
+        {**_reconciliation_assignment("load", 80.0), "lifecycle_state": "assigned"},
+        {**_reconciliation_assignment("load", 80.0), "power_states_w": []},
+        {**_reconciliation_assignment("load", 80.0), "model_confidence": 0.2},
+    ],
+)
+def test_nilm_restart_excludes_ineligible_models(
+    assignment: dict[str, object],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    runtime = _initial_component_runtime((assignment,), {}, now)
+
+    _restore_unique_component_state(80.0, 0.0, 0.0, (assignment,), runtime)
+
+    assert runtime["load"]["status"] == "unknown"
+
+
+def test_nilm_restart_restores_only_one_unique_bounded_fit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    one = _reconciliation_assignment("one", 80.0)
+    one["lifecycle_state"] = "validated"
+    runtime = _initial_component_runtime((one,), {}, now)
+    _restore_unique_component_state(100.0, 20.0, 0.0, (one,), runtime)
+    assert runtime["one"]["status"] == "on"
+
+    equal = [
+        {**_reconciliation_assignment(key, 80.0), "lifecycle_state": "validated"}
+        for key in ("one", "two")
+    ]
+    runtime = _initial_component_runtime(equal, {}, now)
+    _restore_unique_component_state(80.0, 0.0, 0.0, equal, runtime)
+    assert {item["status"] for item in runtime.values()} == {"unknown"}
+
+    compound = [
+        {**_reconciliation_assignment("one", 80.0), "lifecycle_state": "validated"},
+        {**_reconciliation_assignment("two", 100.0), "lifecycle_state": "validated"},
+    ]
+    runtime = _initial_component_runtime(compound, {}, now)
+    _restore_unique_component_state(180.0, 0.0, 0.0, compound, runtime)
+    assert {item["status"] for item in runtime.values()} == {"on"}
+
+
+def test_runtime_assignment_model_discards_malformed_values() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _runtime_assignment_model,
+    )
+
+    model = _runtime_assignment_model({
+        "assignment_id": "bad",
+        "lifecycle_state": "validated",
+        "power_states_w": ["bad", float("nan")],
+        "transition_prototypes": [
+            {"direction": "on", "from_state_w": "bad", "to_state_w": 80.0,
+             "delta_w": float("inf"), "spread_w": {}, "sample_count": "bad"},
+        ],
+        "model_confidence": float("nan"),
+    })
+
+    assert model.power_states_w == ()
+    assert model.transition_prototypes == ()
+    assert model.model_confidence == 0.0
+
+
+def test_confirmed_helper_scores_use_relationship_availability_and_learned_lag(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _confirmed_helper_scores,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+    assignments = [{
+        "assignment_id": "load",
+        "helper_links": [
+            {"helper_circuit_id": "corroborating", "relationship": "corroborates",
+             "status": "confirmed", "confidence": 0.8,
+             "start_lag_seconds": 60.0, "start_lag_mad_seconds": 5.0},
+            {"helper_circuit_id": "direct", "relationship": "direct_component",
+             "status": "confirmed", "confidence": 1.0,
+             "start_lag_seconds": 0.0, "start_lag_mad_seconds": 0.0},
+        ],
+    }]
+    in_window = CircuitEvent(
+        now + timedelta(seconds=170), "corroborating", EventType.START, features={}
+    )
+
+    assert _confirmed_helper_scores(
+        assignments, (in_window,), edge, {"corroborating", "direct"}
+    ) == {"load": 0.8}
+    assert _confirmed_helper_scores(
+        assignments, (), edge, {"corroborating"}
+    ) == {"load": 0.0}
+    assert _confirmed_helper_scores(assignments, (), edge, set()) == {}
+
+
+def test_direct_component_uses_prior_power_and_closes_once() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        **_reconciliation_assignment("pump", 60.0),
+        "lifecycle_state": "validated",
+        "helper_links": [{
+            "helper_circuit_id": "meter", "relationship": "direct_component",
+            "status": "confirmed", "confidence": 0.95,
+        }],
+    }
+    runtime = _initial_component_runtime((assignment,), {}, now)
+    runtime, first, completed, _ = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now, assignments=(assignment,),
+        runtime=runtime, edges=(), standby_w=0.0, noise_spread_w=0.0,
+        direct_helper_powers={"meter": 60.0},
+    )
+    assert runtime["pump"]["status"] == "on"
+    assert first["allocated_power_w"] == 60.0
+    assert first["residual_w"] == 40.0
+    assert completed == []
+
+    suspended, unavailable, fake_close, _ = reconcile_component_runtime(
+        source_power_w=None, timestamp=now + timedelta(seconds=5),
+        assignments=(assignment,), runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=first,
+        direct_helper_powers={"meter": 0.0},
+    )
+    assert suspended["pump"]["status"] == "uncertain"
+    assert unavailable["conflict"] == "source_unavailable"
+    assert fake_close == []
+
+    runtime, second, completed, _ = reconcile_component_runtime(
+        source_power_w=20.0, timestamp=now + timedelta(seconds=10),
+        assignments=(assignment,), runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=first,
+        direct_helper_powers={"meter": 0.0},
+    )
+    assert runtime["pump"]["status"] == "off"
+    assert completed[0]["on_delta_w"] == 60.0
+    assert completed[0]["off_delta_w"] == -60.0
+    assert completed[0]["energy_kwh"] == pytest.approx(60.0 * 10 / 3_600_000)
+    assert completed[0]["helper_evidence"][0]["relationship"] == "direct_component"
+
+    runtime, _, repeated, _ = reconcile_component_runtime(
+        source_power_w=20.0, timestamp=now + timedelta(seconds=10),
+        assignments=(assignment,), runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=second,
+        direct_helper_powers={"meter": 0.0},
+    )
+    assert repeated == []
+
+
+def test_energy_interval_is_atomic_and_capped_to_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    runtime = {
+        key: {"status": "on", "state_power_w": 100.0,
+              "estimated_power_w": 100.0, "session_id": key,
+              "session_start": now.isoformat(), "confidence": 0.9,
+              "consistent": True, "last_observed": now.isoformat(),
+              "energy_kwh": 0.0}
+        for key in ("one", "two")
+    }
+    previous = {
+        "source_power_w": 100.0, "tolerance_w": 25.0,
+        "consistent": True, "energy_allocation_allowed": True,
+    }
+
+    runtime, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=200.0, timestamp=now + timedelta(seconds=10),
+        assignments=(), runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=previous,
+    )
+
+    assert sum(item["energy_kwh"] for item in runtime.values()) == 0.0
+    assert reconciliation["conflict"] == "energy_over_allocation"
+    assert reconciliation["residual_energy_kwh"] == 0.0
+
+
+def test_processor_keeps_only_rejected_reconciliation_edges_unknown() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+
+    class Detector:
+        min_delta_w = 20.0
+        has_pending_transition = False
+        noise_spread_w = 0.0
+
+        def process(self, _sample: object) -> list[NilmEdge]:
+            return [edge]
+
+    def run(assignments: list[dict[str, object]]) -> int:
+        state = AnalyzerState()
+        state.nilm_component_runtime_by_circuit["mixed"] = {
+            str(item["assignment_id"]): {
+                "status": "off", "state_power_w": 0.0,
+                "estimated_power_w": 0.0, "consistent": True,
+                "last_observed": now.isoformat(),
+            }
+            for item in assignments
+        }
+        context = ProcessingContext(
+            now=now, hass=SimpleNamespace(data={DOMAIN: {}}), state=state,
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={"mixed": assignments}
+            ),
+            options={}, entry_data={}, known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        processor = processors.NilmSampleProcessor(
+            nilm_enabled=lambda _config: True,
+            seed_demo_nilm_state=lambda _config, _now: None,
+            min_delta_w_for_circuit=lambda _id: 20.0,
+            detectors={"mixed": Detector()},
+            total_events_by_circuit=defaultdict(int),
+            unmatched_edges_by_circuit=defaultdict(list),
+            ignored_signatures=set(), known_load_events=lambda _id, _events: (),
+            observe_topology=lambda _config, _match, _context: [],
+        )
+        config = CircuitConfig(
+            "mixed", "Mixed", ApplianceProfile.MIXED, CircuitMode.MIXED
+        )
+        sample = NormalizedCircuitSample(
+            timestamp=now, circuit_id="mixed", real_power=100.0,
+            current=None, voltage=None, reactive_power=None,
+            apparent_power=None, power_factor=None, frequency=60.0,
+            energy=None,
+        )
+        processor.process(
+            sample, config, context, events=()
+        )
+        return len(processor.unmatched_edges_by_circuit["mixed"])
+
+    accepted = [_reconciliation_assignment("only", 100.0)]
+    ambiguous = [
+        _reconciliation_assignment("first", 100.0),
+        _reconciliation_assignment("second", 100.0),
+    ]
+
+    assert run(accepted) == 0
+    assert run(ambiguous) == 1
 
 
 @pytest.mark.parametrize(
