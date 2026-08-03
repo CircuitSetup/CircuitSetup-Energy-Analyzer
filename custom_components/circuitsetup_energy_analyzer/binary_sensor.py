@@ -281,7 +281,12 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
     @property
     def available(self) -> bool:
         """Return whether NILM currently knows the appliance state."""
-        return super().available and self.is_on is not None
+        coordinator_available = getattr(
+            super(),
+            "available",
+            getattr(self.coordinator, "last_update_success", True),
+        )
+        return coordinator_available and self.is_on is not None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

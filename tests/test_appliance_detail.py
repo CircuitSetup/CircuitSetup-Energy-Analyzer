@@ -1197,7 +1197,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["health_state"] == "Needs validation"
     assert "electrical_state" not in detail
     assert detail["energy_state"] == "Estimated"
-    assert detail["current_power_w"] == 0.0
+    assert detail["current_power_w"] is None
     assert detail["daily_energy_kwh"] == 0.818
     assert detail["cost_today"] is None
     assert detail["next_step"] == "Review NILM assignment"
@@ -1316,19 +1316,10 @@ def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None
     )
     detail = payload["detail"]
 
-    assert detail["runtime_today_seconds"] == 2400.0
-    assert detail["run_count_today"] == 2
-    assert detail["current_session_duration_seconds"] == 600.0
-    assert detail["current_session"] == {
-        "session_id": "session-dishwasher-open",
-        "signature_fingerprint": "signature_1",
-        "start": "2026-06-30T10:00:00+00:00",
-        "end": None,
-        "duration_seconds": 600.0,
-        "estimated_energy_kwh": 0.0,
-        "confidence": 0.91,
-        "validation_result": None,
-    }
+    assert detail["runtime_today_seconds"] == 1800.0
+    assert detail["run_count_today"] == 1
+    assert detail["current_session_duration_seconds"] is None
+    assert detail["current_session"] is None
     assert detail["last_matched_session"] == {
         "session_id": "session-dishwasher-complete",
         "signature_fingerprint": "signature_1",
@@ -1340,10 +1331,7 @@ def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None
         "validation_result": None,
     }
     timeline_ids = {item["session_id"] for item in detail["recent_timeline"]["items"]}
-    assert timeline_ids == {
-        "session-dishwasher-complete",
-        "session-dishwasher-open",
-    }
+    assert timeline_ids == {"session-dishwasher-complete"}
     assert {item["session_id"] for item in detail["session_timeline"]} == timeline_ids
     assert {item["source_type"] for item in detail["session_timeline"]} == {
         "nilm_estimate"
