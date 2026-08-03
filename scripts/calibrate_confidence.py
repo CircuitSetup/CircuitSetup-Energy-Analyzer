@@ -24,21 +24,21 @@ def run_calibration(
     from tests.helpers.calibration import (
         evaluate_replay_result,
         fixture_expectation_failures,
-        load_calibration_fixture,
+        load_calibration_scenarios,
         replay_fixture_processors,
     )
 
     fixture_paths = _fixture_paths(fixtures_path, fixture_name)
     metrics_list: list[CalibrationMetrics] = []
     for fixture_path in fixture_paths:
-        fixture = load_calibration_fixture(fixture_path)
-        result = replay_fixture_processors(fixture)
-        metrics = evaluate_replay_result(fixture, result)
-        metrics.expectation_failures = fixture_expectation_failures(
-            fixture,
-            metrics,
-        )
-        metrics_list.append(metrics)
+        for fixture in load_calibration_scenarios(fixture_path):
+            result = replay_fixture_processors(fixture)
+            metrics = evaluate_replay_result(fixture, result)
+            metrics.expectation_failures = fixture_expectation_failures(
+                fixture,
+                metrics,
+            )
+            metrics_list.append(metrics)
     return metrics_list
 
 

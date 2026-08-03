@@ -242,13 +242,16 @@ def load_calibration_scenarios(path: Path) -> tuple[CalibrationFixture, ...]:
     scenarios = _optional_list(raw, "scenarios")
     if not scenarios:
         return (_parse_fixture(raw, path),)
-    return tuple(
+    parsed = tuple(
         _parse_fixture(
             {**raw, **dict(scenario), "id": f"{raw['id']}.{scenario['id']}"},
             path,
         )
         for scenario in scenarios
         if isinstance(scenario, Mapping)
+    )
+    return tuple(
+        entry for fixture in parsed for entry in (fixture.entries or (fixture,))
     )
 
 

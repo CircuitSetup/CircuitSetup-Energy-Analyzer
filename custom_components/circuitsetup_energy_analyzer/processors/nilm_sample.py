@@ -175,15 +175,16 @@ class NilmSampleProcessor:
             previous_reconciliation = (
                 context.state.nilm_reconciliation_by_circuit.get(circuit_id)
             )
-            runtime, reconciliation, completed_sessions, accepted = (
-                reconcile_component_runtime(
-                    source_power_w=(
-                        previous_reconciliation.get("source_power_w")
-                        if detector.has_pending_transition
-                        and not edges
-                        and previous_reconciliation
-                        else sample.real_power
-                    ),
+            pending_confirmation = detector.has_pending_transition and not edges
+            source_power_w = (
+                _pending_reconciliation_source(previous_reconciliation)
+                if pending_confirmation
+                else sample.real_power
+            )
+            if not pending_confirmation or source_power_w is not None:
+                runtime, reconciliation, completed_sessions, accepted = (
+                    reconcile_component_runtime(
+                    source_power_w=source_power_w,
                     timestamp=(edges[-1].timestamp if edges else sample.timestamp),
                     assignments=assignments,
                     runtime=runtime,
@@ -201,8 +202,10 @@ class NilmSampleProcessor:
                         )
                         for helper_id in _direct_helper_ids(assignments)
                     },
+                    )
                 )
-            )
+            else:
+                accepted = ()
             accepted_ids = {id(edge) for edge in accepted}
             next_unmatched = [
                 edge for edge in next_unmatched if id(edge) not in accepted_ids
@@ -1133,6 +1136,15 @@ def _finite_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
+
+
+def _pending_reconciliation_source(previous: Any) -> float | None:
+    if not isinstance(previous, Mapping):
+        return None
+    source = _finite_float(previous.get("source_power_w"))
+    return source if source is not None and _runtime_datetime(
+        previous.get("last_observed")
+    ) else None
 
 
 def _runtime_datetime(value: Any) -> datetime | None:

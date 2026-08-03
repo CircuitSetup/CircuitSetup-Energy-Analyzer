@@ -51,6 +51,7 @@ scenarios:
     calibration_expectations: {}
   - id: isolated
     source_kind: mains
+    min_delta_w: 20
     entries:
       - entry_id: first
         circuits:
@@ -59,7 +60,22 @@ scenarios:
             appliance_profile: mains_nilm
             circuit_mode: mains_nilm
             sources: {power: sensor.first}
-        samples: [{t: 0, states: {sensor.first: 0}}]
+        assignments:
+          shared:
+            - assignment_id: first_load
+              lifecycle_state: validated
+              power_states_w: [0, 80]
+              model_confidence: 0.9
+              transition_prototypes: &first_transitions
+                - {direction: "on", delta_w: 80, spread_w: 2, sample_count: 3}
+                - {direction: "off", delta_w: -80, spread_w: 2, sample_count: 3}
+        samples:
+          - {t: 0, states: {sensor.first: 0}}
+          - {t: 10, states: {sensor.first: 80}}
+          - {t: 20, states: {sensor.first: 80}}
+          - {t: 30, states: {sensor.first: 80}}
+          - {t: 40, states: {sensor.first: 0}}
+          - {t: 50, states: {sensor.first: 0}}
       - entry_id: second
         circuits:
           - circuit_id: shared
@@ -67,7 +83,22 @@ scenarios:
             appliance_profile: mains_nilm
             circuit_mode: mains_nilm
             sources: {power: sensor.second}
-        samples: [{t: 0, states: {sensor.second: 0}}]
+        assignments:
+          shared:
+            - assignment_id: second_load
+              lifecycle_state: validated
+              power_states_w: [0, 120]
+              model_confidence: 0.9
+              transition_prototypes:
+                - {direction: "on", delta_w: 120, spread_w: 2, sample_count: 3}
+                - {direction: "off", delta_w: -120, spread_w: 2, sample_count: 3}
+        samples:
+          - {t: 0, states: {sensor.second: 0}}
+          - {t: 10, states: {sensor.second: 120}}
+          - {t: 20, states: {sensor.second: 120}}
+          - {t: 30, states: {sensor.second: 120}}
+          - {t: 40, states: {sensor.second: 0}}
+          - {t: 50, states: {sensor.second: 0}}
     labels: {}
     calibration_expectations: {}
 labels: {}
@@ -78,9 +109,23 @@ calibration_expectations: {}
 
     scenarios = load_calibration_scenarios(fixture_path)
 
-    assert [scenario.id for scenario in scenarios] == ["mixed.one", "mixed.isolated"]
+    assert [scenario.id for scenario in scenarios] == [
+        "mixed.one",
+        "mixed.isolated.first",
+        "mixed.isolated.second",
+    ]
     assert scenarios[0].assignments_by_circuit["mixed"][0]["assignment_id"] == "pump"
-    assert [entry.entry_id for entry in scenarios[1].entries] == ["first", "second"]
+    assert [scenario.entry_id for scenario in scenarios[1:]] == ["first", "second"]
+    assert scenarios[1].circuits[0].circuit_id == scenarios[2].circuits[0].circuit_id
+    assert scenarios[1].circuits[0].sensors != scenarios[2].circuits[0].sensors
+    first_result, second_result = map(replay_fixture_processors, scenarios[1:])
+    assert first_result.store_data is not second_result.store_data
+    first_runtime = first_result.final_state.nilm_component_runtime_by_circuit
+    second_runtime = second_result.final_state.nilm_component_runtime_by_circuit
+    assert set(first_runtime["shared"]) == {"first_load"}
+    assert set(second_runtime["shared"]) == {"second_load"}
+    assert "second_load" not in str(first_result.store_data)
+    assert "first_load" not in str(second_result.store_data)
 
 
 def test_mixed_replay_seeds_models_and_runs_production_source_classifier(
@@ -150,6 +195,15 @@ calibration_expectations: {}
     )
     assert result.metrics is not None
     assert result.metrics.component_metrics["pump"].session_f1 == 1.0
+    runtime = result.final_state.nilm_component_runtime_by_circuit["mixed"]["pump"]
+    reconciliation = result.final_state.nilm_reconciliation_by_circuit["mixed"]
+    assert runtime["status"] == "off"
+    assert reconciliation["conflict"] is None
+    assert reconciliation["source_power_w"] == pytest.approx(
+        reconciliation["standby_w"]
+        + reconciliation["allocated_power_w"]
+        + reconciliation["residual_w"]
+    )
 
 
 def test_calibration_fixture_loader_expands_compact_segments() -> None:
