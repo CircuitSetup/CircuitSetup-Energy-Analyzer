@@ -52,6 +52,7 @@ from custom_components.circuitsetup_energy_analyzer.processors.events import (
 from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
     NilmSampleProcessor,
 )
+from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.state import (
     process_events_into_state,
 )
@@ -169,6 +170,12 @@ class CalibrationFixture:
     expectations: CalibrationExpectations
     path: Path
     source_kind: str | None = None
+    assignments_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    entry_id: str | None = None
+    entries: tuple[CalibrationFixture, ...] = ()
+    min_delta_w: float = 100.0
 
 
 @dataclass(slots=True)
@@ -223,14 +230,38 @@ class ComponentReplayMetrics:
 
 def load_calibration_fixture(path: Path) -> CalibrationFixture:
     raw = _load_yaml_mapping(path)
+    if raw.get("scenarios"):
+        msg = f"{path}: use load_calibration_scenarios for a scenario fixture"
+        raise CalibrationFixtureError(msg)
+    return _parse_fixture(raw, path)
+
+
+def load_calibration_scenarios(path: Path) -> tuple[CalibrationFixture, ...]:
+    """Expand optional scenario blocks while preserving legacy fixtures."""
+    raw = _load_yaml_mapping(path)
+    scenarios = _optional_list(raw, "scenarios")
+    if not scenarios:
+        return (_parse_fixture(raw, path),)
+    return tuple(
+        _parse_fixture(
+            {**raw, **dict(scenario), "id": f"{raw['id']}.{scenario['id']}"},
+            path,
+        )
+        for scenario in scenarios
+        if isinstance(scenario, Mapping)
+    )
+
+
+def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
     schema_version = int(raw.get("schema_version", 0))
     if schema_version != 1:
         msg = f"{path}: expected schema_version 1"
         raise CalibrationFixtureError(msg)
 
     start_time = _parse_datetime(str(raw["start_time"]))
-    circuits = tuple(_parse_circuit(item) for item in _required_list(raw, "circuits"))
-    if not circuits:
+    circuits = tuple(_parse_circuit(item) for item in _optional_list(raw, "circuits"))
+    entries_raw = _optional_list(raw, "entries")
+    if not circuits and not entries_raw:
         msg = f"{path}: at least one circuit is required"
         raise CalibrationFixtureError(msg)
 
@@ -240,7 +271,7 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
     for segment in _optional_list(raw, "segments"):
         samples.extend(_expand_segment(segment, start_time, circuits))
     samples.sort(key=lambda sample: sample.timestamp)
-    if not samples:
+    if not samples and not entries_raw:
         msg = f"{path}: at least one sample or segment is required"
         raise CalibrationFixtureError(msg)
 
@@ -248,9 +279,29 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
     expectations = _parse_expectations(
         _required_mapping(raw, "calibration_expectations")
     )
+    fixture_id = str(raw["id"])
+    entries = tuple(
+        _parse_fixture(
+            {
+                **raw,
+                **dict(entry),
+                "id": f"{fixture_id}.{entry['entry_id']}",
+                "entries": [],
+                "scenarios": [],
+                "labels": dict(entry.get("labels") or {}),
+                "calibration_expectations": dict(
+                    entry.get("calibration_expectations") or {}
+                ),
+            },
+            path,
+        )
+        for entry in entries_raw
+        if isinstance(entry, Mapping)
+    )
+    assignments = _optional_mapping(raw, "assignments")
     return CalibrationFixture(
         schema_version=schema_version,
-        id=str(raw["id"]),
+        id=fixture_id,
         description=str(raw["description"]),
         scenario_type=str(raw["scenario_type"]),
         start_time=start_time,
@@ -260,22 +311,52 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
         expectations=expectations,
         path=path,
         source_kind=(str(raw["source_kind"]) if raw.get("source_kind") else None),
+        assignments_by_circuit={
+            str(circuit_id): [
+                dict(item) for item in values if isinstance(item, Mapping)
+            ]
+            for circuit_id, values in assignments.items()
+            if isinstance(values, list)
+        },
+        entry_id=(str(raw["entry_id"]) if raw.get("entry_id") else None),
+        entries=entries,
+        min_delta_w=float(raw.get("min_delta_w", 100.0)),
     )
 
 
 def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     state = AnalyzerState()
-    store_data = FeatureStoreData()
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            circuit_id: [dict(item) for item in assignments]
+            for circuit_id, assignments in fixture.assignments_by_circuit.items()
+        }
+    )
     event_processor = CircuitEventProcessor()
     nilm_processor = NilmSampleProcessor(
-        nilm_enabled=lambda config: config.mode is CircuitMode.MAINS_NILM,
+        nilm_enabled=lambda config: nilm_source_kind(config) is not None,
         seed_demo_nilm_state=lambda _config, _now: None,
-        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        min_delta_w_for_circuit=lambda _circuit_id: fixture.min_delta_w,
         detectors={},
         total_events_by_circuit=defaultdict(int),
         unmatched_edges_by_circuit=defaultdict(list),
         ignored_signatures=set(),
         known_load_events=lambda circuit_id, event_list: (
+            event
+            for event in event_list
+            if event.circuit_id != circuit_id
+            and next(
+                (
+                    nilm_source_kind(config).value
+                    for config in fixture.circuits
+                    if config.circuit_id == circuit_id
+                    and nilm_source_kind(config) is not None
+                ),
+                None,
+            )
+            == "mains"
+        ),
+        helper_candidate_events=lambda circuit_id, event_list: (
             event for event in event_list if event.circuit_id != circuit_id
         ),
         observe_topology=lambda _config, _match, _context: [],
@@ -378,7 +459,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 ),
             ]
             active_alerts: list[AlertEvidence] = []
-            if circuit_config.mode is CircuitMode.MAINS_NILM:
+            if nilm_source_kind(circuit_config) is not None:
                 results.append(
                     nilm_processor.process(
                         normalized_sample,

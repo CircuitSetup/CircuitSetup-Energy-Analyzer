@@ -14,10 +14,142 @@ from tests.helpers.calibration import (
     assert_fixture_expectations,
     evaluate_replay_result,
     load_calibration_fixture,
+    load_calibration_scenarios,
     replay_fixture_processors,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "calibration"
+
+
+def test_mixed_fixture_parser_expands_scenarios_and_entry_blocks(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "mixed.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: mixed
+description: mixed scenarios
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+scenarios:
+  - id: one
+    source_kind: pure_mixed
+    circuits:
+      - circuit_id: mixed
+        name: Mixed
+        appliance_profile: mixed
+        circuit_mode: mixed
+        sources: {power: sensor.mixed}
+    assignments:
+      mixed:
+        - assignment_id: pump
+          lifecycle_state: validated
+          power_states_w: [0, 80]
+          transition_prototypes: []
+    samples: [{t: 0, states: {sensor.mixed: 0}}]
+    labels: {}
+    calibration_expectations: {}
+  - id: isolated
+    source_kind: mains
+    entries:
+      - entry_id: first
+        circuits:
+          - circuit_id: shared
+            name: First
+            appliance_profile: mains_nilm
+            circuit_mode: mains_nilm
+            sources: {power: sensor.first}
+        samples: [{t: 0, states: {sensor.first: 0}}]
+      - entry_id: second
+        circuits:
+          - circuit_id: shared
+            name: Second
+            appliance_profile: mains_nilm
+            circuit_mode: mains_nilm
+            sources: {power: sensor.second}
+        samples: [{t: 0, states: {sensor.second: 0}}]
+    labels: {}
+    calibration_expectations: {}
+labels: {}
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+
+    scenarios = load_calibration_scenarios(fixture_path)
+
+    assert [scenario.id for scenario in scenarios] == ["mixed.one", "mixed.isolated"]
+    assert scenarios[0].assignments_by_circuit["mixed"][0]["assignment_id"] == "pump"
+    assert [entry.entry_id for entry in scenarios[1].entries] == ["first", "second"]
+
+
+def test_mixed_replay_seeds_models_and_runs_production_source_classifier(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "mixed.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: mixed_replay
+description: mixed replay
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+source_kind: pure_mixed
+min_delta_w: 20
+circuits:
+  - circuit_id: mixed
+    name: Mixed
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+assignments:
+  mixed:
+    - assignment_id: pump
+      lifecycle_state: validated
+      power_states_w: [0, 80]
+      model_confidence: 0.9
+      transition_prototypes:
+        - direction: "on"
+          from_state_w: 0
+          to_state_w: 80
+          delta_w: 80
+          spread_w: 2
+          sample_count: 3
+        - direction: "off"
+          from_state_w: 80
+          to_state_w: 0
+          delta_w: -80
+          spread_w: 2
+          sample_count: 3
+samples:
+  - {t: 0, states: {sensor.mixed: 0}}
+  - {t: 10, states: {sensor.mixed: 80}}
+  - {t: 20, states: {sensor.mixed: 80}}
+  - {t: 30, states: {sensor.mixed: 80}}
+  - {t: 40, states: {sensor.mixed: 0}}
+  - {t: 50, states: {sensor.mixed: 0}}
+  - {t: 60, states: {sensor.mixed: 0}}
+labels:
+  component_truth:
+    pump:
+      edges:
+        - {event_type: start, around_t: 10, tolerance_seconds: 0}
+        - {event_type: stop, around_t: 40, tolerance_seconds: 0}
+      sessions: [{start_t: 10, end_t: 40, tolerance_seconds: 0}]
+      energy_kwh: 0.000667
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+
+    fixture = load_calibration_fixture(fixture_path)
+    result = replay_fixture_processors(fixture)
+
+    assert (
+        result.store_data.nilm_session_history_by_circuit["mixed"][0]["assignment_id"]
+        == "pump"
+    )
+    assert result.metrics is not None
+    assert result.metrics.component_metrics["pump"].session_f1 == 1.0
 
 
 def test_calibration_fixture_loader_expands_compact_segments() -> None:

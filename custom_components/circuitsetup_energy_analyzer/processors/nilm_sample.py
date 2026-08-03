@@ -172,18 +172,25 @@ class NilmSampleProcessor:
             )
             masked_ids = {id(match.edge) for match in matched_edges}
             new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
+            previous_reconciliation = (
+                context.state.nilm_reconciliation_by_circuit.get(circuit_id)
+            )
             runtime, reconciliation, completed_sessions, accepted = (
                 reconcile_component_runtime(
-                    source_power_w=sample.real_power,
-                    timestamp=sample.timestamp,
+                    source_power_w=(
+                        previous_reconciliation.get("source_power_w")
+                        if detector.has_pending_transition
+                        and not edges
+                        and previous_reconciliation
+                        else sample.real_power
+                    ),
+                    timestamp=(edges[-1].timestamp if edges else sample.timestamp),
                     assignments=assignments,
                     runtime=runtime,
                     edges=new_unmasked,
                     standby_w=standby_w,
                     noise_spread_w=detector.noise_spread_w,
-                    previous_reconciliation=(
-                        context.state.nilm_reconciliation_by_circuit.get(circuit_id)
-                    ),
+                    previous_reconciliation=previous_reconciliation,
                     helper_events=self._helper_events_by_source[circuit_id],
                     available_helper_ids=set(
                         context.state.latest_real_power_w_by_circuit
