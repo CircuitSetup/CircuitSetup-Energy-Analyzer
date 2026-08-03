@@ -282,6 +282,25 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
         msg = f"{path}: at least one sample or segment is required"
         raise CalibrationFixtureError(msg)
 
+    source_kind = None
+    if raw.get("source_kind") and circuits:
+        production_kinds = {
+            kind.value
+            for circuit in circuits
+            if (kind := nilm_source_kind(circuit)) is not None
+        }
+        if (
+            len(production_kinds) != 1
+            or str(raw["source_kind"]) not in production_kinds
+        ):
+            msg = (
+                f"{path}: declared source_kind {raw['source_kind']!r} does not "
+                f"match one unambiguous production source kind: "
+                f"{sorted(production_kinds)}"
+            )
+            raise CalibrationFixtureError(msg)
+        source_kind = production_kinds.pop()
+
     labels = _parse_labels(_required_mapping(raw, "labels"))
     expectations = _parse_expectations(
         _required_mapping(raw, "calibration_expectations")
@@ -317,7 +336,7 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
         labels=labels,
         expectations=expectations,
         path=path,
-        source_kind=(str(raw["source_kind"]) if raw.get("source_kind") else None),
+        source_kind=source_kind,
         assignments_by_circuit={
             str(circuit_id): [
                 dict(item) for item in values if isinstance(item, Mapping)
@@ -1133,13 +1152,24 @@ def _component_metrics(
             )
             for expected, actual in matched
         ]
+        predicted_starts = {
+            _parse_datetime(str(actual["start"])) for actual in predicted
+        }
+        predicted_starts.update(
+            _parse_datetime(str(runtime["session_start"]))
+            for snapshot in result.state_snapshots
+            for circuit_runtime in snapshot.get(
+                "nilm_component_runtime_by_circuit", {}
+            ).values()
+            for assignment_id, runtime in circuit_runtime.items()
+            if assignment_id == component_id and runtime.get("session_start")
+        )
         predicted_edges = [
-            (event_type, _parse_datetime(str(actual[key])))
-            for actual in predicted
-            for event_type, key in (
-                (EventType.START, "start"),
-                (EventType.STOP, "end"),
-            )
+            *((EventType.START, start) for start in predicted_starts),
+            *(
+                (EventType.STOP, _parse_datetime(str(actual["end"])))
+                for actual in predicted
+            ),
         ]
         unmatched_edges = list(predicted_edges)
         matched_edges = 0

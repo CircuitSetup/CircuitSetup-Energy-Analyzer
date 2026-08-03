@@ -8,9 +8,13 @@
     "description",
     "scenario_type",
     "start_time",
-    "circuits",
     "labels",
     "calibration_expectations"
+  ],
+  "anyOf": [
+    { "required": ["circuits"] },
+    { "required": ["scenarios"] },
+    { "required": ["entries"] }
   ],
   "properties": {
     "schema_version": { "const": 1 },

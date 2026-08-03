@@ -13,6 +13,7 @@ from custom_components.circuitsetup_energy_analyzer.models import EventType
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
+    CalibrationFixtureError,
     assert_fixture_expectations,
     evaluate_replay_result,
     load_calibration_fixture,
@@ -1085,6 +1086,102 @@ calibration_expectations: {}
     assert metrics.residual_energy_kwh == 0.002
     assert metrics.ambiguous_event_rate == 0.25
     assert metrics.conservation_violations == 0
+
+
+def test_component_edge_metrics_include_open_runtime_starts(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "mixed.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: mixed_open_start
+description: open runtime start counts as a predicted edge
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+source_kind: pure_mixed
+circuits:
+  - circuit_id: mixed
+    name: Mixed
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples: [{t: 0, states: {sensor.mixed: 0}}]
+labels:
+  component_truth:
+    pump:
+      edges:
+        - {event_type: start, around_t: 60, tolerance_seconds: 5}
+        - {event_type: stop, around_t: 180, tolerance_seconds: 5}
+      sessions: [{start_t: 60, end_t: 180, tolerance_seconds: 5}]
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+    fixture = load_calibration_fixture(fixture_path)
+    result = replay_fixture_processors(fixture)
+    result.store_data.nilm_session_history_by_circuit["mixed"] = [{
+        "assignment_id": "pump",
+        "start": (fixture.start_time + timedelta(seconds=60)).isoformat(),
+        "end": (fixture.start_time + timedelta(seconds=180)).isoformat(),
+    }]
+    open_start = (fixture.start_time + timedelta(seconds=240)).isoformat()
+    result.state_snapshots.extend([
+        {"nilm_component_runtime_by_circuit": {
+            "mixed": {"pump": {"session_start": open_start}}
+        }},
+        {"nilm_component_runtime_by_circuit": {
+            "mixed": {"pump": {"session_start": open_start}}
+        }},
+    ])
+
+    component = evaluate_replay_result(fixture, result).component_metrics["pump"]
+
+    assert component.session_f1 == 1.0
+    assert component.edge_precision == pytest.approx(2 / 3, abs=0.001)
+    assert component.edge_recall == 1.0
+
+
+def test_declared_source_kind_must_match_production_source_kind(
+    tmp_path: Path,
+) -> None:
+    fixture_path = tmp_path / "mismatch.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: mismatch
+description: mismatched source kind
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+source_kind: mains
+circuits:
+  - circuit_id: mixed
+    name: Mixed
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples: [{t: 0, states: {sensor.mixed: 0}}]
+labels: {}
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CalibrationFixtureError, match="source_kind"):
+        load_calibration_fixture(fixture_path)
+
+
+def test_calibration_schema_allows_root_scenarios_and_entries() -> None:
+    import json
+
+    schema = json.loads((FIXTURE_DIR / "schema.json").read_text(encoding="utf-8"))
+    fixture = yaml.safe_load(
+        (FIXTURE_DIR / "nilm_mixed_compatibility.yaml").read_text(encoding="utf-8")
+    )
+
+    assert "circuits" not in schema["required"]
+    assert schema["anyOf"] == [
+        {"required": ["circuits"]},
+        {"required": ["scenarios"]},
+        {"required": ["entries"]},
+    ]
+    assert any(key in fixture for key in ("circuits", "scenarios", "entries"))
 
 
 def test_old_fixture_report_header_is_unchanged() -> None:
