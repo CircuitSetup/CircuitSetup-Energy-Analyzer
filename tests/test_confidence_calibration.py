@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
 from custom_components.circuitsetup_energy_analyzer.models import EventType
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
@@ -506,6 +507,104 @@ def test_mixed_helper_replay_scenarios() -> None:
     )
 
 
+def test_mixed_compatibility_replays_are_isolated_and_reported() -> None:
+    from scripts.calibrate_confidence import build_markdown_report, run_calibration
+
+    fixture_path = FIXTURE_DIR / "nilm_mixed_compatibility.yaml"
+    raw = yaml.safe_load(fixture_path.read_text(encoding="utf-8"))
+    fixtures = load_calibration_scenarios(fixture_path)
+
+    assert len(raw["scenarios"]) == 2
+    assert [fixture.id for fixture in fixtures] == [
+        "nilm_mixed_compatibility.legacy_mixed_encoding",
+        "nilm_mixed_compatibility.shared_circuit_entries.pure_entry",
+        "nilm_mixed_compatibility.shared_circuit_entries.primary_entry",
+    ]
+    assert [fixture.source_kind for fixture in fixtures] == [
+        "pure_mixed",
+        "pure_mixed",
+        "primary_mixed",
+    ]
+    assert fixtures[0].circuits[0].appliance_profile.value == "mixed"
+    assert fixtures[0].circuits[0].mode.value == "single_phase"
+    assert all(
+        nilm_source_kind(fixture.circuits[0]).value == fixture.source_kind
+        for fixture in fixtures
+    )
+
+    pure_entry, primary_entry = fixtures[1:]
+    assert pure_entry.entry_id == "pure_entry"
+    assert primary_entry.entry_id == "primary_entry"
+    assert pure_entry.circuits[0].circuit_id == "shared"
+    assert primary_entry.circuits[0].circuit_id == "shared"
+    assert pure_entry.circuits[0].sensors != primary_entry.circuits[0].sensors
+
+    results = [replay_fixture_processors(fixture) for fixture in fixtures]
+    assert len({id(result.final_state) for result in results}) == 3
+    assert len({id(result.store_data) for result in results}) == 3
+
+    expected_assignments = ["legacy_load", "pure_load", "primary_load"]
+    for fixture, result, assignment_id in zip(
+        fixtures, results, expected_assignments, strict=True
+    ):
+        circuit_id = fixture.circuits[0].circuit_id
+        runtime = result.final_state.nilm_component_runtime_by_circuit[circuit_id]
+        assert set(runtime) == {assignment_id}
+        assert [
+            item["assignment_id"]
+            for item in result.store_data.nilm_appliance_assignments_by_circuit[
+                circuit_id
+            ]
+        ] == [assignment_id]
+        assert [
+            item["assignment_id"]
+            for item in result.store_data.nilm_session_history_by_circuit[circuit_id]
+        ] == [assignment_id]
+
+    pure_result, primary_result = results[1:]
+    pure_runtime = pure_result.final_state.nilm_component_runtime_by_circuit["shared"]
+    primary_runtime = primary_result.final_state.nilm_component_runtime_by_circuit[
+        "shared"
+    ]
+    assert "primary_load" not in pure_runtime
+    assert "pure_load" not in primary_runtime
+    assert {
+        item["assignment_id"]
+        for item in pure_result.store_data.nilm_session_history_by_circuit["shared"]
+    } == {"pure_load"}
+    assert {
+        item["assignment_id"]
+        for item in primary_result.store_data.nilm_session_history_by_circuit["shared"]
+    } == {"primary_load"}
+
+    metrics = run_calibration(
+        FIXTURE_DIR, fixture_name="nilm_mixed_compatibility"
+    )
+    report = build_markdown_report(
+        metrics, generated_at=datetime(2026, 8, 3, tzinfo=UTC)
+    )
+    assert len(metrics) == 3
+    assert len({metric.fixture_id for metric in metrics}) == 3
+    assert [metric.source_kind for metric in metrics] == [
+        "pure_mixed",
+        "pure_mixed",
+        "primary_mixed",
+    ]
+    assert "| Fixtures | 3 |" in report
+    assert (
+        "| nilm_mixed_compatibility.legacy_mixed_encoding | pure_mixed | "
+        "legacy_load |"
+    ) in report
+    assert (
+        "| nilm_mixed_compatibility.shared_circuit_entries.pure_entry | "
+        "pure_mixed | pure_load |"
+    ) in report
+    assert (
+        "| nilm_mixed_compatibility.shared_circuit_entries.primary_entry | "
+        "primary_mixed | primary_load |"
+    ) in report
+
+
 def test_calibration_fixture_loader_expands_compact_segments() -> None:
     fixture = load_calibration_fixture(FIXTURE_DIR / "normal_refrigerator_week.yaml")
 
@@ -886,7 +985,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 28 |" in report
+    assert "| Fixtures | 31 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
@@ -903,6 +1002,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "refrigerator_non_finite_power" in report
     assert "refrigerator_stale_power" in report
     assert "hvac_voltage_sag" in report
+    assert "nilm_mixed_compatibility.legacy_mixed_encoding" in report
     assert "nilm_mixed_helpers.ac2_distinct_lag_disambiguates" in report
     assert "Helper FP rate" in report
 
