@@ -1013,6 +1013,34 @@ retire_nilm_appliance_assignment:
       example: assignment-abc123def456
       selector:
         text:
+restore_nilm_item:
+  name: Restore NILM item
+  description: "Advanced/script action: restore one Expected, Ignored, or Retired NILM item. The normal user path is the Restore action in the NILM workspace. Provide exactly one assignment ID or signature ID."
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Config entry that owns the Load Separation source.
+      required: true
+      selector:
+        text:
+    circuit_id:
+      name: Circuit ID
+      description: Load Separation source circuit identifier.
+      required: true
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Hidden assignment to restore. Do not also provide a signature ID.
+      required: false
+      selector:
+        text:
+    signature_id:
+      name: Signature ID
+      description: Hidden signature to restore. Do not also provide an assignment ID.
+      required: false
+      selector:
+        text:
 set_circuit_sensitivity:
   name: Set circuit sensitivity
   description: "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity."

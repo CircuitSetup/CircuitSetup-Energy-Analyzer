@@ -162,7 +162,8 @@ function makeWorkspace({{ lanes = {{}}, lane_counts = {{}}, ...overrides }} = {{
     needs_review: "Needs Review",
     assigned: "Assigned",
     published: "Published",
-    ignored_expected: "Ignored / Expected",
+    expected: "Expected",
+    hidden: "Hidden",
   }};
   const baseLanes = Object.fromEntries(Object.entries(labels).map(([key, label]) => [
     key, {{ label, signature_ids: [], assignment_ids: [], interval_ids: [] }},
@@ -3385,7 +3386,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       const workspace = makeWorkspace({
         circuit: { circuit_id: "mains", name: "Whole Home Main" },
         lane_counts: { needs_review: 5, assigned: 1, published: 2,
-          ignored_expected: 1 },
+          expected: 1, hidden: 0 },
       });
       workspace.lanes.needs_review.signature_ids = ["sig-1", "sig-2"];
       workspace.lanes.assigned.assignment_ids = ["assignment-1"];
@@ -3406,16 +3407,17 @@ def test_nilm_lane_rendering_contracts() -> None:
         "Needs Validation",
         "Ready to Publish",
         "Published",
-        "Ignored / Expected",
+        "Expected",
+        "Hidden",
       ]) {
         assert.ok(!summary.includes(duplicate));
       }
       name = "test_nilm_workspace_renders_review_lanes_from_payload";
       const lanes = panel._renderNilmWorkspaceLanes(workspace);
-      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 4);
+      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 5);
       for (const expected of [
         'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
-        "Needs Review", "Published", "Ignored / Expected", "<strong>5</strong>",
+        "Needs Review", "Published", "Expected", "Hidden", "<strong>5</strong>",
       ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
@@ -3691,8 +3693,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       });
       const html = panel._renderNilmWorkspaceLanes(makeWorkspace());
       assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
-      assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
-      const laneKeys = ["needs_review", "assigned", "published", "ignored_expected"];
+      assert.equal((html.match(/tabindex="-1"/g) || []).length, 4);
+      const laneKeys = ["needs_review", "assigned", "published", "expected", "hidden"];
       let buttons = [];
       const shadow = {
         activeElement: null,
@@ -3717,9 +3719,9 @@ def test_nilm_lane_rendering_contracts() -> None:
       shadow.activeElement = active;
       for (const [key, expectedLane] of [
         ["ArrowRight", "assigned"],
-        ["End", "ignored_expected"],
+        ["End", "hidden"],
         ["Home", "needs_review"],
-        ["ArrowLeft", "ignored_expected"],
+        ["ArrowLeft", "hidden"],
       ]) {
         let prevented = 0;
         active.listeners.keydown({ key, preventDefault() { prevented += 1; } });
@@ -3932,8 +3934,10 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       }) });
       panel._nilmWorkspaceHistorySeries = [[
         { entity_id: "sensor.mains_power", state: "200",
+          effective_role: "real_power", source_unit: "W",
           last_changed: "2026-06-24T18:00:00Z" },
         { entity_id: "sensor.mains_power", state: "900",
+          effective_role: "real_power", source_unit: "W",
           last_changed: "2026-06-24T19:10:00Z" },
       ]];
       const html = panel._renderNilmWorkspaceBody();
@@ -4546,11 +4550,15 @@ card._historySeries = [[
   {
     entity_id: "sensor.mains_power",
     state: "120",
+    effective_role: "real_power",
+    source_unit: "W",
     last_changed: "2026-06-29T12:00:00Z",
   },
   {
     entity_id: "sensor.mains_power",
     state: "180",
+    effective_role: "real_power",
+    source_unit: "W",
     last_changed: "2026-06-29T12:10:00Z",
   },
 ]];
@@ -4580,8 +4588,13 @@ card._nilmWorkspace = {
       signature_ids: [],
       assignment_ids: ["assignment-5"]
     },
-    ignored_expected: {
-      label: "Ignored / Expected",
+    expected: {
+      label: "Expected",
+      signature_ids: [],
+      assignment_ids: []
+    },
+    hidden: {
+      label: "Hidden",
       signature_ids: ["sig-ignored"],
       assignment_ids: []
     }
@@ -4590,7 +4603,8 @@ card._nilmWorkspace = {
     needs_review: 4,
     assigned: 1,
     published: 1,
-    ignored_expected: 1
+    expected: 0,
+    hidden: 1
   },
   sessions: [{
     start: "2026-06-29T12:01:00Z",
@@ -4603,11 +4617,15 @@ card._nilmWorkspaceHistorySeries = [[
   {
     entity_id: "sensor.mains_power",
     state: "120",
+    effective_role: "real_power",
+    source_unit: "W",
     last_changed: "2026-06-29T12:00:00Z",
   },
   {
     entity_id: "sensor.mains_power",
     state: "180",
+    effective_role: "real_power",
+    source_unit: "W",
     last_changed: "2026-06-29T12:10:00Z",
   },
 ]];
@@ -7656,8 +7674,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "highlights the active graph selection and matching time fields",
         "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
-        "The workspace groups work into four lanes",
-        "Needs Review, Assigned, Published, and Ignored / Expected",
+        "The workspace groups work into five lanes",
+        "Needs Review, Assigned, Published, Expected, and Hidden",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
         "Published NILM appliances are marked as estimated",

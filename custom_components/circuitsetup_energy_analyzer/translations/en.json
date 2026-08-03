@@ -1486,6 +1486,7 @@
         "loaded_interval_adjustment": "Loaded interval label for adjustment.",
         "saved_interval_label": "Saved interval label: {label}.",
         "nilm_interval_action_refresh_failed": "The action completed: {message} The NILM workspace could not refresh. Retry the workspace refresh.",
+        "nilm_primary_confirmed": "Configured primary assignment updated.",
         "deleted_interval_label": "Deleted interval label.",
         "loaded_nilm_session_interval": "Loaded NILM session interval.",
         "loaded_nilm_edge_time": "Loaded NILM edge time.",
@@ -1551,7 +1552,8 @@
           "adjust_label": "Adjust Label",
           "complete_interval": "Complete Interval",
           "convert_to_direct_meter": "Use Direct Meter",
-          "remove_interval": "Remove Interval"
+          "remove_interval": "Remove Interval",
+          "restore": "Restore"
         },
         "helpers": {
           "dismiss": "Clear this alert for now without teaching the analyzer.",
@@ -1891,7 +1893,10 @@
         "lane_needs_review": "Needs Review",
         "lane_assigned": "Assigned",
         "lane_published": "Published",
-        "lane_ignored_expected": "Ignored / Expected",
+        "lane_expected": "Expected",
+        "lane_hidden": "Hidden",
+        "expected_description": "Expected loads remain part of matching but are not published.",
+        "hidden_description": "Ignored and retired loads remain hidden until restored.",
         "lane_empty": "No review items from {lane} are available in the current workspace.",
         "item_count": "{count} {noun}",
         "session_validation": "Session Validation",
@@ -1950,6 +1955,11 @@
         "nilm_session": "NILM session",
         "displayed_power_samples": "displayed power samples",
         "sensor_count": "{count} {noun}",
+        "configured_primary": "Configured primary appliance",
+        "primary_current": "Currently assigned to {load}.",
+        "primary_unassigned": "No signature has been confirmed for this primary appliance.",
+        "primary_confirm": "Confirm likely primary",
+        "primary_change": "Change primary signature",
         "helper_evidence": "Helper circuit evidence",
         "helper_toggle": "Show {name} real-power overlay",
         "helper_matched_starts": "Matched {matched} of {total} {name} starts",
@@ -1958,7 +1968,10 @@
         "helper_relationship_corroborates": "Runs with this load (evidence only)",
         "helper_relationship_direct_component": "Directly measures this load (included in source)",
         "helper_confirm": "Confirm helper",
-        "helper_remove": "Remove helper"
+        "helper_remove": "Remove helper",
+        "helper_manual": "Choose another helper circuit",
+        "helper_select": "Helper circuit",
+        "helper_set": "Set helper"
       },
       "chart": {
           "accessible_summary": "Alert evidence chart with {series_count} series and {point_count} points. Values range from {min}{unit} to {max}{unit}, from {start} to {end}.",

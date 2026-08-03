@@ -451,6 +451,224 @@ async def test_primary_identity_survives_other_assignments(action: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_configured_primary_replaces_the_previous_signature_binding() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    config = _config(
+        ApplianceProfile.HVAC_BLOWER,
+        CircuitMode.MIXED,
+        "mixed",
+        "Blower",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(nilm_signatures={
+            "mixed": [
+                {
+                    "signature_id": "signature-1",
+                    "feedback_fingerprint": "fingerprint-1",
+                    "confidence": 0.9,
+                },
+                {
+                    "signature_id": "signature-2",
+                    "feedback_fingerprint": "fingerprint-2",
+                    "confidence": 0.92,
+                },
+            ]
+        }),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.circuit_configs = (config,)
+    assignment_id = configured_primary_assignment_id("mixed")
+
+    await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-1", label="Blower", assignment_id=assignment_id
+    )
+    assignment = await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-2", label="Blower", assignment_id=assignment_id
+    )
+
+    signatures = coordinator.store_data.nilm_signatures["mixed"]
+    assert assignment["signature_fingerprints"] == ["fingerprint-2"]
+    assert "assignment_id" not in signatures[0]
+    assert signatures[1]["assignment_id"] == assignment_id
+
+
+@pytest.mark.asyncio
+async def test_configured_primary_clears_legacy_fingerprint_binding() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    config = _config(
+        ApplianceProfile.HVAC_BLOWER,
+        CircuitMode.MIXED,
+        "mixed",
+        "Blower",
+    )
+    assignment_id = configured_primary_assignment_id("mixed")
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={"mixed": [
+                {
+                    "signature_id": "signature-old",
+                    "feedback_fingerprint": "fingerprint-old",
+                    "confidence": 0.9,
+                    "review_state": "assigned",
+                    "user_label": "Blower",
+                },
+                {
+                    "signature_id": "signature-new",
+                    "feedback_fingerprint": "fingerprint-new",
+                    "confidence": 0.92,
+                },
+            ]},
+            nilm_appliance_assignments_by_circuit={"mixed": [{
+                "assignment_id": assignment_id,
+                "signature_fingerprints": ["fingerprint-old"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            }]},
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    coordinator.circuit_configs = (config,)
+
+    await coordinator.async_assign_nilm_signature(
+        "mixed", "signature-new", label="Blower", assignment_id=assignment_id
+    )
+
+    old_signature = coordinator.store_data.nilm_signatures["mixed"][0]
+    assert old_signature["review_state"] == "new"
+    assert "user_label" not in old_signature
+
+
+@pytest.mark.asyncio
+async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> None:
+    async def save(_now: datetime) -> None:
+        return None
+
+    assignments = [
+        {
+            "assignment_id": "assignment-ignored",
+            "signature_fingerprints": ["fingerprint-ignored"],
+            "session_ids": [],
+            "label_interval_ids": [],
+            "lifecycle_state": "ignored",
+        },
+        {
+            "assignment_id": "assignment-expected",
+            "signature_fingerprints": ["fingerprint-expected"],
+            "session_ids": ["session-1"],
+            "label_interval_ids": [],
+            "lifecycle_state": "expected",
+        },
+        {
+            "assignment_id": "assignment-retired",
+            "signature_fingerprints": ["fingerprint-retired"],
+            "session_ids": ["session-old"],
+            "label_interval_ids": ["interval-old"],
+            "lifecycle_state": "retired",
+            "publish_entities": False,
+        },
+    ]
+    signatures = [
+        {
+            "signature_id": "signature-ignored",
+            "feedback_fingerprint": "fingerprint-ignored",
+            "assignment_id": "assignment-ignored",
+            "review_state": "ignored",
+            "ignored": True,
+        },
+        {
+            "signature_id": "signature-expected",
+            "feedback_fingerprint": "fingerprint-expected",
+            "assignment_id": "assignment-expected",
+            "review_state": "expected",
+            "expected": True,
+        },
+        {
+            "signature_id": "signature-retired",
+            "feedback_fingerprint": "fingerprint-retired",
+            "assignment_id": "assignment-retired",
+            "review_state": "assigned",
+        },
+    ]
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        ignored_nilm_signatures={("mixed", "signature-ignored")},
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": assignments},
+            nilm_signatures={"mixed": signatures},
+        ),
+        state=SimpleNamespace(),
+        refresh_ux_state_for_circuit=lambda *_args: None,
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(side_effect=save),
+        ),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=8,
+        assignment_max_items=8,
+    )
+    controller.refresh_state = lambda *_args, **_kwargs: None
+
+    restored_signature = await controller.async_restore_nilm_item(
+        "mixed", signature_id="signature-ignored"
+    )
+    restored_expected = await controller.async_restore_nilm_item(
+        "mixed", assignment_id="assignment-expected"
+    )
+    restored_retired = await controller.async_restore_nilm_item(
+        "mixed", assignment_id="assignment-retired"
+    )
+
+    assert restored_signature["review_state"] == "new"
+    assert "ignored" not in restored_signature
+    assert "assignment_id" not in restored_signature
+    assert not any(
+        item["assignment_id"] == "assignment-ignored"
+        for item in coordinator.store_data.nilm_appliance_assignments_by_circuit[
+            "mixed"
+        ]
+    )
+    assert restored_expected["lifecycle_state"] == "assigned"
+    assert signatures[1]["review_state"] == "assigned"
+    assert "expected" not in signatures[1]
+    assert restored_retired["lifecycle_state"] == "assigned"
+    assert restored_retired["session_ids"] == ["session-old"]
+    assert restored_retired["label_interval_ids"] == ["interval-old"]
+    assert coordinator.store_persistence.async_save_if_dirty.await_count == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("assignment_id", "signature_id"),
+    ((None, None), ("assignment-1", "signature-1")),
+)
+async def test_restore_nilm_item_requires_exactly_one_identifier(
+    assignment_id: str | None,
+    signature_id: str | None,
+) -> None:
+    controller = _nilm_controller(
+        SimpleNamespace(store_data=FeatureStoreData())
+    )
+
+    with pytest.raises(ValueError, match="exactly one"):
+        await controller.async_restore_nilm_item(
+            "mixed",
+            assignment_id=assignment_id,
+            signature_id=signature_id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_reserved_primary_is_rejected_outside_primary_mixed() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,

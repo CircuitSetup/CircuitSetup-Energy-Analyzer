@@ -5898,6 +5898,339 @@ test("NILM workspace renders kW history as watts", async ({ page }) => {
   await expect(panel.locator("svg.chart")).toHaveAttribute("data-nilm-chart-select", "1");
 });
 
+test("NILM workspace rejects non-real-power history instead of relabeling it as watts", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({
+        json: [
+          [
+            { entity_id: "sensor.mains_power", state: "800", last_changed: "2026-07-13T12:00:00Z", effective_role: "real_power", source_unit: "W" },
+            { entity_id: "sensor.mains_power", state: "1200", last_changed: "2026-07-13T20:00:00Z", effective_role: "real_power", source_unit: "W" },
+          ],
+          [
+            { entity_id: "sensor.mains_reactive", state: "300", last_changed: "2026-07-13T12:00:00Z", effective_role: "real_power", source_unit: "var" },
+            { entity_id: "sensor.mains_reactive", state: "500", last_changed: "2026-07-13T20:00:00Z", effective_role: "real_power", source_unit: "var" },
+          ],
+        ],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power", "sensor.mains_reactive"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await expect(panel.locator('[data-chart-name="Mains Power"]')).toHaveCount(2);
+  await expect(panel.locator('[data-chart-name="Mains Reactive"]')).toHaveCount(0);
+  await expect(panel.locator("[data-chart-point]")).toHaveCount(2);
+});
+
+test("NILM workspace shows the backend real-power requirement when watts are unavailable", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({
+        json: [[
+          { entity_id: "sensor.mains_reactive", state: "300", last_changed: "2026-07-13T12:00:00Z", effective_role: "reactive_power", source_unit: "var" },
+          { entity_id: "sensor.mains_reactive", state: "500", last_changed: "2026-07-13T20:00:00Z", effective_role: "reactive_power", source_unit: "var" },
+        ]],
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_reactive"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      missing_real_power_reason: "Configure a real-power sensor reported in W, kW, mW, or MW.",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await expect(panel.locator("svg.chart")).toHaveCount(0);
+  await expect(panel.getByText("Configure a real-power sensor reported in W, kW, mW, or MW.")).toBeVisible();
+});
+
+test("NILM workspace separates expected and hidden lanes and restores hidden assignments", async ({ page }) => {
+  let workspaceRequests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    workspaceRequests += 1;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const expected = {
+      ...payload.assignments[0],
+      assignment_id: "expected-load",
+      display_name: "Expected Pump",
+      lifecycle_state: "expected",
+      actions: {},
+    };
+    const ignored = {
+      ...payload.assignments[0],
+      assignment_id: "ignored-load",
+      display_name: "Ignored Pump",
+      lifecycle_state: workspaceRequests === 1 ? "ignored" : "assigned",
+      actions: workspaceRequests === 1 ? {
+        restore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "restore_nilm_item",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "ignored-load" },
+        },
+      } : {},
+    };
+    const retired = {
+      ...payload.assignments[0],
+      assignment_id: "retired-load",
+      display_name: "Retired Pump",
+      lifecycle_state: "retired",
+      actions: {
+        restore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "restore_nilm_item",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "retired-load" },
+        },
+      },
+    };
+    payload.assignments = [payload.assignments[0], expected, ignored, retired];
+    payload.lanes = {
+      needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [] },
+      assigned: { label: "Assigned", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["dishwasher"] : ["dishwasher", "ignored-load"], interval_ids: [] },
+      published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
+      expected: { label: "Expected", signature_ids: [], assignment_ids: ["expected-load"], interval_ids: [] },
+      hidden: { label: "Hidden", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["ignored-load", "retired-load"] : ["retired-load"], interval_ids: [] },
+    };
+    payload.lane_counts = { needs_review: 1, assigned: workspaceRequests === 1 ? 1 : 2, published: 0, expected: 1, hidden: workspaceRequests === 1 ? 2 : 1 };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await expect(panel.locator("[data-nilm-lane]")).toHaveCount(5);
+  await panel.locator('[data-nilm-lane="expected"]').click();
+  await expect(panel.getByText("Expected loads remain part of matching but are not published.")).toBeVisible();
+  await expect(panel.locator('[data-nilm-review-item="assignment:expected-load"]')).toBeVisible();
+  await panel.locator('[data-nilm-lane="hidden"]').click();
+  await expect(panel.getByText("Ignored and retired loads remain hidden until restored.")).toBeVisible();
+  await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
+  await expect(panel.locator('[data-nilm-review-item="assignment:retired-load"]')).toBeVisible();
+  await panel.locator('[data-nilm-review-item="assignment:ignored-load"]').click();
+  await panel.locator('[data-nilm-assignment-action="restore"]').click();
+  await expect(panel.locator('[data-nilm-lane="assigned"]')).toHaveAttribute("aria-selected", "true");
+  await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "restore_nilm_item",
+    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "ignored-load" },
+  });
+});
+
+test("NILM workspace restores hidden signatures and explains blocked publication", async ({ page }) => {
+  let restored = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const hiddenSignature = {
+      ...payload.signatures[0],
+      signature_id: "hidden-signature",
+      display_label: "Hidden condensate signature",
+      review_state: restored ? "needs_review" : "ignored",
+      actions: restored ? {} : {
+        restore: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "restore_nilm_item",
+          data: { entry_id: "entry-1", circuit_id: "mains", signature_id: "hidden-signature" },
+        },
+      },
+    };
+    payload.signatures = [payload.signatures[0], hiddenSignature];
+    payload.assignments[0].publication = {
+      available: false,
+      reason: "Confirm enough matched sessions before publishing.",
+    };
+    payload.lanes.needs_review.signature_ids = restored ? ["signature-1", "hidden-signature"] : ["signature-1"];
+    payload.lanes.hidden.signature_ids = restored ? [] : ["hidden-signature"];
+    payload.lane_counts.needs_review = restored ? 2 : 1;
+    payload.lane_counts.hidden = restored ? 0 : 1;
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await expect(panel.getByText("Confirm enough matched sessions before publishing.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Create HA Device" })).toBeDisabled();
+
+  await panel.locator('[data-nilm-lane="hidden"]').click();
+  await panel.locator('[data-nilm-review-item="signature:hidden-signature"]').click();
+  restored = true;
+  await panel.locator('[data-nilm-signature-action="restore"]').click();
+  await expect(panel.locator('[data-nilm-lane="hidden"] strong')).toHaveText("0");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "restore_nilm_item",
+    data: { entry_id: "entry-1", circuit_id: "mains", signature_id: "hidden-signature" },
+  });
+});
+
+test("NILM workspace shows and confirms a configured primary only for primary mixed circuits", async ({ page }) => {
+  let primaryConfirmed = false;
+  let pureMixed = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.circuit = pureMixed
+      ? { circuit_id: "pure_mixed", name: "Pure Mixed" }
+      : { circuit_id: "hvac_2", name: "HVAC 2" };
+    if (!pureMixed) {
+      payload.configured_primary = {
+        assignment_id: "hvac_2-configured-primary",
+        display_name: "HVAC Blower",
+        appliance_profile: "hvac_blower",
+        current_binding: primaryConfirmed ? { signature_id: "signature-blower", display_label: "Blower signature" } : null,
+        suggestion: primaryConfirmed ? null : {
+          signature_id: "signature-blower",
+          display_label: "Blower signature",
+          confidence: 0.94,
+          evidence_summary: "900 W · 14 matched cycles · follows AC2 calls",
+          action: {
+            domain: "circuitsetup_energy_analyzer",
+            service: "assign_signature_to_appliance",
+            data: {
+              entry_id: "entry-1",
+              circuit_id: "hvac_2",
+              signature_id: "signature-blower",
+              assignment_id: "hvac_2-configured-primary",
+              label: "HVAC Blower",
+            },
+          },
+        },
+      };
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2");
+  const primary = panel.locator("[data-nilm-configured-primary]");
+  await expect(primary).toContainText("HVAC Blower");
+  await expect(primary).toContainText("Blower signature");
+  await expect(primary).toContainText("900 W · 14 matched cycles · follows AC2 calls");
+  primaryConfirmed = true;
+  await primary.locator("[data-nilm-primary-confirm]").click();
+  await expect(primary).toContainText("Blower signature");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "assign_signature_to_appliance",
+    data: { entry_id: "entry-1", circuit_id: "hvac_2", assignment_id: "hvac_2-configured-primary", signature_id: "signature-blower" },
+  });
+
+  pureMixed = true;
+  await page.goto(`${HARNESS}?nilm_workspace=1&entry_id=entry-1&circuit_id=pure_mixed`);
+  await page.waitForFunction(() => window.__panelReady === true);
+  await expect(page.locator("circuitsetup-energy-analyzer-panel [data-nilm-configured-primary]")).toHaveCount(0);
+});
+
+test("NILM workspace keeps recommendations qualified and permits manual helper changes", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const setAction = (helperCircuitId) => ({
+      domain: "circuitsetup_energy_analyzer",
+      service: "set_nilm_helper_link",
+      data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: helperCircuitId },
+      requires: ["relationship"],
+    });
+    payload.assignments[0].helper_candidates = [
+      { helper_circuit_id: "ac_1", helper_name: "AC 1", matched_on_count: 8, source_on_count: 10, start_lag_seconds: 42, relationship_options: ["corroborates"], actions: { set: setAction("ac_1") } },
+      { helper_circuit_id: "weak", helper_name: "Weak zero-match circuit", matched_on_count: 0, source_on_count: 10, start_lag_seconds: 0, relationship_options: ["corroborates"], actions: { set: setAction("weak") } },
+    ];
+    payload.assignments[0].helper_options = [
+      { helper_circuit_id: "ac_1", helper_name: "AC 1", relationship_options: ["corroborates"], actions: { set: setAction("ac_1") } },
+      { helper_circuit_id: "ac_2", helper_name: "AC 2", relationship_options: ["corroborates", "direct_component"], actions: { set: setAction("ac_2") } },
+    ];
+    payload.assignments[0].helper_links = [{
+      helper_circuit_id: "old_helper",
+      helper_name: "Old helper",
+      matched_on_count: 7,
+      source_on_count: 10,
+      start_lag_seconds: 30,
+      relationship: "corroborates",
+      actions: {
+        remove: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "remove_nilm_helper_link",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "old_helper" },
+        },
+      },
+    }];
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const helperEvidence = panel.locator("[data-nilm-helper-list]");
+  await expect(helperEvidence.locator('[data-nilm-helper-circuit-id="ac_1"] button[aria-pressed]')).toBeVisible();
+  await expect(helperEvidence.getByText("Weak zero-match circuit", { exact: true })).toHaveCount(0);
+  await panel.locator("[data-nilm-helper-option]").selectOption("ac_2");
+  await panel.locator("[data-nilm-helper-relationship]").selectOption("direct_component");
+  await panel.locator("[data-nilm-assignment-action=helper_manual]").click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "set_nilm_helper_link",
+    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "ac_2", relationship: "direct_component" },
+  });
+  await panel.locator('[data-nilm-helper-circuit-id="old_helper"] [data-nilm-assignment-action^="helper_remove"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "remove_nilm_helper_link",
+    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "old_helper" },
+  });
+});
+
+test("NILM workspace gates electrical topology facts by source capability", async ({ page }) => {
+  let topologyMode = "single";
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const signature = payload.signatures[0];
+    signature.voltage_class = topologyMode === "split" ? "240 V split phase" : "unknown";
+    signature.dominant_leg = topologyMode === "split" ? "L1" : "unknown";
+    signature.topology_applicability = topologyMode === "single" ? "not_applicable" : topologyMode === "split" ? "available" : "unavailable";
+    signature.topology_requirement = topologyMode === "missing" ? "Both leg real-power sensors are required for topology evidence." : null;
+    if (topologyMode === "missing") {
+      delete signature.typical_power_w;
+      delete signature.typical_duration_seconds;
+      delete signature.seen_count;
+      delete signature.known_load_overlap;
+      delete signature.why_grouped;
+      delete signature.last_seen;
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  let panel = await openPanel(page, "?nilm_workspace=1&circuit_id=single");
+  await expect(panel.getByText(/Voltage class:/)).toHaveCount(0);
+  await expect(panel.getByText(/Dominant leg:/)).toHaveCount(0);
+
+  topologyMode = "split";
+  panel = await openPanel(page, "?nilm_workspace=1&circuit_id=split");
+  await expect(panel.getByText("Voltage class: 240 V split phase")).toBeVisible();
+  await expect(panel.getByText("Dominant leg: L1")).toBeVisible();
+
+  topologyMode = "missing";
+  panel = await openPanel(page, "?nilm_workspace=1&circuit_id=missing");
+  await expect(panel.getByText("Both leg real-power sensors are required for topology evidence.")).toBeVisible();
+  await expect(panel.getByText("Voltage class: unknown")).toHaveCount(0);
+  await expect(panel.getByText("Dominant leg: unknown")).toHaveCount(0);
+});
+
 test("NILM assignment helpers reload history and ignore stale toggle responses", async ({ page }) => {
   const historyQueries = [];
   await mockPanelApi(page, async ({ route, url }) => {

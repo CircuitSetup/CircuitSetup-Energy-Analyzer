@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-8"
+    assert PANEL_MODULE_VERSION == "20260803-1"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -1847,6 +1847,11 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["history"]["hours"] == 24.0
     assert payload["history"]["entities"] == ["sensor.mains_power"]
+    assert payload["history"]["entity_series"] == [{
+        "entity_id": "sensor.mains_power",
+        "effective_role": "real_power",
+        "source_unit": "W",
+    }]
     assert payload["history"]["api_path"].startswith(
         "circuitsetup_energy_analyzer/nilm_workspace_history?"
     )
@@ -2069,6 +2074,13 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                 "confidence": 0.5,
                 "publish_entities": False,
             },
+            {
+                "assignment_id": "assignment-expected",
+                "display_name": "Expected Pump",
+                "lifecycle_state": "expected",
+                "confidence": 0.9,
+                "publish_entities": False,
+            },
         ]
     }
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -2096,6 +2108,12 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                     "typical_watts": 110.0,
                     "ignored": True,
                 },
+                {
+                    "signature_id": "sig-expected",
+                    "display_name": "Expected recurring load",
+                    "typical_watts": 90.0,
+                    "expected": True,
+                },
             ]
         }
     }
@@ -2113,10 +2131,14 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "assignment-validation",
         "assignment-published",
     ]
-    assert payload["lanes"]["ignored_expected"]["assignment_ids"] == [
+    assert payload["lanes"]["hidden"]["assignment_ids"] == [
         "assignment-ignored"
     ]
-    assert payload["lanes"]["ignored_expected"]["signature_ids"] == ["sig-ignored"]
+    assert payload["lanes"]["hidden"]["signature_ids"] == ["sig-ignored"]
+    assert payload["lanes"]["expected"]["assignment_ids"] == [
+        "assignment-expected"
+    ]
+    assert payload["lanes"]["expected"]["signature_ids"] == ["sig-expected"]
     assert payload["lane_counts"]["needs_review"] == 3
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
@@ -2161,7 +2183,15 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
         appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.ac2_w", SensorRole.REAL_POWER),),
     )
-    coordinator = _coordinator(config=source, configs=(source, helper))
+    manual_helper = CircuitConfig(
+        circuit_id="condensate", name="Condensate Pump",
+        appliance_profile=ApplianceProfile.WATER_PUMP,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.condensate_w", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        config=source, configs=(source, helper, manual_helper)
+    )
     coordinator.entry_id = "entry-1"
     evidence = {
         "helper_circuit_id": "ac2", "matched_on_count": 9, "source_on_count": 10,
@@ -2174,7 +2204,16 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
     }
     coordinator.store_data.nilm_signatures = {"mains": [{
         "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
-        "helper_candidates": [evidence],
+        "helper_candidates": [
+            evidence,
+            {
+                "helper_circuit_id": "condensate",
+                "matched_on_count": 1,
+                "matched_off_count": 0,
+                "confidence": 0.2,
+                "suggested": False,
+            },
+        ],
     }]}
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [{
         "assignment_id": "assignment-1", "display_name": "Air handler",
@@ -2189,7 +2228,9 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
     )
     candidate = payload["assignments"][0]["helper_candidates"][0]
     link = payload["assignments"][0]["helper_links"][0]
+    helper_options = payload["assignments"][0]["helper_options"]
 
+    assert len(payload["assignments"][0]["helper_candidates"]) == 1
     assert {key: candidate[key] for key in evidence} == evidence
     assert candidate["state"] == "suggested"
     assert candidate["relationship_options"] == ["corroborates", "direct_component"]
@@ -2203,6 +2244,13 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
         "entry_id": "entry-1", "circuit_id": "mains",
         "assignment_id": "assignment-1", "helper_circuit_id": "ac2",
     }
+    assert [option["helper_circuit_id"] for option in helper_options] == [
+        "ac2", "condensate"
+    ]
+    assert all(
+        option["actions"]["set"]["data"]["entry_id"] == "entry-1"
+        for option in helper_options
+    )
 
 
 def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None:
@@ -2232,14 +2280,169 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert _nilm_workspace_session_specs(signatures, assignments) == [("sig-new", None)]
     lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
     assert set(lanes) == {
-        "needs_review",
-        "assigned",
-        "published",
-        "ignored_expected",
+        "needs_review", "assigned", "published", "expected", "hidden"
     }
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
-    assert lanes["ignored_expected"]["assignment_ids"] == ["assignment-retired"]
+    assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
+
+
+def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [
+        {
+            "signature_id": "signature-ignored",
+            "feedback_fingerprint": "fingerprint-ignored",
+            "ignored": True,
+            "review_state": "ignored",
+        },
+        {
+            "signature_id": "signature-ready",
+            "feedback_fingerprint": "fingerprint-ready",
+            "confidence": 0.91,
+        },
+    ]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [
+        {
+            "assignment_id": "assignment-retired",
+            "lifecycle_state": "retired",
+            "signature_fingerprints": ["fingerprint-retired"],
+            "confidence": 0.9,
+        },
+        {
+            "assignment_id": "assignment-empty",
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": [],
+            "session_ids": [],
+            "label_interval_ids": [],
+            "confidence": 0.9,
+        },
+        {
+            "assignment_id": "assignment-ready",
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": ["fingerprint-ready"],
+            "confidence": 0.91,
+        },
+    ]}
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )
+    ignored = next(
+        item for item in payload["signatures"]
+        if item["signature_id"] == "signature-ignored"
+    )
+    retired = next(
+        item for item in payload["assignments"]
+        if item["assignment_id"] == "assignment-retired"
+    )
+    empty = next(
+        item for item in payload["assignments"]
+        if item["assignment_id"] == "assignment-empty"
+    )
+    ready = next(
+        item for item in payload["assignments"]
+        if item["assignment_id"] == "assignment-ready"
+    )
+
+    assert ignored["actions"]["restore"]["data"] == {
+        "entry_id": "entry-1",
+        "circuit_id": "mixed",
+        "signature_id": "signature-ignored",
+    }
+    assert retired["actions"]["restore"]["data"] == {
+        "entry_id": "entry-1",
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-retired",
+    }
+    assert retired["publication"]["available"] is False
+    assert empty["publication"] == {
+        "available": False,
+        "reason": "Assign at least one detected load before publishing.",
+    }
+    assert "publish" not in empty["actions"]
+    assert ready["publication"]["available"] is True
+    assert ready["actions"]["publish"]["service"] == (
+        "publish_nilm_appliance_assignment"
+    )
+
+
+@pytest.mark.parametrize(
+    ("sensors", "expected", "has_requirement"),
+    (
+        (
+            (SensorRef("sensor.load_w", SensorRole.REAL_POWER, unit="W"),),
+            "not_applicable",
+            False,
+        ),
+        (
+            (
+                SensorRef("sensor.load_l1_w", SensorRole.REAL_POWER, "a", "W"),
+                SensorRef("sensor.load_l2_w", SensorRole.REAL_POWER, "b", "W"),
+            ),
+            "available",
+            False,
+        ),
+        (
+            (
+                SensorRef("sensor.load_l1_w", SensorRole.REAL_POWER, "leg1", "W"),
+                SensorRef("sensor.load_l2_w", SensorRole.REAL_POWER, "leg2", "W"),
+            ),
+            "available",
+            False,
+        ),
+        (
+            (SensorRef("sensor.load_l1_w", SensorRole.REAL_POWER, "a", "W"),),
+            "unavailable",
+            True,
+        ),
+    ),
+)
+def test_nilm_signature_topology_is_capability_gated(
+    sensors: tuple[SensorRef, ...],
+    expected: str,
+    has_requirement: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="load",
+        name="Load",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=sensors,
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.store_data.nilm_signatures = {"load": [{
+        "signature_id": "signature-1",
+        "voltage_class": "unknown" if expected != "available" else "240 V",
+        "dominant_leg": "unknown" if expected != "available" else "a",
+    }]}
+
+    signature = nilm_workspace_payload(
+        [coordinator], circuit_id="load"
+    )["signatures"][0]
+
+    assert signature["topology_applicability"] == expected
+    assert ("topology_requirement" in signature) is has_requirement
+    if expected != "available":
+        assert "voltage_class" not in signature
+        assert "dominant_leg" not in signature
 
 
 def test_nilm_workspace_visibility_ignores_empty_hidden_identifiers() -> None:
@@ -2475,6 +2678,161 @@ def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> Non
         "value": "mixed-configured-primary",
         "label": "Configured primary: Blower",
     }]
+
+
+def test_nilm_workspace_suggests_largest_unassigned_recurring_primary() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [
+        {
+            "signature_id": "signature-weak",
+            "feedback_fingerprint": "fingerprint-weak",
+            "typical_watts": 1400.0,
+            "occurrence_count": 2,
+            "confidence": 0.95,
+        },
+        {
+            "signature_id": "signature-assigned",
+            "feedback_fingerprint": "fingerprint-assigned",
+            "typical_watts": 1200.0,
+            "occurrence_count": 6,
+            "confidence": 0.95,
+        },
+        {
+            "signature_id": "signature-z",
+            "feedback_fingerprint": "fingerprint-z",
+            "typical_watts": 850.0,
+            "occurrence_count": 5,
+            "confidence": 0.9,
+        },
+        {
+            "signature_id": "signature-a",
+            "feedback_fingerprint": "fingerprint-a",
+            "typical_watts": 850.0,
+            "occurrence_count": 5,
+            "confidence": 0.9,
+        },
+    ]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
+        "assignment_id": "assignment-other",
+        "signature_fingerprints": ["fingerprint-assigned"],
+        "lifecycle_state": "assigned",
+        "confidence": 0.95,
+    }]}
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )
+    primary = payload["configured_primary"]
+
+    assert primary["assignment_id"] == "mixed-configured-primary"
+    assert primary["display_name"] == "Blower"
+    assert primary["appliance_profile"] == ApplianceProfile.HVAC_BLOWER.value
+    assert primary["current_binding"] is None
+    assert primary["suggestion"]["signature_id"] == "signature-a"
+    assert primary["suggestion"]["action"] == {
+        "domain": DOMAIN,
+        "service": "assign_signature_to_appliance",
+        "data": {
+            "entry_id": "entry-1",
+            "circuit_id": "mixed",
+            "signature_id": "signature-a",
+            "assignment_id": "mixed-configured-primary",
+            "label": "Blower",
+            "appliance_profile": ApplianceProfile.HVAC_BLOWER.value,
+        },
+    }
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {
+        "mixed": [coordinator.store_data.nilm_appliance_assignments_by_circuit[
+            "mixed"
+        ][0]]
+    }
+
+
+def test_nilm_workspace_suggests_larger_primary_when_current_binding_is_wrong(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [
+        {
+            "signature_id": "signature-condensate",
+            "feedback_fingerprint": "fingerprint-condensate",
+            "typical_watts": 90.0,
+            "occurrence_count": 6,
+            "confidence": 0.9,
+            "assignment_id": "mixed-configured-primary",
+        },
+        {
+            "signature_id": "signature-blower",
+            "feedback_fingerprint": "fingerprint-blower",
+            "typical_watts": 850.0,
+            "occurrence_count": 5,
+            "confidence": 0.9,
+        },
+    ]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
+        "assignment_id": "mixed-configured-primary",
+        "signature_fingerprints": ["fingerprint-condensate"],
+        "lifecycle_state": "assigned",
+        "confidence": 0.9,
+    }]}
+
+    primary = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )["configured_primary"]
+
+    assert primary["current_binding"]["signature_id"] == "signature-condensate"
+    assert primary["suggestion"]["signature_id"] == "signature-blower"
+    assert primary["suggestion"]["action"]["data"]["assignment_id"] == (
+        "mixed-configured-primary"
+    )
+
+
+def test_nilm_workspace_omits_configured_primary_for_pure_mixed() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.store_data.nilm_signatures = {"mixed": [{
+        "signature_id": "signature-1",
+        "typical_watts": 900.0,
+        "occurrence_count": 5,
+        "confidence": 0.9,
+    }]}
+
+    assert "configured_primary" not in nilm_workspace_payload(
+        [coordinator], circuit_id="mixed"
+    )
 
 
 @pytest.mark.asyncio
@@ -2752,7 +3110,11 @@ async def test_nilm_workspace_history_view_forwards_requested_entry_id(
 
     payload = await panel.NilmWorkspaceHistoryView().get(request)
 
-    assert payload == [[{"entity_id": "sensor.second_mains_power"}]]
+    assert payload == [[{
+        "entity_id": "sensor.second_mains_power",
+        "effective_role": "real_power",
+        "source_unit": "W",
+    }]]
 
 
 def test_nilm_workspace_payload_accepts_sensor_backed_mixed_source() -> None:
@@ -3057,7 +3419,7 @@ def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> 
     assert payload["history"]["entities"] == ["sensor.nilm_power"]
 
 
-def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
+def test_nilm_workspace_payload_rejects_untyped_runtime_history_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -3076,7 +3438,10 @@ def test_nilm_workspace_payload_accepts_runtime_config_shape() -> None:
     )
 
     assert payload["status"] == "ok"
-    assert payload["history"]["entities"] == ["sensor.mains_power"]
+    assert payload["history"]["entities"] == []
+    assert payload["history"]["missing_real_power_reason"] == (
+        "Configure a real-power sensor measured in W, kW, mW, or MW."
+    )
 
 
 def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
@@ -5081,3 +5446,185 @@ async def test_panel_setup_refreshes_existing_panel_path() -> None:
     await async_unload_panel(hass)
 
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
+
+
+@pytest.mark.parametrize("unit", ("var", "VA", "A"))
+def test_nilm_workspace_history_rejects_non_watts_metadata(unit: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_history_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef(
+                "sensor.mixed_bad_power",
+                SensorRole.REAL_POWER,
+                unit=unit,
+            ),
+        ),
+    )
+
+    history = _nilm_workspace_history_payload(
+        config, [], [], hours=6
+    )
+
+    assert history["entities"] == []
+    assert history["entity_series"] == []
+    assert history["missing_real_power_reason"] == (
+        "Configure a real-power sensor measured in W, kW, mW, or MW."
+    )
+
+
+@pytest.mark.parametrize("unit", ("W", "kW", "mW", "MW"))
+def test_nilm_workspace_history_preserves_real_power_unit(unit: str) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_history_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit=unit),),
+    )
+
+    history = _nilm_workspace_history_payload(config, [], [], hours=6)
+
+    assert history["entity_series"] == [{
+        "entity_id": "sensor.mixed_power",
+        "effective_role": "real_power",
+        "source_unit": unit,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_rows_include_role_and_unit_metadata(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="kW"),
+        ),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+
+    async def history_rows(_hass, _start, _end, _entity_ids):
+        return [[{
+            "entity_id": "sensor.mixed_power",
+            "state": "1.2",
+            "last_changed": "2026-08-03T12:00:00+00:00",
+        }]]
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    rows = await panel.nilm_workspace_history_payload(
+        SimpleNamespace(),
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+    )
+
+    assert rows[0][0]["effective_role"] == "real_power"
+    assert rows[0][0]["source_unit"] == "kW"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_uses_live_real_power_unit(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda _entity_id: SimpleNamespace(
+                attributes={
+                    "device_class": "power",
+                    "unit_of_measurement": "kW",
+                }
+            )
+        )
+    )
+
+    async def history_rows(_hass, _start, _end, _entity_ids):
+        return [[{
+            "entity_id": "sensor.mixed_power",
+            "state": "1.2",
+            "last_changed": "2026-08-03T12:00:00+00:00",
+        }]]
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    rows = await panel.nilm_workspace_history_payload(
+        hass,
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+    )
+
+    assert rows[0][0]["source_unit"] == "kW"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_rejects_live_reactive_metadata(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda _entity_id: SimpleNamespace(
+                attributes={
+                    "device_class": "reactive_power",
+                    "unit_of_measurement": "var",
+                }
+            )
+        )
+    )
+
+    async def history_rows(_hass, _start, _end, _entity_ids):
+        return [[{
+            "entity_id": "sensor.mixed_power",
+            "state": "12",
+            "last_changed": "2026-08-03T12:00:00+00:00",
+        }]]
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    rows = await panel.nilm_workspace_history_payload(
+        hass,
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+    )
+
+    assert rows == []

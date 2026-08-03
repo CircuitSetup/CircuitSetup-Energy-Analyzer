@@ -912,11 +912,13 @@ export function createNilmWorkspaceMethods({
   }
 
   _renderNilmSignatureReview(signature, index) {
+    const restore = signature.actions && signature.actions.restore;
     return `
       ${signature.user_label ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.saved_label", { label: signature.user_label }))}</p>` : ""}
       ${signature.review_state ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.review_state", { state: this._friendlyFeature(signature.review_state) }))}</p>` : ""}
       ${signature.merged_into ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.merged_into", { value: signature.merged_into }))}</p>` : ""}
       ${this._renderNilmDecisionFlow(signature, index)}
+      ${restore ? `<div class="actions"><button type="button" class="secondary" data-nilm-signature-index="${index}" data-nilm-signature-action="restore">${this._escape(this._panelText("actions.labels.restore"))}</button></div>` : ""}
     `;
   }
 
@@ -1407,9 +1409,14 @@ export function createNilmWorkspaceMethods({
   }
 
   async _handleNilmHelperAction(assignment, index, actionKey) {
-    const [kind, offset] = actionKey.slice(7).split("_");
+    const manual = actionKey === "helper_manual";
+    const [parsedKind, offset] = manual ? ["set", "-1"] : actionKey.slice(7).split("_");
+    const kind = parsedKind;
     const items = (kind === "remove" || kind === "togglelink") ? assignment.helper_links : assignment.helper_candidates;
-    const evidence = items && items[Number(offset)];
+    const manualSelect = manual && this.shadowRoot.querySelector(`#nilm_helper_option_${index}`);
+    const evidence = manual
+      ? (assignment.helper_options || []).find((item) => item.helper_circuit_id === (manualSelect && manualSelect.value))
+      : items && items[Number(offset)];
     if (!evidence) return;
     if (kind === "toggle" || kind === "togglelink") {
       this._nilmSelectedHelpers ||= {};
@@ -1425,7 +1432,9 @@ export function createNilmWorkspaceMethods({
     if (!this._guardActionCall(action, `NILM helper ${kind}`)) return;
     const data = { ...(action.data || {}) };
     if (kind === "set") {
-      const select = this.shadowRoot.querySelector(`#nilm_helper_relationship_${index}_${offset}`);
+      const select = this.shadowRoot.querySelector(manual
+        ? `#nilm_helper_manual_relationship_${index}`
+        : `#nilm_helper_relationship_${index}_${offset}`);
       data.relationship = select && select.value;
     }
     await this._hass.callService(action.domain, action.service, data);
@@ -1455,8 +1464,62 @@ export function createNilmWorkspaceMethods({
     };
     const candidates = (assignment.helper_candidates || [])
       .map((item, offset) => ({ item, offset }))
-      .filter(({ item }) => !confirmedIds.has(item.helper_circuit_id));
-    return `<div class="nilm-helper-list"><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}</div>`;
+      .filter(({ item }) => !confirmedIds.has(item.helper_circuit_id)
+        && Number(item.matched_on_count) > 0
+        && Number(item.source_on_count) > 0);
+    const helperOptions = Array.isArray(assignment.helper_options) ? assignment.helper_options : [];
+    const firstOption = helperOptions[0] || {};
+    const manual = helperOptions.length ? `<div class="nilm-helper-manual">
+      <h3>${this._escape(this._panelText("nilm_workspace.helper_manual"))}</h3>
+      <label for="nilm_helper_option_${index}">${this._escape(this._panelText("nilm_workspace.helper_select"))}</label>
+      <select id="nilm_helper_option_${index}" data-nilm-helper-option data-nilm-assignment-index="${index}">
+        ${helperOptions.map((item) => `<option value="${this._escape(item.helper_circuit_id || "")}" data-relationships="${this._escape(JSON.stringify(item.relationship_options || []))}">${this._escape(item.helper_name || item.helper_circuit_id || "")}</option>`).join("")}
+      </select>
+      <label for="nilm_helper_manual_relationship_${index}">${this._escape(this._panelText("nilm_workspace.helper_relationship"))}</label>
+      <select id="nilm_helper_manual_relationship_${index}" data-nilm-helper-relationship>
+        ${(firstOption.relationship_options || []).map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("")}
+      </select>
+      <button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_manual">${this._escape(this._panelText("nilm_workspace.helper_set"))}</button>
+    </div>` : "";
+    return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
+  }
+
+  _syncNilmHelperRelationship(input) {
+    const option = input.selectedOptions && input.selectedOptions[0];
+    const index = input.dataset.nilmAssignmentIndex;
+    const select = this.shadowRoot.querySelector(`#nilm_helper_manual_relationship_${index}`);
+    if (!option || !select) return;
+    let relationships = [];
+    try {
+      relationships = JSON.parse(option.dataset.relationships || "[]");
+    } catch (_error) {
+      relationships = [];
+    }
+    select.innerHTML = relationships.map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("");
+  }
+
+  async _callNilmConfiguredPrimaryAction() {
+    const primary = this._nilmWorkspace && this._nilmWorkspace.configured_primary;
+    const action = primary && primary.suggestion && primary.suggestion.action;
+    if (!this._guardActionCall(action, "NILM configured primary", "nilm-primary")) return;
+    const actionContext = this._nilmWorkspaceActionContext();
+    this._busyAction = "nilm_primary";
+    this._render();
+    try {
+      await this._hass.callService(action.domain || "circuitsetup_energy_analyzer", action.service, { ...(action.data || {}) });
+      const refreshed = await this._refreshNilmWorkspaceData(actionContext.requestId, actionContext.routeKey);
+      if (!actionContext.isCurrent()) return;
+      if (this._busyAction === "nilm_primary") this._busyAction = "";
+      this._setInlineFeedback("nilm-primary", refreshed ? "success" : "error", refreshed
+        ? this._panelText("messages.nilm_primary_confirmed")
+        : this._panelText("errors.load_nilm_workspace"));
+      this._render();
+    } catch (error) {
+      if (!actionContext.isCurrent()) return;
+      if (this._busyAction === "nilm_primary") this._busyAction = "";
+      this._setInlineFeedback("nilm-primary", "error", this._panelTextFormat("errors.run_service", { service: action.service, message: error.message }));
+      this._render();
+    }
   }
 
   _zoomNilmGraph(factor) {
@@ -1610,6 +1673,7 @@ export function createNilmWorkspaceMethods({
     return `
       <div class="nilm-workspace">
         ${this._renderNilmWorkspaceSummary(workspace)}
+        ${this._renderNilmConfiguredPrimary(workspace)}
         ${this._renderNilmModelEvidence()}
         <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
@@ -1670,6 +1734,25 @@ export function createNilmWorkspaceMethods({
     `;
   }
 
+  _renderNilmConfiguredPrimary(workspace) {
+    const primary = workspace && workspace.configured_primary;
+    if (!primary) return "";
+    const current = primary.current_binding;
+    const suggestion = primary.suggestion;
+    return `<section class="workspace-section section-surface" data-nilm-configured-primary>
+      <h2>${this._escape(this._panelText("nilm_workspace.configured_primary"))}</h2>
+      <strong>${this._escape(primary.display_name || primary.assignment_id || "")}</strong>
+      ${current ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_current", { load: current.display_label || current.signature_id || "" }))}</p>` : `<p class="muted">${this._escape(this._panelText("nilm_workspace.primary_unassigned"))}</p>`}
+      ${suggestion ? `<div data-nilm-primary-suggestion>
+        <p><strong>${this._escape(suggestion.display_label || suggestion.signature_id || "")}</strong></p>
+        ${suggestion.evidence_summary ? `<p class="muted">${this._escape(suggestion.evidence_summary)}</p>` : ""}
+        ${suggestion.confidence !== undefined ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(suggestion.confidence || 0) * 100) }))}</p>` : ""}
+        ${suggestion.action ? `<button type="button" data-nilm-primary-confirm ${this._busyAction === "nilm_primary" ? "disabled" : ""}>${this._escape(this._panelText(current ? "nilm_workspace.primary_change" : "nilm_workspace.primary_confirm"))}</button>` : ""}
+      </div>` : ""}
+      ${this._renderInlineFeedback("nilm-primary")}
+    </section>`;
+  }
+
   _renderNilmModelEvidence() {
     return `<section class="workspace-section section-surface" data-nilm-model-evidence>
       <h2>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h2>
@@ -1694,7 +1777,7 @@ export function createNilmWorkspaceMethods({
         ? `<div data-nilm-history-error><p class="muted">${this._escape(this._nilmWorkspaceHistoryError)}</p><button type="button" class="secondary" data-retry-nilm-history>${this._escape(this._panelText("common.retry"))}</button></div>`
         : graphWindow && series.length
           ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), y_axis_label: "W", nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: workspace.edges, nilm_sessions: graphBands })
-          : `<p class="muted">${this._escape(this._panelText("nilm_workspace.no_graph_history"))}</p>`;
+          : `<p class="muted">${this._escape((workspace.history && workspace.history.missing_real_power_reason) || this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
       ${this._renderNilmGraphControls(graphWindow)}
@@ -1892,9 +1975,13 @@ export function createNilmWorkspaceMethods({
     const reviewItems = this._nilmLaneItems(workspace);
     const lane = workspace && workspace.lanes && workspace.lanes[this._nilmActiveLane];
     const laneLabel = (lane && lane.label) || this._friendlyFeature(this._nilmActiveLane);
+    const laneDescription = (lane && lane.description)
+      || (this._nilmActiveLane === "expected" ? this._panelText("nilm_workspace.expected_description") : "")
+      || (this._nilmActiveLane === "hidden" ? this._panelText("nilm_workspace.hidden_description") : "");
     const selectedItem = reviewItems.length ? this._nilmSelectedReviewItem(workspace) : null;
     const selectedKey = selectedItem ? this._nilmReviewKey(selectedItem) : "";
     return `<div class="nilm-review-layout" id="nilm_review_lane_panel" role="tabpanel" aria-labelledby="nilm_lane_${this._escape(this._nilmActiveLane)}">
+      ${laneDescription ? `<p class="muted" data-nilm-lane-description>${this._escape(laneDescription)}</p>` : ""}
       <div class="nilm-review-list section-surface">
       ${this._renderInlineFeedback("nilm-review")}
       ${reviewItems.length ? reviewItems.map((reviewItem) => {
@@ -1962,7 +2049,8 @@ export function createNilmWorkspaceMethods({
       ["needs_review", this._panelText("nilm_workspace.lane_needs_review")],
       ["assigned", this._panelText("nilm_workspace.lane_assigned")],
       ["published", this._panelText("nilm_workspace.lane_published")],
-      ["ignored_expected", this._panelText("nilm_workspace.lane_ignored_expected")],
+      ["expected", this._panelText("nilm_workspace.lane_expected")],
+      ["hidden", this._panelText("nilm_workspace.lane_hidden")],
     ];
     if (!Object.keys(lanes).length && !Object.keys(laneCounts).length) {
       return "";
@@ -2081,15 +2169,22 @@ export function createNilmWorkspaceMethods({
     addFact(this._panelText("nilm_workspace.fact_typical_power"), signature.typical_power_w !== undefined ? `${this._formatMetricValue(signature.typical_power_w)} W` : undefined);
     addFact(this._panelText("nilm_workspace.fact_typical_duration"), signature.typical_duration_seconds !== undefined ? this._formatDuration(signature.typical_duration_seconds) : undefined);
     addFact(this._panelText("nilm_workspace.fact_seen_count"), signature.seen_count);
-    addFact(this._panelText("nilm_workspace.fact_voltage_class"), signature.voltage_class);
-    addFact(this._panelText("nilm_workspace.fact_dominant_leg"), signature.dominant_leg);
+    const topology = String(signature.topology_applicability || "").toLowerCase();
+    const showTopology = topology === "available" || (!topology && (signature.voltage_class || signature.dominant_leg));
+    if (showTopology) {
+      addFact(this._panelText("nilm_workspace.fact_voltage_class"), String(signature.voltage_class || "").toLowerCase() === "unknown" ? undefined : signature.voltage_class);
+      addFact(this._panelText("nilm_workspace.fact_dominant_leg"), String(signature.dominant_leg || "").toLowerCase() === "unknown" ? undefined : signature.dominant_leg);
+    }
     addFact(this._panelText("nilm_workspace.fact_known_load_overlap"), this._formatNilmSignatureFact(signature.known_load_overlap));
     addFact(this._panelText("nilm_workspace.fact_why_grouped"), signature.why_grouped);
     addFact(this._panelText("nilm_workspace.fact_last_seen"), signature.last_seen ? this._formatDateTime(signature.last_seen) : undefined);
-    if (!facts.length) {
+    const requirement = topology === "unavailable" && signature.topology_requirement
+      ? `<p class="muted" data-nilm-topology-requirement>${this._escape(signature.topology_requirement)}</p>`
+      : "";
+    if (!facts.length && !requirement) {
       return "";
     }
-    return facts.map(([label, value]) => `<p class="muted">${this._escape(label)}: ${this._escape(this._formatMetricValue(value))}</p>`).join("");
+    return `${facts.map(([label, value]) => `<p class="muted">${this._escape(label)}: ${this._escape(this._formatMetricValue(value))}</p>`).join("")}${requirement}`;
   }
 
   _formatNilmSignatureFact(value) {
@@ -2279,16 +2374,20 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmAssignmentActions(item, index) {
     const actions = item && item.actions;
+    const publication = item && item.publication;
+    const publicationState = publication && publication.available === false
+      ? `<p class="muted" data-nilm-publication-reason>${this._escape(publication.reason || "")}</p><button type="button" class="secondary" disabled>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>`
+      : "";
     const detailButton = this._nilmApplianceDetailButton(item);
-    if ((!actions || !Object.keys(actions).length) && !detailButton) {
+    if ((!actions || !Object.keys(actions).length) && !detailButton && !publicationState) {
       return "";
     }
     if (!actions || !Object.keys(actions).length) {
-      return `<div class="actions">${detailButton}</div>`;
+      return `${publicationState}<div class="actions">${detailButton}</div>`;
     }
     const hasSave = actions.rename || actions.change_profile;
     const saveDirty = this._nilmAssignmentHasChanges(item);
-    return `
+    return `${publicationState}
       <div class="actions">
         ${detailButton}
         ${hasSave ? `<button type="button" class="${saveDirty ? "" : "secondary"}" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" data-nilm-assignment-save-key="${this._escape(item.assignment_id || "")}" ${this._busyAction === `nilm_assignments_${index}_save` || !saveDirty ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.save"))}</button>` : ""}
@@ -2298,6 +2397,7 @@ export function createNilmWorkspaceMethods({
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>` : ""}
         ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_ha_device"))}</button>` : ""}
         ${actions.retire ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="retire" ${this._busyAction === `nilm_assignments_${index}_retire` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_assignment"))}</button>` : ""}
+        ${actions.restore ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="restore" ${this._busyAction === `nilm_assignments_${index}_restore` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.restore"))}</button>` : ""}
       </div>
     `;
   }
@@ -2395,21 +2495,30 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmWorkspaceWattSeries() {
+    const metadata = new Map((this._nilmWorkspaceHistorySeries || []).flatMap((series) => {
+      const first = Array.isArray(series) && series[0];
+      const entityId = first && first.entity_id;
+      return entityId ? [[entityId, first]] : [];
+    }));
     return this._chartSeries(
       this._nilmWorkspaceHistorySeries,
       [],
       MAX_NILM_CHART_POINTS_PER_SERIES,
-    ).map((item) => {
-      const unit = String(item.unit || "").trim();
-      const factor = unit === "MW" ? 1000000 : unit === "mW" ? 0.001 : unit.toLowerCase() === "kw" ? 1000 : 1;
-      return {
+    ).flatMap((item) => {
+      const source = metadata.get(item.entity_id) || {};
+      const role = String(source.effective_role || source.sensor_role || "").trim().toLowerCase();
+      const unit = String(source.source_unit || source.unit_of_measurement || item.unit || "").trim();
+      const factor = unit === "MW" ? 1000000 : unit === "mW" ? 0.001 : unit.toLowerCase() === "kw" ? 1000 : unit.toLowerCase() === "w" ? 1 : null;
+      if ((role && role !== "real_power") || factor === null) return [];
+      return [{
         ...item,
+        source_unit: unit,
         unit: "W",
         points: factor === 1 ? item.points : item.points.map((point) => ({
           ...point,
           value: point.value * factor,
         })),
-      };
+      }];
     });
   }
 

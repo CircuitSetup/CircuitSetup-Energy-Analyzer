@@ -1,0 +1,50 @@
+schema_version: 1
+id: nilm_signal_integrity
+description: Repeated equal-W loads with optional evidence and a W-only control
+scenario_type: normal
+source_kind: pure_mixed
+start_time: 2026-08-03T00:00:00Z
+min_delta_w: 100
+circuits:
+  - circuit_id: mixed
+    name: Mixed evidence
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources:
+      power: sensor.mixed_power
+      reactive_power: sensor.mixed_var
+      apparent_power: sensor.mixed_va
+      power_factor: sensor.mixed_pf
+  - circuit_id: w_only
+    name: W only
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.w_only_power}
+samples:
+  - {t: 0, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 10, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 20, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 30, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 40, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 50, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 60, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 70, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 80, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 90, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 100, states: {sensor.mixed_power: 300, sensor.mixed_var: 40, sensor.mixed_va: 320, sensor.mixed_pf: 0.938, sensor.w_only_power: 200}}
+  - {t: 110, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 120, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 130, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 140, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 150, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 160, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 170, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 180, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 190, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 200, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 210, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 220, states: {sensor.mixed_power: 300, sensor.mixed_var: 160, sensor.mixed_va: 340, sensor.mixed_pf: 0.882, sensor.w_only_power: 0}}
+  - {t: 230, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+  - {t: 240, states: {sensor.mixed_power: 0, sensor.mixed_var: 0, sensor.mixed_va: 0, sensor.mixed_pf: 0, sensor.w_only_power: 0}}
+labels: {}
+calibration_expectations: {}

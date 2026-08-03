@@ -78,6 +78,69 @@ def test_notification_id_for_alert_does_not_collide_on_underscores() -> None:
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
 
 
+def test_restore_nilm_item_schema_requires_one_scoped_identifier() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _SERVICE_SCHEMAS,
+        SERVICE_RESTORE_NILM_ITEM,
+    )
+
+    schema = _SERVICE_SCHEMAS[SERVICE_RESTORE_NILM_ITEM]
+    assert schema({
+        "entry_id": "entry-1",
+        "circuit_id": "mixed",
+        "signature_id": "signature-1",
+    })["signature_id"] == "signature-1"
+    for invalid in (
+        {"entry_id": "entry-1", "circuit_id": "mixed"},
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mixed",
+            "signature_id": "signature-1",
+            "assignment_id": "assignment-1",
+        },
+        {"circuit_id": "mixed", "signature_id": "signature-1"},
+    ):
+        with pytest.raises((ValueError, vol.Invalid)):
+            schema(invalid)
+
+
+@pytest.mark.asyncio
+async def test_restore_nilm_item_service_targets_only_the_requested_entry() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_RESTORE_NILM_ITEM,
+        _dispatch_service,
+    )
+
+    first = SimpleNamespace(
+        has_circuit=lambda circuit_id: circuit_id == "mixed",
+        async_set_updated_data=lambda _state: None,
+        async_restore_nilm_item=AsyncMock(),
+    )
+    second = SimpleNamespace(
+        has_circuit=lambda circuit_id: circuit_id == "mixed",
+        async_set_updated_data=lambda _state: None,
+        async_restore_nilm_item=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+
+    await _dispatch_service(
+        hass,
+        SERVICE_RESTORE_NILM_ITEM,
+        {
+            "entry_id": "entry-2",
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-1",
+        },
+    )
+
+    first.async_restore_nilm_item.assert_not_awaited()
+    second.async_restore_nilm_item.assert_awaited_once_with(
+        "mixed",
+        assignment_id="assignment-1",
+        signature_id=None,
+    )
+
+
 def test_notification_id_for_alert_uses_nilm_notification_key() -> None:
     from custom_components.circuitsetup_energy_analyzer.notifications import (
         notification_id_for_alert,

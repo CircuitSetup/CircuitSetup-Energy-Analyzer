@@ -1448,6 +1448,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id, assignment_id, helper_circuit_id=helper_circuit_id,
         )
 
+    async def async_restore_nilm_item(
+        self: Self,
+        circuit_id: str,
+        *,
+        assignment_id: str | None = None,
+        signature_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore one hidden NILM signature or assignment."""
+        return await self.nilm_controller.async_restore_nilm_item(
+            circuit_id,
+            assignment_id=assignment_id,
+            signature_id=signature_id,
+        )
+
     async def async_convert_nilm_assignment_to_direct_meter(
         self: Self,
         circuit_id: str,

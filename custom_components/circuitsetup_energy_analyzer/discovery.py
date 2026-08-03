@@ -118,6 +118,52 @@ class DiscoveredSensor:
     integration_domain: str | None
 
 
+def sensor_metadata_is_unsupported(
+    *,
+    device_class: str | None = None,
+    unit: str | None = None,
+) -> bool:
+    """Return whether metadata identifies an unsupported energy quantity."""
+    return (
+        str(device_class or "").strip().lower()
+        in _UNSUPPORTED_REACTIVE_ENERGY_DEVICE_CLASSES
+        or str(unit or "").strip().lower() in _UNSUPPORTED_REACTIVE_ENERGY_UNITS
+    )
+
+
+def sensor_metadata_role_conflict(
+    *,
+    device_class: str | None = None,
+    unit: str | None = None,
+) -> bool:
+    """Return whether recognized metadata resolves to different roles."""
+    device_role = _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower())
+    unit_role = _UNIT_ROLES.get(str(unit or "").strip().lower())
+    return (
+        device_role is not None
+        and unit_role is not None
+        and device_role is not unit_role
+    )
+
+
+def sensor_role_from_metadata(
+    *,
+    device_class: str | None = None,
+    unit: str | None = None,
+) -> SensorRole | None:
+    """Resolve a role from unambiguous device-class and unit metadata."""
+    device_role = _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower())
+    unit_role = _UNIT_ROLES.get(str(unit or "").strip().lower())
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return None
+    non_real_roles = {SensorRole.REACTIVE_POWER, SensorRole.APPARENT_POWER}
+    if device_role in non_real_roles:
+        return device_role
+    if unit_role in non_real_roles:
+        return unit_role
+    return device_role or unit_role
+
+
 def infer_sensor_role(
     entity_id: str,
     friendly_name: str | None,
@@ -130,14 +176,20 @@ def infer_sensor_role(
     normalized_device_class = str(device_class or "").strip().lower()
     normalized_unit = str(unit or "").strip().lower()
 
-    if (
-        normalized_device_class in _UNSUPPORTED_REACTIVE_ENERGY_DEVICE_CLASSES
-        or normalized_unit in _UNSUPPORTED_REACTIVE_ENERGY_UNITS
+    if sensor_metadata_is_unsupported(
+        device_class=normalized_device_class,
+        unit=normalized_unit,
     ):
         return None
-    if role := _DEVICE_CLASS_ROLES.get(normalized_device_class):
-        return role
-    if role := _UNIT_ROLES.get(normalized_unit):
+    if sensor_metadata_role_conflict(
+        device_class=normalized_device_class,
+        unit=normalized_unit,
+    ):
+        return None
+    if role := sensor_role_from_metadata(
+        device_class=normalized_device_class,
+        unit=normalized_unit,
+    ):
         return role
     if "reactive power" in text:
         return SensorRole.REACTIVE_POWER

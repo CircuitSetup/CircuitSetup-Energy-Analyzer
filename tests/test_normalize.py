@@ -21,7 +21,13 @@ from custom_components.circuitsetup_energy_analyzer.normalize import (
 
 @pytest.mark.parametrize(
     ("unit", "expected"),
-    (("kW", 180.0), ("KW", 180.0), ("Kw", 180.0), ("mW", 0.00018)),
+    (
+        ("W", 0.18),
+        ("kW", 180.0),
+        ("KW", 180.0),
+        ("Kw", 180.0),
+        ("mW", 0.00018),
+    ),
 )
 def test_build_circuit_sample_normalizes_real_power_units(
     unit: str,
@@ -44,6 +50,7 @@ def test_build_circuit_sample_normalizes_real_power_units(
             "0.18",
             unit,
             now,
+            device_class="power",
         ),
         "sensor.fridge_current": SourceState(
             "sensor.fridge_current",
@@ -117,6 +124,110 @@ def test_build_circuit_sample_normalizes_scaled_measurements(
     assert sample.voltage == pytest.approx(expected[2])
     assert sample.apparent_power == pytest.approx(expected[3])
     assert sample.reactive_power == pytest.approx(expected[4])
+
+
+def test_build_circuit_sample_does_not_treat_reactive_metadata_as_real_power() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.HVAC,
+        sensors=(SensorRef("sensor.hvac_power", SensorRole.REAL_POWER),),
+    )
+
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.hvac_power": SourceState(
+                "sensor.hvac_power",
+                "320",
+                "var",
+                now,
+                device_class="reactive_power",
+            )
+        },
+        now,
+    )
+
+    assert sample.real_power is None
+    assert sample.reactive_power == 320.0
+    assert any(
+        "configured real_power conflicts with metadata reactive_power" in issue
+        for issue in sample.quality_issues
+    )
+
+
+def test_build_circuit_sample_rejects_conflicting_metadata_roles() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="hvac",
+        name="HVAC",
+        mode=CircuitMode.SINGLE_PHASE,
+        appliance_profile=ApplianceProfile.HVAC,
+        sensors=(SensorRef("sensor.hvac_power", SensorRole.REAL_POWER),),
+    )
+
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.hvac_power": SourceState(
+                "sensor.hvac_power",
+                "12",
+                "A",
+                now,
+                device_class="power",
+            )
+        },
+        now,
+    )
+
+    assert sample.real_power is None
+    assert sample.raw_real_power is None
+    assert sample.current is None
+    assert sample.voltage is None
+    assert sample.reactive_power is None
+    assert sample.apparent_power is None
+    assert sample.power_factor is None
+    assert sample.frequency is None
+    assert sample.energy is None
+    assert sample.source_updated_at_by_role == ()
+    assert "sensor.hvac_power metadata role conflict: device_class=power unit=A" in (
+        sample.quality_issues
+    )
+
+
+def test_build_circuit_sample_retains_per_role_source_update_times() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    reactive_updated = now - timedelta(seconds=4)
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        sensors=(
+            SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
+            SensorRef("sensor.mains_var", SensorRole.REACTIVE_POWER),
+        ),
+    )
+
+    sample = build_circuit_sample(
+        config,
+        {
+            "sensor.mains_power": SourceState(
+                "sensor.mains_power", "500", "W", now
+            ),
+            "sensor.mains_var": SourceState(
+                "sensor.mains_var", "120", "var", reactive_updated
+            ),
+        },
+        now,
+    )
+
+    assert dict(sample.source_updated_at_by_role) == {
+        SensorRole.REAL_POWER: now,
+        SensorRole.REACTIVE_POWER: reactive_updated,
+    }
 
 
 def test_build_circuit_sample_marks_stale_and_unavailable_values() -> None:

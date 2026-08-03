@@ -112,6 +112,9 @@ class SourceSampleBuilder:
             leg_b_voltage=aggregated.leg_b.voltage,
             leg_power_imbalance_ratio=aggregated.leg_power_imbalance_ratio,
             voltage_difference=aggregated.voltage_difference,
+            source_updated_at_by_role=_merge_source_update_times(
+                (left_sample, right_sample)
+            ),
         )
         return suppress_inactive_stale_current_issues(
             config,
@@ -281,6 +284,7 @@ class SourceSampleBuilder:
                 SensorRole.VOLTAGE,
                 "b",
             ),
+            source_updated_at_by_role=_merge_source_update_times(samples),
         )
         return suppress_inactive_stale_current_issues(
             config,
@@ -296,7 +300,7 @@ def _parallel_leg_samples(
         (
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is SensorRole.REAL_POWER
+            if _sensor_sample_has_role(sensor, sample, SensorRole.REAL_POWER)
             and normalized_leg(sensor.leg) == "a"
         ),
         None,
@@ -305,7 +309,7 @@ def _parallel_leg_samples(
         (
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is SensorRole.REAL_POWER
+            if _sensor_sample_has_role(sensor, sample, SensorRole.REAL_POWER)
             and normalized_leg(sensor.leg) == "b"
         ),
         None,
@@ -317,7 +321,7 @@ def _parallel_leg_samples(
         (
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is SensorRole.REAL_POWER
+            if _sensor_sample_has_role(sensor, sample, SensorRole.REAL_POWER)
             and entity_id_leg_hint(sensor.entity_id) == "a"
         ),
         None,
@@ -326,7 +330,7 @@ def _parallel_leg_samples(
         (
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is SensorRole.REAL_POWER
+            if _sensor_sample_has_role(sensor, sample, SensorRole.REAL_POWER)
             and entity_id_leg_hint(sensor.entity_id) == "b"
         ),
         None,
@@ -391,6 +395,17 @@ def _sample_value_or_none(
     return float(value)
 
 
+def _merge_source_update_times(
+    samples: list[NormalizedCircuitSample]
+    | tuple[NormalizedCircuitSample, ...],
+) -> tuple[tuple[SensorRole, datetime], ...]:
+    latest: dict[SensorRole, datetime] = {}
+    for sample in samples:
+        for role, timestamp in sample.source_updated_at_by_role:
+            latest[role] = min(latest.get(role, timestamp), timestamp)
+    return tuple(latest.items())
+
+
 def _sum_complete_sample_values(
     samples: tuple[NormalizedCircuitSample, ...] | list[NormalizedCircuitSample],
     attribute: str,
@@ -417,7 +432,7 @@ def _sum_parallel_sensor_values(
         [
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is role
+            if _sensor_sample_has_role(sensor, sample, role)
         ],
         attribute,
     )
@@ -447,12 +462,24 @@ def _average_leg_sensor_values(
         [
             sample
             for sensor, sample in sensor_samples
-            if sensor.role is role
+            if _sensor_sample_has_role(sensor, sample, role)
             and (normalized_leg(sensor.leg) or entity_id_leg_hint(sensor.entity_id))
             == leg
         ],
         attribute,
     )
+
+
+def _sensor_sample_has_role(
+    sensor: SensorRef,
+    sample: NormalizedCircuitSample,
+    role: SensorRole,
+) -> bool:
+    source_roles = {
+        source_role.value if isinstance(source_role, SensorRole) else str(source_role)
+        for source_role, _timestamp in sample.source_updated_at_by_role
+    }
+    return role.value in source_roles if source_roles else sensor.role is role
 
 
 def _power_flow_direction(

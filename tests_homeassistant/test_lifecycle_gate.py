@@ -428,7 +428,8 @@ def _assert_appliance_workflow_payloads(
         "needs_review",
         "assigned",
         "published",
-        "ignored_expected",
+        "expected",
+        "hidden",
     }
     label_action_data = nilm_workspace["actions"]["label_interval"]["data"]
     assert label_action_data["circuit_id"] == "mains"
@@ -514,7 +515,8 @@ async def _assert_appliance_workflow_panel_views(
         "needs_review",
         "assigned",
         "published",
-        "ignored_expected",
+        "expected",
+        "hidden",
     }
     label_action_data = nilm_workspace["actions"]["label_interval"]["data"]
     assert label_action_data["circuit_id"] == "mains"
@@ -704,7 +706,7 @@ async def test_config_entry_setup_registers_published_nilm_device(
                 "display_name": "Washer",
                 "appliance_profile": "washer",
                 "mains_circuit_id": "mains",
-                "signature_fingerprints": [],
+                "signature_fingerprints": ["washer-signature"],
                 "session_ids": [],
                 "label_interval_ids": [],
                 "lifecycle_state": "published",

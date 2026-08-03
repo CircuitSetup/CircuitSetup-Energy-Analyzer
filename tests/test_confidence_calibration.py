@@ -627,6 +627,28 @@ def test_calibration_fixture_loader_expands_compact_segments() -> None:
     assert len(fixture.samples) == 15
 
 
+def test_nilm_signal_integrity_fixture_replays_optional_and_w_only_signatures() -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "nilm_signal_integrity.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+
+    mixed_on = [
+        signature
+        for signature in result.store_data.nilm_signatures["mixed"]
+        if signature["signature_id"].startswith("on-")
+    ]
+    assert {signature["median_delta_var"] for signature in mixed_on} == {40.0, 160.0}
+
+    w_only = result.store_data.nilm_signatures["w_only"]
+    assert w_only
+    assert all(
+        signature[field] is None
+        for signature in w_only
+        for field in ("median_delta_var", "median_delta_va", "median_delta_pf")
+    )
+
+
 @pytest.mark.parametrize(
     "fixture_name",
     [
@@ -986,7 +1008,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 31 |" in report
+    assert "| Fixtures | 32 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
