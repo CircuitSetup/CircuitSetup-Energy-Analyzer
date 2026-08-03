@@ -531,7 +531,18 @@ class NilmController:
             "created_at": str(existing.get("created_at") if existing else now),
             "updated_at": now,
         }
+        if existing and observed_transition_w is None:
+            previous_transition_w = existing.get("observed_transition_w")
+            if (
+                isinstance(previous_transition_w, (int, float))
+                and not isinstance(previous_transition_w, bool)
+                and math.isfinite(float(previous_transition_w))
+                and previous_transition_w >= 0
+            ):
+                payload["observed_transition_w"] = float(previous_transition_w)
         if observed_transition_w is not None:
+            if isinstance(observed_transition_w, bool):
+                raise ValueError("Invalid observed transition watts.")
             try:
                 transition_w = float(observed_transition_w)
             except (TypeError, ValueError) as err:

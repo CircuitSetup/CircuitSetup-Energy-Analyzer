@@ -290,7 +290,25 @@ async def test_label_intervals_validate_and_retain_observed_transition_w() -> No
     )
 
     assert saved["observed_transition_w"] == 83.0
-    for invalid in (-1, float("inf"), float("nan"), "unknown"):
+    updated = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Condensate pump",
+        start="2026-06-02T10:01:00+00:00",
+        end="2026-06-02T10:06:00+00:00",
+        interval_id=saved["interval_id"],
+    )
+    assert updated["observed_transition_w"] == 83.0
+
+    replaced = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Condensate pump",
+        start="2026-06-02T10:01:00+00:00",
+        end="2026-06-02T10:06:00+00:00",
+        interval_id=saved["interval_id"],
+        observed_transition_w=91.0,
+    )
+    assert replaced["observed_transition_w"] == 91.0
+    for invalid in (-1, float("inf"), float("nan"), "unknown", True, False):
         with pytest.raises(ValueError, match="observed transition"):
             await controller.async_label_nilm_interval(
                 "mixed",

@@ -6467,7 +6467,8 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();
   await panel.locator("[data-nilm-sensitivity-action]").click();
 
-  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await page.evaluate(() => window.__panel._callNilmLabelIntervalAction(0, "adjust"));
+  await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveValue("83");
   await panel.locator('[data-nilm-label-interval-input="label"]').fill("Dishwasher");
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
   await panel.locator('[data-nilm-label-interval-input="start"]').fill("2026-07-13T18:00");

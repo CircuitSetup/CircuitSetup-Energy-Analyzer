@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-6"
+    assert PANEL_MODULE_VERSION == "20260802-7"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -4277,7 +4277,7 @@ def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> 
     coordinator.options = {CONF_ENABLE_EXPERIMENTAL_NILM: True}
     coordinator.data = SimpleNamespace()
     coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
-    coordinator.store_data.nilm_reconciliation_by_circuit = {
+    coordinator.state.nilm_reconciliation_by_circuit = {
         "mixed": {"status": "conflict", "conflict_reason": "over_allocation"}
     }
 
@@ -4297,7 +4297,7 @@ def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> 
     coordinator.store_data.nilm_signatures = {
         "mixed": [{"signature_id": "sig-1", "assignment_id": "pump"}]
     }
-    coordinator.store_data.nilm_reconciliation_by_circuit = {
+    coordinator.state.nilm_reconciliation_by_circuit = {
         "mixed": {"status": "consistent"}
     }
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": []}
@@ -4344,6 +4344,29 @@ def test_nilm_sensitivity_uses_latest_three_ordered_observations() -> None:
     assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == (
         "sensitive"
     )
+
+
+def test_nilm_sensitivity_orders_observations_by_absolute_time() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": start,
+            "observed_transition_w": watts,
+        }
+        for start, watts in (
+            ("2026-11-01T01:30:00-05:00", 82.0),
+            ("2026-11-01T01:45:00-04:00", 78.0),
+            ("2026-11-01T01:15:00-05:00", 80.0),
+            ("2026-11-01T00:30:00-05:00", 140.0),
+        )
+    ]
+
+    assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == "sensitive"
 
 
 @pytest.mark.parametrize(

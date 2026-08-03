@@ -810,9 +810,11 @@ def _setup_health_nilm_issues(
             for key in ("assignment_id", "expected", "ignored", "merged_into")
         )
     ]
-    reconciliation = getattr(store, "nilm_reconciliation_by_circuit", {}).get(
-        circuit_id, {}
-    )
+    reconciliation = getattr(
+        getattr(coordinator, "state", None),
+        "nilm_reconciliation_by_circuit",
+        {},
+    ).get(circuit_id, {})
     assignments = getattr(
         store, "nilm_appliance_assignments_by_circuit", {}
     ).get(circuit_id, ())

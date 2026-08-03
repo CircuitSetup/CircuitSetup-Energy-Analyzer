@@ -404,6 +404,7 @@ export function createNilmWorkspaceMethods({
           interval_id: String(interval.interval_id || ""),
           start: this._datetimeLocalFromMillis(Date.parse(interval.start || "")),
           end: this._datetimeLocalFromMillis(Date.parse(interval.end || "")),
+          observed_transition_w: interval.observed_transition_w ?? "",
         }],
       };
       this._nilmActiveIntervalIndex = 0;

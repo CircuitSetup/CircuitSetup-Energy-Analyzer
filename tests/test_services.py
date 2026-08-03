@@ -2487,8 +2487,9 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
             mains_entity_id: str | None = None,
             ground_truth_entity_id: str | None = None,
             interval_id: str | None = None,
-            source: str = "manual",
-            confidence: float = 1.0,
+                source: str = "manual",
+                confidence: float = 1.0,
+                observed_transition_w=None,
         ) -> None:
             self.calls.append(
                 (
@@ -2506,6 +2507,7 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                         interval_id,
                         source,
                         confidence,
+                        observed_transition_w,
                     ),
                 )
             )
@@ -2562,10 +2564,64 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                 None,
                 "manual",
                 1.0,
+                None,
             ),
         ),
         ("async_delete_nilm_label_interval", ("mains", "label-1")),
     ]
+
+
+@pytest.mark.asyncio
+async def test_nilm_label_interval_service_rejects_boolean_transition() -> None:
+    from datetime import UTC, datetime
+    from unittest.mock import AsyncMock
+
+    from custom_components.circuitsetup_energy_analyzer.managers import nilm_controller
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_LABEL_NILM_INTERVAL,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 8, 2, tzinfo=UTC),
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=AsyncMock()
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+        circuit_configs=[SimpleNamespace(circuit_id="mains")],
+        has_circuit=lambda circuit_id: circuit_id == "mains",
+    )
+    coordinator.async_label_nilm_interval = nilm_controller.NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    ).async_label_nilm_interval
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+    await async_setup_services(hass)
+
+    with pytest.raises(ValueError, match="observed transition"):
+        await hass.services.registered[(DOMAIN, SERVICE_LABEL_NILM_INTERVAL)](
+            SimpleNamespace(
+                data={
+                    "circuit_id": "mains",
+                    "label": "Pump",
+                    "start": "2026-08-02T10:00:00+00:00",
+                    "end": "2026-08-02T10:05:00+00:00",
+                    "observed_transition_w": True,
+                }
+            )
+        )
 
 
 @pytest.mark.asyncio
