@@ -792,6 +792,7 @@ def _nilm_assignments_for_circuit(
             circuit_id,
             item,
             assignments,
+            entry_id=str(getattr(coordinator, "entry_id", "") or ""),
             label_intervals=label_intervals,
             direct_circuit_options=direct_circuit_options,
         )
@@ -917,6 +918,7 @@ def _nilm_assignment_payload(
     assignment: Mapping[str, Any],
     assignments: Iterable[Mapping[str, Any]] = (),
     *,
+    entry_id: str = "",
     label_intervals: Iterable[Mapping[str, Any]] = (),
     direct_circuit_options: Iterable[Mapping[str, str]] = (),
 ) -> dict[str, Any]:
@@ -925,7 +927,9 @@ def _nilm_assignment_payload(
     if not assignment_id:
         return payload
 
-    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(assignment_id)
+    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
+        assignment_id, entry_id=entry_id
+    )
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
@@ -1064,6 +1068,7 @@ def _nilm_virtual_appliances_for_assignments(
     coordinator: Any | None = None,
 ) -> list[dict[str, Any]]:
     reference_date = _nilm_workspace_reference_date(edges, sessions)
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
     virtual_appliances = []
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip()
@@ -1098,6 +1103,9 @@ def _nilm_virtual_appliances_for_assignments(
             )
             else "healthy"
         )
+        detail_query = {ATTR_ASSIGNMENT_ID: assignment_id}
+        if entry_id:
+            detail_query[ATTR_ENTRY_ID] = entry_id
         virtual_appliances.append(
             {
                 "appliance_key": f"nilm:{assignment_id}",
@@ -1141,11 +1149,10 @@ def _nilm_virtual_appliances_for_assignments(
                 "estimated": True,
                 "mains_circuit_id": str(assignment.get("mains_circuit_id") or ""),
                 "appliance_detail_api_path": (
-                    f"{APPLIANCE_DETAIL_API_PATH}?"
-                    f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id})}"
+                    f"{APPLIANCE_DETAIL_API_PATH}?{urlencode(detail_query)}"
                 ),
                 "appliance_detail_path": _nilm_appliance_detail_panel_path(
-                    assignment_id
+                    assignment_id, entry_id=entry_id
                 ),
             }
         )
@@ -1174,10 +1181,15 @@ def _nilm_reconciliation_payload(
     }
 
 
-def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:
+def _nilm_appliance_detail_panel_path(
+    assignment_id: str, *, entry_id: str = ""
+) -> str:
+    query = {ATTR_ASSIGNMENT_ID: assignment_id, "appliance_detail": "1"}
+    if entry_id:
+        query[ATTR_ENTRY_ID] = entry_id
     return (
         f"/{PANEL_URL_PATH}?"
-        f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id, 'appliance_detail': '1'})}"
+        f"{urlencode(query)}"
     )
 
 

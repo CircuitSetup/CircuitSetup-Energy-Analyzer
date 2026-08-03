@@ -2332,6 +2332,86 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
 
 
+def test_nilm_assignment_detail_links_keep_duplicate_assignment_entry_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    coordinators = [
+        _nilm_workspace_coordinator(
+            entry_id=entry_id,
+            name=name,
+            entity_id=f"sensor.{entry_id}_mains_power",
+        )
+        for entry_id, name in (
+            ("entry/one", "First Mains"),
+            ("entry two", "Second Mains"),
+        )
+    ]
+    for coordinator in coordinators:
+        coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+            "mains": [
+                {
+                    "assignment_id": "shared-assignment",
+                    "display_name": coordinator.circuit_configs[0].name,
+                    "mains_circuit_id": "mains",
+                    "lifecycle_state": "assigned",
+                }
+            ]
+        }
+
+    workspaces = [
+        nilm_workspace_payload(
+            coordinators,
+            circuit_id="mains",
+            entry_id=coordinator.entry_id,
+        )
+        for coordinator in coordinators
+    ]
+
+    for coordinator, workspace in zip(coordinators, workspaces, strict=True):
+        for path in (
+            workspace["assignments"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_api_path"],
+        ):
+            assert parse_qs(urlparse(path).query)["entry_id"] == [
+                coordinator.entry_id
+            ]
+        assert all(
+            action["data"]["entry_id"] == coordinator.entry_id
+            for action in _nilm_service_actions(workspace)
+        )
+
+    selected: list[str] = []
+    monkeypatch.setattr(
+        panel,
+        "appliance_detail_for_assignment",
+        lambda coordinator, _assignment_id: selected.append(coordinator.entry_id)
+        or SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        panel,
+        "_appliance_detail_payload",
+        lambda coordinator, _detail, **_kwargs: {"entry_id": coordinator.entry_id},
+    )
+    for workspace in workspaces:
+        for path in (
+            workspace["assignments"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_api_path"],
+        ):
+            query = parse_qs(urlparse(path).query)
+            assert panel.appliance_detail_payload(
+                coordinators,
+                assignment_id=query["assignment_id"][0],
+                entry_id=query["entry_id"][0],
+            )["entry_id"] == query["entry_id"][0]
+    assert selected == ["entry/one", "entry/one", "entry two", "entry two"]
+
+
 @pytest.mark.parametrize(
     ("profile", "mode", "expected"),
     [
