@@ -9126,6 +9126,136 @@ def test_nilm_runtime_suspends_overallocation_without_fake_close() -> None:
     assert reconciliation["review_item"]["type"] == "model_conflict"
 
 
+def test_nilm_sample_processor_preserves_delayed_overallocation_conflict() -> None:
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        apply_state_update,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitConfig,
+        CircuitMode,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+    start = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+
+    class DelayedDetector:
+        min_delta_w = 20.0
+        noise_spread_w = 0.0
+        calls = 0
+
+        @property
+        def has_pending_transition(self) -> bool:
+            return self.calls == 1
+
+        def process(self, _sample: object) -> list[NilmEdge]:
+            self.calls += 1
+            return (
+                [NilmEdge(start + timedelta(seconds=10), -40.0, 0.0, -40.0, 0.0, "off")]
+                if self.calls == 2
+                else []
+            )
+
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mixed"] = {
+        "pump": {
+            "status": "on",
+            "state_power_w": 80.0,
+            "estimated_power_w": 80.0,
+            "session_id": "open",
+            "session_start": start.isoformat(),
+            "confidence": 0.9,
+            "consistent": True,
+            "last_observed": start.isoformat(),
+            "energy_kwh": 0.001,
+        }
+    }
+    state.nilm_reconciliation_by_circuit["mixed"] = {
+        "source_power_w": 80.0,
+        "source_energy_kwh": 0.001,
+        "component_energy_kwh": 0.001,
+        "last_observed": start.isoformat(),
+        "energy_allocation_allowed": True,
+    }
+    store = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            "mixed": [_reconciliation_assignment("pump", 80.0)]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={"mixed": DelayedDetector()},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    config = CircuitConfig("mixed", "Mixed", ApplianceProfile.MIXED, CircuitMode.MIXED)
+
+    energy_before_rejection = 0.0
+    for offset in (10, 20):
+        now = start + timedelta(seconds=offset)
+        result = processor.process(
+            NormalizedCircuitSample(
+                timestamp=now,
+                circuit_id="mixed",
+                real_power=40.0,
+                current=None,
+                voltage=None,
+                reactive_power=None,
+                apparent_power=None,
+                power_factor=None,
+                frequency=None,
+                energy=None,
+            ),
+            config,
+            ProcessingContext(
+                now=now,
+                hass=SimpleNamespace(data={DOMAIN: {}}),
+                state=state,
+                store_data=store,
+                options={},
+                entry_data={},
+                known_load_circuit_ids=frozenset(),
+                sensitivity="balanced",
+            ),
+            events=(),
+        )
+        for update in result.state_updates:
+            apply_state_update(state, update.path, update.value)
+        if offset == 10:
+            energy_before_rejection = state.nilm_reconciliation_by_circuit["mixed"][
+                "component_energy_kwh"
+            ]
+
+    reconciliation = state.nilm_reconciliation_by_circuit["mixed"]
+    assert reconciliation["conflict"] == "over_allocation"
+    assert reconciliation["energy_allocation_allowed"] is False
+    assert reconciliation["component_energy_kwh"] == pytest.approx(
+        energy_before_rejection
+    )
+    assert state.nilm_component_runtime_by_circuit["mixed"]["pump"]["status"] == (
+        "uncertain"
+    )
+    assert processor.unmatched_edges_by_circuit["mixed"]
+
+
 def test_nilm_runtime_keeps_helper_conflict_unknown() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (

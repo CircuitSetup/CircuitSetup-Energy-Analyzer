@@ -220,7 +220,11 @@ class NilmSampleProcessor:
                     direct_helper_powers=direct_helper_powers,
                     )
                 )
-                if edge_timestamp < sample.timestamp:
+                if (
+                    edge_timestamp < sample.timestamp
+                    and reconciliation.get("energy_allocation_allowed")
+                    and reconciliation.get("consistent")
+                ):
                     runtime, reconciliation, followup_completed, _ = (
                         reconcile_component_runtime(
                             source_power_w=sample.real_power,
