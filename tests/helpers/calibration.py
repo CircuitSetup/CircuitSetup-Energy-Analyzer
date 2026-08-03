@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 from types import SimpleNamespace
 from typing import Any
 
@@ -51,6 +52,7 @@ from custom_components.circuitsetup_energy_analyzer.processors.events import (
 from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
     NilmSampleProcessor,
 )
+from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.state import (
     process_events_into_state,
 )
@@ -93,6 +95,7 @@ class CalibrationSample:
     t: int
     states: dict[str, Any]
     completes_prior_energy_days: bool = False
+    restart_before_sample: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +131,22 @@ class CalibrationLabels:
     expected_alerts: tuple[ExpectedAlert, ...] = ()
     expected_no_alerts: tuple[ExpectedNoAlert, ...] = ()
     abnormal_condition_start_t: int | None = None
+    component_truth: dict[str, ComponentTruth] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedComponentSession:
+    start_t: int
+    end_t: int
+    tolerance_seconds: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentTruth:
+    edges: tuple[ExpectedEvent, ...] = ()
+    sessions: tuple[ExpectedComponentSession, ...] = ()
+    energy_kwh: float | None = None
+    corroborating_helper_circuit_ids: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +171,13 @@ class CalibrationFixture:
     labels: CalibrationLabels
     expectations: CalibrationExpectations
     path: Path
+    source_kind: str | None = None
+    assignments_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    entry_id: str | None = None
+    entries: tuple[CalibrationFixture, ...] = ()
+    min_delta_w: float = 100.0
 
 
 @dataclass(slots=True)
@@ -182,40 +208,126 @@ class CalibrationMetrics:
     confidence_bins: dict[str, dict[str, float]]
     brier_score: float | None
     expected_calibration_error: float | None
+    source_kind: str | None = None
+    component_metrics: dict[str, ComponentReplayMetrics] = field(default_factory=dict)
+    residual_energy_kwh: float = 0.0
+    false_helper_association_rate: float | None = None
+    ambiguous_event_rate: float = 0.0
+    conservation_violations: int = 0
     expectation_failures: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentReplayMetrics:
+    edge_precision: float | None
+    edge_recall: float | None
+    session_precision: float | None
+    session_recall: float | None
+    session_f1: float | None
+    median_start_error_seconds: float | None
+    median_stop_error_seconds: float | None
+    energy_absolute_error_kwh: float | None
+    energy_percentage_error: float | None
 
 
 def load_calibration_fixture(path: Path) -> CalibrationFixture:
     raw = _load_yaml_mapping(path)
+    if raw.get("scenarios"):
+        msg = f"{path}: use load_calibration_scenarios for a scenario fixture"
+        raise CalibrationFixtureError(msg)
+    return _parse_fixture(raw, path)
+
+
+def load_calibration_scenarios(path: Path) -> tuple[CalibrationFixture, ...]:
+    """Expand optional scenario blocks while preserving legacy fixtures."""
+    raw = _load_yaml_mapping(path)
+    scenarios = _optional_list(raw, "scenarios")
+    if not scenarios:
+        return (_parse_fixture(raw, path),)
+    _validate_block_ids(scenarios, "id", "scenario")
+    parsed = tuple(
+        _parse_fixture(
+            {**raw, **dict(scenario), "id": f"{raw['id']}.{scenario['id']}"},
+            path,
+        )
+        for scenario in scenarios
+        if isinstance(scenario, Mapping)
+    )
+    return tuple(
+        entry for fixture in parsed for entry in (fixture.entries or (fixture,))
+    )
+
+
+def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
     schema_version = int(raw.get("schema_version", 0))
     if schema_version != 1:
         msg = f"{path}: expected schema_version 1"
         raise CalibrationFixtureError(msg)
 
     start_time = _parse_datetime(str(raw["start_time"]))
-    circuits = tuple(_parse_circuit(item) for item in _required_list(raw, "circuits"))
-    if not circuits:
+    circuits = tuple(_parse_circuit(item) for item in _optional_list(raw, "circuits"))
+    entries_raw = _optional_list(raw, "entries")
+    _validate_block_ids(entries_raw, "entry_id", "entry")
+    if not circuits and not entries_raw:
         msg = f"{path}: at least one circuit is required"
         raise CalibrationFixtureError(msg)
 
     samples = [
-        _parse_sample(item, start_time)
-        for item in _optional_list(raw, "samples")
+        _parse_sample(item, start_time) for item in _optional_list(raw, "samples")
     ]
     for segment in _optional_list(raw, "segments"):
         samples.extend(_expand_segment(segment, start_time, circuits))
     samples.sort(key=lambda sample: sample.timestamp)
-    if not samples:
+    if not samples and not entries_raw:
         msg = f"{path}: at least one sample or segment is required"
         raise CalibrationFixtureError(msg)
+
+    source_kind = None
+    if raw.get("source_kind") and circuits:
+        production_kinds = {
+            kind.value
+            for circuit in circuits
+            if (kind := nilm_source_kind(circuit)) is not None
+        }
+        if (
+            len(production_kinds) != 1
+            or str(raw["source_kind"]) not in production_kinds
+        ):
+            msg = (
+                f"{path}: declared source_kind {raw['source_kind']!r} does not "
+                f"match one unambiguous production source kind: "
+                f"{sorted(production_kinds)}"
+            )
+            raise CalibrationFixtureError(msg)
+        source_kind = production_kinds.pop()
 
     labels = _parse_labels(_required_mapping(raw, "labels"))
     expectations = _parse_expectations(
         _required_mapping(raw, "calibration_expectations")
     )
+    fixture_id = str(raw["id"])
+    entries = tuple(
+        _parse_fixture(
+            {
+                **raw,
+                **dict(entry),
+                "id": f"{fixture_id}.{entry['entry_id']}",
+                "entries": [],
+                "scenarios": [],
+                "labels": dict(entry.get("labels") or {}),
+                "calibration_expectations": dict(
+                    entry.get("calibration_expectations") or {}
+                ),
+            },
+            path,
+        )
+        for entry in entries_raw
+        if isinstance(entry, Mapping)
+    )
+    assignments = _optional_mapping(raw, "assignments")
     return CalibrationFixture(
         schema_version=schema_version,
-        id=str(raw["id"]),
+        id=fixture_id,
         description=str(raw["description"]),
         scenario_type=str(raw["scenario_type"]),
         start_time=start_time,
@@ -224,58 +336,106 @@ def load_calibration_fixture(path: Path) -> CalibrationFixture:
         labels=labels,
         expectations=expectations,
         path=path,
+        source_kind=source_kind,
+        assignments_by_circuit={
+            str(circuit_id): [
+                dict(item) for item in values if isinstance(item, Mapping)
+            ]
+            for circuit_id, values in assignments.items()
+            if isinstance(values, list)
+        },
+        entry_id=(str(raw["entry_id"]) if raw.get("entry_id") else None),
+        entries=entries,
+        min_delta_w=float(raw.get("min_delta_w", 100.0)),
     )
 
 
 def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     state = AnalyzerState()
-    store_data = FeatureStoreData()
-    event_processor = CircuitEventProcessor()
-    nilm_processor = NilmSampleProcessor(
-        nilm_enabled=lambda config: config.mode is CircuitMode.MAINS_NILM,
-        seed_demo_nilm_state=lambda _config, _now: None,
-        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
-        detectors={},
-        total_events_by_circuit=defaultdict(int),
-        unmatched_edges_by_circuit=defaultdict(list),
-        ignored_signatures=set(),
-        known_load_events=lambda circuit_id, event_list: (
-            event for event in event_list if event.circuit_id != circuit_id
-        ),
-        observe_topology=lambda _config, _match, _context: [],
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            circuit_id: [dict(item) for item in assignments]
+            for circuit_id, assignments in fixture.assignments_by_circuit.items()
+        }
     )
-    alert_policies: dict[str, ConservativeAlertPolicy] = {}
-    cycle_alert_policies: dict[str, ConservativeAlertPolicy] = {}
-    run_cycle_processor = RunCycleProcessor(
-        alert_policy_for_circuit=lambda circuit_id: cycle_alert_policies.setdefault(
-            circuit_id,
-            ConservativeAlertPolicy(
-                min_repeated=3,
-                min_total_score=4.5,
-                min_average_score=1.5,
-                min_baseline_confidence=0.6,
+    def build_processors() -> tuple[
+        CircuitEventProcessor,
+        NilmSampleProcessor,
+        RunCycleProcessor,
+        EnergyUsageProcessor,
+    ]:
+        alert_policies: dict[str, ConservativeAlertPolicy] = {}
+        cycle_alert_policies: dict[str, ConservativeAlertPolicy] = {}
+        return (
+            CircuitEventProcessor(),
+            NilmSampleProcessor(
+                nilm_enabled=lambda config: nilm_source_kind(config) is not None,
+                seed_demo_nilm_state=lambda _config, _now: None,
+                min_delta_w_for_circuit=lambda _circuit_id: fixture.min_delta_w,
+                detectors={},
+                total_events_by_circuit=defaultdict(int),
+                unmatched_edges_by_circuit=defaultdict(list),
+                ignored_signatures=set(),
+                known_load_events=lambda circuit_id, event_list: (
+                    event
+                    for event in event_list
+                    if event.circuit_id != circuit_id
+                    and next(
+                        (
+                            nilm_source_kind(config).value
+                            for config in fixture.circuits
+                            if config.circuit_id == circuit_id
+                            and nilm_source_kind(config) is not None
+                        ),
+                        None,
+                    )
+                    == "mains"
+                ),
+                helper_candidate_events=lambda circuit_id, event_list: (
+                    event for event in event_list if event.circuit_id != circuit_id
+                ),
+                observe_topology=lambda _config, _match, _context: [],
             ),
-        ),
-        learning_mature=lambda _config, _now: False,
-    )
-    energy_usage_processor = EnergyUsageProcessor(
-        settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
-            window_days=config.energy_usage_window_days if config else 7,
-            daily_spike_ratio=(
-                config.daily_energy_spike_ratio if config else 0.25
+            RunCycleProcessor(
+                alert_policy_for_circuit=lambda circuit_id: (
+                    cycle_alert_policies.setdefault(
+                        circuit_id,
+                        ConservativeAlertPolicy(
+                            min_repeated=3,
+                            min_total_score=4.5,
+                            min_average_score=1.5,
+                            min_baseline_confidence=0.6,
+                        ),
+                    )
+                ),
+                learning_mature=lambda _config, _now: False,
             ),
-        ),
-        retention_days_for_circuit=lambda _circuit_id: 45,
-        alert_policy_for_circuit=lambda circuit_id: alert_policies.setdefault(
-            circuit_id,
-            ConservativeAlertPolicy(
-                min_repeated=3,
-                min_total_score=3.0,
-                min_average_score=1.0,
-                min_baseline_confidence=0.8,
+            EnergyUsageProcessor(
+                settings_for_config=lambda config, _circuit_id: EnergyUsageSettings(
+                    window_days=config.energy_usage_window_days if config else 7,
+                    daily_spike_ratio=(
+                        config.daily_energy_spike_ratio if config else 0.25
+                    ),
+                ),
+                retention_days_for_circuit=lambda _circuit_id: 45,
+                alert_policy_for_circuit=lambda circuit_id: alert_policies.setdefault(
+                    circuit_id,
+                    ConservativeAlertPolicy(
+                        min_repeated=3,
+                        min_total_score=3.0,
+                        min_average_score=1.0,
+                        min_baseline_confidence=0.8,
+                    ),
+                ),
             ),
-        ),
-    )
+        )
+
+    (
+        event_processor,
+        nilm_processor,
+        run_cycle_processor,
+        energy_usage_processor,
+    ) = build_processors()
     hass = SimpleNamespace(data={DOMAIN: {}})
     events: list[CircuitEvent] = []
     alerts: list[AlertEvidence] = []
@@ -283,6 +443,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     snapshots: list[dict[str, Any]] = []
 
     for calibration_sample in fixture.samples:
+        if calibration_sample.restart_before_sample:
+            state = AnalyzerState()
+            (
+                event_processor,
+                nilm_processor,
+                run_cycle_processor,
+                energy_usage_processor,
+            ) = build_processors()
         context = ProcessingContext(
             now=calibration_sample.timestamp,
             hass=hass,
@@ -310,6 +478,14 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 source_states,
                 calibration_sample.timestamp,
             )
+            if normalized_sample.real_power is None:
+                state.latest_real_power_w_by_circuit.pop(
+                    circuit_config.circuit_id, None
+                )
+            else:
+                state.latest_real_power_w_by_circuit[circuit_config.circuit_id] = (
+                    normalized_sample.real_power
+                )
             setup_issues.extend(
                 {
                     "timestamp": calibration_sample.timestamp.isoformat(),
@@ -344,7 +520,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 ),
             ]
             active_alerts: list[AlertEvidence] = []
-            if circuit_config.mode is CircuitMode.MAINS_NILM:
+            if nilm_source_kind(circuit_config) is not None:
                 results.append(
                     nilm_processor.process(
                         normalized_sample,
@@ -368,7 +544,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                 active_alerts,
                 evaluated_circuit_ids=(circuit_config.circuit_id,),
             )
-        snapshots.append(_snapshot_state(state))
+        snapshots.append(_snapshot_state(state, nilm_processor, store_data))
 
     result = ReplayResult(
         events=events,
@@ -404,15 +580,12 @@ def evaluate_replay_result(
 
     true_positive_alerts = len(matched_alert_indexes)
     false_positive_alerts = len(result.alerts) - true_positive_alerts
-    false_negative_alerts = (
-        len(fixture.labels.expected_alerts) - true_positive_alerts
-    )
+    false_negative_alerts = len(fixture.labels.expected_alerts) - true_positive_alerts
     true_negative_windows = sum(
         1
         for window in fixture.labels.expected_no_alerts
         if not any(
-            _alert_in_no_alert_window(fixture, alert, window)
-            for alert in result.alerts
+            _alert_in_no_alert_window(fixture, alert, window) for alert in result.alerts
         )
     )
     precision = _ratio_or_none(
@@ -434,6 +607,7 @@ def evaluate_replay_result(
         result.alerts,
         matched_alert_indexes,
     )
+    reconciliation = _combined_reconciliation(result)
     return CalibrationMetrics(
         fixture_id=fixture.id,
         true_positive_alerts=true_positive_alerts,
@@ -449,6 +623,18 @@ def evaluate_replay_result(
         confidence_bins=confidence_bins,
         brier_score=brier,
         expected_calibration_error=ece,
+        source_kind=fixture.source_kind,
+        component_metrics=_component_metrics(fixture, result),
+        residual_energy_kwh=float(reconciliation.get("residual_energy_kwh", 0.0)),
+        false_helper_association_rate=_false_helper_association_rate(
+            fixture, result
+        ),
+        ambiguous_event_rate=_ratio_or_none(
+            int(reconciliation.get("ambiguous_event_count", 0)),
+            int(reconciliation.get("total_event_count", 0)),
+        )
+        or 0.0,
+        conservation_violations=int(reconciliation.get("conservation_violations", 0)),
     )
 
 
@@ -582,6 +768,7 @@ def _parse_sample(raw: Any, start_time: datetime) -> CalibrationSample:
         timestamp=start_time + timedelta(seconds=t),
         t=t,
         states={str(key): value for key, value in states.items()},
+        restart_before_sample=raw.get("restart") is True,
     )
 
 
@@ -646,14 +833,10 @@ def _expand_cold_storage_signature_segment(
                 raw["excursion_power_w"] if excursion else raw["base_power_w"]
             ),
             SensorRole.CURRENT: float(
-                raw["excursion_current_a"]
-                if excursion
-                else raw["base_current_a"]
+                raw["excursion_current_a"] if excursion else raw["base_current_a"]
             ),
             SensorRole.POWER_FACTOR: float(
-                raw["excursion_power_factor"]
-                if excursion
-                else raw["base_power_factor"]
+                raw["excursion_power_factor"] if excursion else raw["base_power_factor"]
             ),
         }
         for role, value in values.items():
@@ -728,6 +911,36 @@ def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
             if raw.get("abnormal_condition_start_t") is not None
             else None
         ),
+        component_truth={
+            str(component_id): ComponentTruth(
+                edges=tuple(
+                    ExpectedEvent(
+                        circuit_id=str(component_id),
+                        event_type=EventType(str(item["event_type"])),
+                        around_t=int(item["around_t"]),
+                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+                    )
+                    for item in _optional_list(value, "edges")
+                ),
+                sessions=tuple(
+                    ExpectedComponentSession(
+                        start_t=int(item["start_t"]),
+                        end_t=int(item["end_t"]),
+                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+                    )
+                    for item in _optional_list(value, "sessions")
+                ),
+                energy_kwh=_optional_float(value.get("energy_kwh")),
+                corroborating_helper_circuit_ids=frozenset(
+                    str(item)
+                    for item in _optional_list(
+                        value, "corroborating_helper_circuit_ids"
+                    )
+                ),
+            )
+            for component_id, value in _optional_mapping(raw, "component_truth").items()
+            if isinstance(value, Mapping)
+        },
     )
 
 
@@ -797,12 +1010,32 @@ def _apply_feature_result(
     return list(result.events), active_alerts
 
 
-def _snapshot_state(state: AnalyzerState) -> dict[str, Any]:
+def _snapshot_state(
+    state: AnalyzerState,
+    nilm_processor: NilmSampleProcessor,
+    store_data: FeatureStoreData,
+) -> dict[str, Any]:
     return {
+        "state_id": id(state),
+        "nilm_processor_id": id(nilm_processor),
+        "store_id": id(store_data),
         "daily_energy_usage_by_circuit": dict(state.daily_energy_usage_by_circuit),
         "energy_usage_evidence_by_circuit": dict(
             state.energy_usage_evidence_by_circuit
         ),
+        "nilm_component_runtime_by_circuit": {
+            circuit_id: {
+                assignment_id: dict(component)
+                for assignment_id, component in runtime.items()
+            }
+            for circuit_id, runtime in state.nilm_component_runtime_by_circuit.items()
+        },
+        "nilm_reconciliation_by_circuit": {
+            circuit_id: dict(reconciliation)
+            for circuit_id, reconciliation in (
+                state.nilm_reconciliation_by_circuit.items()
+            )
+        },
     }
 
 
@@ -858,6 +1091,183 @@ def _event_match_counts(
         else:
             misses += 1
     return matches, misses
+
+
+def _component_metrics(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> dict[str, ComponentReplayMetrics]:
+    sessions = [
+        item
+        for history in result.store_data.nilm_session_history_by_circuit.values()
+        for item in history
+        if isinstance(item, Mapping)
+    ]
+    metrics: dict[str, ComponentReplayMetrics] = {}
+    for component_id, truth in fixture.labels.component_truth.items():
+        predicted = [
+            item
+            for item in sessions
+            if str(item.get("assignment_id") or item.get("appliance_id") or "")
+            == component_id
+            and item.get("start")
+            and item.get("end")
+        ]
+        matched: list[tuple[ExpectedComponentSession, Mapping[str, Any]]] = []
+        unused = list(predicted)
+        for expected in truth.sessions:
+            for actual in unused:
+                start_error = abs(
+                    (
+                        _parse_datetime(str(actual["start"])) - fixture.start_time
+                    ).total_seconds()
+                    - expected.start_t
+                )
+                stop_error = abs(
+                    (
+                        _parse_datetime(str(actual["end"])) - fixture.start_time
+                    ).total_seconds()
+                    - expected.end_t
+                )
+                if max(start_error, stop_error) <= expected.tolerance_seconds:
+                    matched.append((expected, actual))
+                    unused.remove(actual)
+                    break
+        session_precision = _ratio_or_none(len(matched), len(predicted))
+        session_recall = _ratio_or_none(len(matched), len(truth.sessions))
+        start_errors = [
+            abs(
+                (
+                    _parse_datetime(str(actual["start"])) - fixture.start_time
+                ).total_seconds()
+                - expected.start_t
+            )
+            for expected, actual in matched
+        ]
+        stop_errors = [
+            abs(
+                (
+                    _parse_datetime(str(actual["end"])) - fixture.start_time
+                ).total_seconds()
+                - expected.end_t
+            )
+            for expected, actual in matched
+        ]
+        predicted_starts = {
+            _parse_datetime(str(actual["start"])) for actual in predicted
+        }
+        predicted_starts.update(
+            _parse_datetime(str(runtime["session_start"]))
+            for snapshot in result.state_snapshots
+            for circuit_runtime in snapshot.get(
+                "nilm_component_runtime_by_circuit", {}
+            ).values()
+            for assignment_id, runtime in circuit_runtime.items()
+            if assignment_id == component_id and runtime.get("session_start")
+        )
+        predicted_edges = [
+            *((EventType.START, start) for start in predicted_starts),
+            *(
+                (EventType.STOP, _parse_datetime(str(actual["end"])))
+                for actual in predicted
+            ),
+        ]
+        unmatched_edges = list(predicted_edges)
+        matched_edges = 0
+        for expected in truth.edges:
+            for actual in unmatched_edges:
+                if actual[0] is expected.event_type and abs(
+                    (actual[1] - fixture.start_time).total_seconds()
+                    - expected.around_t
+                ) <= expected.tolerance_seconds:
+                    matched_edges += 1
+                    unmatched_edges.remove(actual)
+                    break
+        actual_energy = sum(float(item.get("energy_kwh", 0.0)) for item in predicted)
+        absolute_error = (
+            abs(actual_energy - truth.energy_kwh)
+            if truth.energy_kwh is not None
+            else None
+        )
+        metrics[component_id] = ComponentReplayMetrics(
+            edge_precision=_ratio_or_none(matched_edges, len(predicted_edges)),
+            edge_recall=_ratio_or_none(matched_edges, len(truth.edges)),
+            session_precision=session_precision,
+            session_recall=session_recall,
+            session_f1=_f1(session_precision, session_recall),
+            median_start_error_seconds=median(start_errors) if start_errors else None,
+            median_stop_error_seconds=median(stop_errors) if stop_errors else None,
+            energy_absolute_error_kwh=round(absolute_error, 6)
+            if absolute_error is not None
+            else None,
+            energy_percentage_error=round(absolute_error / truth.energy_kwh * 100, 3)
+            if absolute_error is not None and truth.energy_kwh
+            else None,
+        )
+    return metrics
+
+
+def _combined_reconciliation(result: ReplayResult) -> dict[str, Any]:
+    items = list(result.final_state.nilm_reconciliation_by_circuit.values())
+    return {
+        key: sum(float(item.get(key, 0)) for item in items)
+        for key in (
+            "residual_energy_kwh",
+            "ambiguous_event_count",
+            "total_event_count",
+            "conservation_violations",
+        )
+    }
+
+
+def _false_helper_association_rate(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> float | None:
+    records: list[bool] = []
+    unused_truth = {
+        component_id: list(truth.sessions)
+        for component_id, truth in fixture.labels.component_truth.items()
+    }
+    for sessions in result.store_data.nilm_session_history_by_circuit.values():
+        for session in sessions:
+            component_id = str(
+                session.get("assignment_id") or session.get("appliance_id") or ""
+            )
+            truth = fixture.labels.component_truth.get(component_id)
+            matching_truth = next((
+                expected
+                for expected in unused_truth.get(component_id, ())
+                if max(
+                    abs(
+                        (_parse_datetime(str(session["start"])) - fixture.start_time)
+                        .total_seconds()
+                        - expected.start_t
+                    ),
+                    abs(
+                        (_parse_datetime(str(session["end"])) - fixture.start_time)
+                        .total_seconds()
+                        - expected.end_t
+                    ),
+                )
+                <= expected.tolerance_seconds
+            ), None)
+            session_matches = matching_truth is not None
+            if matching_truth is not None:
+                unused_truth[component_id].remove(matching_truth)
+            for evidence in session.get("helper_evidence", ()):
+                if evidence.get("relationship") != "corroborates":
+                    continue
+                records.append(
+                    session_matches
+                    and str(evidence.get("helper_circuit_id") or "")
+                    in truth.corroborating_helper_circuit_ids
+                )
+    return _ratio_or_none(records.count(False), len(records))
+
+
+def _f1(precision: float | None, recall: float | None) -> float | None:
+    if precision is None or recall is None or precision + recall == 0:
+        return None
+    return round(2 * precision * recall / (precision + recall), 3)
 
 
 def _confidence_calibration(
@@ -929,11 +1339,7 @@ def _calibration_score(alert: AlertEvidence) -> float:
             min(max(daily_usage_share / threshold_ratio, 0.0) / 2.0, 1.0),
         )
     baseline_confidence = _baseline_confidence(alert)
-    score = (
-        0.35 * repeated_score
-        + 0.35 * ratio_score
-        + 0.30 * baseline_confidence
-    )
+    score = 0.35 * repeated_score + 0.35 * ratio_score + 0.30 * baseline_confidence
     return round(min(max(score, 0.0), 1.0), 3)
 
 
@@ -1065,6 +1471,26 @@ def _optional_list(raw: Mapping[str, Any], key: str) -> list[Any]:
         msg = f"{key} must be a list"
         raise CalibrationFixtureError(msg)
     return value
+
+
+def _optional_mapping(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    value = raw.get(key, {})
+    if not isinstance(value, Mapping):
+        msg = f"{key} must be a mapping"
+        raise CalibrationFixtureError(msg)
+    return value
+
+
+def _validate_block_ids(items: list[Any], key: str, label: str) -> None:
+    ids = [
+        str(item.get(key) or "").strip()
+        for item in items
+        if isinstance(item, Mapping)
+    ]
+    invalid = len(ids) != len(items) or any(not item for item in ids)
+    if invalid or len(set(ids)) != len(ids):
+        msg = f"{label} IDs must be nonempty and unique"
+        raise CalibrationFixtureError(msg)
 
 
 def _parse_datetime(value: str) -> datetime:

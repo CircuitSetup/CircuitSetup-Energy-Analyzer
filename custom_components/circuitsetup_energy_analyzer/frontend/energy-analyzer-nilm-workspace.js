@@ -404,6 +404,7 @@ export function createNilmWorkspaceMethods({
           interval_id: String(interval.interval_id || ""),
           start: this._datetimeLocalFromMillis(Date.parse(interval.start || "")),
           end: this._datetimeLocalFromMillis(Date.parse(interval.end || "")),
+          observed_transition_w: interval.observed_transition_w ?? "",
         }],
       };
       this._nilmActiveIntervalIndex = 0;
@@ -430,6 +431,12 @@ export function createNilmWorkspaceMethods({
           this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
           return;
         }
+        const transitionText = String(interval.observed_transition_w ?? "").trim();
+        const observedTransitionW = Number(transitionText);
+        if (transitionText && (!Number.isFinite(observedTransitionW) || observedTransitionW < 0)) {
+          this._setNilmIntervalError(this._panelText("errors.nilm_interval_transition_invalid"));
+          return;
+        }
         data = {
           ...action && action.data || {},
           label,
@@ -438,6 +445,7 @@ export function createNilmWorkspaceMethods({
           appliance_id: String(draft.appliance_id || label).trim(),
           appliance_profile: applianceProfile,
         };
+        if (transitionText) data.observed_transition_w = observedTransitionW;
         const intervalId = String(interval.interval_id || "").trim();
         if (intervalId) data.interval_id = intervalId;
         if (draft.assignment_id) data.assignment_id = draft.assignment_id;
@@ -1037,7 +1045,7 @@ export function createNilmWorkspaceMethods({
     }
     const field = input.dataset.nilmLabelIntervalInput;
     const index = Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10);
-    if (index >= 0 && ["start", "end"].includes(field)) {
+    if (index >= 0 && ["start", "end", "observed_transition_w"].includes(field)) {
       const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
       intervals[index] = { ...(intervals[index] || {}), [field]: input.value };
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
@@ -1602,6 +1610,7 @@ export function createNilmWorkspaceMethods({
     return `
       <div class="nilm-workspace">
         ${this._renderNilmWorkspaceSummary(workspace)}
+        ${this._renderNilmModelEvidence()}
         <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
@@ -1633,6 +1642,9 @@ export function createNilmWorkspaceMethods({
           ${sources.map((source) => `<option value="${this._escape(source.path || "")}" ${source.circuit_id === circuit.circuit_id ? "selected" : ""}>${this._escape(source.name || source.circuit_id || "")}</option>`).join("")}
         </select>
       </label>` : "";
+    const sensitivity = workspace.sensitivity || {};
+    const sensitivityAction = sensitivity.action && sensitivity.recommendation ? `
+      <button type="button" class="secondary" data-nilm-sensitivity-action>${this._escape(this._panelTextFormat("nilm_workspace.use_sensitivity", { setting: this._friendlyFeature(sensitivity.recommendation) }))}</button>` : "";
     return `
       <section class="workspace-summary section-surface" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
         <div class="workspace-summary-item">
@@ -1640,6 +1652,11 @@ export function createNilmWorkspaceMethods({
           <strong>${this._escape(circuit.name || circuit.circuit_id || this._panelText("common.unknown"))}</strong>
         </div>
         ${sourcePicker}
+        <div class="workspace-summary-item" data-nilm-sensitivity>
+          <span>${this._escape(this._panelText("nilm_workspace.sensitivity"))}</span>
+          <strong>${this._escape(this._friendlyFeature(sensitivity.current || "balanced"))} · ${this._escape(this._formatMetricValue(sensitivity.effective_minimum_edge_w))} W</strong>
+          ${sensitivityAction}
+        </div>
         <div class="workspace-summary-item">
           <span>${this._escape(this._panelText("nilm_workspace.lane_needs_review"))}</span>
           <strong>${needsReview}</strong>
@@ -1651,6 +1668,22 @@ export function createNilmWorkspaceMethods({
         </label>
       </section>
     `;
+  }
+
+  _renderNilmModelEvidence() {
+    return `<section class="workspace-section section-surface" data-nilm-model-evidence>
+      <h2>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h2>
+      <strong>${this._escape(this._panelText("nilm_workspace.lifecycle_flow"))}</strong>
+      ${["measured_vs_estimated", "residual_evidence", "ambiguous_evidence", "helper_conflict_evidence", "compound_evidence", "source_unavailable_evidence", "conservation_evidence"].map((key) => `<p class="muted">${this._escape(this._panelText(`nilm_workspace.${key}`))}</p>`).join("")}
+    </section>`;
+  }
+
+  async _applyNilmSensitivity() {
+    const action = this._nilmWorkspace && this._nilmWorkspace.sensitivity && this._nilmWorkspace.sensitivity.action;
+    if (!this._guardActionCall(action, "NILM sensitivity", "nilm-sensitivity")) return;
+    await this._hass.callService(action.domain || "circuitsetup_energy_analyzer", action.service, { ...(action.data || {}) });
+    await this._refreshNilmWorkspaceData();
+    this._render();
   }
 
   _renderNilmGraph(workspace, graphWindow, graphBands) {
@@ -2119,6 +2152,7 @@ export function createNilmWorkspaceMethods({
             <div class="nilm-interval-form">
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span><input type="datetime-local" data-nilm-label-interval-input="start" data-nilm-interval-index="${index}" value="${this._escape(interval.start || "")}"></label>
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.end"))}</span><input type="datetime-local" data-nilm-label-interval-input="end" data-nilm-interval-index="${index}" value="${this._escape(interval.end || "")}"></label>
+              <label><span class="muted">${this._escape(this._panelText("nilm_workspace.observed_transition_w"))}</span><input type="number" min="0" step="any" inputmode="decimal" data-nilm-label-interval-input="observed_transition_w" data-nilm-interval-index="${index}" value="${this._escape(interval.observed_transition_w ?? "")}"></label>
             </div>
           </div>`).join("")}
         </div>

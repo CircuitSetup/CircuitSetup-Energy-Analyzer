@@ -8,15 +8,21 @@
     "description",
     "scenario_type",
     "start_time",
-    "circuits",
     "labels",
     "calibration_expectations"
+  ],
+  "anyOf": [
+    { "required": ["circuits"] },
+    { "required": ["scenarios"] },
+    { "required": ["entries"] }
   ],
   "properties": {
     "schema_version": { "const": 1 },
     "id": { "type": "string", "minLength": 1 },
     "description": { "type": "string", "minLength": 1 },
     "scenario_type": { "enum": ["normal", "abnormal"] },
+    "source_kind": { "enum": ["mains", "pure_mixed", "primary_mixed"] },
+    "min_delta_w": { "type": "number", "minimum": 0 },
     "start_time": { "type": "string", "format": "date-time" },
     "circuits": {
       "type": "array",
@@ -34,9 +40,33 @@
         }
       }
     },
-    "samples": { "type": "array" },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "restart": { "type": "boolean" } }
+      }
+    },
     "segments": { "type": "array" },
-    "labels": { "type": "object" },
+    "assignments": { "type": "object" },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": { "restart": { "type": "boolean" } }
+            }
+          }
+        }
+      }
+    },
+    "labels": { "type": "object", "properties": { "component_truth": { "type": "object", "additionalProperties": { "type": "object", "properties": { "edges": { "type": "array" }, "sessions": { "type": "array" }, "energy_kwh": { "type": "number", "minimum": 0 }, "corroborating_helper_circuit_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true } } } } } },
     "calibration_expectations": { "type": "object" }
   }
 }

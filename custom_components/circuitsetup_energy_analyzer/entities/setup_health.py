@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import urlencode
 
 from ..const import (
     CONF_CIRCUITS,
@@ -15,7 +16,7 @@ from ..const import (
 from ..entity import circuit_info_from_config
 from ..localized_text import translation_section
 from ..models import ApplianceProfile, CircuitMode, SensorRole
-from ..profiles import get_profile_definition
+from ..profiles import get_profile_definition, nilm_source_kind
 from ..state import circuit_is_learning
 
 SETUP_HEALTH_OPEN_PATH = "/config/integrations/integration/circuitsetup_energy_analyzer"
@@ -522,6 +523,8 @@ def _setup_health_issue_open_path(
     issue: Mapping[str, Any],
 ) -> str | None:
     issue_key = str(issue.get("issue") or "")
+    if issue_key.startswith("nilm_"):
+        return str(issue.get("open_path") or "") or None
     if issue_key == "missing_capacity_setting":
         return _setup_health_options_path(
             coordinator,
@@ -580,6 +583,8 @@ def _bounded_setup_health_issue(
     issue: Mapping[str, Any],
 ) -> dict[str, Any]:
     bounded = {key: _bounded_setup_health_value(value) for key, value in issue.items()}
+    if str(issue.get("issue") or "").startswith("nilm_"):
+        bounded["open_path"] = str(issue.get("open_path") or "")
     path = _setup_health_issue_open_path(coordinator, bounded)
     if path is None:
         bounded.pop("open_path", None)
@@ -782,8 +787,90 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
         )
         if utility_comparison_issue is not None:
             issues.append(utility_comparison_issue)
+        issues.extend(_setup_health_nilm_issues(coordinator, circuit))
 
     return _dedupe_setup_health_issues(issues)
+
+
+def _setup_health_nilm_issues(
+    coordinator: Any,
+    circuit: Any,
+) -> list[dict[str, Any]]:
+    if nilm_source_kind(circuit) is None:
+        return []
+    circuit_id = circuit.circuit_id
+    store = getattr(coordinator, "store_data", None)
+    signatures = getattr(store, "nilm_signatures", {}).get(circuit_id, ())
+    unreviewed = [
+        item
+        for item in signatures
+        if isinstance(item, Mapping)
+        and not any(
+            item.get(key)
+            for key in ("assignment_id", "expected", "ignored", "merged_into")
+        )
+    ]
+    reconciliation = getattr(
+        getattr(coordinator, "state", None),
+        "nilm_reconciliation_by_circuit",
+        {},
+    ).get(circuit_id, {})
+    assignments = getattr(
+        store, "nilm_appliance_assignments_by_circuit", {}
+    ).get(circuit_id, ())
+    degraded = any(
+        str(link.get("status") or "").lower() == "degraded"
+        for assignment in assignments
+        if isinstance(assignment, Mapping)
+        for link in assignment.get("helper_links", ())
+        if isinstance(link, Mapping)
+    )
+    query = urlencode(
+        {
+            "nilm_workspace": "1",
+            "circuit_id": circuit_id,
+            "entry_id": str(getattr(coordinator, "entry_id", "") or ""),
+        }
+    )
+    path = f"/circuitsetup-energy-analyzer-evidence?{query}"
+    issues: list[dict[str, Any]] = []
+    if unreviewed:
+        issues.append(_setup_health_issue(
+            "Review load signatures",
+            f"Review load signatures for {circuit.name}",
+            circuit,
+            "Load Separation has observed signatures that still need review.",
+            issue="nilm_unreviewed_signatures",
+            severity="review",
+        ))
+    if isinstance(reconciliation, Mapping) and (
+        reconciliation.get("status") == "conflict"
+        or reconciliation.get("review_item")
+        or reconciliation.get("conflict_reason")
+    ):
+        issues.append(_setup_health_issue(
+            "Review load model conflict",
+            f"Review load model conflict for {circuit.name}",
+            circuit,
+            (
+                "Estimated components conflict with measured source power; "
+                "energy allocation is suspended."
+            ),
+            issue="nilm_model_conflict",
+            severity="review",
+        ))
+    if degraded:
+        issues.append(_setup_health_issue(
+            "Review helper evidence",
+            f"Review helper evidence for {circuit.name}",
+            circuit,
+            "A helper relationship has degraded and needs review.",
+            issue="nilm_helper_degraded",
+            severity="review",
+        ))
+    for issue in issues:
+        issue["open_path"] = path
+    return issues
 
 
 def _setup_health_hvac_thermostat_issues(

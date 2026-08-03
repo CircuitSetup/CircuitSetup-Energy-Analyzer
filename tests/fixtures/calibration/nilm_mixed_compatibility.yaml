@@ -1,0 +1,119 @@
+schema_version: 1
+id: nilm_mixed_compatibility
+description: Legacy and config-entry mixed-load compatibility replays
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+min_delta_w: 20
+labels: {}
+calibration_expectations: {}
+
+scenarios:
+  - id: legacy_mixed_encoding
+    source_kind: pure_mixed
+    circuits:
+      - circuit_id: legacy_mixed
+        name: Legacy mixed loads
+        appliance_profile: mixed
+        circuit_mode: single_phase
+        sources: {power: sensor.legacy_mixed}
+    assignments:
+      legacy_mixed:
+        - assignment_id: legacy_load
+          lifecycle_state: validated
+          power_states_w: [0, 80]
+          model_confidence: 0.9
+          transition_prototypes:
+            - {direction: "on", from_state_w: 0, to_state_w: 80, delta_w: 80, spread_w: 2, sample_count: 3}
+            - {direction: "off", from_state_w: 80, to_state_w: 0, delta_w: -80, spread_w: 2, sample_count: 3}
+    samples:
+      - {t: 0, states: {sensor.legacy_mixed: 0}}
+      - {t: 10, states: {sensor.legacy_mixed: 80}}
+      - {t: 20, states: {sensor.legacy_mixed: 80}}
+      - {t: 30, states: {sensor.legacy_mixed: 80}}
+      - {t: 40, states: {sensor.legacy_mixed: 0}}
+      - {t: 50, states: {sensor.legacy_mixed: 0}}
+      - {t: 60, states: {sensor.legacy_mixed: 0}}
+    labels:
+      component_truth:
+        legacy_load:
+          edges:
+            - {event_type: start, around_t: 10}
+            - {event_type: stop, around_t: 40}
+          sessions: [{start_t: 10, end_t: 40}]
+          energy_kwh: 0.000667
+    calibration_expectations: {}
+
+  - id: shared_circuit_entries
+    entries:
+      - entry_id: pure_entry
+        source_kind: pure_mixed
+        circuits:
+          - circuit_id: shared
+            name: Pure mixed entry
+            appliance_profile: mixed
+            circuit_mode: mixed
+            sources: {power: sensor.pure_entry}
+        assignments:
+          shared:
+            - assignment_id: pure_load
+              lifecycle_state: validated
+              power_states_w: [0, 80]
+              model_confidence: 0.9
+              transition_prototypes:
+                - {direction: "on", from_state_w: 0, to_state_w: 80, delta_w: 80, spread_w: 2, sample_count: 3}
+                - {direction: "off", from_state_w: 80, to_state_w: 0, delta_w: -80, spread_w: 2, sample_count: 3}
+        samples:
+          - {t: 0, states: {sensor.pure_entry: 0}}
+          - {t: 10, states: {sensor.pure_entry: 80}}
+          - {t: 20, states: {sensor.pure_entry: 80}}
+          - {t: 30, states: {sensor.pure_entry: 80}}
+          - {t: 40, states: {sensor.pure_entry: 0}}
+          - {t: 50, states: {sensor.pure_entry: 0}}
+          - {t: 60, states: {sensor.pure_entry: 0}}
+        labels:
+          component_truth:
+            pure_load:
+              edges:
+                - {event_type: start, around_t: 10}
+                - {event_type: stop, around_t: 40}
+              sessions: [{start_t: 10, end_t: 40}]
+              energy_kwh: 0.000667
+        calibration_expectations: {}
+
+      - entry_id: primary_entry
+        source_kind: primary_mixed
+        circuits:
+          - circuit_id: shared
+            name: Primary mixed entry
+            appliance_profile: hvac_blower
+            circuit_mode: mixed
+            sources: {power: sensor.primary_entry}
+        assignments:
+          shared:
+            - assignment_id: primary_load
+              role: primary
+              lifecycle_state: validated
+              power_states_w: [0, 120]
+              model_confidence: 0.9
+              transition_prototypes:
+                - {direction: "on", from_state_w: 0, to_state_w: 120, delta_w: 120, spread_w: 2, sample_count: 3}
+                - {direction: "off", from_state_w: 120, to_state_w: 0, delta_w: -120, spread_w: 2, sample_count: 3}
+        samples:
+          - {t: 0, states: {sensor.primary_entry: 0}}
+          - {t: 10, states: {sensor.primary_entry: 120}}
+          - {t: 20, states: {sensor.primary_entry: 120}}
+          - {t: 30, states: {sensor.primary_entry: 120}}
+          - {t: 40, states: {sensor.primary_entry: 0}}
+          - {t: 50, states: {sensor.primary_entry: 0}}
+          - {t: 60, states: {sensor.primary_entry: 0}}
+        labels:
+          component_truth:
+            primary_load:
+              edges:
+                - {event_type: start, around_t: 10}
+                - {event_type: stop, around_t: 40}
+              sessions: [{start_t: 10, end_t: 40}]
+              energy_kwh: 0.001
+        calibration_expectations: {}
+    labels: {}
+    calibration_expectations: {}

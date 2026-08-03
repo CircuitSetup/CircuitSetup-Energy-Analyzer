@@ -10,13 +10,18 @@ from typing import Any
 
 from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
-from ..models import AlertEvidence, ApplianceProfile, CircuitMode
+from ..models import AlertEvidence, ApplianceProfile, CircuitMode, NilmSourceKind
 from ..nilm import (
     NilmEdge,
     build_nilm_assignment_model,
     normalize_nilm_assignment_model,
 )
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
+
+
+def configured_primary_assignment_id(circuit_id: str) -> str:
+    """Return the stable configured-primary assignment ID for a source."""
+    return f"{circuit_id}-configured-primary"
 
 
 class NilmController:
@@ -300,8 +305,20 @@ class NilmController:
         label_interval_id: str | None = None,
         lifecycle_state: str = "assigned",
         confidence: Any = 1.0,
+        role: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a durable NILM appliance assignment."""
+        assignment_id_text = str(assignment_id or "").strip()
+        if assignment_id_text == configured_primary_assignment_id(circuit_id):
+            config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
+            if nilm_source_kind(config) is not NilmSourceKind.PRIMARY_MIXED:
+                raise ValueError(
+                    f"Circuit '{circuit_id}' has no configured primary assignment."
+                )
+            label = config.name
+            appliance_id = config.circuit_id
+            appliance_profile = config.appliance_profile.value
+            role = "primary"
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
@@ -315,7 +332,6 @@ class NilmController:
                 [],
             )
         )
-        assignment_id_text = str(assignment_id or "").strip()
         assignment = next(
             (
                 item
@@ -351,7 +367,7 @@ class NilmController:
                 "updated_at": now,
                 "created_device": False,
                 "publish_entities": False,
-                "role": "component",
+                "role": role or "component",
                 "power_states_w": [],
                 "transition_prototypes": [],
                 "model_confidence": 0.0,
@@ -368,6 +384,8 @@ class NilmController:
             if appliance_profile:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
             assignment["lifecycle_state"] = lifecycle_state
+            if role is not None:
+                assignment["role"] = role
             assignment["updated_at"] = now
             assignment["appliance_key"] = f"nilm:{assignment['assignment_id']}"
 
@@ -459,6 +477,7 @@ class NilmController:
         interval_id: str | None = None,
         source: str = "manual",
         confidence: float = 1.0,
+        observed_transition_w: Any = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         label_text = str(label or "").strip()
@@ -512,6 +531,25 @@ class NilmController:
             "created_at": str(existing.get("created_at") if existing else now),
             "updated_at": now,
         }
+        if existing and observed_transition_w is None:
+            previous_transition_w = existing.get("observed_transition_w")
+            if (
+                isinstance(previous_transition_w, (int, float))
+                and not isinstance(previous_transition_w, bool)
+                and math.isfinite(float(previous_transition_w))
+                and previous_transition_w >= 0
+            ):
+                payload["observed_transition_w"] = float(previous_transition_w)
+        if observed_transition_w is not None:
+            if isinstance(observed_transition_w, bool):
+                raise ValueError("Invalid observed transition watts.")
+            try:
+                transition_w = float(observed_transition_w)
+            except (TypeError, ValueError) as err:
+                raise ValueError("Invalid observed transition watts.") from err
+            if not math.isfinite(transition_w) or transition_w < 0.0:
+                raise ValueError("Invalid observed transition watts.")
+            payload["observed_transition_w"] = transition_w
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text

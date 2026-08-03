@@ -5813,6 +5813,7 @@ test("Appliance Detail omits unavailable HVAC efficiency metrics", async ({ page
 test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
   const needsReview = panel.locator('[data-nilm-lane="needs_review"]');
   await needsReview.focus();
   await needsReview.press("ArrowRight");
@@ -6464,20 +6465,41 @@ test("NILM review supports decisions, validation, and interval labeling", async 
 
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();
+  await panel.locator("[data-nilm-sensitivity-action]").click();
 
-  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await page.evaluate(() => window.__panel._callNilmLabelIntervalAction(0, "adjust"));
+  await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveValue("83");
   await panel.locator('[data-nilm-label-interval-input="label"]').fill("Dishwasher");
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
   await panel.locator('[data-nilm-label-interval-input="start"]').fill("2026-07-13T18:00");
   await panel.locator('[data-nilm-label-interval-input="end"]').fill("2026-07-13T18:45");
+  await panel.locator('[data-nilm-label-interval-input="observed_transition_w"]').fill("84");
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
     "mark_nilm_signature_expected",
     "validate_nilm_session",
     "validate_nilm_assignment_history",
+    "set_circuit_sensitivity",
     "label_nilm_interval",
   ]);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1).data.observed_transition_w)).toBe(84);
+});
+
+test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {
+  await mockPanelApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const evidence = panel.locator("[data-nilm-model-evidence]");
+
+  await expect(evidence).toContainText("Observed → Suggested → Assigned → Validated → Published");
+  await expect(evidence).toContainText("Source power is measured; component power and energy are estimated");
+  await expect(evidence).toContainText("Ambiguous edges remain unknown");
+  await expect(evidence).toContainText("Helper conflicts require review and are not resolved automatically");
+  await expect(evidence).toContainText("More than two simultaneous transitions remain a compound unknown");
+  await expect(evidence).toContainText("Source unavailable means estimates unavailable");
+  await expect(evidence).toContainText("suspended");
+  await expect(evidence).toBeInViewport();
 });
 
 test("failed NILM request can be retried", async ({ page }) => {

@@ -17,6 +17,16 @@ expectations. The first harness supports explicit samples plus
 `cold_storage_signature` segments for fixed-interval refrigerator/freezer
 PF, real-power, and current pulses.
 
+Mixed-load fixtures may add `source_kind` and `labels.component_truth`. Component
+truth is keyed by assignment ID and may contain bounded expected `edges`,
+`sessions`, `energy_kwh`, and expected `corroborating_helper_circuit_ids`.
+Helper association rates use corroborating evidence on actual completed
+sessions; direct-component evidence is excluded. Fixtures without component
+truth retain the original report format.
+
+Related mixed-load cases may share one file through a top-level `scenarios`
+list. Each scenario has a unique `id` and may override the fixture defaults.
+
 A `cold_storage_signature` segment requires `start_t`, `duration_seconds`,
 `sample_interval_seconds`, `excursion_interval_seconds`, `base_power_w`,
 `base_current_a`, `base_power_factor`, `excursion_power_w`,

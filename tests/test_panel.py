@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260802-4"
+    assert PANEL_MODULE_VERSION == "20260802-8"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -1734,6 +1734,10 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         config=mains_config,
         configs=(mains_config, known_config, solar_config),
     )
+    coordinator.settings_controller = SimpleNamespace(
+        sensitivity_for_circuit=lambda _circuit_id: "balanced",
+        nilm_min_delta_w=lambda _circuit_id: 100.0,
+    )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
         "mains": [
             {
@@ -1748,7 +1752,25 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
                 "mains_entity_id": "sensor.mains_power",
                 "created_at": "2026-06-06T09:00:00+00:00",
                 "updated_at": "2026-06-06T09:00:00+00:00",
-            }
+                "assignment_id": "assignment-dishwasher",
+                "observed_transition_w": 80.0,
+            },
+            {
+                "interval_id": "label-2",
+                "label": "Dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-06-06T10:10:00+00:00",
+                "end": "2026-06-06T10:40:00+00:00",
+                "observed_transition_w": 83.0,
+            },
+            {
+                "interval_id": "label-3",
+                "label": "Dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-06-06T11:10:00+00:00",
+                "end": "2026-06-06T11:40:00+00:00",
+                "observed_transition_w": 86.0,
+            },
         ]
     }
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -1810,6 +1832,19 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     payload = nilm_workspace_payload([coordinator], circuit_id="mains", hours="72")
 
     assert payload["status"] == "ok"
+    assert payload["sensitivity"] == {
+        "current": "balanced",
+        "effective_minimum_edge_w": 100.0,
+        "recommendation": "sensitive",
+        "action": {
+            "domain": DOMAIN,
+            "service": "set_circuit_sensitivity",
+                "data": {
+                    "circuit_id": "mains",
+                    "preset": "sensitive",
+            },
+        },
+    }
     assert payload["history"]["hours"] == 24.0
     assert payload["history"]["entities"] == ["sensor.mains_power"]
     assert payload["history"]["api_path"].startswith(
@@ -2295,6 +2330,195 @@ def test_nilm_workspace_payload_uses_requested_entry_for_duplicate_circuit_id() 
 
     assert payload["circuit"]["name"] == "Second Mains"
     assert payload["history"]["entities"] == ["sensor.second_mains_power"]
+
+
+def test_nilm_assignment_detail_links_keep_duplicate_assignment_entry_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    coordinators = [
+        _nilm_workspace_coordinator(
+            entry_id=entry_id,
+            name=name,
+            entity_id=f"sensor.{entry_id}_mains_power",
+        )
+        for entry_id, name in (
+            ("entry/one", "First Mains"),
+            ("entry two", "Second Mains"),
+        )
+    ]
+    for coordinator in coordinators:
+        coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+            "mains": [
+                {
+                    "assignment_id": "shared-assignment",
+                    "display_name": coordinator.circuit_configs[0].name,
+                    "mains_circuit_id": "mains",
+                    "lifecycle_state": "assigned",
+                }
+            ]
+        }
+
+    workspaces = [
+        nilm_workspace_payload(
+            coordinators,
+            circuit_id="mains",
+            entry_id=coordinator.entry_id,
+        )
+        for coordinator in coordinators
+    ]
+
+    for coordinator, workspace in zip(coordinators, workspaces, strict=True):
+        for path in (
+            workspace["assignments"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_api_path"],
+        ):
+            assert parse_qs(urlparse(path).query)["entry_id"] == [
+                coordinator.entry_id
+            ]
+        assert all(
+            action["data"]["entry_id"] == coordinator.entry_id
+            for action in _nilm_service_actions(workspace)
+        )
+
+    selected: list[str] = []
+    monkeypatch.setattr(
+        panel,
+        "appliance_detail_for_assignment",
+        lambda coordinator, _assignment_id: selected.append(coordinator.entry_id)
+        or SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        panel,
+        "_appliance_detail_payload",
+        lambda coordinator, _detail, **_kwargs: {"entry_id": coordinator.entry_id},
+    )
+    for workspace in workspaces:
+        for path in (
+            workspace["assignments"][0]["appliance_detail_path"],
+            workspace["virtual_appliances"][0]["appliance_detail_api_path"],
+        ):
+            query = parse_qs(urlparse(path).query)
+            assert panel.appliance_detail_payload(
+                coordinators,
+                assignment_id=query["assignment_id"][0],
+                entry_id=query["entry_id"][0],
+            )["entry_id"] == query["entry_id"][0]
+    assert selected == ["entry/one", "entry/one", "entry two", "entry two"]
+
+
+@pytest.mark.parametrize(
+    ("profile", "mode", "expected"),
+    [
+        (ApplianceProfile.HVAC_BLOWER, CircuitMode.MIXED,
+         [{"value": "mixed-configured-primary",
+           "label": "Configured primary: Upstairs Blower"}]),
+        (ApplianceProfile.MIXED, CircuitMode.MIXED, []),
+        (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, []),
+    ],
+)
+def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
+    profile: ApplianceProfile,
+    mode: CircuitMode,
+    expected: list[dict[str, str]],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed", name="Upstairs Blower", appliance_profile=profile,
+        mode=mode, sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {}
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mixed")
+
+    assert payload["signatures"][0]["actions"]["assign"].get(
+        "assignment_options", []
+    ) == expected
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {}
+    assert "assignment_id" not in coordinator.store_data.nilm_signatures["mixed"][0]
+
+
+def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed", name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
+        "assignment_id": "mixed-configured-primary", "display_name": "Blower",
+        "lifecycle_state": "assigned", "role": "primary",
+    }]}
+
+    options = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed",
+    )["signatures"][0]["actions"]["assign"]["assignment_options"]
+
+    assert options == [{
+        "value": "mixed-configured-primary",
+        "label": "Configured primary: Blower",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_configured_primary_service_creation_is_entry_scoped() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+        _dispatch_service,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+    coordinators = {}
+    for entry_id, name in (("entry-1", "First Blower"), ("entry-2", "Second Blower")):
+        config = CircuitConfig(
+            circuit_id="mixed", name=name,
+            appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        )
+        coordinator = EnergyAnalyzerCoordinator(
+            SimpleNamespace(data={}), entry_id=entry_id,
+            store_data=FeatureStoreData(nilm_signatures={"mixed": [{
+                "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
+            }]}),
+        )
+        coordinator.circuit_configs = (config,)
+        coordinators[entry_id] = coordinator
+
+    await _dispatch_service(
+        SimpleNamespace(data={DOMAIN: coordinators}),
+        SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+        {
+            "entry_id": "entry-2", "circuit_id": "mixed",
+            "signature_id": "sig-1", "label": "spoofed",
+            "assignment_id": "mixed-configured-primary",
+        },
+    )
+
+    first_store = coordinators["entry-1"].store_data
+    second_store = coordinators["entry-2"].store_data
+    assert first_store.nilm_appliance_assignments_by_circuit == {}
+    assignment = second_store.nilm_appliance_assignments_by_circuit["mixed"][0]
+    assert assignment["display_name"] == "Second Blower"
+    assert assignment["role"] == "primary"
 
 
 def _nilm_service_actions(payload: object) -> list[dict[str, object]]:
@@ -4111,6 +4335,148 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
     }
     assert payload["checklist_total_count"] == 10
     assert payload["open_path"].startswith("/config/integrations/")
+
+
+def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_ENABLE_EXPERIMENTAL_NILM,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        setup_health_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config)
+    coordinator.entry_id = "entry-1"
+    coordinator.options = {CONF_ENABLE_EXPERIMENTAL_NILM: True}
+    coordinator.data = SimpleNamespace()
+    coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
+    coordinator.state.nilm_reconciliation_by_circuit = {
+        "mixed": {"status": "conflict", "conflict_reason": "over_allocation"}
+    }
+
+    payload = setup_health_payload([coordinator])
+    nilm_issues = [
+        item for item in payload["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    assert {item["issue"] for item in nilm_issues} == {
+        "nilm_model_conflict",
+        "nilm_unreviewed_signatures",
+    }
+    assert all(item["severity"] == "review" for item in nilm_issues)
+    assert all("entry_id=entry-1" in item["open_path"] for item in nilm_issues)
+    assert all("circuit_id=mixed" in item["open_path"] for item in nilm_issues)
+
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [{"signature_id": "sig-1", "assignment_id": "pump"}]
+    }
+    coordinator.state.nilm_reconciliation_by_circuit = {
+        "mixed": {"status": "consistent"}
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": []}
+
+    healthy = setup_health_payload([coordinator])
+    assert not [
+        item for item in healthy["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [{"helper_links": [{"status": "degraded"}]}]
+    }
+
+    reviewed = setup_health_payload([coordinator])
+    reviewed_nilm = [
+        item for item in reviewed["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    assert [item["issue"] for item in reviewed_nilm] == ["nilm_helper_degraded"]
+    assert reviewed_nilm[0]["severity"] == "review"
+    assert "safety" not in str(reviewed_nilm[0]).lower()
+
+
+def test_nilm_sensitivity_uses_latest_three_ordered_observations() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": start,
+            "observed_transition_w": watts,
+        }
+        for start, watts in (
+            ("2026-08-02T12:00:00+00:00", 82.0),
+            ("2026-08-02T11:00:00+00:00", 80.0),
+            ("2026-08-02T10:00:00+00:00", 78.0),
+            ("2026-08-02T09:00:00+00:00", 140.0),
+        )
+    ]
+
+    assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == (
+        "sensitive"
+    )
+
+
+def test_nilm_sensitivity_orders_observations_by_absolute_time() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": start,
+            "observed_transition_w": watts,
+        }
+        for start, watts in (
+            ("2026-11-01T01:30:00-05:00", 82.0),
+            ("2026-11-01T01:45:00-04:00", 78.0),
+            ("2026-11-01T01:15:00-05:00", 80.0),
+            ("2026-11-01T00:30:00-05:00", 140.0),
+        )
+    ]
+
+    assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == "sensitive"
+
+
+@pytest.mark.parametrize(
+    ("current", "watts"),
+    [
+        ("balanced", [80.0]),
+        ("balanced", [80.0, 82.0]),
+        ("balanced", [60.0, 80.0, 100.0]),
+        ("balanced", [0.0, 0.0, 0.0]),
+        ("sensitive", [80.0, 82.0, 84.0]),
+    ],
+)
+def test_nilm_sensitivity_does_not_recommend_insufficient_or_noisy_evidence(
+    current: str, watts: list[float]
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_sensitivity_recommendation,
+    )
+
+    intervals = [
+        {
+            "assignment_id": "pump",
+            "label": "Pump",
+            "start": f"2026-08-02T{index + 10:02d}:00:00+00:00",
+            "observed_transition_w": value,
+        }
+        for index, value in enumerate(watts)
+    ]
+
+    assert _nilm_sensitivity_recommendation(current, 100.0, intervals) is None
 
 
 def test_setup_health_payload_links_actions_to_supported_integration_page() -> None:

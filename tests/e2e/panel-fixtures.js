@@ -372,6 +372,16 @@ export const setupHealth = {
 export const nilmWorkspace = {
   status: "ok",
   circuit: { circuit_id: "mains", name: "Whole Home Main" },
+  sensitivity: {
+    current: "balanced",
+    effective_minimum_edge_w: 100,
+    recommendation: "sensitive",
+    action: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "set_circuit_sensitivity",
+      data: { circuit_id: "mains", preset: "sensitive", entry_id: "entry-1" },
+    },
+  },
   history: {
     start: "2026-07-13T12:00:00Z",
     end: "2026-07-13T20:00:00Z",
@@ -469,7 +479,15 @@ export const nilmWorkspace = {
     },
   ],
   edges: [],
-  label_intervals: [],
+  label_intervals: [{
+    interval_id: "interval-1",
+    label: "Dishwasher",
+    appliance_id: "dishwasher",
+    assignment_id: "dishwasher",
+    start: "2026-07-13T18:00:00Z",
+    end: "2026-07-13T18:45:00Z",
+    observed_transition_w: 83,
+  }],
   virtual_appliances: [],
   known_load_overlays: [],
   solar_overlays: [],

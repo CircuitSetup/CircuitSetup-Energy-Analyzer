@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
+from statistics import median
 from typing import Any
 from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
-from .models import ApplianceProfile, CircuitConfig, CircuitMode, SensorRole
+from .managers.nilm_controller import configured_primary_assignment_id
+from .models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    NilmSourceKind,
+    SensorRole,
+)
 from .nilm import (
     NilmEdge,
     NilmSession,
@@ -43,6 +52,7 @@ from .services import (
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
+    ATTR_PRESET,
     ATTR_RELATIONSHIP,
     ATTR_SESSION_ID,
     ATTR_SIGNATURE_FINGERPRINT,
@@ -67,6 +77,7 @@ from .services import (
     SERVICE_REMOVE_NILM_HELPER_LINK,
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
@@ -199,7 +210,10 @@ def nilm_workspace_payload(
         ),
         session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
-    _add_nilm_assignment_options(signatures, assignment_options)
+    _add_nilm_assignment_options(
+        signatures,
+        _nilm_assignment_options(assignments, config=config),
+    )
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
@@ -221,6 +235,9 @@ def nilm_workspace_payload(
             coordinator, config.circuit_id
         ),
         "source": _nilm_workspace_source(coordinator, config, include_path=False),
+        "sensitivity": _nilm_workspace_sensitivity(
+            coordinator, config.circuit_id, all_label_intervals
+        ),
         "sources": sources,
         "history": _nilm_workspace_history_payload(
             config,
@@ -258,6 +275,72 @@ def nilm_workspace_payload(
         "session_count": len(all_sessions),
     }
     return _scope_nilm_actions(payload, selected_entry_id)
+
+
+def _nilm_workspace_sensitivity(
+    coordinator: Any,
+    circuit_id: str,
+    label_intervals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    settings = getattr(coordinator, "settings_controller", None)
+    if settings is None:
+        current = "balanced"
+        threshold = 100.0
+    else:
+        current = settings.sensitivity_for_circuit(circuit_id)
+        threshold = settings.nilm_min_delta_w(circuit_id)
+    recommendation = _nilm_sensitivity_recommendation(
+        current, threshold, label_intervals
+    )
+    action = {
+        "domain": DOMAIN,
+        "service": SERVICE_SET_CIRCUIT_SENSITIVITY,
+        "data": {ATTR_CIRCUIT_ID: circuit_id},
+    }
+    if recommendation is not None:
+        action["data"][ATTR_PRESET] = recommendation
+    return {
+        "current": current,
+        "effective_minimum_edge_w": threshold,
+        "recommendation": recommendation,
+        "action": action,
+    }
+
+
+def _nilm_sensitivity_recommendation(
+    current: str,
+    threshold_w: float,
+    intervals: list[dict[str, Any]],
+) -> str | None:
+    next_setting = {"quiet": "balanced", "balanced": "sensitive"}.get(current)
+    if next_setting is None:
+        return None
+    grouped: dict[tuple[str, str], list[tuple[datetime, float]]] = {}
+    for interval in intervals:
+        assignment = str(interval.get("assignment_id") or "").strip()
+        label = str(interval.get("label") or "").strip().casefold()
+        value = interval.get("observed_transition_w")
+        if not assignment or not label or not isinstance(value, (int, float)):
+            continue
+        value = abs(float(value))
+        if not math.isfinite(value):
+            continue
+        observed_at = _datetime_from_iso(
+            interval.get("start") or interval.get("created_at")
+        )
+        if observed_at is None:
+            continue
+        grouped.setdefault((assignment, label), []).append((observed_at, value))
+    for observations in grouped.values():
+        recent = [value for _, value in sorted(observations)[-3:]]
+        if len(recent) < 3:
+            continue
+        typical = median(recent)
+        if 0.0 < typical < threshold_w and all(
+            abs(value - typical) <= typical * 0.2 for value in recent
+        ):
+            return next_setting
+    return None
 
 
 def _nilm_payload_for_circuit(
@@ -709,6 +792,7 @@ def _nilm_assignments_for_circuit(
             circuit_id,
             item,
             assignments,
+            entry_id=str(getattr(coordinator, "entry_id", "") or ""),
             label_intervals=label_intervals,
             direct_circuit_options=direct_circuit_options,
         )
@@ -718,8 +802,18 @@ def _nilm_assignments_for_circuit(
 
 def _nilm_assignment_options(
     assignments: Iterable[Mapping[str, Any]],
+    *,
+    config: CircuitConfig | None = None,
 ) -> list[dict[str, str]]:
-    options: list[dict[str, str]] = []
+    options = (
+        [{
+            "value": configured_primary_assignment_id(config.circuit_id),
+            "label": f"Configured primary: {config.name}",
+        }]
+        if config is not None
+        and nilm_source_kind(config) is NilmSourceKind.PRIMARY_MIXED
+        else []
+    )
     for assignment in assignments:
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
         if (
@@ -732,6 +826,8 @@ def _nilm_assignment_options(
             or assignment.get("appliance_id")
             or assignment_id,
         ).strip()
+        if any(option["value"] == assignment_id for option in options):
+            continue
         options.append({"value": assignment_id, "label": label})
     return options
 
@@ -822,6 +918,7 @@ def _nilm_assignment_payload(
     assignment: Mapping[str, Any],
     assignments: Iterable[Mapping[str, Any]] = (),
     *,
+    entry_id: str = "",
     label_intervals: Iterable[Mapping[str, Any]] = (),
     direct_circuit_options: Iterable[Mapping[str, str]] = (),
 ) -> dict[str, Any]:
@@ -830,7 +927,9 @@ def _nilm_assignment_payload(
     if not assignment_id:
         return payload
 
-    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(assignment_id)
+    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
+        assignment_id, entry_id=entry_id
+    )
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
@@ -969,6 +1068,7 @@ def _nilm_virtual_appliances_for_assignments(
     coordinator: Any | None = None,
 ) -> list[dict[str, Any]]:
     reference_date = _nilm_workspace_reference_date(edges, sessions)
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
     virtual_appliances = []
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip()
@@ -1003,6 +1103,9 @@ def _nilm_virtual_appliances_for_assignments(
             )
             else "healthy"
         )
+        detail_query = {ATTR_ASSIGNMENT_ID: assignment_id}
+        if entry_id:
+            detail_query[ATTR_ENTRY_ID] = entry_id
         virtual_appliances.append(
             {
                 "appliance_key": f"nilm:{assignment_id}",
@@ -1046,11 +1149,10 @@ def _nilm_virtual_appliances_for_assignments(
                 "estimated": True,
                 "mains_circuit_id": str(assignment.get("mains_circuit_id") or ""),
                 "appliance_detail_api_path": (
-                    f"{APPLIANCE_DETAIL_API_PATH}?"
-                    f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id})}"
+                    f"{APPLIANCE_DETAIL_API_PATH}?{urlencode(detail_query)}"
                 ),
                 "appliance_detail_path": _nilm_appliance_detail_panel_path(
-                    assignment_id
+                    assignment_id, entry_id=entry_id
                 ),
             }
         )
@@ -1079,10 +1181,15 @@ def _nilm_reconciliation_payload(
     }
 
 
-def _nilm_appliance_detail_panel_path(assignment_id: str) -> str:
+def _nilm_appliance_detail_panel_path(
+    assignment_id: str, *, entry_id: str = ""
+) -> str:
+    query = {ATTR_ASSIGNMENT_ID: assignment_id, "appliance_detail": "1"}
+    if entry_id:
+        query[ATTR_ENTRY_ID] = entry_id
     return (
         f"/{PANEL_URL_PATH}?"
-        f"{urlencode({ATTR_ASSIGNMENT_ID: assignment_id, 'appliance_detail': '1'})}"
+        f"{urlencode(query)}"
     )
 
 

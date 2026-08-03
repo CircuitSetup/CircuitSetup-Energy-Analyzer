@@ -1,0 +1,155 @@
+schema_version: 1
+id: nilm_mixed_helpers
+description: Mixed-load helper evidence replays
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+min_delta_w: 20
+circuits:
+  - &helper
+    circuit_id: ac2
+    name: AC 2
+    appliance_profile: hvac_blower
+    circuit_mode: single_phase
+    sources: {power: sensor.ac2}
+  - &wrong_helper
+    circuit_id: other
+    name: Other helper
+    appliance_profile: motor_load
+    circuit_mode: single_phase
+    sources: {power: sensor.other}
+  - &mixed
+    circuit_id: mixed
+    name: Mixed loads
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples: [{t: 0, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 0}}]
+labels: {}
+calibration_expectations: {}
+
+scenarios:
+  - id: ac2_distinct_lag_disambiguates
+    source_kind: pure_mixed
+    circuits: [*helper, *wrong_helper, *mixed]
+    assignments:
+      mixed:
+        - &blower
+          assignment_id: blower
+          lifecycle_state: validated
+          power_states_w: [0, 100]
+          model_confidence: 0.9
+          transition_prototypes:
+            - {direction: "on", from_state_w: 0, to_state_w: 100, delta_w: 100, spread_w: 2, sample_count: 3}
+            - {direction: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 3}
+          helper_links:
+            - {helper_circuit_id: ac2, relationship: corroborates, status: confirmed, confidence: 1.0, start_lag_seconds: -30, start_lag_mad_seconds: 2, stop_lag_seconds: -50, stop_lag_mad_seconds: 3}
+        - &equal_other
+          assignment_id: equal_other
+          lifecycle_state: validated
+          power_states_w: [0, 100]
+          model_confidence: 0.9
+          transition_prototypes:
+            - {direction: "on", from_state_w: 0, to_state_w: 100, delta_w: 100, spread_w: 2, sample_count: 3}
+            - {direction: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 3}
+          helper_links:
+            - {helper_circuit_id: other, relationship: corroborates, status: confirmed, confidence: 1.0, start_lag_seconds: 0, start_lag_mad_seconds: 1, stop_lag_seconds: 0, stop_lag_mad_seconds: 1}
+    samples:
+      - {t: 0, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 0}}
+      - {t: 10, states: {sensor.ac2: 100, sensor.other: 0, sensor.mixed: 0}}
+      - {t: 40, states: {sensor.ac2: 100, sensor.other: 0, sensor.mixed: 100}}
+      - {t: 80, states: {sensor.ac2: 100, sensor.other: 0, sensor.mixed: 100}}
+      - {t: 120, states: {sensor.ac2: 100, sensor.other: 0, sensor.mixed: 100}}
+      - {t: 150, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 100}}
+      - {t: 200, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 0}}
+      - {t: 240, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 0}}
+      - {t: 280, states: {sensor.ac2: 0, sensor.other: 0, sensor.mixed: 0}}
+    labels:
+      component_truth:
+        blower:
+          corroborating_helper_circuit_ids: [ac2]
+          edges: [{event_type: start, around_t: 40}, {event_type: stop, around_t: 200}]
+          sessions: [{start_t: 40, end_t: 200}]
+          energy_kwh: 0.004444
+        equal_other: {}
+
+  - id: helper_unavailable_return
+    source_kind: pure_mixed
+    circuits: [*helper, *mixed]
+    assignments:
+      mixed:
+        - <<: *blower
+          helper_links:
+            - {helper_circuit_id: ac2, relationship: corroborates, status: confirmed, confidence: 1.0, start_lag_seconds: 0, start_lag_mad_seconds: 1, stop_lag_seconds: 0, stop_lag_mad_seconds: 1}
+    samples:
+      - {t: 0, states: {sensor.ac2: unknown, sensor.mixed: 0}}
+      - {t: 10, states: {sensor.ac2: unknown, sensor.mixed: 100}}
+      - {t: 20, states: {sensor.ac2: unknown, sensor.mixed: 100}}
+      - {t: 30, states: {sensor.ac2: unknown, sensor.mixed: 100}}
+      - {t: 40, states: {sensor.ac2: unknown, sensor.mixed: 0}}
+      - {t: 50, states: {sensor.ac2: unknown, sensor.mixed: 0}}
+      - {t: 60, states: {sensor.ac2: unknown, sensor.mixed: 0}}
+      - {t: 70, states: {sensor.ac2: 0, sensor.mixed: 0}}
+      - {t: 80, states: {sensor.ac2: 100, sensor.mixed: 0}}
+      - {t: 90, states: {sensor.ac2: 100, sensor.mixed: 0}}
+      - {t: 100, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 110, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 120, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 130, states: {sensor.ac2: 0, sensor.mixed: 100}}
+      - {t: 180, states: {sensor.ac2: 0, sensor.mixed: 100}}
+      - {t: 190, states: {sensor.ac2: 0, sensor.mixed: 0}}
+      - {t: 200, states: {sensor.ac2: 0, sensor.mixed: 0}}
+      - {t: 210, states: {sensor.ac2: 0, sensor.mixed: 0}}
+    labels:
+      component_truth:
+        blower:
+          corroborating_helper_circuit_ids: [ac2]
+          edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 40}, {event_type: start, around_t: 100}, {event_type: stop, around_t: 190}]
+          sessions: [{start_t: 10, end_t: 40}, {start_t: 100, end_t: 190}]
+          energy_kwh: 0.003333
+
+  - id: helper_timing_drift
+    source_kind: pure_mixed
+    circuits: [*helper, *mixed]
+    assignments:
+      mixed:
+        - <<: *blower
+          helper_links:
+            - {helper_circuit_id: ac2, relationship: corroborates, status: confirmed, confidence: 1.0, start_lag_seconds: 0, start_lag_mad_seconds: 1, stop_lag_seconds: 0, stop_lag_mad_seconds: 1}
+    samples:
+      - {t: 0, states: {sensor.ac2: 0, sensor.mixed: 0}}
+      - {t: 10, states: {sensor.ac2: 100, sensor.mixed: 0}}
+      - {t: 150, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 180, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 210, states: {sensor.ac2: 100, sensor.mixed: 100}}
+      - {t: 240, states: {sensor.ac2: 100, sensor.mixed: 0}}
+    labels: {component_truth: {blower: {corroborating_helper_circuit_ids: [ac2]}}}
+
+  - id: direct_component_counted_once
+    source_kind: pure_mixed
+    circuits:
+      - circuit_id: meter
+        name: Direct meter
+        appliance_profile: motor_load
+        circuit_mode: single_phase
+        sources: {power: sensor.meter}
+      - *mixed
+    assignments:
+      mixed:
+        - assignment_id: pump
+          lifecycle_state: validated
+          power_states_w: [0, 60]
+          model_confidence: 0.95
+          helper_links:
+            - {helper_circuit_id: meter, relationship: direct_component, status: confirmed, confidence: 0.95}
+    samples:
+      - {t: 0, states: {sensor.meter: 0, sensor.mixed: 20}}
+      - {t: 10, states: {sensor.meter: 60, sensor.mixed: 80}}
+      - {t: 40, states: {sensor.meter: 60, sensor.mixed: 80}}
+      - {t: 70, states: {sensor.meter: 0, sensor.mixed: 20}}
+      - {t: 100, states: {sensor.meter: 0, sensor.mixed: 20}}
+    labels:
+      component_truth:
+        pump:
+          edges: [{event_type: start, around_t: 10}, {event_type: stop, around_t: 70}]
+          sessions: [{start_t: 10, end_t: 70}]
+          energy_kwh: 0.001

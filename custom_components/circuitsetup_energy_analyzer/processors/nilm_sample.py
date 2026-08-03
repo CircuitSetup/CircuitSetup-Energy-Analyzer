@@ -172,30 +172,82 @@ class NilmSampleProcessor:
             )
             masked_ids = {id(match.edge) for match in matched_edges}
             new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
-            runtime, reconciliation, completed_sessions, accepted = (
-                reconcile_component_runtime(
-                    source_power_w=sample.real_power,
-                    timestamp=sample.timestamp,
+            previous_reconciliation = (
+                context.state.nilm_reconciliation_by_circuit.get(circuit_id)
+            )
+            pending_confirmation = detector.has_pending_transition and not edges
+            source_power_w = (
+                _pending_reconciliation_source(
+                    previous_reconciliation, sample.timestamp
+                )
+                if pending_confirmation
+                else sample.real_power
+            )
+            available_helper_ids = set(
+                context.state.latest_real_power_w_by_circuit
+            )
+            direct_helper_powers = {
+                helper_id: (
+                    runtime.get(str(item.get("assignment_id") or ""), {}).get(
+                        "estimated_power_w"
+                    )
+                    if pending_confirmation
+                    else context.state.latest_real_power_w_by_circuit.get(helper_id)
+                )
+                for item in assignments
+                if (helper_id := _direct_helper_id(item)) is not None
+            }
+            if not pending_confirmation or source_power_w is not None:
+                edge_timestamp = (
+                    max(edge.timestamp for edge in new_unmasked)
+                    if new_unmasked
+                    else sample.timestamp
+                )
+                reconciliation_previous = (
+                    _reconciliation_at_or_before(
+                        previous_reconciliation, edge_timestamp
+                    )
+                    if new_unmasked
+                    else previous_reconciliation
+                )
+                runtime, reconciliation, completed_sessions, accepted = (
+                    reconcile_component_runtime(
+                    source_power_w=source_power_w,
+                    timestamp=edge_timestamp,
                     assignments=assignments,
                     runtime=runtime,
                     edges=new_unmasked,
                     standby_w=standby_w,
                     noise_spread_w=detector.noise_spread_w,
-                    previous_reconciliation=(
-                        context.state.nilm_reconciliation_by_circuit.get(circuit_id)
-                    ),
+                    previous_reconciliation=reconciliation_previous,
                     helper_events=self._helper_events_by_source[circuit_id],
-                    available_helper_ids=set(
-                        context.state.latest_real_power_w_by_circuit
-                    ),
-                    direct_helper_powers={
-                        helper_id: context.state.latest_real_power_w_by_circuit.get(
-                            helper_id
-                        )
-                        for helper_id in _direct_helper_ids(assignments)
-                    },
+                    available_helper_ids=available_helper_ids,
+                    direct_helper_powers=direct_helper_powers,
+                    )
                 )
-            )
+                if (
+                    edge_timestamp < sample.timestamp
+                    and reconciliation.get("energy_allocation_allowed")
+                    and reconciliation.get("consistent")
+                ):
+                    runtime, reconciliation, followup_completed, _ = (
+                        reconcile_component_runtime(
+                            source_power_w=sample.real_power,
+                            timestamp=sample.timestamp,
+                            assignments=assignments,
+                            runtime=runtime,
+                            edges=(),
+                            standby_w=standby_w,
+                            noise_spread_w=detector.noise_spread_w,
+                            previous_reconciliation=reconciliation,
+                            helper_events=self._helper_events_by_source[circuit_id],
+                            available_helper_ids=available_helper_ids,
+                            direct_helper_powers=direct_helper_powers,
+                        )
+                    )
+                    completed_sessions.extend(followup_completed)
+            else:
+                accepted = ()
             accepted_ids = {id(edge) for edge in accepted}
             next_unmatched = [
                 edge for edge in next_unmatched if id(edge) not in accepted_ids
@@ -486,6 +538,7 @@ def reconcile_component_runtime(
 ]:
     """Apply bounded assignment transitions and enforce source conservation."""
     assignments = tuple(assignments)
+    edges = tuple(edges)
     models = tuple(
         model
         for item in assignments
@@ -498,12 +551,14 @@ def reconcile_component_runtime(
     completed: list[dict[str, Any]] = []
     session_closes: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
     conflict: str | None = None
+    ambiguous_event_increment = 0
 
     if source_power_w is None or not isfinite(source_power_w):
         _suspend_runtime(next_runtime)
         return next_runtime, _runtime_reconciliation(
             None, standby_w, next_runtime, noise_spread_w,
-            "source_unavailable", timestamp
+            "source_unavailable", timestamp, previous_reconciliation,
+            total_event_increment=len(edges),
         ), completed, accepted
 
     direct_closes, direct_unavailable = _apply_direct_component_sample(
@@ -541,12 +596,21 @@ def reconcile_component_runtime(
             ),
         )
         if not result.accepted:
+            if result.reason == "ambiguous":
+                ambiguous_event_increment += 1
             if result.reason == "helper_conflict":
                 conflict = result.reason
             continue
         pending_sessions: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
         for transition in result.transitions:
             payload = next_runtime[transition.assignment_id]
+            matched_helper_evidence = _matched_corroborating_links(
+                assignments,
+                transition.assignment_id,
+                helper_events,
+                edge,
+                available_helper_ids,
+            )
             if transition.direction == "on":
                 payload.update({
                     "status": NilmComponentStatus.ON,
@@ -561,8 +625,22 @@ def reconcile_component_runtime(
                     "last_observed": edge.timestamp.isoformat(),
                     "energy_kwh": 0.0,
                     "on_delta_w": transition.delta_w,
+                    "helper_evidence": matched_helper_evidence,
                 })
             else:
+                existing_helper_ids = {
+                    item.get("helper_circuit_id")
+                    for item in _list_items(payload.get("helper_evidence"))
+                    if isinstance(item, Mapping)
+                }
+                payload["helper_evidence"] = [
+                    *_list_items(payload.get("helper_evidence")),
+                    *(
+                        item
+                        for item in matched_helper_evidence
+                        if item.get("helper_circuit_id") not in existing_helper_ids
+                    ),
+                ]
                 if payload.get("session_id") and payload.get("session_start"):
                     pending_sessions.append(
                         (transition.assignment_id, transition, edge)
@@ -645,6 +723,7 @@ def reconcile_component_runtime(
                 "session_id": None,
                 "session_start": None,
                 "energy_kwh": 0.0,
+                "helper_evidence": [],
             })
     consistent = conflict is None
     for payload in next_runtime.values():
@@ -656,6 +735,8 @@ def reconcile_component_runtime(
         source_interval if conflict is None else 0.0,
         standby_interval if conflict is None else 0.0,
         component_interval if conflict is None else 0.0,
+        len(edges),
+        ambiguous_event_increment,
     ), completed, accepted
 
 
@@ -969,6 +1050,31 @@ def _confirmed_helper_link_evidence(
     return helper_id, confidence, matched
 
 
+def _matched_corroborating_links(
+    assignments: Iterable[Mapping[str, Any]],
+    assignment_id: str,
+    events: Iterable[CircuitEvent],
+    edge: NilmEdge,
+    available_helper_ids: set[str] | frozenset[str],
+) -> list[dict[str, Any]]:
+    assignment = next(
+        item for item in assignments if item.get("assignment_id") == assignment_id
+    )
+    expected = "start" if edge.direction == "on" else "stop"
+    return [
+        dict(link)
+        for link in _list_items(assignment.get("helper_links"))
+        if isinstance(link, Mapping)
+        and (
+            evidence := _confirmed_helper_link_evidence(
+                link, events, edge, available_helper_ids, expected
+            )
+        )
+        is not None
+        and evidence[2]
+    ]
+
+
 def _runtime_energy_increments(
     runtime: Mapping[str, Mapping[str, Any]],
     timestamp: datetime,
@@ -1026,9 +1132,18 @@ def _completed_runtime_session(
             _finite_float(assignment.get("model_confidence")) or 0.0,
         ),
         "helper_evidence": [
-            dict(link)
-            for link in _list_items(assignment.get("helper_links"))
-            if isinstance(link, Mapping) and link.get("status") == "confirmed"
+            *(
+                dict(link)
+                for link in _list_items(assignment.get("helper_links"))
+                if isinstance(link, Mapping)
+                and link.get("status") == "confirmed"
+                and link.get("relationship") == "direct_component"
+            ),
+            *(
+                dict(link)
+                for link in _list_items(runtime.get("helper_evidence"))
+                if isinstance(link, Mapping)
+            ),
         ],
         "consistent": True,
     }
@@ -1045,6 +1160,8 @@ def _runtime_reconciliation(
     source_interval_energy_kwh: float = 0.0,
     standby_interval_energy_kwh: float = 0.0,
     component_interval_energy_kwh: float = 0.0,
+    total_event_increment: int = 0,
+    ambiguous_event_increment: int = 0,
 ) -> dict[str, Any]:
     allocated = _runtime_allocated_power(runtime)
     residual = (
@@ -1053,6 +1170,8 @@ def _runtime_reconciliation(
         else 0.0
     )
     consistent = source_power_w is not None and conflict is None
+    conservation_conflicts = {"over_allocation", "energy_over_allocation"}
+    previous_conflict = (previous or {}).get("conflict")
     payload = {
         "source_power_w": source_power_w,
         "standby_w": standby_w,
@@ -1065,6 +1184,21 @@ def _runtime_reconciliation(
         "energy_allocation_allowed": consistent,
         "conflict": conflict,
         "last_observed": timestamp.isoformat(),
+        "total_event_count": _nonnegative_int(
+            (previous or {}).get("total_event_count")
+        )
+        + total_event_increment,
+        "ambiguous_event_count": _nonnegative_int(
+            (previous or {}).get("ambiguous_event_count")
+        )
+        + ambiguous_event_increment,
+        "conservation_violations": _nonnegative_int(
+            (previous or {}).get("conservation_violations")
+        )
+        + int(
+            conflict in conservation_conflicts
+            and previous_conflict not in conservation_conflicts
+        ),
         "source_energy_kwh": (
             (_finite_float((previous or {}).get("source_energy_kwh")) or 0.0)
             + source_interval_energy_kwh
@@ -1126,6 +1260,29 @@ def _finite_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if isfinite(number) else None
+
+
+def _pending_reconciliation_source(
+    previous: Any, pending_timestamp: datetime
+) -> float | None:
+    if not isinstance(previous, Mapping):
+        return None
+    source = _finite_float(previous.get("source_power_w"))
+    observed = _runtime_datetime(previous.get("last_observed"))
+    return (
+        source
+        if source is not None and observed is not None and observed <= pending_timestamp
+        else None
+    )
+
+
+def _reconciliation_at_or_before(
+    previous: Any, timestamp: datetime
+) -> Mapping[str, Any] | None:
+    if not isinstance(previous, Mapping):
+        return None
+    valid = _pending_reconciliation_source(previous, timestamp)
+    return previous if valid is not None else None
 
 
 def _runtime_datetime(value: Any) -> datetime | None:
