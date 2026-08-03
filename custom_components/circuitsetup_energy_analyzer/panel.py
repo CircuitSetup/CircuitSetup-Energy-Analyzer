@@ -28,7 +28,6 @@ from .const import (
     DOMAIN,
 )
 from .context_sources import thermostat_mappings_for_settings
-from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .entities.setup_health import (
     setup_health_attributes,
     setup_health_panel_text,
@@ -63,6 +62,7 @@ from .panel_contracts import (
 )
 from .panel_nilm import (
     MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
+    _nilm_history_live_real_power_metadata,
     _nilm_known_load_overlays,
     _nilm_payload_for_circuit,
     _nilm_solar_overlays,
@@ -1994,9 +1994,12 @@ async def nilm_workspace_history_payload(
         hours=hours,
         entry_id=str(getattr(coordinator, "entry_id", "") or ""),
         helper_configs=helper_configs,
+        hass=hass,
     )
     entity_series = list(history.get("entity_series", ()))
-    source_entity_id = entity_series[0]["entity_id"] if entity_series else None
+    if not entity_series:
+        return []
+    source_entity_id = entity_series[0]["entity_id"]
     entity_series = [
         {**item, **metadata}
         for item in entity_series
@@ -2065,31 +2068,6 @@ async def nilm_workspace_history_payload(
                 row.update(source)
         annotated.append(series)
     return annotated
-
-
-def _nilm_history_live_real_power_metadata(
-    hass: Any,
-    entity_id: str,
-) -> dict[str, str] | None:
-    states = getattr(hass, "states", None)
-    state_get = getattr(states, "get", None)
-    state = state_get(entity_id) if callable(state_get) else None
-    attributes = getattr(state, "attributes", None)
-    if not isinstance(attributes, Mapping):
-        return {"effective_role": SensorRole.REAL_POWER.value}
-    device_class = attributes.get("device_class")
-    unit = str(attributes.get("unit_of_measurement") or "").strip()
-    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
-        return None
-    role = sensor_role_from_metadata(device_class=device_class, unit=unit)
-    if role not in {None, SensorRole.REAL_POWER} or (
-        unit and unit.lower() not in {"w", "kw", "mw"}
-    ):
-        return None
-    metadata = {"effective_role": SensorRole.REAL_POWER.value}
-    if unit:
-        metadata["source_unit"] = unit
-    return metadata
 
 
 async def _async_history_rows(

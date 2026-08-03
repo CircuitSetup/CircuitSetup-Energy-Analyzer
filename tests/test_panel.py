@@ -5628,3 +5628,73 @@ async def test_nilm_workspace_history_rejects_live_reactive_metadata(
     )
 
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_falls_through_to_live_watts(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(
+            SensorRef("sensor.mixed_var", SensorRole.REAL_POWER),
+            SensorRef("sensor.mixed_watts", SensorRole.REAL_POWER),
+        ),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    metadata = {
+        "sensor.mixed_var": {
+            "device_class": "reactive_power",
+            "unit_of_measurement": "var",
+        },
+        "sensor.mixed_watts": {
+            "device_class": "power",
+            "unit_of_measurement": "W",
+        },
+    }
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda entity_id: SimpleNamespace(attributes=metadata[entity_id])
+        )
+    )
+    coordinator.hass = hass
+    requested_entity_ids = []
+
+    async def history_rows(_hass, _start, _end, entity_ids):
+        requested_entity_ids.extend(entity_ids)
+        return [[{
+            "entity_id": "sensor.mixed_watts",
+            "state": "420",
+            "last_changed": "2026-08-03T12:00:00+00:00",
+        }]]
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )
+    assert payload["history"]["entity_series"] == [{
+        "entity_id": "sensor.mixed_watts",
+        "effective_role": "real_power",
+        "source_unit": "W",
+    }]
+
+    rows = await panel.nilm_workspace_history_payload(
+        hass,
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+    )
+
+    assert requested_entity_ids == ["sensor.mixed_watts"]
+    assert rows[0][0]["effective_role"] == "real_power"
+    assert rows[0][0]["source_unit"] == "W"

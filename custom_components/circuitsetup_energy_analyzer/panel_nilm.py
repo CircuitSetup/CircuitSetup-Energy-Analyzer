@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
-from .discovery import sensor_role_from_metadata
+from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .managers.nilm_controller import (
     configured_primary_assignment_id,
     nilm_assignment_publication_reason,
@@ -268,6 +268,7 @@ def nilm_workspace_payload(
             solar_overlays,
             hours=hours,
             entry_id=selected_entry_id,
+            hass=getattr(coordinator, "hass", None),
         ),
         "known_load_overlays": known_load_overlays,
         "solar_overlays": solar_overlays,
@@ -1960,6 +1961,7 @@ def _nilm_workspace_history_payload(
     hours: Any,
     entry_id: str | None = None,
     helper_configs: Iterable[CircuitConfig] = (),
+    hass: Any = None,
 ) -> dict[str, Any]:
     requested_hours = _bounded_float(
         hours,
@@ -1968,12 +1970,13 @@ def _nilm_workspace_history_payload(
     )
     end = datetime.now(UTC)
     start = end - timedelta(hours=requested_hours)
-    source_series = _nilm_real_power_series(config)[:1]
+    source_series = _nilm_real_power_series(config, hass=hass)[:1]
     entity_series = _nilm_workspace_history_series(
         config,
         known_load_overlays,
         solar_overlays,
         helper_configs,
+        hass=hass,
     )
     entities = [item["entity_id"] for item in entity_series]
     history_query_values = {
@@ -2036,14 +2039,16 @@ def _nilm_workspace_history_series(
     _known_load_overlays: list[dict[str, Any]],
     _solar_overlays: list[dict[str, Any]],
     helper_configs: Iterable[CircuitConfig] = (),
+    *,
+    hass: Any = None,
 ) -> list[dict[str, str]]:
-    source_series = _nilm_real_power_series(config)[:1]
+    source_series = _nilm_real_power_series(config, hass=hass)[:1]
     if not source_series:
         return []
     helper_series = [
         series
         for helper in helper_configs
-        for series in _nilm_real_power_series(helper)[:1]
+        for series in _nilm_real_power_series(helper, hass=hass)[:1]
     ]
     unique = {}
     for series in (*source_series, *helper_series):
@@ -2051,10 +2056,14 @@ def _nilm_workspace_history_series(
     return list(unique.values())[:5]
 
 
-def _nilm_real_power_series(config: CircuitConfig) -> list[dict[str, str]]:
+def _nilm_real_power_series(
+    config: CircuitConfig,
+    *,
+    hass: Any = None,
+) -> list[dict[str, str]]:
     series = []
     for sensor in getattr(config, "sensors", ()) or ():
-        item = _nilm_real_power_sensor_series(sensor)
+        item = _nilm_real_power_sensor_series(sensor, hass=hass)
         if item is not None and item["entity_id"] not in {
             existing["entity_id"] for existing in series
         }:
@@ -2062,7 +2071,11 @@ def _nilm_real_power_series(config: CircuitConfig) -> list[dict[str, str]]:
     return series
 
 
-def _nilm_real_power_sensor_series(sensor: Any) -> dict[str, str] | None:
+def _nilm_real_power_sensor_series(
+    sensor: Any,
+    *,
+    hass: Any = None,
+) -> dict[str, str] | None:
     entity_id = str(getattr(sensor, "entity_id", "") or "").strip()
     if not entity_id:
         return None
@@ -2074,11 +2087,42 @@ def _nilm_real_power_sensor_series(sensor: Any) -> dict[str, str] | None:
         return None
     if unit and unit.lower() not in {"w", "kw", "mw"}:
         return None
-    return {
+    series = {
         "entity_id": entity_id,
         "effective_role": SensorRole.REAL_POWER.value,
         "source_unit": unit or "W",
     }
+    if hass is not None:
+        metadata = _nilm_history_live_real_power_metadata(hass, entity_id)
+        if metadata is None:
+            return None
+        series.update(metadata)
+    return series
+
+
+def _nilm_history_live_real_power_metadata(
+    hass: Any,
+    entity_id: str,
+) -> dict[str, str] | None:
+    states = getattr(hass, "states", None)
+    state_get = getattr(states, "get", None)
+    state = state_get(entity_id) if callable(state_get) else None
+    attributes = getattr(state, "attributes", None)
+    if not isinstance(attributes, Mapping):
+        return {"effective_role": SensorRole.REAL_POWER.value}
+    device_class = attributes.get("device_class")
+    unit = str(attributes.get("unit_of_measurement") or "").strip()
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return None
+    role = sensor_role_from_metadata(device_class=device_class, unit=unit)
+    if role not in {None, SensorRole.REAL_POWER} or (
+        unit and unit.lower() not in {"w", "kw", "mw"}
+    ):
+        return None
+    metadata = {"effective_role": SensorRole.REAL_POWER.value}
+    if unit:
+        metadata["source_unit"] = unit
+    return metadata
 
 
 def _sensor_entity_ids(config: Any) -> list[str]:
