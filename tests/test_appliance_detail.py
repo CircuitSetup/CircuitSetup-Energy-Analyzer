@@ -1363,6 +1363,69 @@ def test_off_only_nilm_assignment_does_not_create_energy_or_history() -> None:
     assert "embedded_series" not in payload["history"]
 
 
+def test_explicitly_linked_legacy_off_session_is_retained() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        _merged_assignment_session_payloads,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
+    fingerprint = (
+        "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.10-0.15|"
+        "split=unknown|leg=unknown|balance=unknown"
+    )
+    assignment["signature_fingerprints"] = [fingerprint, "unassigned"]
+    assignment["session_ids"] = ["legacy-complete", "legacy-open"]
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                **_nilm_session(
+                    "legacy-complete",
+                    start=datetime(2026, 6, 30, 8, 0, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 8, 5, tzinfo=UTC),
+                    duration_seconds=300.0,
+                    energy_kwh=0.008,
+                ),
+                "signature_fingerprint": fingerprint,
+                "assignment_id": assignment["assignment_id"],
+            },
+            {
+                **_nilm_session(
+                    "legacy-open",
+                    start=datetime(2026, 6, 30, 8, 30, tzinfo=UTC),
+                    end=None,
+                    duration_seconds=None,
+                    energy_kwh=0.0,
+                ),
+                "signature_fingerprint": fingerprint,
+                "assignment_id": assignment["assignment_id"],
+            },
+            {
+                **_nilm_session(
+                    "unlinked",
+                    start=datetime(2026, 6, 30, 9, 0, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 9, 5, tzinfo=UTC),
+                    duration_seconds=300.0,
+                    energy_kwh=0.008,
+                ),
+                "signature_fingerprint": fingerprint,
+                "assignment_id": assignment["assignment_id"],
+            },
+        ]
+    }
+
+    sessions = _merged_assignment_session_payloads(
+        coordinator,
+        "mains",
+        assignment,
+        (),
+    )
+
+    assert [session["session_id"] for session in sessions] == ["legacy-complete"]
+
+
 def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,

@@ -27,6 +27,7 @@ from ..nilm import (
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     nilm_signature_is_assignable,
+    nilm_signature_is_off_direction,
     normalize_nilm_assignment_model,
     pair_nilm_sessions_for_signatures,
     reconcile_nilm_edge,
@@ -465,11 +466,14 @@ class NilmSampleProcessor:
                 "classification": classify_signature(classified_signature),
                 "feedback_fingerprint": feedback_fingerprint,
             }
-            signature_edges = [
+            matching_edges = [
                 edge
                 for edge in self.unmatched_edges_by_circuit[circuit_id]
+                if _nilm_signature_edge_score(edge, payload) is not None
+            ]
+            signature_edges = [
+                edge for edge in matching_edges
                 if edge.timestamp >= context.now - timedelta(minutes=10)
-                and _nilm_signature_edge_score(edge, payload) is not None
             ]
             assignment = next(
                 (
@@ -490,6 +494,32 @@ class NilmSampleProcessor:
                 ),
                 None,
             )
+            legacy_owner = None
+            if assignment is None:
+                legacy_owner = _confirmed_placeholder_owner(
+                    payload,
+                    matching_edges,
+                    context.store_data.nilm_appliance_assignments_by_circuit.get(
+                        circuit_id, []
+                    ),
+                    context.store_data.nilm_session_history_by_circuit.get(
+                        circuit_id, []
+                    ),
+                )
+                if legacy_owner is not None:
+                    fingerprints = [
+                        str(value or "").strip()
+                        for value in _list_items(
+                            legacy_owner.get("signature_fingerprints")
+                        )
+                        if str(value or "").strip().casefold() != "unassigned"
+                    ]
+                    legacy_owner["signature_fingerprints"] = list(
+                        dict.fromkeys((*fingerprints, feedback_fingerprint))
+                    )
+                    legacy_owner["updated_at"] = context.now.isoformat()
+                    assignment = legacy_owner
+                    self._helper_links_dirty = True
             if assignment is not None and _record_assignment_model_drift(
                 assignment, feedback_fingerprint, signature_edges
             ):
@@ -521,6 +551,9 @@ class NilmSampleProcessor:
             for key in ("review_state", "expected", "merged_into"):
                 if key in metadata_current:
                     payload[key] = metadata_current[key]
+            if legacy_owner is not None:
+                payload["review_state"] = "assigned"
+                payload["assignment_id"] = legacy_owner["assignment_id"]
             target_fingerprint = metadata_current.get("merged_into_fingerprint")
             if target_fingerprint:
                 payload["merged_into_fingerprint"] = target_fingerprint
@@ -1055,18 +1088,34 @@ def _runtime_assignment_model(
         signatures = tuple(signature_specs)
         by_key = _nilm_signatures_by_key(signatures)
         provisional = []
+        legacy_provisional = []
         for fingerprint in _list_items(assignment.get("signature_fingerprints")):
             resolved = resolve_nilm_signature_fingerprint(str(fingerprint), signatures)
             signature = by_key.get(resolved or "")
-            watts = _finite_float(
+            signed_watts = _finite_float(
                 signature.get("median_delta_w") if signature else None
             )
-            if signature is None or watts is None or watts <= 0:
+            if signature is None or signed_watts is None or signed_watts == 0:
                 continue
+            if signed_watts < 0 and not _list_items(
+                assignment.get("confirmed_session_ids")
+            ):
+                continue
+            watts = abs(signed_watts)
             reactive = _finite_float(signature.get("median_delta_var"))
+            if signed_watts < 0 and reactive is not None:
+                reactive = -reactive
             sample_count = _nonnegative_int(signature.get("occurrence_count"))
             confidence = _clamped_confidence(signature.get("confidence"))
-            provisional.append((watts, reactive, sample_count, confidence))
+            if signed_watts < 0:
+                confidence = max(
+                    confidence,
+                    _clamped_confidence(assignment.get("confidence")),
+                )
+            target = legacy_provisional if signed_watts < 0 else provisional
+            target.append((watts, reactive, sample_count, confidence))
+        if not provisional:
+            provisional = legacy_provisional
         if provisional:
             states = sorted({0.0, *(watts for watts, *_ in provisional)})
             prototypes = [
@@ -1099,6 +1148,9 @@ def _runtime_assignment_model(
     ]
     component_eligible = not fingerprints or any(
         map(nilm_signature_is_assignable, fingerprints)
+    ) or (
+        bool(_list_items(assignment.get("confirmed_session_ids")))
+        and any(map(nilm_signature_is_off_direction, fingerprints))
     )
     prototypes = tuple(
         NilmTransitionPrototype(
@@ -1674,6 +1726,70 @@ def _newest_nilm_edges(edges: Iterable[NilmEdge], max_items: int) -> list[NilmEd
     if max_items <= 0:
         return []
     return sorted(edges, key=lambda edge: edge.timestamp)[-max_items:]
+
+
+def _confirmed_placeholder_owner(
+    signature: Mapping[str, Any],
+    edges: Iterable[NilmEdge],
+    assignments: Iterable[Any],
+    sessions: Iterable[Any],
+) -> dict[str, Any] | None:
+    """Find one legacy placeholder assignment confirmed for this ON cluster."""
+    fingerprint = str(signature.get("feedback_fingerprint") or "").strip()
+    if (
+        not nilm_signature_is_assignable(fingerprint)
+        or _nonnegative_int(signature.get("occurrence_count")) < 3
+    ):
+        return None
+    starts = {
+        edge.timestamp
+        for edge in edges
+        if edge.direction == "on"
+        and _nilm_signature_edge_score(edge, signature) is not None
+    }
+    if len(starts) < 2:
+        return None
+    matching_sessions = [
+        session
+        for session in sessions
+        if isinstance(session, Mapping)
+        and str(session.get("signature_fingerprint") or "").strip().casefold()
+        == "unassigned"
+        and _runtime_datetime(session.get("start")) in starts
+    ]
+    owners: list[dict[str, Any]] = []
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            continue
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
+        assignment_fingerprints = [
+            str(value or "").strip()
+            for value in _list_items(assignment.get("signature_fingerprints"))
+        ]
+        if (
+            not assignment_id
+            or "unassigned"
+            not in {value.casefold() for value in assignment_fingerprints}
+            or any(map(nilm_signature_is_assignable, assignment_fingerprints))
+            or str(assignment.get("lifecycle_state") or "").strip().casefold()
+            in {"hidden", "ignored", "retired", "rejected", "converted"}
+        ):
+            continue
+        confirmed = {
+            str(value or "").strip()
+            for value in _list_items(assignment.get("confirmed_session_ids"))
+            if str(value or "").strip()
+        }
+        matches = sum(
+            1
+            for session in matching_sessions
+            if str(session.get("session_id") or "").strip() in confirmed
+            and str(session.get("assignment_id") or "").strip()
+            in {"", assignment_id}
+        )
+        if matches >= 2:
+            owners.append(assignment)
+    return owners[0] if len(owners) == 1 else None
 
 
 def _recover_unassigned_session_edges(

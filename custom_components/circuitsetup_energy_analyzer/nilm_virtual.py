@@ -633,8 +633,9 @@ def _merged_assignment_session_payloads(
         for value in _iter_items(assignment.get("signature_fingerprints"))
         if str(value or "").strip()
     ]
-    if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
-        return []
+    component_eligible = not fingerprints or any(
+        map(nilm_signature_is_assignable, fingerprints)
+    )
     session_ids = {
         str(value or "").strip()
         for value in _iter_items(assignment.get("session_ids"))
@@ -650,17 +651,24 @@ def _merged_assignment_session_payloads(
         session_fingerprint = str(
             session.get("signature_fingerprint") or ""
         ).strip()
-        if session_fingerprint and not nilm_signature_is_assignable(
-            session_fingerprint
-        ):
-            continue
         session_id = str(session.get("session_id") or "").strip()
         owner = str(session.get("assignment_id") or "").strip()
         if not session_id:
             continue
+        explicitly_linked = session_id in session_ids
+        if not component_eligible and (
+            not explicitly_linked or not session.get("end")
+        ):
+            continue
         if owner and owner != assignment_id:
             continue
-        if not owner and session_id not in session_ids:
+        if not owner and not explicitly_linked:
+            continue
+        if (
+            session_fingerprint
+            and not nilm_signature_is_assignable(session_fingerprint)
+            and not explicitly_linked
+        ):
             continue
         merged[session_id] = dict(session)
     owned_starts = {str(session.get("start") or "") for session in merged.values()}

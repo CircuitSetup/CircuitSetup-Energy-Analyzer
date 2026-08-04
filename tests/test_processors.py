@@ -9776,6 +9776,223 @@ def test_nilm_restart_restores_multiple_assigned_signature_models() -> None:
     assert {item["status"] for item in runtime.values()} == {"on"}
 
 
+def test_confirmed_legacy_off_signature_drives_component_runtime() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _runtime_assignment_model,
+    )
+
+    fingerprint = (
+        "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.10-0.15|"
+        "split=unknown|leg=unknown|balance=unknown"
+    )
+    model = _runtime_assignment_model(
+        {
+            "assignment_id": "pump",
+            "lifecycle_state": "assigned",
+            "confidence": 0.85,
+            "signature_fingerprints": [fingerprint, "unassigned"],
+            "confirmed_session_ids": ["confirmed-session"],
+        },
+        [
+            {
+                "feedback_fingerprint": fingerprint,
+                "direction": "off",
+                "median_delta_w": -82.0,
+                "median_delta_var": 4.0,
+                "occurrence_count": 3,
+                "confidence": 0.6,
+            }
+        ],
+    )
+
+    assert model.power_states_w == (0.0, 82.0)
+    assert [
+        (item.direction, item.delta_w, item.delta_var)
+        for item in model.transition_prototypes
+    ] == [
+        ("on", 82.0, -4.0),
+        ("off", -82.0, 4.0),
+    ]
+    assert model.model_confidence == 0.85
+
+
+def test_assigned_on_signature_replaces_legacy_off_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _runtime_assignment_model,
+    )
+
+    off_fingerprint = "direction=off|watts=0-100"
+    on_fingerprint = "direction=on|watts=0-100"
+    model = _runtime_assignment_model(
+        {
+            "assignment_id": "pump",
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": [off_fingerprint, on_fingerprint],
+            "confirmed_session_ids": ["confirmed-session"],
+        },
+        [
+            {
+                "feedback_fingerprint": off_fingerprint,
+                "median_delta_w": -82.0,
+                "occurrence_count": 3,
+                "confidence": 0.85,
+            },
+            {
+                "feedback_fingerprint": on_fingerprint,
+                "median_delta_w": 78.0,
+                "occurrence_count": 3,
+                "confidence": 0.8,
+            },
+        ],
+    )
+
+    assert model.power_states_w == (0.0, 78.0)
+    assert len(model.transition_prototypes) == 2
+
+
+def test_confirmed_placeholder_sessions_identify_one_legacy_owner() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _confirmed_placeholder_owner,
+    )
+
+    start = datetime(2026, 8, 4, tzinfo=UTC)
+    edges = [
+        NilmEdge(
+            timestamp=start + timedelta(minutes=index),
+            delta_w=watts,
+            delta_var=reactive,
+            direction="on",
+        )
+        for index, (watts, reactive) in enumerate(
+            [(80.0, -4.0), (82.0, -3.5), (84.0, -4.5)]
+        )
+    ]
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "signature_fingerprint": "unassigned",
+            "start": edge.timestamp.isoformat(),
+        }
+        for index, edge in enumerate(edges)
+    ]
+    signature = {
+        "feedback_fingerprint": "direction=on|watts=0-100|var=0-100",
+        "median_delta_w": 82.0,
+        "median_delta_var": -4.0,
+        "occurrence_count": 3,
+    }
+    owner = {
+        "assignment_id": "pump",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": ["direction=off|watts=0-100", "unassigned"],
+        "confirmed_session_ids": ["session-0", "session-1"],
+    }
+
+    assert _confirmed_placeholder_owner(signature, edges, [owner], sessions) is owner
+    assert _confirmed_placeholder_owner(
+        signature,
+        edges,
+        [
+            owner,
+            {
+                **owner,
+                "assignment_id": "other",
+            },
+        ],
+        sessions,
+    ) is None
+
+
+def test_signature_payload_rebinds_confirmed_placeholder_owner() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        NilmSignature,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 8, 4, 12, 5, tzinfo=UTC)
+    edges = [
+        NilmEdge(
+            timestamp=now - timedelta(minutes=5 - index),
+            delta_w=watts,
+            delta_var=reactive,
+            direction="on",
+        )
+        for index, (watts, reactive) in enumerate(
+            [(80.0, -4.0), (82.0, -3.5), (84.0, -4.5)]
+        )
+    ]
+    owner = {
+        "assignment_id": "pump",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": ["direction=off|watts=0-100", "unassigned"],
+        "confirmed_session_ids": ["session-0", "session-1"],
+    }
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [owner]},
+            nilm_session_history_by_circuit={
+                "mixed": [
+                    {
+                        "session_id": f"session-{index}",
+                        "signature_fingerprint": "unassigned",
+                        "assignment_id": "pump",
+                        "start": edge.timestamp.isoformat(),
+                    }
+                    for index, edge in enumerate(edges)
+                ]
+            },
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    processor.unmatched_edges_by_circuit["mixed"] = edges
+
+    payload = processor._nilm_signature_payloads(
+        "mixed",
+        [
+            NilmSignature(
+                signature_id="on-1",
+                median_delta_w=82.0,
+                median_delta_var=-4.0,
+                occurrence_count=3,
+                confidence=0.8,
+            )
+        ],
+        context,
+    )[0]
+
+    assert payload["review_state"] == "assigned"
+    assert payload["assignment_id"] == "pump"
+    assert "unassigned" not in owner["signature_fingerprints"]
+    assert payload["feedback_fingerprint"] in owner["signature_fingerprints"]
+
+
 def test_assigned_signature_drives_w_var_component_runtime() -> None:
     from collections import defaultdict
     from types import SimpleNamespace
