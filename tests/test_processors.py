@@ -9698,7 +9698,6 @@ def _reconciliation_assignment(
     "assignment",
     [
         {**_reconciliation_assignment("load", 80.0), "lifecycle_state": "retired"},
-        {**_reconciliation_assignment("load", 80.0), "lifecycle_state": "assigned"},
         {**_reconciliation_assignment("load", 80.0), "power_states_w": []},
         {**_reconciliation_assignment("load", 80.0), "model_confidence": 0.2},
     ],
@@ -9717,6 +9716,172 @@ def test_nilm_restart_excludes_ineligible_models(
     _restore_unique_component_state(80.0, 0.0, 0.0, (assignment,), runtime, now)
 
     assert runtime["load"]["status"] == "unknown"
+
+
+def test_nilm_restart_restores_user_assigned_model() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        **_reconciliation_assignment("load", 80.0),
+        "lifecycle_state": "assigned",
+    }
+    runtime = _initial_component_runtime((assignment,), {}, now)
+
+    _restore_unique_component_state(80.0, 0.0, 0.0, (assignment,), runtime, now)
+
+    assert runtime["load"]["status"] == "on"
+
+
+def test_nilm_restart_restores_multiple_assigned_signature_models() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        {
+            "assignment_id": assignment_id,
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": [fingerprint],
+        }
+        for assignment_id, fingerprint in (
+            ("pump", "pump-fingerprint"),
+            ("blower", "blower-fingerprint"),
+        )
+    ]
+    signatures = [
+        {
+            "feedback_fingerprint": fingerprint,
+            "median_delta_w": watts,
+            "median_delta_var": reactive,
+            "occurrence_count": 4,
+            "confidence": 0.8,
+        }
+        for fingerprint, watts, reactive in (
+            ("pump-fingerprint", 84.0, 27.0),
+            ("blower-fingerprint", 319.0, 120.0),
+        )
+    ]
+    runtime = _initial_component_runtime(assignments, {}, now)
+
+    _restore_unique_component_state(
+        403.0, 0.0, 0.0, assignments, runtime, now, signatures
+    )
+
+    assert {item["status"] for item in runtime.values()} == {"on"}
+
+
+def test_assigned_signature_drives_w_var_component_runtime() -> None:
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+        apply_state_update,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        ApplianceProfile,
+        CircuitConfig,
+        CircuitMode,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        NormalizedCircuitSample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+
+    class Detector:
+        min_delta_w = 20.0
+        has_pending_transition = False
+        noise_spread_w = 0.0
+
+        def process(self, _sample: object) -> list[NilmEdge]:
+            return [NilmEdge(now, 84.0, 27.0, 88.0, 0.0, "on")]
+
+    assignment = {
+        "assignment_id": "pump",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": ["pump-fingerprint"],
+    }
+    store = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+        nilm_signatures={"mixed": [{
+            "signature_id": "on-1",
+            "feedback_fingerprint": "pump-fingerprint",
+            "median_delta_w": 84.0,
+            "median_delta_var": 27.0,
+            "occurrence_count": 4,
+            "confidence": 0.8,
+        }]},
+    )
+    state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit["mixed"] = {
+        "pump": {
+            "status": "off",
+            "state_power_w": 0.0,
+            "estimated_power_w": 0.0,
+            "consistent": True,
+            "last_observed": now.isoformat(),
+            "energy_kwh": 0.0,
+        }
+    }
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={"mixed": Detector()},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mixed",
+        real_power=84.0,
+        current=None,
+        voltage=None,
+        reactive_power=27.0,
+        apparent_power=88.0,
+        power_factor=None,
+        frequency=None,
+        energy=None,
+    )
+    result = processor.process(
+        sample,
+        CircuitConfig("mixed", "Mixed", ApplianceProfile.MIXED, CircuitMode.MIXED),
+        ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=state,
+            store_data=store,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="balanced",
+        ),
+        events=(),
+    )
+    for update in result.state_updates:
+        apply_state_update(state, update.path, update.value)
+
+    runtime = state.nilm_component_runtime_by_circuit["mixed"]["pump"]
+    assert runtime["status"] == "on"
+    assert runtime["on_delta_w"] == 84.0
+    assert runtime["on_delta_var"] == 27.0
 
 
 def test_nilm_restart_restores_only_one_unique_bounded_fit() -> None:

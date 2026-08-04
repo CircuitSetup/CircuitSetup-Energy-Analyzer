@@ -3796,7 +3796,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     name = "test_nilm_secondary_collections_use_one_disclosure";
     {
       const panel = makePanel();
-      const html = panel._renderNilmSecondaryCollections(makeWorkspace());
+      const html = panel._renderNilmSecondaryCollections(makeWorkspace({ sessions: [
+        { session_id: "assigned", assignment_id: "assignment-1",
+          start: "OWNED_SESSION", actions: { assign: {} } },
+        { session_id: "unassigned", start: "RAW_SESSION",
+          actions: { assign: {} } },
+      ] }));
       assert.equal((html.match(/<details/g) || []).length, 1);
       for (const expected of [
         "Sessions, validation, and technical details",
@@ -3809,6 +3814,10 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       }
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
+      assert.ok(!html.includes("OWNED_SESSION"));
+      assert.ok(html.includes("RAW_SESSION"));
+      assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
+      assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
     }
 
     name = "test_nilm_full_workspace_has_one_owner";
@@ -3854,11 +3863,13 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       }
       for (let index = 0; index < sessions.length; index += 1) {
         const input = `id="nilm_session_label_${index}"`;
-        assert.equal(html.split(input).length - 1, 1);
-        for (const action of ["assign", "validate", "reject"]) {
+        assert.equal(html.split(input).length - 1, 0);
+        for (const action of ["validate", "reject"]) {
           const marker = `data-nilm-session-index="${index}" data-nilm-session-action="${action}"`;
           assert.equal(html.split(marker).length - 1, 1);
         }
+        const assign = `data-nilm-session-index="${index}" data-nilm-session-action="assign"`;
+        assert.equal(html.split(assign).length - 1, 0);
       }
       const secondary = panel._renderNilmSecondaryCollections(workspace);
       for (const duplicate of [
@@ -6213,10 +6224,9 @@ def test_nilm_interval_action_contracts() -> None:
         ] } } });
       for (const expected of [
         "Label appliance interval", "Click and drag across the graph",
-        "Power increase at start is optional",
-        "Power increase at interval start (W, optional)",
         "Appliance Type", "Dishwasher", "Save Interval",
       ]) assert.ok(html.includes(expected), expected);
+      assert.ok(!html.includes('data-nilm-label-interval-input="observed_transition_w"'));
     }
 
     name = "test_nilm_failed_interval_save_preserves_open_editor_and_draft";

@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-3"
+    assert PANEL_MODULE_VERSION == "20260804-4"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -1980,19 +1980,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"
-    assert payload["sessions"][0]["actions"]["assign"] == {
-        "domain": DOMAIN,
-        "service": "assign_session_to_appliance",
-        "data": {
-            "circuit_id": "mains",
-            "session_id": payload["sessions"][0]["session_id"],
-            "signature_fingerprint": payload["sessions"][0]["signature_fingerprint"],
-        },
-        "requires": ["label"],
-        "assignment_options": [
-            {"value": "assignment-dishwasher", "label": "Dishwasher"}
-        ],
-    }
+    assert "assign" not in payload["sessions"][0]["actions"]
     assert payload["sessions"][0]["actions"]["validate"] == {
         "domain": DOMAIN,
         "service": "validate_nilm_session",
@@ -4699,10 +4687,8 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
     sessions = {session["session_id"]: session for session in payload["sessions"]}
-    assert "validate" not in sessions["session-confirmed"]["actions"]
-    assert "reject" not in sessions["session-confirmed"]["actions"]
-    assert "validate" not in sessions["session-merged"]["actions"]
-    assert "reject" not in sessions["session-merged"]["actions"]
+    assert "actions" not in sessions["session-confirmed"]
+    assert "actions" not in sessions["session-merged"]
     assert "validate" in sessions["session-pending"]["actions"]
     assert "reject" in sessions["session-pending"]["actions"]
 

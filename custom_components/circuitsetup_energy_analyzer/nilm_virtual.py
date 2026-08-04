@@ -663,10 +663,10 @@ def _merged_assignment_session_payloads(
         if not owner and session_id not in session_ids:
             continue
         merged[session_id] = dict(session)
-    if not merged:
-        for session in derived_sessions:
-            payload = nilm_session_to_dict(session)
-            merged[session.session_id] = payload
+    owned_starts = {str(session.get("start") or "") for session in merged.values()}
+    for session in derived_sessions:
+        if session.start.isoformat() not in owned_starts:
+            merged.setdefault(session.session_id, nilm_session_to_dict(session))
     return sorted(
         merged.values(),
         key=lambda session: str(session.get("start") or ""),
