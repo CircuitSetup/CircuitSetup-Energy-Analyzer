@@ -7864,9 +7864,13 @@ async def test_nilm_label_interval_create_update_and_delete() -> None:
         start="2026-06-02T12:00:00+00:00",
         end="2026-06-02T12:45:00+00:00",
         appliance_id="dishwasher",
+        appliance_profile="dishwasher",
         mains_entity_id="sensor.mains_power",
         ground_truth_entity_id="sensor.dishwasher_power",
     )
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
     now["value"] = datetime(2026, 6, 2, 13, 5, tzinfo=UTC)
     updated = await coordinator.async_label_nilm_interval(
         "mains",
@@ -7891,6 +7895,7 @@ async def test_nilm_label_interval_create_update_and_delete() -> None:
     assert updated["updated_at"] == "2026-06-02T13:05:00+00:00"
     assert deleted is True
     assert coordinator.store_data.nilm_label_intervals_by_circuit["mains"] == []
+    assert assignment["label_interval_ids"] == []
 
 
 @pytest.mark.asyncio

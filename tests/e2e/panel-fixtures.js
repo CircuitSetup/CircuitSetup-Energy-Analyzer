@@ -444,7 +444,7 @@ export const nilmWorkspace = {
       appliance_profile: "dishwasher",
       state: "assigned",
       signature_ids: ["signature-1"],
-      label_interval_ids: [],
+      label_interval_ids: ["interval-1"],
       detail_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&assignment_id=dishwasher",
       actions: {
         validate_history: {
@@ -510,6 +510,13 @@ export const nilmWorkspace = {
     start: "2026-07-13T18:00:00Z",
     end: "2026-07-13T18:45:00Z",
     observed_transition_w: 83,
+    actions: {
+      delete: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "delete_nilm_label_interval",
+        data: { circuit_id: "mains", interval_id: "interval-1" },
+      },
+    },
   }],
   virtual_appliances: [],
   known_load_overlays: [],

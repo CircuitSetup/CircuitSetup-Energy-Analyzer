@@ -488,6 +488,15 @@ export function createNilmWorkspaceMethods({
       const message = actionKey === "save"
         ? this._panelTextFormat("messages.saved_interval_label", { label: data.label })
         : this._panelText("messages.deleted_interval_label");
+      if (actionKey === "delete") {
+        const deletedId = String(intervals && intervals[index] && intervals[index].interval_id || "");
+        const draftIntervals = this._nilmIntervalDraftItems();
+        if (deletedId && draftIntervals.some((item) => item.interval_id === deletedId)) {
+          this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
+          this._nilmActiveIntervalIndex = 0;
+          this._nilmIntervalEditorOpen = false;
+        }
+      }
       const refreshed = await this._refreshNilmWorkspaceData(
         actionContext.requestId,
         actionContext.routeKey,
@@ -2183,11 +2192,25 @@ export function createNilmWorkspaceMethods({
   _renderNilmReviewInspector(reviewItem) {
     const item = reviewItem.item;
     const title = item.display_label || item.display_name || item.label || item.likely_type || item.appliance_id || this._panelText("common.unknown_load");
+    const assignedIntervals = reviewItem.kind === "assignment"
+      ? ((this._nilmWorkspace && this._nilmWorkspace.label_intervals) || [])
+        .map((interval, index) => ({ interval, index }))
+        .filter(({ interval }) => interval.assignment_id === item.assignment_id
+          || (item.label_interval_ids || []).includes(interval.interval_id))
+      : [];
     const content = reviewItem.kind === "assignment"
       ? `
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
+        ${assignedIntervals.length ? `<div class="entity-list" data-nilm-assigned-intervals>${assignedIntervals.map(({ interval, index }) => `<div class="metric">
+          <span>${this._escape(this._panelText("common.labeled_interval"))}</span>
+          <strong>${this._escape(this._formatNilmSessionRange(interval))}</strong>
+          <div class="actions">
+            <button type="button" class="secondary" data-nilm-label-interval-index="${index}" data-nilm-label-interval-action="adjust">${this._escape(this._panelText("actions.labels.adjust_interval"))}</button>
+            ${interval.actions && interval.actions.delete ? `<button type="button" class="secondary" data-nilm-label-interval-index="${index}" data-nilm-label-interval-action="delete">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>` : ""}
+          </div>
+        </div>`).join("")}</div>` : ""}
         ${this._renderNilmHelperEvidence(item, reviewItem.index)}
         ${this._renderNilmReferenceSensors(item, reviewItem.index)}
         ${this._renderNilmAssignmentEditFields(item, reviewItem.index)}
@@ -2463,6 +2486,9 @@ export function createNilmWorkspaceMethods({
       : [];
     const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
+    const savedIntervals = Array.isArray(workspace && workspace.label_intervals)
+      ? workspace.label_intervals
+      : [];
     return `<div class="metric" data-nilm-interval-editor>
         <h3>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</h3>
         <p class="muted">${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
@@ -2480,17 +2506,25 @@ export function createNilmWorkspaceMethods({
           </label>
         </div>
         <div class="nilm-interval-rows">
-          ${intervals.map((interval, index) => `<div class="nilm-interval-row" data-nilm-interval-row="${index}" data-nilm-active="${index === this._nilmActiveIntervalIndex}">
+          ${intervals.map((interval, index) => {
+            const savedIndex = savedIntervals.findIndex((item) => item.interval_id === interval.interval_id);
+            const saved = savedIndex >= 0 ? savedIntervals[savedIndex] : null;
+            return `<div class="nilm-interval-row" data-nilm-interval-row="${index}" data-nilm-active="${index === this._nilmActiveIntervalIndex}">
             <div class="nilm-interval-row-heading">
               <strong>${this._escape(this._panelTextFormat("nilm_workspace.interval_number", { number: index + 1 }))}</strong>
               <span data-nilm-editing-indicator="${index}" ${index === this._nilmActiveIntervalIndex ? "" : "hidden"}>${this._escape(this._panelTextFormat("nilm_workspace.editing_interval", { number: index + 1 }))}</span>
-              <button type="button" class="secondary" data-nilm-remove-interval="${index}">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>
+              ${saved && saved.actions && saved.actions.delete
+                ? `<button type="button" class="secondary" data-nilm-label-interval-index="${savedIndex}" data-nilm-label-interval-action="delete">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>`
+                : !interval.interval_id
+                  ? `<button type="button" class="secondary" data-nilm-remove-interval="${index}">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>`
+                  : ""}
             </div>
             <div class="nilm-interval-form">
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span><input type="datetime-local" data-nilm-label-interval-input="start" data-nilm-interval-index="${index}" value="${this._escape(interval.start || "")}"></label>
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.end"))}</span><input type="datetime-local" data-nilm-label-interval-input="end" data-nilm-interval-index="${index}" value="${this._escape(interval.end || "")}"></label>
             </div>
-          </div>`).join("")}
+          </div>`;
+          }).join("")}
         </div>
         <div class="actions">
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>${this._escape(this._panelText("actions.labels.save_interval"))}</button>

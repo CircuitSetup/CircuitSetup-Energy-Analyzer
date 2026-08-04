@@ -6432,6 +6432,69 @@ assert.equal(panel._nilmIntervalEditorOpen, false);
     )
 
 
+def test_nilm_assigned_interval_is_visible_and_persistently_removable() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const interval = {
+  interval_id: "saved-interval",
+  assignment_id: "assignment-pump",
+  label: "Condensate Pump 2",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+  actions: { delete: makeAction("delete_nilm_label_interval") },
+};
+const assignment = {
+  assignment_id: "assignment-pump",
+  display_name: "Condensate Pump 2",
+  lifecycle_state: "assigned",
+  label_interval_ids: ["saved-interval"],
+  actions: {},
+};
+const workspace = makeWorkspace({
+  assignments: [assignment],
+  label_intervals: [interval],
+});
+const calls = [];
+const panel = makePanel({ _nilmWorkspace: workspace });
+panel._render = () => {};
+panel._restoreNilmIntervalScroll = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._hass = { callService: async (domain, service, data) => {
+  calls.push({ domain, service, data });
+} };
+
+let html = panel._renderNilmReviewInspector({
+  kind: "assignment",
+  index: 0,
+  item: assignment,
+});
+assert.ok(html.includes("Labeled interval"), html);
+assert.ok(html.includes('data-nilm-label-interval-action="adjust"'), html);
+assert.ok(html.includes('data-nilm-label-interval-action="delete"'), html);
+
+await panel._callNilmLabelIntervalAction(0, "adjust");
+html = panel._renderNilmLabelIntervalEditor(workspace);
+assert.ok(html.includes('data-nilm-label-interval-action="delete"'), html);
+assert.ok(!html.includes('data-nilm-remove-interval="0"'), html);
+
+panel._refreshNilmWorkspaceData = async () => {
+  panel._nilmWorkspace = makeWorkspace({ assignments: [assignment] });
+  return true;
+};
+await panel._callNilmLabelIntervalAction(0, "delete");
+assert.equal(calls.length, 1);
+assert.equal(calls[0].service, "delete_nilm_label_interval");
+assert.equal(panel._nilmIntervalEditorOpen, false);
+assert.deepEqual(panel._nilmLabelIntervalDraft, panel._emptyNilmLabelIntervalDraft());
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
 def test_nilm_interval_power_combines_only_mains_source_legs() -> None:
     _run_panel_node_script(
         """

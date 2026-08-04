@@ -7049,6 +7049,35 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   ]);
 });
 
+test("assigned NILM intervals can be inspected and removed", async ({ page }) => {
+  let workspaceLoads = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    workspaceLoads += 1;
+    const payload = structuredClone(apiPayload(url.pathname));
+    if (workspaceLoads > 1) {
+      payload.label_intervals = [];
+      payload.assignments[0].label_interval_ids = [];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const savedInterval = panel.locator("[data-nilm-assigned-intervals] .metric");
+  await expect(savedInterval).toContainText("Labeled interval");
+  await savedInterval.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await toHaveNoViolations(page);
+
+  await panel.locator('[data-nilm-interval-editor] [data-nilm-label-interval-action="delete"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-assigned-intervals]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1)?.service))
+    .toBe("delete_nilm_label_interval");
+});
+
 test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {
   await mockPanelApi(page);
   await page.setViewportSize({ width: 390, height: 844 });
