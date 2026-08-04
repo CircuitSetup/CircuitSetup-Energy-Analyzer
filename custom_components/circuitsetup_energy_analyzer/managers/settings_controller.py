@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
+from datetime import datetime
 from datetime import time as time_of_day
+from math import isfinite
 from typing import Any
 
 from ..activity_alerts import ActivityAlertSettings
@@ -34,6 +36,7 @@ from ..demand import MAX_DEMAND_WINDOW_MINUTES, DemandSettings
 from ..goals import EnergyGoalSettings
 from ..hvac_efficiency import episode_from_dict
 from ..load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
+from ..local_time import local_date
 from ..metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -43,6 +46,10 @@ from ..models import EventType
 from ..operating_detection import (
     OPERATING_DETECTION_OVERRIDE_FIELDS,
     OPERATING_DETECTION_SOURCE,
+    OPERATING_IDLE_SAMPLE_COUNT,
+    OPERATING_IDLE_UPPER_W,
+    OPERATING_RUNNING_LOWER_W,
+    OPERATING_RUNNING_SAMPLE_COUNT,
     OperatingThresholdSource,
     resolve_operating_detection_from_settings,
 )
@@ -82,6 +89,10 @@ from ..utility_comparison import (
 from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
+_COMPLETED_CYCLE_RECOMMENDATION_FEATURES = {
+    "always_on_standby",
+    "operating_detection_thresholds",
+}
 
 
 class SettingsController:
@@ -210,6 +221,15 @@ class SettingsController:
                     and stored.expires_at > now
                     and _recommendation_materially_matches(stored, recommendation)
                 ):
+                    refreshed = replace(
+                        recommendation,
+                        created_at=stored.created_at,
+                        expires_at=stored.expires_at,
+                    )
+                    if refreshed != stored:
+                        coordinator.store_data.settings_recommendations[
+                            recommendation.recommendation_id
+                        ] = refreshed
                     continue
                 if stored != recommendation:
                     coordinator.store_data.settings_recommendations[
@@ -255,10 +275,7 @@ class SettingsController:
         feature_history: dict[str, Any] = {
             "energy_usage_days": [],
             "cycles": [],
-            "operating_idle_samples": [],
-            "operating_start_samples": [],
-            "standby_samples_w": [],
-            "standby_sample_counts": [],
+            "operating_cycles": [],
             "current_samples": [],
             "current_sample_counts": [],
             "leg_imbalance_ratios": [],
@@ -279,6 +296,11 @@ class SettingsController:
         if isinstance(usage_days, list):
             feature_history["energy_usage_days"] = list(usage_days)
 
+        time_zone = coordinator.context_builder.time_zone()
+        learning_events = coordinator.processor_runtime.learning_events_since_restart(
+            config,
+            now,
+        )
         merge_gap_seconds = resolve_operating_detection_from_settings(
             config,
             getattr(
@@ -288,11 +310,11 @@ class SettingsController:
             ).get(circuit_id, {}),
         ).profile.merge_gap_seconds
         cycle_values = cycle_baseline_feature_values(
-            coordinator.store_data.events,
+            learning_events,
             circuit_id=circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,
-            time_zone=coordinator.context_builder.time_zone(),
+            time_zone=time_zone,
         )
         feature_history["cycles"] = [
             {"duration_minutes": duration_seconds / 60.0}
@@ -301,38 +323,35 @@ class SettingsController:
             )
         ]
 
-        standby_history = coordinator.store_data.standby_by_circuit.get(
-            circuit_id,
-            {},
-        )
-        standby_samples = standby_history.get("samples")
-        if isinstance(standby_samples, list):
-            feature_history["operating_idle_samples"] = [
-                dict(sample)
-                for sample in standby_samples
-                if isinstance(sample, Mapping)
-            ]
-        standby_values = _numeric_items_with_counts(
-            standby_samples,
-            keys=("real_power_w",),
-        )
-        feature_history["standby_samples_w"] = [value for value, _ in standby_values]
-        feature_history["standby_sample_counts"] = [
-            count for _, count in standby_values
-        ]
-
-        feature_history["operating_start_samples"] = [
-            {
-                "timestamp": event.timestamp.isoformat(),
-                "power_w": float(event.features["startup_power_w"]),
-            }
-            for event in coordinator.store_data.events
+        for event in learning_events:
             if (
-                event.circuit_id == circuit_id
-                and event.event_type is EventType.START
-                and "startup_power_w" in event.features
+                event.circuit_id != circuit_id
+                or event.event_type is not EventType.STOP
+                or event.features.get("baseline_eligible") is False
+            ):
+                continue
+            values = tuple(
+                _optional_float_value(event.features.get(key))
+                for key in (
+                    OPERATING_IDLE_UPPER_W,
+                    OPERATING_RUNNING_LOWER_W,
+                    OPERATING_IDLE_SAMPLE_COUNT,
+                    OPERATING_RUNNING_SAMPLE_COUNT,
+                )
             )
-        ]
+            if any(value is None or not isfinite(value) for value in values):
+                continue
+            idle_upper_w, running_lower_w, idle_count, running_count = values
+            feature_history["operating_cycles"].append(
+                {
+                    "timestamp": event.timestamp.isoformat(),
+                    "date": local_date(event.timestamp, time_zone).isoformat(),
+                    "idle_upper_w": idle_upper_w,
+                    "running_lower_w": running_lower_w,
+                    "idle_sample_count": int(idle_count),
+                    "running_sample_count": int(running_count),
+                }
+            )
 
         demand_history = coordinator.store_data.demand_by_circuit.get(circuit_id, {})
         current_values = _numeric_items_with_counts(
@@ -485,6 +504,7 @@ class SettingsController:
             now=now,
             suggested_value=recommendation.suggested_value,
             evidence_fingerprint=recommendation_evidence_fingerprint(recommendation),
+            evidence=recommendation.evidence,
         ):
             return []
         return [recommendation]
@@ -1804,12 +1824,39 @@ class SettingsController:
             )
         await coordinator.config_entry_controller.async_persist_options()
 
+        now = coordinator.current_time()
+        applied_unique_keys: set[str] = set()
+        for setting_key, value in recommendation.apply_payload.items():
+            applied_unique_keys.add(
+                recommendation_unique_key(
+                    recommendation.circuit_id,
+                    str(setting_key),
+                )
+            )
+            self._record_setting_recommendation_decision(
+                recommendation,
+                setting_key=str(setting_key),
+                decided_value=value,
+                status=RecommendationStatus.APPLIED,
+                decided_at=now,
+            )
+        for sibling_id, sibling in tuple(
+            coordinator.store_data.settings_recommendations.items()
+        ):
+            if (
+                sibling_id != recommendation_id
+                and sibling.status is RecommendationStatus.PENDING
+                and sibling.unique_key in applied_unique_keys
+            ):
+                coordinator.store_data.settings_recommendations[sibling_id] = replace(
+                    sibling,
+                    status=RecommendationStatus.STALE,
+                )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.APPLIED,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -1836,6 +1883,10 @@ class SettingsController:
             recommendation.current_value,
         )
         await coordinator.config_entry_controller.async_persist_options()
+        coordinator.store_data.settings_recommendation_decisions.pop(
+            recommendation.unique_key,
+            None,
+        )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.PENDING,
@@ -1869,12 +1920,19 @@ class SettingsController:
             default_value,
         )
         await coordinator.config_entry_controller.async_persist_options()
+        now = coordinator.current_time()
+        self._record_setting_recommendation_decision(
+            recommendation,
+            setting_key=recommendation.setting_key,
+            decided_value=default_value,
+            status=RecommendationStatus.DISMISSED,
+            decided_at=now,
+        )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.STALE,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -2255,21 +2313,42 @@ class SettingsController:
             recommendation,
             status=status,
         )
-        coordinator.store_data.settings_recommendation_decisions[
-            recommendation.unique_key
-        ] = RecommendationDecision(
-            unique_key=recommendation.unique_key,
+        self._record_setting_recommendation_decision(
+            recommendation,
+            setting_key=recommendation.setting_key,
+            decided_value=recommendation.suggested_value,
             status=status,
             decided_at=now,
-            denied_value=recommendation.suggested_value,
-            evidence_fingerprint=recommendation_evidence_fingerprint(
-                recommendation,
-            ),
         )
         coordinator.store_persistence.mark_dirty()
         self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
+
+    def _record_setting_recommendation_decision(
+        self,
+        recommendation: SettingRecommendation,
+        *,
+        setting_key: str,
+        decided_value: Any,
+        status: RecommendationStatus,
+        decided_at: datetime,
+    ) -> None:
+        unique_key = recommendation_unique_key(
+            recommendation.circuit_id,
+            setting_key,
+        )
+        self._coordinator.store_data.settings_recommendation_decisions[unique_key] = (
+            RecommendationDecision(
+                unique_key=unique_key,
+                status=status,
+                decided_at=decided_at,
+                denied_value=decided_value,
+                evidence_fingerprint=recommendation_evidence_fingerprint(
+                    recommendation
+                ),
+            )
+        )
 
 
 def _merged_entry_settings_map(
@@ -2312,7 +2391,11 @@ def _recommendation_material_key(
         recommendation.feature,
         recommendation.group,
         round(recommendation.confidence, 3),
-        recommendation.reason,
+        (
+            None
+            if recommendation.feature in _COMPLETED_CYCLE_RECOMMENDATION_FEATURES
+            else recommendation.reason
+        ),
         tuple(sorted(dict(recommendation.apply_payload).items())),
         material_recommendation_evidence_key(
             recommendation.feature,
@@ -2329,6 +2412,14 @@ def material_recommendation_evidence_key(
     ignored_keys: set[str] = set()
     if feature == "capacity_warning_ratio":
         ignored_keys.add("observed_samples")
+    elif feature in _COMPLETED_CYCLE_RECOMMENDATION_FEATURES:
+        ignored_keys.update(
+            {
+                "completed_cycle_count",
+                "distinct_learning_days",
+                "latest_cycle_at",
+            }
+        )
     return tuple(
         sorted(
             (key, value)

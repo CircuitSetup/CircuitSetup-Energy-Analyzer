@@ -281,6 +281,8 @@ def test_operating_state_machine_confirms_start_after_on_dwell() -> None:
 
 def test_operating_state_machine_ignores_short_below_threshold_dip() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_SAMPLE_COUNT,
+        OPERATING_RUNNING_SAMPLE_COUNT,
         OperatingDetectionProfile,
         OperatingState,
         OperatingStateMachine,
@@ -304,17 +306,30 @@ def test_operating_state_machine_ignores_short_below_threshold_dip() -> None:
         )
     )
 
-    machine.process(_sample(0, 5.0, circuit_id="fridge"))
-    machine.process(_sample(5, 40.0, circuit_id="fridge"))
+    machine.process(_sample(0, 4.0, circuit_id="fridge"))
+    machine.process(_sample(1, 4.0, circuit_id="fridge"))
+    machine.process(_sample(2, 5.0, circuit_id="fridge"))
+    machine.process(_sample(3, 6.0, circuit_id="fridge"))
+    machine.process(_sample(4, 40.0, circuit_id="fridge"))
     machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    machine.process(_sample(17, 80.0, circuit_id="fridge"))
+    machine.process(_sample(18, 90.0, circuit_id="fridge"))
+    machine.process(_sample(19, 100.0, circuit_id="fridge"))
 
     pending = machine.process(_sample(20, 8.0, circuit_id="fridge"))
     recovered = machine.process(_sample(35, 35.0, circuit_id="fridge"))
+    machine.process(_sample(36, 80.0, circuit_id="fridge"))
+    machine.process(_sample(37, 90.0, circuit_id="fridge"))
+    machine.process(_sample(38, 100.0, circuit_id="fridge"))
+    machine.process(_sample(39, 8.0, circuit_id="fridge"))
+    stopped = machine.process(_sample(60, 7.0, circuit_id="fridge"))
 
     assert pending.snapshot.state is OperatingState.PENDING_OFF
     assert recovered.events == ()
     assert recovered.snapshot.state is OperatingState.RUNNING
     assert recovered.snapshot.stable_state is OperatingState.RUNNING
+    assert stopped.events[0].features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert stopped.events[0].features[OPERATING_RUNNING_SAMPLE_COUNT] == 6
 
 
 def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
@@ -351,6 +366,95 @@ def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
     assert [event.event_type for event in confirmed.events] == [EventType.STOP]
     assert confirmed.snapshot.state is OperatingState.OFF
     assert confirmed.snapshot.stable_state is OperatingState.OFF
+
+
+def test_completed_stop_records_stable_cycle_power_boundaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_SAMPLE_COUNT,
+        OPERATING_IDLE_UPPER_W,
+        OPERATING_RUNNING_LOWER_W,
+        OPERATING_RUNNING_SAMPLE_COUNT,
+    )
+
+    machine = _machine()
+    machine.process(_sample(0, 4.0))
+    machine.process(_sample(1, 4.0))
+    machine.process(_sample(2, 5.0))
+    machine.process(_sample(3, 6.0))
+    machine.process(_sample(4, 50.0))
+    machine.process(_sample(15, 55.0))
+    machine.process(_sample(16, 80.0))
+    machine.process(_sample(17, 90.0))
+    machine.process(_sample(18, 100.0))
+    machine.process(_sample(19, 8.0))
+    stopped = machine.process(_sample(40, 7.0))
+
+    stop = stopped.events[0]
+    assert stop.event_type is EventType.STOP
+    assert stop.features[OPERATING_IDLE_UPPER_W] == 6.0
+    assert stop.features[OPERATING_RUNNING_LOWER_W] == 80.0
+    assert stop.features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert stop.features[OPERATING_RUNNING_SAMPLE_COUNT] == 3
+
+
+def test_completed_cycles_keep_independent_power_boundaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_SAMPLE_COUNT,
+        OPERATING_IDLE_UPPER_W,
+        OPERATING_RUNNING_LOWER_W,
+        OPERATING_RUNNING_SAMPLE_COUNT,
+    )
+
+    machine = _machine()
+    for seconds in range(4):
+        machine.process(_sample(seconds, 20.0))
+    machine.process(_sample(4, 50.0))
+    machine.process(_sample(15, 55.0))
+    for seconds, watts in ((16, 80.0), (17, 90.0), (18, 100.0)):
+        machine.process(_sample(seconds, watts))
+    machine.process(_sample(19, 8.0))
+    first_stop = machine.process(_sample(40, 7.0)).events[0]
+
+    for seconds in range(41, 44):
+        machine.process(_sample(seconds, 2.0))
+    machine.process(_sample(44, 50.0))
+    machine.process(_sample(55, 55.0))
+    for seconds, watts in ((56, 40.0), (57, 50.0), (58, 60.0)):
+        machine.process(_sample(seconds, watts))
+    machine.process(_sample(59, 8.0))
+    second_stop = machine.process(_sample(80, 7.0)).events[0]
+
+    assert first_stop.features[OPERATING_IDLE_UPPER_W] == 20.0
+    assert first_stop.features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert second_stop.features[OPERATING_IDLE_UPPER_W] == 2.0
+    assert second_stop.features[OPERATING_RUNNING_LOWER_W] == 40.0
+    assert second_stop.features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert second_stop.features[OPERATING_RUNNING_SAMPLE_COUNT] == 3
+
+
+def test_unavailable_stop_omits_learned_cycle_boundaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_UPPER_W,
+        OPERATING_RUNNING_LOWER_W,
+    )
+
+    machine = _machine(max_sample_gap_seconds=30.0)
+    machine.process(_sample(0, 4.0))
+    machine.process(_sample(1, 5.0))
+    machine.process(_sample(2, 6.0))
+    machine.process(_sample(3, 7.0))
+    machine.process(_sample(5, 40.0))
+    machine.process(_sample(16, 42.0))
+    machine.process(_sample(17, 80.0))
+    machine.process(_sample(18, 90.0))
+    machine.process(_sample(19, 100.0))
+    machine.process(_sample(30, None))
+    unavailable = machine.process(_sample(50, None))
+
+    stop = unavailable.events[0]
+    assert stop.event_type is EventType.STOP
+    assert OPERATING_IDLE_UPPER_W not in stop.features
+    assert OPERATING_RUNNING_LOWER_W not in stop.features
 
 
 def test_operating_state_machine_continued_running_preserves_state_since() -> None:
@@ -582,6 +686,8 @@ def test_operating_state_machine_confirmed_events_keep_threshold_crossing_time(
 
 def test_operating_state_machine_ignores_duplicate_and_out_of_order_samples() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_SAMPLE_COUNT,
+        OPERATING_RUNNING_SAMPLE_COUNT,
         OperatingDetectionProfile,
         OperatingStateMachine,
         OperatingThresholdSource,
@@ -604,16 +710,29 @@ def test_operating_state_machine_ignores_duplicate_and_out_of_order_samples() ->
         )
     )
 
-    machine.process(_sample(0, 5.0, circuit_id="fridge"))
-    machine.process(_sample(5, 40.0, circuit_id="fridge"))
-
-    duplicate = machine.process(_sample(5, 40.0, circuit_id="fridge"))
-    out_of_order = machine.process(_sample(4, 40.0, circuit_id="fridge"))
+    machine.process(_sample(0, 4.0, circuit_id="fridge"))
+    machine.process(_sample(1, 4.0, circuit_id="fridge"))
+    machine.process(_sample(2, 5.0, circuit_id="fridge"))
+    machine.process(_sample(3, 6.0, circuit_id="fridge"))
+    duplicate_off = machine.process(_sample(3, 6.0, circuit_id="fridge"))
+    out_of_order_off = machine.process(_sample(2, 5.0, circuit_id="fridge"))
+    machine.process(_sample(4, 40.0, circuit_id="fridge"))
     confirmed = machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    machine.process(_sample(17, 80.0, circuit_id="fridge"))
+    duplicate_running = machine.process(_sample(17, 80.0, circuit_id="fridge"))
+    out_of_order_running = machine.process(_sample(16, 42.0, circuit_id="fridge"))
+    machine.process(_sample(18, 90.0, circuit_id="fridge"))
+    machine.process(_sample(19, 100.0, circuit_id="fridge"))
+    machine.process(_sample(20, 8.0, circuit_id="fridge"))
+    stopped = machine.process(_sample(41, 7.0, circuit_id="fridge"))
 
-    assert duplicate.events == ()
-    assert out_of_order.events == ()
+    assert duplicate_off.events == ()
+    assert out_of_order_off.events == ()
+    assert duplicate_running.events == ()
+    assert out_of_order_running.events == ()
     assert [event.event_type for event in confirmed.events] == [EventType.START]
+    assert stopped.events[0].features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert stopped.events[0].features[OPERATING_RUNNING_SAMPLE_COUNT] == 3
 
 
 def test_operating_state_machine_marks_state_unavailable_after_missing_power_grace(

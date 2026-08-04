@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -24,6 +25,12 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitMode,
     EventType,
     PowerFlowMode,
+)
+from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+    OPERATING_IDLE_SAMPLE_COUNT,
+    OPERATING_IDLE_UPPER_W,
+    OPERATING_RUNNING_LOWER_W,
+    OPERATING_RUNNING_SAMPLE_COUNT,
 )
 from custom_components.circuitsetup_energy_analyzer.settings_advisor import (
     RecommendationStatus,
@@ -134,7 +141,11 @@ class _SettingsCoordinator:
         )
         self.processor_runtime = SimpleNamespace(
             learning_mature=lambda config, now: True,
+            learning_events_since_restart=(
+                lambda config, now, events=None: self.learning_events
+            ),
         )
+        self.learning_events: list[Any] = []
         self.circuit_configs = [
             SimpleNamespace(
                 circuit_id="fridge",
@@ -256,7 +267,17 @@ class _SettingsCoordinator:
 
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
-    recommendation = _recommendation()
+    recommendation = _recommendation(
+        recommendation_id="fridge:operating_on_threshold_w:v1",
+        unique_key="fridge:operating_on_threshold_w",
+        setting_key="operating_on_threshold_w",
+        current_value=1515.0,
+        suggested_value=1200.0,
+        apply_payload={
+            "operating_on_threshold_w": 1200.0,
+            "operating_off_threshold_w": 250.0,
+        },
+    )
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
 
@@ -266,22 +287,35 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     applied = coordinator.store_data.settings_recommendations[
         recommendation.recommendation_id
     ]
+    applied_decisions = dict(
+        coordinator.store_data.settings_recommendation_decisions
+    )
     undo_result = await controller.async_undo_setting_recommendation(
         recommendation.recommendation_id,
+    )
+    decisions_after_undo = dict(
+        coordinator.store_data.settings_recommendation_decisions
     )
     reset_result = await controller.async_reset_setting_recommendation(
         recommendation.recommendation_id,
     )
 
     assert applied.status is RecommendationStatus.APPLIED
+    assert {
+        key: (decision.status, decision.denied_value)
+        for key, decision in applied_decisions.items()
+    } == {
+        "fridge:operating_on_threshold_w": (RecommendationStatus.APPLIED, 1200.0),
+        "fridge:operating_off_threshold_w": (RecommendationStatus.APPLIED, 250.0),
+    }
     assert undo_result is True
+    assert recommendation.unique_key not in decisions_after_undo
     assert reset_result is True
-    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"] == {
-        "daily_spike_ratio": 0.25
-    }
-    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
-        "daily_spike_ratio": 0.25
-    }
+    reset_decision = coordinator.store_data.settings_recommendation_decisions[
+        recommendation.unique_key
+    ]
+    assert reset_decision.status is RecommendationStatus.DISMISSED
+    assert reset_decision.denied_value is None
     assert coordinator.persist_count == 3
     assert coordinator.dirty_count == 3
     assert coordinator.updated == [
@@ -289,6 +323,42 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
         coordinator.state,
         coordinator.state,
     ]
+
+
+@pytest.mark.asyncio
+async def test_applying_operating_card_retires_pending_sibling() -> None:
+    on = _recommendation(
+        recommendation_id="fridge:operating_on_threshold_w:v1",
+        unique_key="fridge:operating_on_threshold_w",
+        setting_key="operating_on_threshold_w",
+        apply_payload={
+            "operating_on_threshold_w": 1200.0,
+            "operating_off_threshold_w": 250.0,
+        },
+    )
+    off = _recommendation(
+        recommendation_id="fridge:operating_off_threshold_w:v1",
+        unique_key="fridge:operating_off_threshold_w",
+        setting_key="operating_off_threshold_w",
+        apply_payload=dict(on.apply_payload),
+    )
+    coordinator = _SettingsCoordinator(on)
+    coordinator.store_data.settings_recommendations[off.recommendation_id] = off
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_apply_setting_recommendation(on.recommendation_id)
+
+    assert coordinator.store_data.settings_recommendations[
+        on.recommendation_id
+    ].status is RecommendationStatus.APPLIED
+    assert coordinator.store_data.settings_recommendations[
+        off.recommendation_id
+    ].status is RecommendationStatus.STALE
+    assert coordinator.state.settings_recommendation_count_by_circuit == {}
+    assert {
+        item["recommendation_id"]
+        for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
+    } == {on.recommendation_id}
 
 
 @pytest.mark.asyncio
@@ -398,16 +468,6 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     coordinator.store_data.energy_usage_by_circuit["fridge"] = {
         "days": [{"date": "2026-06-30", "energy_kwh": 1.8}]
     }
-    coordinator.store_data.standby_by_circuit["fridge"] = {
-        "samples": [
-            {
-                "timestamp": coordinator.now.isoformat(),
-                "real_power_w": "4.5",
-                "sample_count": 3,
-            },
-            {"real_power_w": "bad"},
-        ]
-    }
     coordinator.store_data.demand_by_circuit["fridge"] = {
         "capacity_current_samples": [{"current_amps": "7.25", "sample_count": 4}],
         "samples": [{"current_a": "8.5"}],
@@ -419,6 +479,37 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
             timestamp=coordinator.now,
             features={"startup_power_w": "610"},
         )
+    ]
+    coordinator.learning_events = [
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now,
+            features={
+                OPERATING_IDLE_UPPER_W: 6.0,
+                OPERATING_RUNNING_LOWER_W: 80.0,
+                OPERATING_IDLE_SAMPLE_COUNT: 12,
+                OPERATING_RUNNING_SAMPLE_COUNT: 15,
+            },
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now - timedelta(days=1),
+            features={
+                OPERATING_IDLE_UPPER_W: 7.0,
+                OPERATING_RUNNING_LOWER_W: 90.0,
+                OPERATING_IDLE_SAMPLE_COUNT: 20,
+                OPERATING_RUNNING_SAMPLE_COUNT: 20,
+                "baseline_eligible": False,
+            },
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now - timedelta(days=2),
+            features={},
+        ),
     ]
     coordinator.state.leg_imbalance_evidence_by_circuit = {
         "fridge": {
@@ -442,10 +533,17 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     }
     config = coordinator.circuit_configs[0]
 
+    cycle_events: list[Any] | None = None
+
+    def _cycle_values(events: list[Any], **kwargs: Any) -> dict[str, list[int]]:
+        nonlocal cycle_events
+        cycle_events = events
+        return {RUN_CYCLE_DURATION_FEATURE: [900]}
+
     monkeypatch.setattr(
         settings_controller,
         "cycle_baseline_feature_values",
-        lambda events, **kwargs: {RUN_CYCLE_DURATION_FEATURE: [900]},
+        _cycle_values,
         raising=False,
     )
 
@@ -457,13 +555,23 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
         {"date": "2026-06-30", "energy_kwh": 1.8}
     ]
     assert history["cycles"] == [{"duration_minutes": 15.0}]
-    assert history["standby_samples_w"] == [4.5]
-    assert history["standby_sample_counts"] == [3]
+    assert cycle_events is coordinator.learning_events
+    assert history["operating_cycles"] == [
+        {
+            "timestamp": coordinator.now.isoformat(),
+            "date": coordinator.now.date().isoformat(),
+            "idle_upper_w": 6.0,
+            "running_lower_w": 80.0,
+            "idle_sample_count": 12,
+            "running_sample_count": 15,
+        }
+    ]
+    assert "operating_idle_samples" not in history
+    assert "operating_start_samples" not in history
+    assert "standby_samples_w" not in history
+    assert "standby_sample_counts" not in history
     assert history["current_samples"] == [7.25, 8.5]
     assert history["current_sample_counts"] == [4, 1]
-    assert history["operating_start_samples"] == [
-        {"timestamp": coordinator.now.isoformat(), "power_w": 610.0}
-    ]
     assert history["leg_imbalance_ratios"] == [0.12]
     assert history["dual_phase_total_power_w"] == [780]
     assert history["apparent_power_residual_percent"] == [3.5]
@@ -807,6 +915,73 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
         item["recommendation_id"]
         for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
     ] == [generated.recommendation_id]
+
+
+@pytest.mark.parametrize(
+    ("feature", "setting_key"),
+    [
+        ("operating_detection_thresholds", "operating_on_threshold_w"),
+        ("always_on_standby", "standby_threshold_w"),
+    ],
+)
+def test_completed_cycle_refresh_preserves_pending_lifetime(
+    monkeypatch,
+    feature: str,
+    setting_key: str,
+) -> None:
+    stored = _recommendation(
+        recommendation_id=f"fridge:{setting_key}:v1",
+        unique_key=f"fridge:{setting_key}",
+        setting_key=setting_key,
+        setting_label=setting_key,
+        feature=feature,
+        reason="Observed 20 completed cycles across 7 distinct days.",
+        evidence={
+            "completed_cycle_count": 20,
+            "distinct_learning_days": 7,
+            "idle_ceiling_w": 12.0,
+            "running_floor_w": 100.0,
+            "separation_w": 88.0,
+            "latest_cycle_at": "2026-06-29T12:00:00+00:00",
+            "calculation_basis": "completed_operating_cycles",
+        },
+        apply_payload={setting_key: 55.0},
+        current_value=25.0,
+        suggested_value=55.0,
+    )
+    candidate = replace(
+        stored,
+        reason="Observed 21 completed cycles across 8 distinct days.",
+        evidence={
+            **stored.evidence,
+            "completed_cycle_count": 21,
+            "distinct_learning_days": 8,
+            "latest_cycle_at": "2026-07-01T12:00:00+00:00",
+        },
+        created_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+        expires_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+    )
+    coordinator = _SettingsCoordinator(stored)
+    controller = settings_controller.SettingsController(coordinator)
+    monkeypatch.setattr(
+        settings_controller,
+        "build_settings_recommendations",
+        lambda inputs: [candidate],
+    )
+
+    changed = controller.rebuild_setting_recommendations(candidate.created_at)
+
+    refreshed = coordinator.store_data.settings_recommendations[
+        stored.recommendation_id
+    ]
+    assert changed is False
+    assert refreshed.created_at == stored.created_at
+    assert refreshed.expires_at == stored.expires_at
+    assert refreshed.reason == candidate.reason
+    assert refreshed.evidence == candidate.evidence
+    assert coordinator.state.settings_recommendations_by_circuit["fridge"][0][
+        "evidence"
+    ] == dict(candidate.evidence)
 
 
 def test_settings_controller_waits_for_live_learning_state(monkeypatch) -> None:

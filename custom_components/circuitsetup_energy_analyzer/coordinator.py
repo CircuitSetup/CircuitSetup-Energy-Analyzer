@@ -776,6 +776,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._baseline_values,
             now,
         )
+        self._detectors.pop(circuit_id, None)
         for stream_id, marker in active_hvac_markers.items():
             self.store_data.hvac_response_history_by_stream.setdefault(
                 stream_id,

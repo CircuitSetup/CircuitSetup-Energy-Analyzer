@@ -25,6 +25,7 @@ from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
+from .profiles import get_profile_definition
 from .standby import DEFAULT_STANDBY_THRESHOLD_W
 from .usage import DEFAULT_DAILY_USAGE_SPIKE_RATIO
 
@@ -32,15 +33,20 @@ ADVISOR_VERSION = 1
 MIN_ADVISOR_DAYS = 7
 DAILY_SPIKE_RATIO_SAFETY_MARGIN = 0.10
 DEFAULT_RECOMMENDATION_TTL = timedelta(days=30)
+APPLIED_COOLDOWN = DEFAULT_RECOMMENDATION_TTL
 DENIAL_COOLDOWN = timedelta(days=90)
 DISMISSAL_COOLDOWN = DEFAULT_RECOMMENDATION_TTL
-OPERATING_THRESHOLD_MIN_IDLE_SAMPLES = 10
-OPERATING_THRESHOLD_MIN_START_SAMPLES = 5
 OPERATING_THRESHOLD_MIN_SEPARATION_W = 15.0
-OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
-STANDBY_THRESHOLD_MIN_SIGNIFICANT_DELTA_W = 1.0
-STANDBY_THRESHOLD_MAX_SIGNIFICANT_DELTA_W = 5.0
-STANDBY_THRESHOLD_SIGNIFICANT_DELTA_RATIO = 0.1
+LEARNED_WATT_MIN_DELTA_W = 5.0
+LEARNED_WATT_MIN_DELTA_RATIO = 0.10
+
+
+def _is_material_learned_watt_change(current: float, suggested: float) -> bool:
+    required = max(
+        LEARNED_WATT_MIN_DELTA_W,
+        abs(current) * LEARNED_WATT_MIN_DELTA_RATIO,
+    )
+    return abs(suggested - current) > required
 
 
 def _advisor_text(*keys: str, **values: Any) -> str:
@@ -275,21 +281,45 @@ def should_suppress_recommendation(
     now: datetime,
     suggested_value: Any,
     evidence_fingerprint: str,
+    evidence: Mapping[str, Any] | None = None,
 ) -> bool:
-    """Return true when a recent denial still applies to the same suggestion."""
+    """Return true while a user decision remains authoritative."""
     if decision is None:
         return False
-    if decision.status is RecommendationStatus.DENIED:
-        cooldown = DENIAL_COOLDOWN
-    elif decision.status is RecommendationStatus.DISMISSED:
-        cooldown = DISMISSAL_COOLDOWN
-    else:
+    cooldown = {
+        RecommendationStatus.APPLIED: APPLIED_COOLDOWN,
+        RecommendationStatus.DISMISSED: DISMISSAL_COOLDOWN,
+        RecommendationStatus.DENIED: DENIAL_COOLDOWN,
+    }.get(decision.status)
+    if cooldown is None:
         return False
-    if now - decision.decided_at >= cooldown:
+    decided_at = decision.decided_at
+    comparison_now = now
+    if decided_at.tzinfo is None and comparison_now.tzinfo is not None:
+        comparison_now = comparison_now.replace(tzinfo=None)
+    elif decided_at.tzinfo is not None and comparison_now.tzinfo is None:
+        comparison_now = comparison_now.replace(tzinfo=decided_at.tzinfo)
+    if comparison_now - decided_at < cooldown:
+        return True
+    if not evidence or evidence.get("calculation_basis") != (
+        "completed_operating_cycles"
+    ):
         return False
-    if decision.denied_value != suggested_value:
-        return False
-    return decision.evidence_fingerprint == evidence_fingerprint
+    try:
+        latest_cycle_at = datetime.fromisoformat(str(evidence["latest_cycle_at"]))
+        comparison_decided_at = decided_at
+        if latest_cycle_at.tzinfo is None and comparison_decided_at.tzinfo is not None:
+            comparison_decided_at = comparison_decided_at.replace(tzinfo=None)
+        elif (
+            latest_cycle_at.tzinfo is not None
+            and comparison_decided_at.tzinfo is None
+        ):
+            comparison_decided_at = comparison_decided_at.replace(
+                tzinfo=latest_cycle_at.tzinfo
+            )
+        return latest_cycle_at <= comparison_decided_at
+    except (KeyError, TypeError, ValueError):
+        return True
 
 
 def recommendation_evidence_fingerprint(
@@ -338,6 +368,7 @@ def build_settings_recommendations(
             now=inputs.now,
             suggested_value=recommendation.suggested_value,
             evidence_fingerprint=evidence_fingerprint,
+            evidence=recommendation.evidence,
         ):
             continue
         recommendations.append(recommendation)
@@ -475,32 +506,88 @@ def _capacity_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendati
     ]
 
 
+def _operating_cycle_distribution(inputs: AdvisorInputs) -> dict[str, Any] | None:
+    cycles = [
+        item
+        for item in inputs.feature_history.get("operating_cycles", ())
+        if isinstance(item, Mapping)
+    ]
+    try:
+        profile = get_profile_definition(
+            ApplianceProfile(inputs.context.appliance_profile)
+        )
+    except ValueError:
+        return None
+
+    parsed_cycles: list[tuple[datetime, str, float, float]] = []
+    for item in cycles:
+        try:
+            timestamp = datetime.fromisoformat(str(item["timestamp"]))
+            raw_date = item["date"]
+            date = str(raw_date) if raw_date else ""
+            idle_upper_w = float(item["idle_upper_w"])
+            running_lower_w = float(item["running_lower_w"])
+            idle_sample_count = float(item["idle_sample_count"])
+            running_sample_count = float(item["running_sample_count"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            not date
+            or not all(
+                math.isfinite(value)
+                for value in (
+                    idle_upper_w,
+                    running_lower_w,
+                    idle_sample_count,
+                    running_sample_count,
+                )
+            )
+            or idle_sample_count < 3
+            or running_sample_count < 3
+        ):
+            return None
+        parsed_cycles.append((timestamp, date, idle_upper_w, running_lower_w))
+
+    dates = {date for _, date, _, _ in parsed_cycles}
+    if len(parsed_cycles) < profile.minimum_cycles or len(dates) < MIN_ADVISOR_DAYS:
+        return None
+
+    idle_values = sorted(item[2] for item in parsed_cycles)
+    running_values = sorted(item[3] for item in parsed_cycles)
+    idle_ceiling = round(_percentile(idle_values, 90), 1)
+    running_floor = round(_percentile(running_values, 10), 1)
+    try:
+        latest_cycle_at = max(item[0] for item in parsed_cycles).isoformat()
+    except TypeError:
+        return None
+    return {
+        "completed_cycle_count": len(parsed_cycles),
+        "distinct_learning_days": len(dates),
+        "idle_ceiling_w": idle_ceiling,
+        "running_floor_w": running_floor,
+        "separation_w": round(running_floor - idle_ceiling, 1),
+        "latest_cycle_at": latest_cycle_at,
+        "calculation_basis": "completed_operating_cycles",
+    }
+
+
 def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendation]:
-    standby_samples = _numeric_values(
-        inputs.feature_history.get("standby_samples_w"),
-    )
-    standby_counts = _sample_counts(
-        standby_samples,
-        inputs.feature_history.get("standby_sample_counts"),
-    )
-    if sum(standby_counts) < MIN_ADVISOR_DAYS:
+    evidence = _operating_cycle_distribution(inputs)
+    if (
+        evidence is None
+        or evidence["separation_w"] <= OPERATING_THRESHOLD_MIN_SEPARATION_W
+    ):
         return []
 
-    p95 = _percentile(standby_samples, 95)
-    suggested_value = float(_round_to_nearest(max(5.0, p95 * 1.3), 1))
+    suggested_value = float(
+        _round_to_nearest(max(5.0, evidence["idle_ceiling_w"] * 1.3), 1)
+    )
     current_value = _float_setting(
         inputs.context.advanced_settings,
         "standby_threshold_w",
         DEFAULT_STANDBY_THRESHOLD_W,
     )
-    significant_delta = min(
-        STANDBY_THRESHOLD_MAX_SIGNIFICANT_DELTA_W,
-        max(
-            STANDBY_THRESHOLD_MIN_SIGNIFICANT_DELTA_W,
-            current_value * STANDBY_THRESHOLD_SIGNIFICANT_DELTA_RATIO,
-        ),
-    )
-    if abs(suggested_value - current_value) < significant_delta:
+    if not _is_material_learned_watt_change(current_value, suggested_value):
         return []
 
     return [
@@ -517,12 +604,10 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
                 "reasons",
                 "standby",
                 circuit_name=inputs.context.circuit_name,
+                completed_cycles=evidence["completed_cycle_count"],
+                learning_days=evidence["distinct_learning_days"],
             ),
-            evidence={
-                "observed_samples": sum(standby_counts),
-                "median_standby_w": round(_median(standby_samples), 1),
-                "p95_standby_w": round(p95, 1),
-            },
+            evidence=evidence,
         )
     ]
 
@@ -538,39 +623,22 @@ def _operating_detection_recommendations(
     }:
         return []
 
-    idle_samples = _timestamped_numeric_values(
-        inputs.feature_history.get("operating_idle_samples"),
-        key="real_power_w",
-    )
-    start_samples = _timestamped_numeric_values(
-        inputs.feature_history.get("operating_start_samples"),
-        key="power_w",
-    )
-    if (
-        _timestamped_sample_count(idle_samples) < OPERATING_THRESHOLD_MIN_IDLE_SAMPLES
-        or _timestamped_sample_count(start_samples)
-        < OPERATING_THRESHOLD_MIN_START_SAMPLES
-    ):
+    distribution = _operating_cycle_distribution(inputs)
+    if distribution is None:
         return []
 
-    learning_days = _learning_days(idle_samples + start_samples)
-    if learning_days < MIN_ADVISOR_DAYS:
-        return []
-
-    idle_values = [value for _, value, _ in idle_samples]
-    idle_counts = [count for _, _, count in idle_samples]
-    start_values = [value for _, value, _ in start_samples]
-    start_counts = [count for _, _, count in start_samples]
-    idle_p95 = round(_percentile(idle_values, 95), 1)
-    running_p10 = round(_percentile(start_values, 10), 1)
-    separation = running_p10 - idle_p95
+    idle_ceiling = distribution["idle_ceiling_w"]
+    running_floor = distribution["running_floor_w"]
+    separation = distribution["separation_w"]
     if separation <= OPERATING_THRESHOLD_MIN_SEPARATION_W:
         return []
 
-    suggested_on = float(_round_to_nearest((idle_p95 + running_p10) / 2.0, 5))
+    suggested_on = float(
+        _round_to_nearest((idle_ceiling + running_floor) / 2.0, 5)
+    )
     suggested_off_target = max(
-        idle_p95 + 2.0,
-        min(idle_p95 + min(10.0, separation * 0.2), suggested_on - 5.0),
+        idle_ceiling + 2.0,
+        min(idle_ceiling + min(10.0, separation * 0.2), suggested_on - 5.0),
     )
     suggested_off = float(_round_to_nearest(suggested_off_target, 5))
     if suggested_off >= suggested_on:
@@ -580,12 +648,7 @@ def _operating_detection_recommendations(
 
     current_on, current_off = _current_operating_thresholds(inputs)
     evidence = {
-        "idle_sample_count": sum(idle_counts),
-        "running_sample_count": sum(start_counts),
-        "distinct_run_sessions": len(start_values),
-        "learning_days": learning_days,
-        "idle_p95_w": idle_p95,
-        "running_p10_w": running_p10,
+        **distribution,
         "suggested_on_threshold_w": suggested_on,
         "suggested_off_threshold_w": suggested_off,
     }
@@ -597,9 +660,8 @@ def _operating_detection_recommendations(
     reason = _advisor_text(
         "reasons",
         "operating_detection",
-        confirmed_starts=len(start_values),
-        idle_samples=len(idle_values),
-        learning_days=learning_days,
+        completed_cycles=distribution["completed_cycle_count"],
+        learning_days=distribution["distinct_learning_days"],
     )
     recommendations: list[SettingRecommendation] = []
     threshold_payload = {
@@ -607,7 +669,7 @@ def _operating_detection_recommendations(
         OPERATING_OFF_THRESHOLD_W: suggested_off,
     }
 
-    if abs(current_on - suggested_on) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+    if _is_material_learned_watt_change(current_on, suggested_on):
         recommendations.append(
             _make_recommendation(
                 inputs,
@@ -624,7 +686,7 @@ def _operating_detection_recommendations(
             )
         )
 
-    if abs(current_off - suggested_off) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+    if _is_material_learned_watt_change(current_off, suggested_off):
         recommendations.append(
             _make_recommendation(
                 inputs,
@@ -1324,45 +1386,6 @@ def _operating_threshold_overrides(settings: Mapping[str, Any]) -> dict[str, Any
     return overrides
 
 
-def _timestamped_numeric_values(
-    values: Any,
-    *,
-    key: str,
-) -> list[tuple[datetime, float, int]]:
-    if values is None:
-        return []
-
-    samples: list[tuple[datetime, float, int]] = []
-    for item in values:
-        if not isinstance(item, Mapping):
-            continue
-        raw_timestamp = item.get("timestamp")
-        raw_value = item.get(key)
-        try:
-            timestamp = datetime.fromisoformat(str(raw_timestamp))
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(value):
-            try:
-                count = max(int(item.get("sample_count", 1)), 1)
-            except (TypeError, ValueError):
-                count = 1
-            samples.append((timestamp, value, count))
-    return samples
-
-
-def _timestamped_sample_count(samples: list[tuple[datetime, float, int]]) -> int:
-    return sum(count for _, _, count in samples)
-
-
-def _learning_days(samples: list[tuple[datetime, float, int]]) -> int:
-    if not samples:
-        return 0
-    timestamps = sorted(timestamp for timestamp, _, _ in samples)
-    return int((timestamps[-1] - timestamps[0]).total_seconds() // 86400) + 1
-
-
 def _round_ratio(value: float) -> float:
     return _clamp(round(value, 1), 0.05, 1.0)
 
@@ -1406,9 +1429,18 @@ def _evidence_fingerprint(
     if feature == "operating_detection_thresholds":
         return (
             "operating_detection_thresholds:"
-            f"days={evidence.get('learning_days')};"
-            f"idle_p95={evidence.get('idle_p95_w')};"
-            f"running_p10={evidence.get('running_p10_w')}"
+            f"cycles={evidence.get('completed_cycle_count')};"
+            f"days={evidence.get('distinct_learning_days')};"
+            f"idle_ceiling={evidence.get('idle_ceiling_w')};"
+            f"running_floor={evidence.get('running_floor_w')}"
+        )
+    if feature == "always_on_standby":
+        return (
+            "always_on_standby:"
+            f"cycles={evidence.get('completed_cycle_count')};"
+            f"days={evidence.get('distinct_learning_days')};"
+            f"idle_ceiling={evidence.get('idle_ceiling_w')};"
+            f"running_floor={evidence.get('running_floor_w')}"
         )
     if feature == "hvac_thermostat_correlation":
         return (
