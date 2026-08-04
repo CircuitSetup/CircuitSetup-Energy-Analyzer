@@ -848,6 +848,7 @@ export function createNilmWorkspaceMethods({
     this._nilmActiveLane = lane[0];
     this._nilmSelectedReviewKey = `assignment:${assignmentId}`;
     this._nilmFocusedSignature = "";
+    this._nilmFocusedOccurrenceIndex = -1;
     return this._nilmSelectedReviewKey;
   }
 
@@ -1231,6 +1232,7 @@ export function createNilmWorkspaceMethods({
     const canToggle = options.toggle !== false;
     if (canToggle && this._nilmFocusedSignature === signatureFingerprint) {
       this._nilmFocusedSignature = "";
+      this._nilmFocusedOccurrenceIndex = -1;
       this._nilmGraphWindow = null;
       this._lastActionMessage = this._panelText("messages.showing_all_nilm_sessions");
       if (shouldScroll) {
@@ -1241,6 +1243,10 @@ export function createNilmWorkspaceMethods({
       return;
     }
     this._nilmFocusedSignature = signatureFingerprint;
+    this._nilmFocusedOccurrenceIndex = Math.max(
+      0,
+      this._nilmSignatureSessions(signatureFingerprint).length - 1,
+    );
     const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
@@ -1273,18 +1279,88 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmSignatureGraphWindow(signatureFingerprint) {
-    const workspace = this._nilmWorkspace;
-    const sessions = ((workspace && workspace.sessions) || [])
-      .filter((session) => session.signature_fingerprint === signatureFingerprint);
-    const starts = sessions.map((session) => Date.parse(session.start || "")).filter(Number.isFinite);
-    const ends = sessions.map((session) => Date.parse(session.end || session.start || "")).filter(Number.isFinite);
-    if (!starts.length || !ends.length) {
+    const sessions = this._nilmSignatureSessions(signatureFingerprint);
+    const index = signatureFingerprint === this._nilmFocusedSignature
+      ? Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1))
+      : sessions.length - 1;
+    const occurrence = sessions[index];
+    const start = Date.parse(occurrence && occurrence.start || "");
+    const end = Date.parse(occurrence && occurrence.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end)) {
       return null;
     }
-    const start = Math.min(...starts);
-    const end = Math.max(...ends, start + 15 * 60 * 1000);
-    const padding = Math.max((end - start) * 0.25, 15 * 60 * 1000);
+    const padding = Math.max((end - start) * 0.25, 5 * 60 * 1000);
     return { start: start - padding, end: end + padding };
+  }
+
+  _nilmSignatureSessions(signatureFingerprint) {
+    return (((this._nilmWorkspace && this._nilmWorkspace.sessions) || []))
+      .filter((session) => session.signature_fingerprint === signatureFingerprint
+        && session.end && !session.ambiguous)
+      .sort((left, right) => Date.parse(left.start || "") - Date.parse(right.start || ""));
+  }
+
+  _nilmFocusedOccurrence() {
+    const sessions = this._nilmSignatureSessions(this._nilmFocusedSignature);
+    if (!sessions.length) return null;
+    const index = Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1));
+    return sessions[index];
+  }
+
+  _nilmFocusedGraphEvidence(workspace) {
+    const occurrence = this._nilmFocusedOccurrence();
+    if (!this._nilmFocusedSignature || !occurrence) {
+      return { sessions: workspace.sessions || [], edges: workspace.edges || [] };
+    }
+    return {
+      sessions: [{ ...occurrence, selected: true }],
+      edges: [
+        {
+          timestamp: occurrence.start,
+          direction: "on",
+          delta_w: occurrence.on_delta_w,
+          delta_var: occurrence.on_delta_var,
+        },
+        {
+          timestamp: occurrence.end,
+          direction: "off",
+          delta_w: occurrence.off_delta_w,
+          delta_var: occurrence.off_delta_var,
+        },
+      ],
+    };
+  }
+
+  async _stepNilmOccurrence(step) {
+    const sessions = this._nilmSignatureSessions(this._nilmFocusedSignature);
+    if (!sessions.length) return;
+    const current = Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1));
+    const next = Math.max(0, Math.min(current + Number(step || 0), sessions.length - 1));
+    if (next === current) return;
+    this._nilmFocusedOccurrenceIndex = next;
+    const targetWindow = this._nilmSignatureGraphWindow(this._nilmFocusedSignature);
+    if (targetWindow) {
+      const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
+      if (historyLoaded === null) return;
+      this._focusNilmGraphWindowForSignature(this._nilmFocusedSignature);
+    }
+    this._render();
+  }
+
+  _renderNilmOccurrenceControls() {
+    const sessions = this._nilmSignatureSessions(this._nilmFocusedSignature);
+    const occurrence = this._nilmFocusedOccurrence();
+    if (!occurrence) return "";
+    const index = sessions.indexOf(occurrence);
+    return `<div class="actions nilm-occurrence-controls" data-nilm-occurrence-controls>
+      <button type="button" class="secondary" data-nilm-occurrence-step="-1" ${index <= 0 ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.previous_occurrence"))}</button>
+      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.occurrence_summary", {
+        start: this._formatDateTime(occurrence.start),
+        end: this._formatDateTime(occurrence.end),
+        duration: this._nilmSessionDuration(occurrence),
+      }))}</p>
+      <button type="button" class="secondary" data-nilm-occurrence-step="1" ${index >= sessions.length - 1 ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.next_occurrence"))}</button>
+    </div>`;
   }
 
   async _loadNilmWorkspaceHistoryForWindow(window, failedRequest = null) {
@@ -1664,10 +1740,8 @@ export function createNilmWorkspaceMethods({
       return "";
     }
     const graphWindow = this._nilmWorkspaceGraphWindow(workspace);
-    const graphSessions = this._nilmFocusedSignature
-      ? (workspace.sessions || []).filter((item) => item.signature_fingerprint === this._nilmFocusedSignature)
-      : workspace.sessions;
-    const graphBands = this._nilmGraphBands(workspace, graphSessions);
+    const graphEvidence = this._nilmFocusedGraphEvidence(workspace);
+    const graphBands = this._nilmGraphBands(workspace, graphEvidence.sessions);
     const intervalEditor = this._renderNilmLabelIntervalEditor(workspace);
     const intervalFeedback = this._renderNilmIntervalFeedback();
     return `
@@ -1771,15 +1845,17 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmGraph(workspace, graphWindow, graphBands) {
     const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
+    const graphEdges = this._nilmFocusedGraphEvidence(workspace).edges;
     const graph = this._nilmWorkspaceHistoryLoading
       ? `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div>`
       : this._nilmWorkspaceHistoryError
         ? `<div data-nilm-history-error><p class="muted">${this._escape(this._nilmWorkspaceHistoryError)}</p><button type="button" class="secondary" data-retry-nilm-history>${this._escape(this._panelText("common.retry"))}</button></div>`
         : graphWindow && series.length
-          ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), y_axis_label: "W", nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: workspace.edges, nilm_sessions: graphBands })
+          ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), y_axis_label: "W", nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: graphEdges, nilm_sessions: graphBands })
           : `<p class="muted">${this._escape((workspace.history && workspace.history.missing_real_power_reason) || this._panelText("nilm_workspace.no_graph_history"))}</p>`;
     return `
       ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
+      ${this._renderNilmOccurrenceControls()}
       ${this._renderNilmGraphControls(graphWindow)}
       ${graph}
       ${!this._nilmIntervalEditorOpen ? `<div class="actions">
@@ -1997,6 +2073,7 @@ export function createNilmWorkspaceMethods({
     this._nilmActiveLane = laneKey || "needs_review";
     this._nilmSelectedReviewKey = "";
     this._nilmFocusedSignature = "";
+    this._nilmFocusedOccurrenceIndex = -1;
     this._render();
   }
 
@@ -2168,6 +2245,11 @@ export function createNilmWorkspaceMethods({
     };
     addFact(this._panelText("nilm_workspace.fact_typical_power"), signature.typical_power_w !== undefined ? `${this._formatMetricValue(signature.typical_power_w)} W` : undefined);
     addFact(this._panelText("nilm_workspace.fact_typical_duration"), signature.typical_duration_seconds !== undefined ? this._formatDuration(signature.typical_duration_seconds) : undefined);
+    addFact(this._panelText("nilm_workspace.fact_electrical_class"), signature.electrical_class ? this._friendlyFeature(signature.electrical_class) : undefined);
+    const occurrence = signature.latest_session || {};
+    addFact(this._panelText("nilm_workspace.fact_active_start"), occurrence.start ? this._formatDateTime(occurrence.start) : undefined);
+    addFact(this._panelText("nilm_workspace.fact_active_stop"), occurrence.end ? this._formatDateTime(occurrence.end) : undefined);
+    addFact(this._panelText("nilm_workspace.fact_active_duration"), occurrence.duration_seconds !== undefined ? this._formatDuration(occurrence.duration_seconds) : undefined);
     addFact(this._panelText("nilm_workspace.fact_seen_count"), signature.seen_count);
     const topology = String(signature.topology_applicability || "").toLowerCase();
     const showTopology = topology === "available" || (!topology && (signature.voltage_class || signature.dominant_leg));

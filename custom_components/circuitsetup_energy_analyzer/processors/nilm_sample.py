@@ -794,17 +794,25 @@ def _restore_unique_component_state(
     assignment_by_id = {
         str(item.get("assignment_id") or ""): item for item in assignments
     }
-    models = tuple(
-        model
-        for item in assignments
-        if _direct_helper_id(item) is None
-        if (model := _runtime_assignment_model(item)).lifecycle_state
-        in {"expected", "validated", "published"}
-        and model.model_confidence >= 0.70
-        and len(model.power_states_w) >= 2
-        and any(state > 0.0 for state in model.power_states_w)
-        and model.transition_prototypes
-    )
+    models = tuple(sorted(
+        (
+            model
+            for item in assignments
+            if _direct_helper_id(item) is None
+            if (model := _runtime_assignment_model(item)).lifecycle_state
+            in {"expected", "validated", "published"}
+            and model.model_confidence >= 0.70
+            and len(model.power_states_w) >= 2
+            and any(state > 0.0 for state in model.power_states_w)
+            and model.transition_prototypes
+        ),
+        key=lambda model: (
+            -model.last_observed.timestamp()
+            if model.last_observed is not None
+            else float("inf"),
+            model.assignment_id,
+        ),
+    )[:20])
     unknown = [
         model for model in models
         if runtime[model.assignment_id]["status"] == NilmComponentStatus.UNKNOWN
@@ -822,6 +830,8 @@ def _restore_unique_component_state(
     fits: list[tuple[float, tuple[str, ...]]] = []
 
     def search(index: int, total: float, active_ids: tuple[str, ...]) -> None:
+        if len(fits) > 1 and fits[0][0] == fits[1][0] == 0.0:
+            return
         if total > target + tolerance or total + remaining[index] < target - tolerance:
             return
         if index == len(ordered):
@@ -909,8 +919,8 @@ def _scale_runtime_estimates(
     available = max(source_power_w - standby_w - fixed_power, 0.0)
     if (
         not estimated_ids
-        or estimated_total <= available
-        or estimated_total - available > tolerance_w
+        or estimated_total <= 0.0
+        or abs(estimated_total - available) > tolerance_w
     ):
         return
     scale = available / estimated_total

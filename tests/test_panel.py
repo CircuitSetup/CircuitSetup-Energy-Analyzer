@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260803-1"
+    assert PANEL_MODULE_VERSION == "20260804-1"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -2121,7 +2121,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
 
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
-    assert payload["lanes"]["needs_review"]["signature_ids"] == ["sig-new"]
+    assert payload["lanes"]["needs_review"]["signature_ids"] == []
     assert payload["lanes"]["assigned"]["assignment_ids"] == ["assignment-assigned"]
     assert payload["lanes"]["needs_review"]["assignment_ids"] == [
         "assignment-zero-confidence",
@@ -2139,7 +2139,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "assignment-expected"
     ]
     assert payload["lanes"]["expected"]["signature_ids"] == ["sig-expected"]
-    assert payload["lane_counts"]["needs_review"] == 3
+    assert payload["lane_counts"]["needs_review"] == 2
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
     )
@@ -2166,6 +2166,91 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
+
+
+def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="hvac_2",
+        name="HVAC 2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.hvac_2_w", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    fingerprints = {
+        "on-pump": "direction=on|watts=0-100|var=0-100|split=unknown|leg=unknown",
+        "off-pump": "direction=off|watts=0-100|var=0-100|split=unknown|leg=unknown",
+        "on-blower": "direction=on|watts=300-400|var=100-200|split=unknown|leg=unknown",
+        "off-blower": (
+            "direction=off|watts=300-400|var=100-200|split=unknown|leg=unknown"
+        ),
+        "on-open-185": "direction=on|watts=100-200|var=0-100|split=unknown|leg=unknown",
+        "on-open-197": "direction=on|watts=100-200|var=0-100|split=unknown|leg=unknown",
+    }
+    coordinator.store_data.nilm_signatures = {
+        "hvac_2": [
+            {
+                "signature_id": signature_id,
+                "feedback_fingerprint": fingerprints[signature_id],
+                "typical_watts": watts,
+                "typical_var": var,
+                "occurrence_count": 4,
+                "confidence": 0.9,
+            }
+            for signature_id, watts, var in (
+                ("on-pump", 84.0, 18.0),
+                ("off-pump", 84.0, 18.0),
+                ("on-blower", 319.0, 120.0),
+                ("off-blower", 319.0, 120.0),
+                ("on-open-185", 185.0, 50.0),
+                ("on-open-197", 197.0, 55.0),
+            )
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "hvac_2": [{
+            "assignment_id": "pump",
+            "display_name": "Condensate Pump 2",
+            "signature_fingerprints": [
+                "direction=on|watts=0-100|var=100-200|split=unknown|leg=unknown"
+            ],
+            "lifecycle_state": "published",
+            "confidence": 0.95,
+            "publish_entities": True,
+        }]
+    }
+    start = datetime(2026, 8, 4, tzinfo=UTC)
+    coordinator._nilm_unmatched_edges = {
+        "hvac_2": [
+            NilmEdge(start, 84.0, 18.0, direction="on"),
+            NilmEdge(start + timedelta(minutes=1), -84.0, -18.0, direction="off"),
+            NilmEdge(start + timedelta(minutes=2), 319.0, 120.0, direction="on"),
+            NilmEdge(start + timedelta(minutes=4), -319.0, -120.0, direction="off"),
+            NilmEdge(start + timedelta(minutes=5), 185.0, 50.0, direction="on"),
+            NilmEdge(start + timedelta(minutes=6), 197.0, 55.0, direction="on"),
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="hvac_2")
+
+    assert payload["lanes"]["needs_review"]["signature_ids"] == ["on-blower"]
+    pump = next(
+        item for item in payload["signatures"] if item["signature_id"] == "on-pump"
+    )
+    blower = next(
+        item for item in payload["signatures"] if item["signature_id"] == "on-blower"
+    )
+    assert pump["matched_assignment_id"] == "pump"
+    assert pump["direction"] == "on"
+    assert len(blower["session_ids"]) == 1
+    assert blower["latest_session"]["start"] == "2026-08-04T00:02:00+00:00"
+    assert blower["latest_session"]["end"] == "2026-08-04T00:04:00+00:00"
+    assert blower["latest_session"]["duration_seconds"] == 120.0
 
 
 def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> None:
@@ -2261,7 +2346,12 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
 
     signatures = [
         {"signature_id": "sig-retired", "review_state": "assigned"},
-        {"signature_id": "sig-new", "review_state": "new"},
+        {
+            "signature_id": "sig-new",
+            "review_state": "new",
+            "direction": "on",
+            "session_ids": ["session-new"],
+        },
         {"signature_id": "sig-ignored", "review_state": "ignored"},
     ]
     assignments = [

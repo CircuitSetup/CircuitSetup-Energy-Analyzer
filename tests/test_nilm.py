@@ -1762,10 +1762,28 @@ def test_legacy_fingerprint_resolves_unique_w_direction_despite_var_drift() -> N
     resolved = nilm_domain.resolve_nilm_signature_fingerprint(
         "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.00-0.05|"
         "split=unknown|leg=unknown|balance=unknown",
-        [{"signature_id": "off-1", "feedback_fingerprint": current_fingerprint}],
+        [{
+            "signature_id": "off-1",
+            "feedback_fingerprint": current_fingerprint,
+            "signature_fingerprint": current_fingerprint,
+        }],
     )
 
     assert resolved == current_fingerprint
+
+
+def test_legacy_fingerprint_does_not_cross_known_split_phase_topology() -> None:
+    assert nilm_domain.resolve_nilm_signature_fingerprint(
+        "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
+        "split=single_leg_a|leg=a|balance=unknown",
+        [{
+            "signature_id": "on-1",
+            "feedback_fingerprint": (
+                "direction=on|watts=0-100|var=100-200|va=unknown|pf=unknown|"
+                "split=single_leg_b|leg=b|balance=unknown"
+            ),
+        }],
+    ) is None
 
 
 def test_legacy_fingerprint_does_not_resolve_ambiguous_same_w_components() -> None:

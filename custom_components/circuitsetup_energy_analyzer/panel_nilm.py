@@ -28,6 +28,7 @@ from .nilm import (
     NilmSession,
     nilm_session_to_dict,
     pair_nilm_sessions_for_signatures,
+    resolve_nilm_signature_fingerprint,
 )
 from .nilm_virtual import (
     nilm_live_runtime,
@@ -99,7 +100,15 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "display_name",
     "user_label",
     "likely_type",
+    "classification",
     "typical_watts",
+    "typical_var",
+    "typical_va",
+    "typical_power_factor",
+    "median_delta_w",
+    "median_delta_var",
+    "median_delta_va",
+    "median_delta_pf",
     "typical_duration_seconds",
     "seen_count",
     "occurrence_count",
@@ -120,6 +129,13 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "feedback_fingerprint",
     "signature_fingerprint",
     "helper_candidates",
+    "direction",
+    "component_id",
+    "matched_assignment_id",
+    "session_ids",
+    "latest_session",
+    "electrical_class",
+    "electrical_class_confidence",
 )
 DEFAULT_NILM_WORKSPACE_HISTORY_HOURS = 6.0
 MAX_NILM_WORKSPACE_HISTORY_HOURS = 24.0
@@ -211,6 +227,7 @@ def nilm_workspace_payload(
         all_sessions,
         session_display_labels,
     )
+    _add_nilm_component_occurrences(signatures, all_sessions)
     sessions = _add_nilm_session_display_labels(
         _nilm_workspace_visible_sessions(
             _merge_nilm_session_payloads(
@@ -592,6 +609,7 @@ def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
     }
     payload["source_type"] = "nilm_estimate"
     payload["source_label"] = _panel_text("source_labels", "nilm_estimate")
+    payload["direction"] = _nilm_signature_direction(signature)
     if "typical_watts" in signature:
         payload["typical_power_w"] = signature["typical_watts"]
     payload["why_grouped"] = _nilm_signature_explanation(signature)
@@ -599,6 +617,133 @@ def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
     if review_state:
         payload["review_state"] = review_state
     return payload
+
+
+def _add_nilm_component_occurrences(
+    signatures: list[dict[str, Any]],
+    sessions: Iterable[Mapping[str, Any]],
+) -> None:
+    candidates = [
+        signature
+        for signature in signatures
+        if _nilm_signature_direction(signature) == "on"
+    ]
+    by_key = {
+        key: signature
+        for signature in candidates
+        for key in _nilm_signature_lookup_keys(signature)
+    }
+    matched: dict[str, list[Mapping[str, Any]]] = {
+        str(signature.get(ATTR_SIGNATURE_ID)): [] for signature in candidates
+    }
+    for session in sessions:
+        if not session.get("end") or session.get("ambiguous"):
+            continue
+        fingerprint = str(session.get("signature_fingerprint") or "").strip()
+        signature = by_key.get(fingerprint)
+        if signature is None:
+            compatible = [
+                item for item in candidates
+                if _nilm_session_signature_compatible(session, item)
+            ]
+            signature = compatible[0] if len(compatible) == 1 else None
+        if signature is not None:
+            matched[str(signature.get(ATTR_SIGNATURE_ID))].append(session)
+    for signature in candidates:
+        occurrences = matched[str(signature.get(ATTR_SIGNATURE_ID))]
+        if not occurrences:
+            continue
+        occurrences.sort(
+            key=lambda item: str(item.get("end") or item.get("start") or "")
+        )
+        latest = occurrences[-1]
+        session_ids = [
+            str(item.get("session_id"))
+            for item in occurrences
+            if item.get("session_id")
+        ]
+        durations = [
+            float(item["duration_seconds"])
+            for item in occurrences
+            if isinstance(item.get("duration_seconds"), int | float)
+        ]
+        assignment_ids = {
+            str(item.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            for item in occurrences
+            if str(item.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        }
+        signature["session_ids"] = session_ids
+        signature["latest_session"] = {
+            key: latest[key]
+            for key in (
+                "session_id", "start", "end", "duration_seconds",
+                "median_power_w", "estimated_energy_kwh", "confidence",
+                ATTR_ASSIGNMENT_ID,
+            )
+            if latest.get(key) is not None
+        }
+        if durations:
+            signature["typical_duration_seconds"] = median(durations)
+        if len(assignment_ids) == 1:
+            assignment_id = next(iter(assignment_ids))
+            signature["matched_assignment_id"] = assignment_id
+            signature["component_id"] = assignment_id
+        else:
+            signature["component_id"] = _nilm_signature_session_fingerprint(signature)
+        electrical_class = _nilm_signature_electrical_class(signature)
+        if electrical_class != "unknown":
+            signature["electrical_class"] = electrical_class
+            signature["electrical_class_confidence"] = signature.get("confidence")
+
+
+def _nilm_session_signature_compatible(
+    session: Mapping[str, Any],
+    signature: Mapping[str, Any],
+) -> bool:
+    observed_w = _clamped_float(session.get("on_delta_w"), default=0.0)
+    expected_w = _clamped_float(
+        signature.get("typical_watts") or signature.get("median_delta_w"),
+        default=0.0,
+    )
+    if not observed_w or not expected_w or abs(abs(observed_w) - abs(expected_w)) > max(
+        50.0, abs(expected_w) * 0.25
+    ):
+        return False
+    observed_var = session.get("on_delta_var")
+    expected_var = signature.get("typical_var") or signature.get("median_delta_var")
+    return not (
+        isinstance(observed_var, int | float)
+        and isinstance(expected_var, int | float)
+        and abs(abs(float(observed_var)) - abs(float(expected_var)))
+        > max(75.0, abs(float(expected_var)) * 0.5)
+    )
+
+
+def _nilm_signature_electrical_class(signature: Mapping[str, Any]) -> str:
+    value = str(
+        signature.get("likely_type") or signature.get("classification") or ""
+    ).lower()
+    if "motor" in value:
+        return "motor"
+    if "resistive" in value or "heating_element" in value:
+        return "resistive"
+    if "power_electronics" in value or "power-electronics" in value:
+        return "power_electronics"
+    return "unknown"
+
+
+def _nilm_signature_direction(signature: Mapping[str, Any]) -> str:
+    explicit = str(signature.get("direction") or "").strip().lower()
+    if explicit in {"on", "off"}:
+        return explicit
+    for value in _nilm_signature_lookup_keys(signature):
+        for token in value.split("|"):
+            if token in {"direction=on", "direction=off"}:
+                return token.removeprefix("direction=")
+        prefix = value.split("-", 1)[0].lower()
+        if prefix in {"on", "off"}:
+            return prefix
+    return "unknown"
 
 
 def _nilm_signature_explanation(signature: Mapping[str, Any]) -> str:
@@ -1539,8 +1684,13 @@ def _nilm_workspace_lanes(
             lanes["expected"]["signature_ids"].append(signature_id)
         elif _nilm_signature_hidden(signature):
             lanes["hidden"]["signature_ids"].append(signature_id)
-        elif _nilm_signature_identifiers(signature).isdisjoint(
-            assigned_signature_ids,
+        elif (
+            _nilm_signature_direction(signature) == "on"
+            and signature.get("session_ids")
+            and not str(signature.get("matched_assignment_id") or "").strip()
+            and _nilm_signature_identifiers(signature).isdisjoint(
+                assigned_signature_ids,
+            )
         ):
             lanes["needs_review"]["signature_ids"].append(signature_id)
 
@@ -2236,10 +2386,15 @@ def _nilm_workspace_session_specs(
     hidden_fingerprints: set[str] = set()
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
-        fingerprints = {
+        saved_fingerprints = {
             str(value or "").strip()
             for value in _iter_items(assignment.get("signature_fingerprints"))
             if str(value or "").strip()
+        }
+        fingerprints = {
+            resolved
+            for value in saved_fingerprints
+            if (resolved := resolve_nilm_signature_fingerprint(value, signatures))
         }
         if _nilm_assignment_hidden(assignment):
             hidden_fingerprints.update(fingerprints)

@@ -631,7 +631,7 @@ def reconcile_nilm_edge(
     *,
     helper_conflict: bool = False,
 ) -> NilmReconciliationResult:
-    """Match one edge to at most two legal assignment transitions."""
+    """Match one edge to a bounded set of legal assignment transitions."""
     models = tuple(models)
     legal = [
         (model, prototype)
@@ -1224,7 +1224,7 @@ def resolve_nilm_signature_fingerprint(
 ) -> str | None:
     """Resolve a stale review fingerprint only when one current shape wins."""
     saved = str(saved_fingerprint or "").strip()
-    current = [
+    current = list(dict.fromkeys(
         value
         for signature in signatures
         for value in (
@@ -1233,8 +1233,7 @@ def resolve_nilm_signature_fingerprint(
             str(signature.get("signature_id") or "").strip(),
         )
         if value
-    ]
-    current = [value for value in current if value]
+    ))
     if saved in current:
         return saved
     saved_parts = _nilm_fingerprint_parts(saved)
@@ -1246,6 +1245,7 @@ def resolve_nilm_signature_fingerprint(
         if (parts := _nilm_fingerprint_parts(value)).get("direction")
         == saved_parts["direction"]
         and parts.get("watts") == saved_parts["watts"]
+        and _nilm_fingerprint_topology_compatible(saved_parts, parts)
     ]
     if len(candidates) == 1:
         return candidates[0]
@@ -1273,6 +1273,15 @@ def _nilm_fingerprint_parts(value: str) -> dict[str, str]:
         if "=" in token
         for key, item in (token.split("=", 1),)
     }
+
+
+def _nilm_fingerprint_topology_compatible(
+    saved: Mapping[str, str], current: Mapping[str, str]
+) -> bool:
+    return all(
+        saved.get(key) in {None, "unknown"} or saved.get(key) == current.get(key)
+        for key in ("split", "leg")
+    )
 
 
 class NilmEdgeDetector:

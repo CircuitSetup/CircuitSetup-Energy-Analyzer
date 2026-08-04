@@ -8799,7 +8799,7 @@ def test_nilm_runtime_reconciles_overlapping_components_and_conserves_power() ->
         "blower": "on", "pump": "on"
     }
     assert completed == []
-    assert first["residual_w"] == 20.0
+    assert first["residual_w"] == pytest.approx(0.0)
     assert first["source_power_w"] == pytest.approx(
         first["standby_w"]
         + sum(item["estimated_power_w"] for item in runtime.values())
@@ -8817,7 +8817,9 @@ def test_nilm_runtime_reconciles_overlapping_components_and_conserves_power() ->
     assert completed[0]["assignment_id"] == "blower"
     assert completed[0]["on_delta_w"] == 100.0
     assert completed[0]["off_delta_w"] == -100.0
-    assert completed[0]["energy_kwh"] == pytest.approx(100.0 * 10 / 3_600_000)
+    assert completed[0]["energy_kwh"] == pytest.approx(
+        (200.0 * 100.0 / 180.0) * 10 / 3_600_000
+    )
     assert second["allocated_power_w"] == 80.0
 
 
@@ -9720,6 +9722,32 @@ def test_nilm_restart_restores_unique_state_with_three_active_components() -> No
 
     assert {item["status"] for item in runtime.values()} == {"on"}
     assert sum(item["estimated_power_w"] for item in runtime.values()) == 903.0
+
+
+def test_nilm_restart_state_search_uses_twenty_most_recent_models() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        {
+            **_reconciliation_assignment(f"old-{index:02d}", 1_000.0 + index),
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        for index in range(20)
+    ]
+    assignments.append({
+        **_reconciliation_assignment("recent", 80.0),
+        "updated_at": now.isoformat(),
+    })
+    runtime = _initial_component_runtime(assignments, {}, now)
+
+    _restore_unique_component_state(80.0, 0.0, 0.0, assignments, runtime, now)
+
+    assert runtime["recent"]["status"] == "on"
+    assert sum(item["status"] == "unknown" for item in runtime.values()) == 1
 
 
 def test_runtime_assignment_model_discards_malformed_values() -> None:

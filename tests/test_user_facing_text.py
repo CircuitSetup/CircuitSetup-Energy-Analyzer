@@ -7042,6 +7042,57 @@ if (!/graph sessions/.test(panel._lastActionMessage || "")) {
     )
 
 
+def test_nilm_graph_focuses_one_occurrence_and_navigates_previous_next() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const panel = new context.Panel();
+panel._render = () => {};
+panel._requestJson = async () => [];
+panel._nilmWorkspace = {
+  status: "ok",
+  history: {},
+  sessions: [
+    { session_id: "older", signature_fingerprint: "blower",
+      start: "2026-08-04T01:00:00Z", end: "2026-08-04T01:05:00Z",
+      duration_seconds: 300, on_delta_w: 319, off_delta_w: -319 },
+    { session_id: "newer", signature_fingerprint: "blower",
+      start: "2026-08-04T03:00:00Z", end: "2026-08-04T03:10:00Z",
+      duration_seconds: 600, on_delta_w: 319, off_delta_w: -319 },
+    { session_id: "other", signature_fingerprint: "pump",
+      start: "2026-08-04T02:00:00Z", end: "2026-08-04T02:02:00Z" },
+  ],
+  edges: [],
+};
+await panel._focusNilmSignatureOnGraph("blower", { scroll: false, toggle: false });
+assert.equal(panel._nilmFocusedOccurrence().session_id, "newer");
+let evidence = panel._nilmFocusedGraphEvidence(panel._nilmWorkspace);
+assert.equal(evidence.sessions.length, 1);
+assert.equal(evidence.sessions[0].selected, true);
+assert.equal(
+  JSON.stringify(evidence.edges.map((edge) => [edge.direction, edge.timestamp])),
+  JSON.stringify([["on", "2026-08-04T03:00:00Z"], ["off", "2026-08-04T03:10:00Z"]]),
+);
+let html = panel._renderNilmOccurrenceControls();
+assert.ok(html.includes("data-nilm-occurrence-step=\\\"-1\\\""));
+assert.ok(html.includes("data-nilm-occurrence-step=\\\"1\\\" disabled"));
+assert.match(html, /10m|10 min|10 minutes/);
+
+await panel._stepNilmOccurrence(-1);
+assert.equal(panel._nilmFocusedOccurrence().session_id, "older");
+evidence = panel._nilmFocusedGraphEvidence(panel._nilmWorkspace);
+assert.equal(evidence.sessions[0].session_id, "older");
+html = panel._renderNilmOccurrenceControls();
+assert.ok(html.includes("data-nilm-occurrence-step=\\\"-1\\\" disabled"));
+assert.ok(html.includes("data-nilm-occurrence-step=\\\"1\\\""));
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
 def test_show_on_graph_toggle_off_restores_full_nilm_window() -> None:
     _run_panel_node_script(
         """

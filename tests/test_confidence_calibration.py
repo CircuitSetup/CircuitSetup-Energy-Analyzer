@@ -1027,7 +1027,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 32 |" in report
+    assert "| Fixtures | 33 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
