@@ -37,8 +37,22 @@ def nilm_assignment_publication_reason(
     if state in {"ignored", "retired"}:
         return "Restore this hidden load before publishing."
     fingerprints = _clean_string_list(assignment.get("signature_fingerprints"))
-    if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
-        return "Bind a complete ON/OFF component before publishing."
+    model_directions = {
+        str(prototype.get("direction") or "")
+        for prototype in normalize_nilm_assignment_model(assignment)[
+            "transition_prototypes"
+        ]
+    }
+    if (
+        fingerprints
+        and not any(map(nilm_signature_is_assignable, fingerprints))
+        and model_directions != {"on", "off"}
+    ):
+        return (
+            "A complete appliance run is still missing. Confirm one session with "
+            "both the power-on and matching power-off transition so NILM can track "
+            "state and energy before publishing."
+        )
     if assignment.get("publish_entities") is True or state == "published":
         return None
     if state not in {"assigned", "validated", "ready_to_publish"}:

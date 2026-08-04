@@ -6143,7 +6143,7 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   } } });
   const html = panel._renderNilmLabelIntervalEditor(workspace);
   assert.ok(html.includes("Label appliance interval"));
-  assert.ok(html.includes("Click and drag across the graph"));
+  assert.ok(html.includes("Select one full appliance run per interval"));
   assert.ok(html.includes('data-nilm-interval-row="0"'));
   assert.ok(html.includes('data-nilm-interval-row="1"'));
   assert.ok(html.includes('data-nilm-active="true"'));
@@ -6223,7 +6223,9 @@ def test_nilm_interval_action_contracts() -> None:
           { value: "dishwasher", label: "Dishwasher" },
         ] } } });
       for (const expected of [
-        "Label appliance interval", "Click and drag across the graph",
+        "Label appliance interval", "Select one full appliance run per interval",
+        "start just before its power-on step",
+        "avoid intervals where they also turn on or off",
         "Appliance Type", "Dishwasher", "Save Interval",
       ]) assert.ok(html.includes(expected), expected);
       assert.ok(!html.includes('data-nilm-label-interval-input="observed_transition_w"'));

@@ -1547,11 +1547,21 @@ def _nilm_virtual_appliances_for_assignments(
             for value in _iter_items(assignment.get("session_ids"))
             if str(value or "").strip()
         }
+        rejected_session_ids = {
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("rejected_session_ids"))
+            if str(value or "").strip()
+        }
         assignment_sessions = [
             session
             for session in sessions
-            if session.get("assignment_id") == assignment_id
-            or str(session.get("session_id") or "").strip() in assignment_session_ids
+            if (
+                session.get("assignment_id") == assignment_id
+                or str(session.get("session_id") or "").strip()
+                in assignment_session_ids
+            )
+            and str(session.get("session_id") or "").strip()
+            not in rejected_session_ids
         ]
         open_session = _latest_nilm_session(
             session for session in assignment_sessions if not session.get("end")

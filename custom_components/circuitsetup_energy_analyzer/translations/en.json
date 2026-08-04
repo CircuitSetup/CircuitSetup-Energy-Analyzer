@@ -1921,7 +1921,7 @@
         "fact_why_grouped": "Why grouped",
         "fact_last_seen": "Last seen",
         "interval_prompt": "Label appliance interval",
-        "interval_prompt_detail": "Click and drag across the graph to select one or more intervals. Click a highlighted interval or its form row to edit it.",
+        "interval_prompt_detail": "Select one full appliance run per interval: start just before its power-on step and end just after the matching power-off step. Other loads may stay on, but avoid intervals where they also turn on or off. Drag across the graph, then click a highlighted interval or its form row to adjust it.",
         "interval_number": "Interval {number}",
         "editing_interval": "Editing interval {number}",
         "start": "Start",

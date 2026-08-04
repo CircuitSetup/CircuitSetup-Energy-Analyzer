@@ -4714,7 +4714,8 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
                 "display_name": "Dishwasher",
                 "mains_circuit_id": "mains",
                 "signature_fingerprints": ["signature_1"],
-                "session_ids": ["session-dishwasher"],
+                "session_ids": ["session-dishwasher", "session-rejected"],
+                "rejected_session_ids": ["session-rejected"],
                 "label_interval_ids": [],
                 "lifecycle_state": "assigned",
                 "confidence": 0.8,
@@ -4733,7 +4734,18 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
                 "median_power_w": 820.0,
                 "estimated_energy_kwh": 0.615,
                 "confidence": 0.9,
-            }
+            },
+            {
+                "session_id": "session-rejected",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T09:00:00+00:00",
+                "end": "2026-06-06T09:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 3200.0,
+                "estimated_energy_kwh": 2.4,
+                "confidence": 0.9,
+            },
         ]
     }
 
