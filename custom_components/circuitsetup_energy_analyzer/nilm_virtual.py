@@ -8,6 +8,11 @@ from typing import Any
 
 from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import DOMAIN
+from .discovery import (
+    sensor_metadata_is_unsupported,
+    sensor_metadata_role_conflict,
+    sensor_role_from_metadata,
+)
 from .models import AlertEvidence, SensorRole, Severity
 from .nilm import (
     NilmEdge,
@@ -883,6 +888,8 @@ def _nilm_session_seen(session: NilmSession | None) -> datetime | None:
 
 
 def _mains_source_entity_id(coordinator: Any, circuit_id: str) -> str | None:
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(states, "get", None)
     for config in getattr(coordinator, "circuit_configs", ()) or ():
         if str(getattr(config, "circuit_id", "")) != circuit_id:
             continue
@@ -892,8 +899,22 @@ def _mains_source_entity_id(coordinator: Any, circuit_id: str) -> str | None:
                 sensor_role = role if isinstance(role, SensorRole) else SensorRole(role)
             except (TypeError, ValueError):
                 continue
-            if sensor_role is SensorRole.REAL_POWER:
-                return str(getattr(sensor, "entity_id", "") or "") or None
+            entity_id = str(getattr(sensor, "entity_id", "") or "")
+            source = get_state(entity_id) if callable(get_state) and entity_id else None
+            attributes = getattr(source, "attributes", None)
+            attributes = attributes if isinstance(attributes, Mapping) else {}
+            device_class = attributes.get("device_class")
+            unit = attributes.get("unit_of_measurement")
+            if sensor_metadata_is_unsupported(
+                device_class=device_class, unit=unit
+            ) or sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+                continue
+            effective_role = sensor_role_from_metadata(
+                device_class=device_class,
+                unit=unit,
+            ) or sensor_role
+            if effective_role is SensorRole.REAL_POWER:
+                return entity_id or None
     return None
 
 
