@@ -14,6 +14,7 @@ from ..models import AlertEvidence, ApplianceProfile, CircuitMode, NilmSourceKin
 from ..nilm import (
     NilmEdge,
     build_nilm_assignment_model,
+    nilm_signature_is_off_direction,
     normalize_nilm_assignment_model,
 )
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
@@ -45,6 +46,9 @@ def nilm_assignment_publication_reason(
         or assignment_id.endswith("-configured-primary")
     ) and not _clean_string_list(assignment.get("signature_fingerprints")):
         return "Bind the configured primary signature before publishing."
+    fingerprints = _clean_string_list(assignment.get("signature_fingerprints"))
+    if fingerprints and all(map(nilm_signature_is_off_direction, fingerprints)):
+        return "Bind a complete ON/OFF component before publishing."
     if not any(
         _clean_string_list(assignment.get(key))
         for key in ("signature_fingerprints", "session_ids", "label_interval_ids")
@@ -251,8 +255,8 @@ class NilmController:
         if not coordinator.store_data.nilm_unknown_loads_by_circuit.get(circuit_id):
             unknown_loads = seed.get("unknown_loads")
             if isinstance(unknown_loads, Mapping):
-                coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id] = (
-                    dict(unknown_loads)
+                coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id] = dict(
+                    unknown_loads
                 )
             coordinator.store_persistence.mark_dirty()
 
@@ -291,17 +295,24 @@ class NilmController:
         """Hydrate NILM runtime state from retained store data."""
         coordinator = self._coordinator
         rebuilt = False
-        for circuit_id, assignments in (
-            coordinator.store_data.nilm_appliance_assignments_by_circuit.items()
-        ):
+        for (
+            circuit_id,
+            assignments,
+        ) in coordinator.store_data.nilm_appliance_assignments_by_circuit.items():
             history = coordinator.store_data.nilm_session_history_by_circuit.get(
                 circuit_id, ()
             )
             for assignment in assignments:
-                missing = any(key not in assignment for key in (
-                    "role", "power_states_w", "transition_prototypes",
-                    "model_confidence", "model_revision",
-                ))
+                missing = any(
+                    key not in assignment
+                    for key in (
+                        "role",
+                        "power_states_w",
+                        "transition_prototypes",
+                        "model_confidence",
+                        "model_revision",
+                    )
+                )
                 model = build_nilm_assignment_model(assignment, history)
                 if missing and model["transition_prototypes"]:
                     assignment.update(model)
@@ -321,12 +332,14 @@ class NilmController:
     def _rebuild_assignment_model(
         self, circuit_id: str, assignment: dict[str, Any]
     ) -> None:
-        assignment.update(build_nilm_assignment_model(
-            assignment,
-            self._coordinator.store_data.nilm_session_history_by_circuit.get(
-                circuit_id, ()
-            ),
-        ))
+        assignment.update(
+            build_nilm_assignment_model(
+                assignment,
+                self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                    circuit_id, ()
+                ),
+            )
+        )
 
     def upsert_assignment(
         self,
@@ -358,16 +371,13 @@ class NilmController:
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
-        appliance_id_text = (
-            str(appliance_id or "").strip()
-            or self._assignment_appliance_id(label_text)
+        appliance_id_text = str(
+            appliance_id or ""
+        ).strip() or self._assignment_appliance_id(label_text)
+        assignments_by_circuit = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit
         )
-        assignments = (
-            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.setdefault(
-                circuit_id,
-                [],
-            )
-        )
+        assignments = assignments_by_circuit.setdefault(circuit_id, [])
         assignment = next(
             (
                 item
@@ -409,9 +419,7 @@ class NilmController:
                 "model_confidence": 0.0,
                 "model_revision": 0,
             }
-            assignment["appliance_key"] = (
-                f"nilm:{assignment['assignment_id']}"
-            )
+            assignment["appliance_key"] = f"nilm:{assignment['assignment_id']}"
             assignments.append(assignment)
         else:
             assignments[:] = [item for item in assignments if item is not assignment]
@@ -442,7 +450,7 @@ class NilmController:
             float(assignment.get("confidence") or 0.0),
             max(min(confidence_value, 1.0), 0.0),
         )
-        del assignments[:-self._assignment_max_items]
+        del assignments[: -self._assignment_max_items]
         return assignment
 
     def assignment_session_history(
@@ -454,11 +462,9 @@ class NilmController:
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
         session_ids = set(self._clean_string_list(assignment.get("session_ids")))
-        history = (
-            self._coordinator.store_data.nilm_session_history_by_circuit.get(
-                circuit_id,
-                (),
-            )
+        history = self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id,
+            (),
         )
         sessions = [
             dict(session)
@@ -472,10 +478,10 @@ class NilmController:
         ]
         return sorted(
             sessions,
-            key=lambda session: self._datetime_or_none(
-                session.get("end") or session.get("start")
-            )
-            or datetime.min.replace(tzinfo=UTC),
+            key=lambda session: (
+                self._datetime_or_none(session.get("end") or session.get("start"))
+                or datetime.min.replace(tzinfo=UTC)
+            ),
             reverse=True,
         )
 
@@ -625,7 +631,7 @@ class NilmController:
             payload["assignment_id"] = assignment["assignment_id"]
             if existing is not None:
                 existing["assignment_id"] = assignment["assignment_id"]
-        del intervals[:-self._label_interval_max_items]
+        del intervals[: -self._label_interval_max_items]
 
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
@@ -690,19 +696,14 @@ class NilmController:
                 self._clean_string_list(assignment.get("signature_fingerprints"))
             ) - {fingerprint}
             assignment["signature_fingerprints"] = [fingerprint]
-            for previous in coordinator.store_data.nilm_signatures.get(
-                circuit_id, ()
-            ):
-                if (
-                    previous is not signature
-                    and (
-                        previous.get("assignment_id") == primary_id
-                        or self._signature_fingerprint_value(
-                            previous,
-                            str(previous.get("signature_id") or ""),
-                        )
-                        in previous_fingerprints
+            for previous in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
+                if previous is not signature and (
+                    previous.get("assignment_id") == primary_id
+                    or self._signature_fingerprint_value(
+                        previous,
+                        str(previous.get("signature_id") or ""),
                     )
+                    in previous_fingerprints
                 ):
                     previous.pop("assignment_id", None)
                     previous["review_state"] = "new"
@@ -748,11 +749,9 @@ class NilmController:
             lifecycle_state="assigned",
         )
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
-        assignments = (
-            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-                circuit_id,
-                [],
-            )
+        assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id,
+            [],
         )
         for candidate in assignments:
             if candidate is assignment:
@@ -768,8 +767,7 @@ class NilmController:
         ):
             if (
                 isinstance(session, dict)
-                and str(session.get("session_id") or "").strip()
-                == session_id_text
+                and str(session.get("session_id") or "").strip() == session_id_text
             ):
                 session["assignment_id"] = assignment_id_text
         coordinator.store_persistence.mark_dirty()
@@ -797,11 +795,7 @@ class NilmController:
             [],
         )
         interval = next(
-            (
-                item
-                for item in intervals
-                if item.get("interval_id") == interval_id_text
-            ),
+            (item for item in intervals if item.get("interval_id") == interval_id_text),
             None,
         )
         if interval is None:
@@ -917,9 +911,7 @@ class NilmController:
                 )
                 for interval in overlapping_intervals:
                     matched_interval_ids.add(id(interval))
-                    interval_power = self._float_or_none(
-                        interval.get("median_power_w")
-                    )
+                    interval_power = self._float_or_none(interval.get("median_power_w"))
                     interval_energy = self._float_or_none(
                         interval.get("estimated_energy_kwh"),
                     )
@@ -933,9 +925,7 @@ class NilmController:
             ):
                 self._append_unique(conflicting_session_ids, session_id)
 
-        confirmed = self._clean_string_list(
-            assignment.get("confirmed_session_ids")
-        )
+        confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
         newly_confirmed = [
             session_id
@@ -949,8 +939,7 @@ class NilmController:
         ]
         if not matched_session_ids and not conflicting_session_ids:
             raise ValueError(
-                "No matching ground-truth NILM sessions were found for this "
-                "assignment."
+                "No matching ground-truth NILM sessions were found for this assignment."
             )
 
         for session_id in newly_confirmed:
@@ -1044,6 +1033,41 @@ class NilmController:
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
+        return dict(assignment)
+
+    async def async_confirm_nilm_configured_primary(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Confirm the configured appliance identity for a primary-mixed source."""
+        expected_id = configured_primary_assignment_id(circuit_id)
+        if str(assignment_id or "").strip() != expected_id:
+            raise ValueError(
+                f"Assignment '{assignment_id}' is not the configured primary."
+            )
+        config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
+        if nilm_source_kind(config) is not NilmSourceKind.PRIMARY_MIXED:
+            raise ValueError(
+                f"Circuit '{circuit_id}' has no configured primary assignment."
+            )
+        assignment = self.assignment_for_id(circuit_id, expected_id)
+        state = str(assignment.get("lifecycle_state") or "").strip().lower()
+        if (
+            state in {"expected", "ignored", "retired", "conflict"}
+            or assignment.get("conversion_state") == "direct_meter"
+        ):
+            raise ValueError("Restore or resolve this configured primary first.")
+        if state != "published":
+            assignment["lifecycle_state"] = "validated"
+        now_dt = self._coordinator.current_time()
+        now = now_dt.isoformat()
+        assignment["last_validation"] = "configured_primary"
+        assignment["last_validated_at"] = now
+        assignment["updated_at"] = now
+        self._coordinator.store_persistence.mark_dirty()
+        self._coordinator.async_set_updated_data(self._coordinator.state)
+        await self._coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
 
     async def async_record_nilm_session_validation(
@@ -1384,8 +1408,7 @@ class NilmController:
         else:
             store_data = getattr(coordinator, "store_data", None)
             known_circuits = {
-                *getattr(store_data, "nilm_signatures", {})
-                .keys(),
+                *getattr(store_data, "nilm_signatures", {}).keys(),
                 *getattr(
                     store_data,
                     "nilm_appliance_assignments_by_circuit",
@@ -1413,8 +1436,7 @@ class NilmController:
                 signature, signature_id_text
             )
             was_expected = (
-                str(signature.get("review_state") or "").strip().lower()
-                == "expected"
+                str(signature.get("review_state") or "").strip().lower() == "expected"
                 or signature.get("expected") is True
             )
             owner_id = str(signature.get("assignment_id") or "").strip()
@@ -1468,11 +1490,10 @@ class NilmController:
                     for key in ("session_ids", "label_interval_ids")
                 )
                 if not owner["signature_fingerprints"] and not owner_has_history:
-                    assignments = (
-                        coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-                            circuit_id, []
-                        )
+                    assignments_by_circuit = (
+                        coordinator.store_data.nilm_appliance_assignments_by_circuit
                     )
+                    assignments = assignments_by_circuit.get(circuit_id, [])
                     assignments[:] = [item for item in assignments if item is not owner]
                 else:
                     owner["lifecycle_state"] = "assigned"
@@ -1485,9 +1506,7 @@ class NilmController:
         state = str(assignment.get("lifecycle_state") or "").strip().lower()
         direct_conversion = assignment.get("conversion_state") == "direct_meter"
         if state not in {"expected", "ignored", "retired"} and not direct_conversion:
-            raise ValueError(
-                f"Assignment '{assignment_id_text}' is not restorable."
-            )
+            raise ValueError(f"Assignment '{assignment_id_text}' is not restorable.")
         if direct_conversion:
             for key in (
                 "conversion_state",
@@ -1521,9 +1540,7 @@ class NilmController:
             signature.pop("ignored", None)
             signature.pop("expected", None)
             if isinstance(ignored, set):
-                ignored.discard(
-                    (circuit_id, str(signature.get("signature_id") or ""))
-                )
+                ignored.discard((circuit_id, str(signature.get("signature_id") or "")))
         self._rebuild_assignment_model(circuit_id, assignment)
         await self._async_save_nilm_review_change(circuit_id)
         return dict(assignment)
@@ -1601,8 +1618,7 @@ class NilmController:
             (
                 assignment
                 for assignment in assignments
-                if signature_fingerprint
-                in assignment.get("signature_fingerprints", ())
+                if signature_fingerprint in assignment.get("signature_fingerprints", ())
             ),
             None,
         )
@@ -1681,8 +1697,12 @@ class NilmController:
         return dict(assignment)
 
     async def async_set_nilm_helper_link(
-        self, circuit_id: str, assignment_id: str, *,
-        helper_circuit_id: str, relationship: str,
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        helper_circuit_id: str,
+        relationship: str,
     ) -> dict[str, Any]:
         """Confirm one direct-circuit relationship for a NILM assignment."""
         assignment, helper_id, helper_config = self._helper_link_resources(
@@ -1695,10 +1715,11 @@ class NilmController:
             raise ValueError(
                 f"Helper circuit '{helper_id}' is not direct-appliance eligible."
             )
-        links = [_normalized_helper_link(link)
-                 for link in assignment.get("helper_links", ())
-                 if isinstance(link, Mapping)
-                 and link.get("helper_circuit_id") != helper_id]
+        links = [
+            _normalized_helper_link(link)
+            for link in assignment.get("helper_links", ())
+            if isinstance(link, Mapping) and link.get("helper_circuit_id") != helper_id
+        ]
         if len(links) >= 4:
             raise ValueError(
                 "A NILM assignment can have at most four confirmed helper links."
@@ -1709,17 +1730,20 @@ class NilmController:
             raise ValueError(
                 "A NILM assignment can have only one direct_component link."
             )
-        fingerprints = set(self._clean_string_list(
-            assignment.get("signature_fingerprints")
-        ))
-        candidates = [(str(signature.get("feedback_fingerprint") or ""), candidate)
-            for signature in
-            self._coordinator.store_data.nilm_signatures.get(circuit_id, ())
+        fingerprints = set(
+            self._clean_string_list(assignment.get("signature_fingerprints"))
+        )
+        candidates = [
+            (str(signature.get("feedback_fingerprint") or ""), candidate)
+            for signature in self._coordinator.store_data.nilm_signatures.get(
+                circuit_id, ()
+            )
             if isinstance(signature, Mapping)
             and str(signature.get("feedback_fingerprint") or "") in fingerprints
             for candidate in signature.get("helper_candidates", ())
             if isinstance(candidate, Mapping)
-            and candidate.get("helper_circuit_id") == helper_id]
+            and candidate.get("helper_circuit_id") == helper_id
+        ]
         selected = max(
             candidates,
             key=lambda item: (*_helper_candidate_sort_key(item[1]), item[0]),
@@ -1727,37 +1751,49 @@ class NilmController:
         )
         candidate = selected[1] if selected else None
         link = _normalized_helper_link(candidate or {})
-        link.update(helper_circuit_id=helper_id, relationship=relationship,
-                    status="confirmed")
+        link.update(
+            helper_circuit_id=helper_id, relationship=relationship, status="confirmed"
+        )
         link["confirmed_matched_on_count"] = int(link.get("matched_on_count") or 0)
         link["confirmed_matched_off_count"] = int(link.get("matched_off_count") or 0)
         links.append(link)
-        links.sort(key=lambda item: (
-            _nonnegative_float_value(item.get("confidence"), default=0.0),
-            _helper_link_recency(item)),
-                   reverse=True)
+        links.sort(
+            key=lambda item: (
+                _nonnegative_float_value(item.get("confidence"), default=0.0),
+                _helper_link_recency(item),
+            ),
+            reverse=True,
+        )
         assignment["helper_links"] = links[:4]
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
     async def async_remove_nilm_helper_link(
-        self, circuit_id: str, assignment_id: str, *, helper_circuit_id: str,
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        helper_circuit_id: str,
     ) -> dict[str, Any]:
         """Remove one confirmed helper relationship."""
         assignment, helper_id, _ = self._helper_link_resources(
             circuit_id, assignment_id, helper_circuit_id
         )
-        assignment["helper_links"] = [dict(link)
+        assignment["helper_links"] = [
+            dict(link)
             for link in assignment.get("helper_links", ())
-            if isinstance(link, Mapping)
-            and link.get("helper_circuit_id") != helper_id]
+            if isinstance(link, Mapping) and link.get("helper_circuit_id") != helper_id
+        ]
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
 
     def _helper_link_resources(
-        self, circuit_id: str, assignment_id: str, helper_circuit_id: str,
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        helper_circuit_id: str,
     ) -> tuple[dict[str, Any], str, Any]:
         registry = self._coordinator.circuit_registry
         if registry.config_for_circuit(circuit_id) is None:
@@ -1825,9 +1861,7 @@ class NilmController:
             "pre_conversion_lifecycle_state",
             assignment.get("lifecycle_state"),
         )
-        assignment["keep_assignment_for_masking"] = bool(
-            keep_assignment_for_masking
-        )
+        assignment["keep_assignment_for_masking"] = bool(keep_assignment_for_masking)
         assignment["keep_published_estimate"] = bool(keep_published_estimate)
         assignment["publish_entities"] = bool(keep_published_estimate)
         assignment["created_device"] = bool(keep_published_estimate)
@@ -1873,9 +1907,7 @@ class NilmController:
             )
         source = self.assignment_for_id(circuit_id, source_id)
         target = self.assignment_for_id(circuit_id, target_id)
-        target_confirmed = self._clean_string_list(
-            target.get("confirmed_session_ids")
-        )
+        target_confirmed = self._clean_string_list(target.get("confirmed_session_ids"))
         target_rejected = self._clean_string_list(target.get("rejected_session_ids"))
         for key in (
             "signature_fingerprints",
@@ -1904,9 +1936,7 @@ class NilmController:
         ]
         confirmed_set = set(confirmed)
         rejected = [
-            session_id
-            for session_id in rejected
-            if session_id not in confirmed_set
+            session_id for session_id in rejected if session_id not in confirmed_set
         ]
         target["confirmed_session_ids"] = confirmed
         target["rejected_session_ids"] = rejected
@@ -1914,9 +1944,7 @@ class NilmController:
         target["rejected_sessions"] = len(rejected)
         validation_total = len(confirmed) + len(rejected)
         target["false_positive_rate"] = (
-            round(len(rejected) / validation_total, 3)
-            if validation_total
-            else 0.0
+            round(len(rejected) / validation_total, 3) if validation_total else 0.0
         )
         target["confidence"] = max(
             self._nonnegative_float_value(target.get("confidence"), default=0.0),
@@ -1951,11 +1979,11 @@ class NilmController:
         ):
             if signature.get("assignment_id") == source_id:
                 signature["assignment_id"] = target_id
-        for interval in (
-            self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
-                circuit_id,
-                [],
-            )
+        for (
+            interval
+        ) in self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
+            circuit_id,
+            [],
         ):
             if interval.get("assignment_id") == source_id:
                 interval["assignment_id"] = target_id
@@ -2110,9 +2138,12 @@ class NilmController:
                 entity_present = expected_unique_ids <= registered_unique_ids
             else:
                 entity_present = bool(registered_unique_ids)
-            device_present = device_registry.async_get_device(
-                identifiers={(DOMAIN, f"{entry_id}_nilm_{assignment_id}")},
-            ) is not None
+            device_present = (
+                device_registry.async_get_device(
+                    identifiers={(DOMAIN, f"{entry_id}_nilm_{assignment_id}")},
+                )
+                is not None
+            )
             return (
                 entity_present and device_present
                 if expected
@@ -2216,21 +2247,26 @@ def _helper_candidate_sort_key(
 def _normalized_helper_link(link: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(link)
     for key in (
-        "matched_on_count", "matched_off_count", "unmatched_source_count",
-        "unmatched_helper_count", "source_event_count", "helper_event_count",
-        "confirmed_matched_on_count", "confirmed_matched_off_count",
+        "matched_on_count",
+        "matched_off_count",
+        "unmatched_source_count",
+        "unmatched_helper_count",
+        "source_event_count",
+        "helper_event_count",
+        "confirmed_matched_on_count",
+        "confirmed_matched_off_count",
     ):
         count = _nonnegative_float_value(normalized.get(key), default=0.0)
         normalized[key] = int(count) if math.isfinite(count) else 0
-    confidence = _nonnegative_float_value(
-        normalized.get("confidence"), default=0.0
-    )
+    confidence = _nonnegative_float_value(normalized.get("confidence"), default=0.0)
     normalized["confidence"] = (
         min(confidence, 1.0) if math.isfinite(confidence) else 0.0
     )
     for key in (
-        "start_lag_seconds", "stop_lag_seconds",
-        "start_lag_mad_seconds", "stop_lag_mad_seconds",
+        "start_lag_seconds",
+        "stop_lag_seconds",
+        "start_lag_mad_seconds",
+        "stop_lag_mad_seconds",
     ):
         value = _float_or_none(normalized.get(key))
         normalized[key] = value if value is not None and math.isfinite(value) else None
@@ -2306,9 +2342,11 @@ def _nilm_assignment_interval_matches(
         and str(interval.get("assignment_id") or "").strip() == assignment_id
     ):
         return True
-    interval_appliance = str(
-        interval.get("appliance_id") or interval.get("label") or ""
-    ).strip().casefold()
+    interval_appliance = (
+        str(interval.get("appliance_id") or interval.get("label") or "")
+        .strip()
+        .casefold()
+    )
     if not interval_appliance:
         return False
     return interval_appliance in {

@@ -241,6 +241,7 @@ def test_hvac_associations_payload_marks_setup_issues_and_avoids_hass() -> None:
         "hvac", "HVAC", ApplianceProfile.HVAC, CircuitMode.SINGLE_PHASE, ()
     )
     coordinator = _hvac_association_coordinator(config)
+
     class ForbiddenHassAccess:
         def __getattr__(self, name: str) -> object:
             raise AssertionError(f"unexpected hass access: {name}")
@@ -255,8 +256,7 @@ def test_hvac_associations_payload_marks_setup_issues_and_avoids_hass() -> None:
     assert payload["items"][0]["status"] == "needs_attention"
 
 
-def test_hvac_associations_payload_scopes_setup_issues_to_matching_mapping(
-) -> None:
+def test_hvac_associations_payload_scopes_setup_issues_to_matching_mapping() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         hvac_associations_payload,
     )
@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-1"
+    assert PANEL_MODULE_VERSION == "20260804-2"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -536,11 +536,14 @@ async def test_alert_evidence_payload_hides_retired_action_cache(
         action_name,
     )(alert_id)
 
-    assert alert_evidence_payload(
-        [coordinator],
-        alert_id=alert_id,
-        circuit_id="hvac",
-    )["alert"] is None
+    assert (
+        alert_evidence_payload(
+            [coordinator],
+            alert_id=alert_id,
+            circuit_id="hvac",
+        )["alert"]
+        is None
+    )
 
 
 def test_alert_evidence_payload_explains_expected_feedback_state() -> None:
@@ -1839,19 +1842,21 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "action": {
             "domain": DOMAIN,
             "service": "set_circuit_sensitivity",
-                "data": {
-                    "circuit_id": "mains",
-                    "preset": "sensitive",
+            "data": {
+                "circuit_id": "mains",
+                "preset": "sensitive",
             },
         },
     }
     assert payload["history"]["hours"] == 24.0
     assert payload["history"]["entities"] == ["sensor.mains_power"]
-    assert payload["history"]["entity_series"] == [{
-        "entity_id": "sensor.mains_power",
-        "effective_role": "real_power",
-        "source_unit": "W",
-    }]
+    assert payload["history"]["entity_series"] == [
+        {
+            "entity_id": "sensor.mains_power",
+            "effective_role": "real_power",
+            "source_unit": "W",
+        }
+    ]
     assert payload["history"]["api_path"].startswith(
         "circuitsetup_energy_analyzer/nilm_workspace_history?"
     )
@@ -1932,13 +1937,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "profile_options"
     ]
     assert {"value": "mixed", "label": "Mixed"} in change_profile["profile_options"]
-    assert payload["assignments"][0]["actions"]["convert_to_direct_meter"] == {
-        "domain": DOMAIN,
-        "service": "convert_nilm_appliance_to_direct_meter",
-        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
-        "requires": ["direct_circuit_id"],
-        "target_options": [{"value": "pool_pump", "label": "Pool Pump"}],
-    }
+    assert "convert_to_direct_meter" not in payload["assignments"][0]["actions"]
     assert payload["assignments"][0]["actions"]["publish"] == {
         "domain": DOMAIN,
         "service": "publish_nilm_appliance_assignment",
@@ -2131,14 +2130,10 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "assignment-validation",
         "assignment-published",
     ]
-    assert payload["lanes"]["hidden"]["assignment_ids"] == [
-        "assignment-ignored"
-    ]
-    assert payload["lanes"]["hidden"]["signature_ids"] == ["sig-ignored"]
-    assert payload["lanes"]["expected"]["assignment_ids"] == [
-        "assignment-expected"
-    ]
-    assert payload["lanes"]["expected"]["signature_ids"] == ["sig-expected"]
+    assert payload["lanes"]["hidden"]["assignment_ids"] == ["assignment-ignored"]
+    assert payload["lanes"]["hidden"]["signature_ids"] == []
+    assert payload["lanes"]["expected"]["assignment_ids"] == ["assignment-expected"]
+    assert payload["lanes"]["expected"]["signature_ids"] == []
     assert payload["lane_counts"]["needs_review"] == 2
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
@@ -2166,6 +2161,37 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
+
+
+def test_nilm_workspace_lanes_only_show_complete_component_signatures() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        [
+            {
+                "signature_id": "hidden-off-edge",
+                "direction": "off",
+                "review_state": "ignored",
+            },
+            {
+                "signature_id": "hidden-component",
+                "direction": "on",
+                "review_state": "ignored",
+                "session_ids": ["session-1"],
+            },
+            {
+                "signature_id": "expected-without-session",
+                "direction": "on",
+                "review_state": "expected",
+            },
+        ],
+        [],
+    )
+
+    assert lanes["hidden"]["signature_ids"] == ["hidden-component"]
+    assert lanes["expected"]["signature_ids"] == []
 
 
 def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() -> None:
@@ -2213,16 +2239,18 @@ def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() ->
         ]
     }
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
-        "hvac_2": [{
-            "assignment_id": "pump",
-            "display_name": "Condensate Pump 2",
-            "signature_fingerprints": [
-                "direction=on|watts=0-100|var=100-200|split=unknown|leg=unknown"
-            ],
-            "lifecycle_state": "published",
-            "confidence": 0.95,
-            "publish_entities": True,
-        }]
+        "hvac_2": [
+            {
+                "assignment_id": "pump",
+                "display_name": "Condensate Pump 2",
+                "signature_fingerprints": [
+                    "direction=on|watts=0-100|var=100-200|split=unknown|leg=unknown"
+                ],
+                "lifecycle_state": "published",
+                "confidence": 0.95,
+                "publish_entities": True,
+            }
+        ]
     }
     start = datetime(2026, 8, 4, tzinfo=UTC)
     coordinator._nilm_unmatched_edges = {
@@ -2259,54 +2287,81 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
     )
 
     source = CircuitConfig(
-        circuit_id="mains", name="Mains",
-        appliance_profile=ApplianceProfile.MAINS_NILM, mode=CircuitMode.MAINS_NILM,
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
     )
     helper = CircuitConfig(
-        circuit_id="ac2", name="AC2",
-        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.SINGLE_PHASE,
+        circuit_id="ac2",
+        name="AC2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.ac2_w", SensorRole.REAL_POWER),),
     )
     manual_helper = CircuitConfig(
-        circuit_id="condensate", name="Condensate Pump",
+        circuit_id="condensate",
+        name="Condensate Pump",
         appliance_profile=ApplianceProfile.WATER_PUMP,
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.condensate_w", SensorRole.REAL_POWER),),
     )
-    coordinator = _coordinator(
-        config=source, configs=(source, helper, manual_helper)
-    )
+    coordinator = _coordinator(config=source, configs=(source, helper, manual_helper))
     coordinator.entry_id = "entry-1"
     evidence = {
-        "helper_circuit_id": "ac2", "matched_on_count": 9, "source_on_count": 10,
-        "matched_off_count": 8, "source_off_count": 10, "source_coverage": 0.85,
-        "start_coverage": 0.9, "stop_coverage": 0.8, "helper_precision": 0.95,
-        "start_lag_seconds": 42.0, "stop_lag_seconds": -18.0,
-        "start_lag_mad_seconds": 5.0, "stop_lag_mad_seconds": 7.0,
-        "confidence": 0.91, "last_observed": "2026-08-02T12:00:00+00:00",
+        "helper_circuit_id": "ac2",
+        "matched_on_count": 9,
+        "source_on_count": 10,
+        "matched_off_count": 8,
+        "source_off_count": 10,
+        "source_coverage": 0.85,
+        "start_coverage": 0.9,
+        "stop_coverage": 0.8,
+        "helper_precision": 0.95,
+        "start_lag_seconds": 42.0,
+        "stop_lag_seconds": -18.0,
+        "start_lag_mad_seconds": 5.0,
+        "stop_lag_mad_seconds": 7.0,
+        "confidence": 0.91,
+        "last_observed": "2026-08-02T12:00:00+00:00",
         "suggested": True,
     }
-    coordinator.store_data.nilm_signatures = {"mains": [{
-        "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
-        "helper_candidates": [
-            evidence,
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
             {
-                "helper_circuit_id": "condensate",
-                "matched_on_count": 1,
-                "matched_off_count": 0,
-                "confidence": 0.2,
-                "suggested": False,
-            },
-        ],
-    }]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [{
-        "assignment_id": "assignment-1", "display_name": "Air handler",
-        "signature_fingerprints": ["fp-1"], "lifecycle_state": "assigned",
-        "helper_links": [{
-            **evidence, "relationship": "direct_component", "status": "confirmed",
-        }],
-    }]}
+                "signature_id": "sig-1",
+                "feedback_fingerprint": "fp-1",
+                "helper_candidates": [
+                    evidence,
+                    {
+                        "helper_circuit_id": "condensate",
+                        "matched_on_count": 1,
+                        "matched_off_count": 0,
+                        "confidence": 0.2,
+                        "suggested": False,
+                    },
+                ],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-1",
+                "display_name": "Air handler",
+                "signature_fingerprints": ["fp-1"],
+                "lifecycle_state": "assigned",
+                "helper_links": [
+                    {
+                        **evidence,
+                        "relationship": "direct_component",
+                        "status": "confirmed",
+                    }
+                ],
+            }
+        ]
+    }
 
     payload = nilm_workspace_payload(
         [coordinator], circuit_id="mains", entry_id="entry-1"
@@ -2318,19 +2373,24 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
     assert len(payload["assignments"][0]["helper_candidates"]) == 1
     assert {key: candidate[key] for key in evidence} == evidence
     assert candidate["state"] == "suggested"
-    assert candidate["relationship_options"] == ["corroborates", "direct_component"]
+    assert candidate["relationship_options"] == ["corroborates"]
     assert candidate["actions"]["set"]["data"] == {
-        "entry_id": "entry-1", "circuit_id": "mains",
-        "assignment_id": "assignment-1", "helper_circuit_id": "ac2",
+        "entry_id": "entry-1",
+        "circuit_id": "mains",
+        "assignment_id": "assignment-1",
+        "helper_circuit_id": "ac2",
     }
     assert candidate["actions"]["set"]["requires"] == ["relationship"]
     assert link["state"] == "confirmed"
     assert link["actions"]["remove"]["data"] == {
-        "entry_id": "entry-1", "circuit_id": "mains",
-        "assignment_id": "assignment-1", "helper_circuit_id": "ac2",
+        "entry_id": "entry-1",
+        "circuit_id": "mains",
+        "assignment_id": "assignment-1",
+        "helper_circuit_id": "ac2",
     }
     assert [option["helper_circuit_id"] for option in helper_options] == [
-        "ac2", "condensate"
+        "ac2",
+        "condensate",
     ]
     assert all(
         option["actions"]["set"]["data"]["entry_id"] == "entry-1"
@@ -2369,16 +2429,15 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
 
     assert _nilm_workspace_session_specs(signatures, assignments) == [("sig-new", None)]
     lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
-    assert set(lanes) == {
-        "needs_review", "assigned", "published", "expected", "hidden"
-    }
+    assert set(lanes) == {"needs_review", "assigned", "published", "expected", "hidden"}
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
 
 
-def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
-) -> None:
+def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -2392,71 +2451,80 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
-    coordinator.store_data.nilm_signatures = {"mixed": [
-        {
-            "signature_id": "signature-ignored",
-            "feedback_fingerprint": "fingerprint-ignored",
-            "ignored": True,
-            "review_state": "ignored",
-        },
-        {
-            "signature_id": "signature-ready",
-            "feedback_fingerprint": "fingerprint-ready",
-            "confidence": 0.91,
-        },
-    ]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [
-        {
-            "assignment_id": "assignment-retired",
-            "lifecycle_state": "retired",
-            "signature_fingerprints": ["fingerprint-retired"],
-            "confidence": 0.9,
-        },
-        {
-            "assignment_id": "assignment-empty",
-            "lifecycle_state": "assigned",
-            "signature_fingerprints": [],
-            "session_ids": [],
-            "label_interval_ids": [],
-            "confidence": 0.9,
-        },
-        {
-            "assignment_id": "assignment-ready",
-            "lifecycle_state": "assigned",
-            "signature_fingerprints": ["fingerprint-ready"],
-            "confidence": 0.91,
-        },
-        {
-            "assignment_id": "assignment-converted",
-            "lifecycle_state": "converted",
-            "conversion_state": "direct_meter",
-            "direct_circuit_id": "ac2",
-            "signature_fingerprints": ["fingerprint-converted"],
-            "confidence": 0.91,
-        },
-    ]}
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-ignored",
+                "feedback_fingerprint": "fingerprint-ignored",
+                "ignored": True,
+                "review_state": "ignored",
+            },
+            {
+                "signature_id": "signature-ready",
+                "feedback_fingerprint": "fingerprint-ready",
+                "confidence": 0.91,
+            },
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "assignment-retired",
+                "lifecycle_state": "retired",
+                "signature_fingerprints": ["fingerprint-retired"],
+                "confidence": 0.9,
+            },
+            {
+                "assignment_id": "assignment-empty",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": [],
+                "session_ids": [],
+                "label_interval_ids": [],
+                "confidence": 0.9,
+            },
+            {
+                "assignment_id": "assignment-ready",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["fingerprint-ready"],
+                "confidence": 0.91,
+            },
+            {
+                "assignment_id": "assignment-converted",
+                "lifecycle_state": "converted",
+                "conversion_state": "direct_meter",
+                "direct_circuit_id": "ac2",
+                "signature_fingerprints": ["fingerprint-converted"],
+                "confidence": 0.91,
+            },
+        ]
+    }
 
     payload = nilm_workspace_payload(
         [coordinator], circuit_id="mixed", entry_id="entry-1"
     )
     ignored = next(
-        item for item in payload["signatures"]
+        item
+        for item in payload["signatures"]
         if item["signature_id"] == "signature-ignored"
     )
     retired = next(
-        item for item in payload["assignments"]
+        item
+        for item in payload["assignments"]
         if item["assignment_id"] == "assignment-retired"
     )
     empty = next(
-        item for item in payload["assignments"]
+        item
+        for item in payload["assignments"]
         if item["assignment_id"] == "assignment-empty"
     )
     ready = next(
-        item for item in payload["assignments"]
+        item
+        for item in payload["assignments"]
         if item["assignment_id"] == "assignment-ready"
     )
     converted = next(
-        item for item in payload["assignments"]
+        item
+        for item in payload["assignments"]
         if item["assignment_id"] == "assignment-converted"
     )
 
@@ -2539,15 +2607,19 @@ def test_nilm_signature_topology_is_capability_gated(
         sensors=sensors,
     )
     coordinator = _coordinator(config=config, configs=(config,))
-    coordinator.store_data.nilm_signatures = {"load": [{
-        "signature_id": "signature-1",
-        "voltage_class": "unknown" if expected != "available" else "240 V",
-        "dominant_leg": "unknown" if expected != "available" else "a",
-    }]}
+    coordinator.store_data.nilm_signatures = {
+        "load": [
+            {
+                "signature_id": "signature-1",
+                "voltage_class": "unknown" if expected != "available" else "240 V",
+                "dominant_leg": "unknown" if expected != "available" else "a",
+            }
+        ]
+    }
 
-    signature = nilm_workspace_payload(
-        [coordinator], circuit_id="load"
-    )["signatures"][0]
+    signature = nilm_workspace_payload([coordinator], circuit_id="load")["signatures"][
+        0
+    ]
 
     assert signature["topology_applicability"] == expected
     assert ("topology_requirement" in signature) is has_requirement
@@ -2692,9 +2764,7 @@ def test_nilm_assignment_detail_links_keep_duplicate_assignment_entry_scope(
             workspace["virtual_appliances"][0]["appliance_detail_path"],
             workspace["virtual_appliances"][0]["appliance_detail_api_path"],
         ):
-            assert parse_qs(urlparse(path).query)["entry_id"] == [
-                coordinator.entry_id
-            ]
+            assert parse_qs(urlparse(path).query)["entry_id"] == [coordinator.entry_id]
         assert all(
             action["data"]["entry_id"] == coordinator.entry_id
             for action in _nilm_service_actions(workspace)
@@ -2704,8 +2774,9 @@ def test_nilm_assignment_detail_links_keep_duplicate_assignment_entry_scope(
     monkeypatch.setattr(
         panel,
         "appliance_detail_for_assignment",
-        lambda coordinator, _assignment_id: selected.append(coordinator.entry_id)
-        or SimpleNamespace(),
+        lambda coordinator, _assignment_id: (
+            selected.append(coordinator.entry_id) or SimpleNamespace()
+        ),
     )
     monkeypatch.setattr(
         panel,
@@ -2718,20 +2789,30 @@ def test_nilm_assignment_detail_links_keep_duplicate_assignment_entry_scope(
             workspace["virtual_appliances"][0]["appliance_detail_api_path"],
         ):
             query = parse_qs(urlparse(path).query)
-            assert panel.appliance_detail_payload(
-                coordinators,
-                assignment_id=query["assignment_id"][0],
-                entry_id=query["entry_id"][0],
-            )["entry_id"] == query["entry_id"][0]
+            assert (
+                panel.appliance_detail_payload(
+                    coordinators,
+                    assignment_id=query["assignment_id"][0],
+                    entry_id=query["entry_id"][0],
+                )["entry_id"]
+                == query["entry_id"][0]
+            )
     assert selected == ["entry/one", "entry/one", "entry two", "entry two"]
 
 
 @pytest.mark.parametrize(
     ("profile", "mode", "expected"),
     [
-        (ApplianceProfile.HVAC_BLOWER, CircuitMode.MIXED,
-         [{"value": "mixed-configured-primary",
-           "label": "Configured primary: Upstairs Blower"}]),
+        (
+            ApplianceProfile.HVAC_BLOWER,
+            CircuitMode.MIXED,
+            [
+                {
+                    "value": "mixed-configured-primary",
+                    "label": "Configured primary: Upstairs Blower",
+                }
+            ],
+        ),
         (ApplianceProfile.MIXED, CircuitMode.MIXED, []),
         (ApplianceProfile.MAINS_NILM, CircuitMode.MAINS_NILM, []),
     ],
@@ -2746,8 +2827,11 @@ def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
     )
 
     config = CircuitConfig(
-        circuit_id="mixed", name="Upstairs Blower", appliance_profile=profile,
-        mode=mode, sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        circuit_id="mixed",
+        name="Upstairs Blower",
+        appliance_profile=profile,
+        mode=mode,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -2756,9 +2840,10 @@ def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
 
     payload = nilm_workspace_payload([coordinator], circuit_id="mixed")
 
-    assert payload["signatures"][0]["actions"]["assign"].get(
-        "assignment_options", []
-    ) == expected
+    assert (
+        payload["signatures"][0]["actions"]["assign"].get("assignment_options", [])
+        == expected
+    )
     assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {}
     assert "assignment_id" not in coordinator.store_data.nilm_signatures["mixed"][0]
 
@@ -2769,26 +2854,82 @@ def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> Non
     )
 
     config = CircuitConfig(
-        circuit_id="mixed", name="Blower",
-        appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+        circuit_id="mixed",
+        name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
     coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
-        "assignment_id": "mixed-configured-primary", "display_name": "Blower",
-        "lifecycle_state": "assigned", "role": "primary",
-    }]}
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "mixed-configured-primary",
+                "display_name": "Blower",
+                "lifecycle_state": "assigned",
+                "role": "primary",
+            }
+        ]
+    }
 
     options = nilm_workspace_payload(
-        [coordinator], circuit_id="mixed",
+        [coordinator],
+        circuit_id="mixed",
     )["signatures"][0]["actions"]["assign"]["assignment_options"]
 
-    assert options == [{
-        "value": "mixed-configured-primary",
-        "label": "Configured primary: Blower",
-    }]
+    assert options == [
+        {
+            "value": "mixed-configured-primary",
+            "label": "Configured primary: Blower",
+        }
+    ]
+
+
+def test_nilm_workspace_can_confirm_the_configured_primary_assignment() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Blower",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "mixed-configured-primary",
+                "display_name": "Blower",
+                "lifecycle_state": "needs_validation",
+                "role": "primary",
+                "signature_fingerprints": ["fingerprint-1"],
+                "confidence": 0.9,
+            }
+        ]
+    }
+
+    assignment = nilm_workspace_payload(
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+    )["assignments"][0]
+
+    assert assignment["display_name"] == "Blower (estimated)"
+    assert assignment["actions"]["confirm_primary"] == {
+        "domain": DOMAIN,
+        "service": "confirm_nilm_configured_primary",
+        "data": {
+            "entry_id": "entry-1",
+            "circuit_id": "mixed",
+            "assignment_id": "mixed-configured-primary",
+        },
+    }
 
 
 def test_nilm_workspace_suggests_largest_unassigned_recurring_primary() -> None:
@@ -2805,42 +2946,48 @@ def test_nilm_workspace_suggests_largest_unassigned_recurring_primary() -> None:
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
-    coordinator.store_data.nilm_signatures = {"mixed": [
-        {
-            "signature_id": "signature-weak",
-            "feedback_fingerprint": "fingerprint-weak",
-            "typical_watts": 1400.0,
-            "occurrence_count": 2,
-            "confidence": 0.95,
-        },
-        {
-            "signature_id": "signature-assigned",
-            "feedback_fingerprint": "fingerprint-assigned",
-            "typical_watts": 1200.0,
-            "occurrence_count": 6,
-            "confidence": 0.95,
-        },
-        {
-            "signature_id": "signature-z",
-            "feedback_fingerprint": "fingerprint-z",
-            "typical_watts": 850.0,
-            "occurrence_count": 5,
-            "confidence": 0.9,
-        },
-        {
-            "signature_id": "signature-a",
-            "feedback_fingerprint": "fingerprint-a",
-            "typical_watts": 850.0,
-            "occurrence_count": 5,
-            "confidence": 0.9,
-        },
-    ]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
-        "assignment_id": "assignment-other",
-        "signature_fingerprints": ["fingerprint-assigned"],
-        "lifecycle_state": "assigned",
-        "confidence": 0.95,
-    }]}
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-weak",
+                "feedback_fingerprint": "fingerprint-weak",
+                "typical_watts": 1400.0,
+                "occurrence_count": 2,
+                "confidence": 0.95,
+            },
+            {
+                "signature_id": "signature-assigned",
+                "feedback_fingerprint": "fingerprint-assigned",
+                "typical_watts": 1200.0,
+                "occurrence_count": 6,
+                "confidence": 0.95,
+            },
+            {
+                "signature_id": "signature-z",
+                "feedback_fingerprint": "fingerprint-z",
+                "typical_watts": 850.0,
+                "occurrence_count": 5,
+                "confidence": 0.9,
+            },
+            {
+                "signature_id": "signature-a",
+                "feedback_fingerprint": "fingerprint-a",
+                "typical_watts": 850.0,
+                "occurrence_count": 5,
+                "confidence": 0.9,
+            },
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "assignment-other",
+                "signature_fingerprints": ["fingerprint-assigned"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.95,
+            }
+        ]
+    }
 
     payload = nilm_workspace_payload(
         [coordinator], circuit_id="mixed", entry_id="entry-1"
@@ -2865,14 +3012,13 @@ def test_nilm_workspace_suggests_largest_unassigned_recurring_primary() -> None:
         },
     }
     assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {
-        "mixed": [coordinator.store_data.nilm_appliance_assignments_by_circuit[
-            "mixed"
-        ][0]]
+        "mixed": [
+            coordinator.store_data.nilm_appliance_assignments_by_circuit["mixed"][0]
+        ]
     }
 
 
-def test_nilm_workspace_suggests_larger_primary_when_current_binding_is_wrong(
-) -> None:
+def test_nilm_workspace_suggests_larger_primary_when_current_binding_is_wrong() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -2886,29 +3032,35 @@ def test_nilm_workspace_suggests_larger_primary_when_current_binding_is_wrong(
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
-    coordinator.store_data.nilm_signatures = {"mixed": [
-        {
-            "signature_id": "signature-condensate",
-            "feedback_fingerprint": "fingerprint-condensate",
-            "typical_watts": 90.0,
-            "occurrence_count": 6,
-            "confidence": 0.9,
-            "assignment_id": "mixed-configured-primary",
-        },
-        {
-            "signature_id": "signature-blower",
-            "feedback_fingerprint": "fingerprint-blower",
-            "typical_watts": 850.0,
-            "occurrence_count": 5,
-            "confidence": 0.9,
-        },
-    ]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": [{
-        "assignment_id": "mixed-configured-primary",
-        "signature_fingerprints": ["fingerprint-condensate"],
-        "lifecycle_state": "assigned",
-        "confidence": 0.9,
-    }]}
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-condensate",
+                "feedback_fingerprint": "fingerprint-condensate",
+                "typical_watts": 90.0,
+                "occurrence_count": 6,
+                "confidence": 0.9,
+                "assignment_id": "mixed-configured-primary",
+            },
+            {
+                "signature_id": "signature-blower",
+                "feedback_fingerprint": "fingerprint-blower",
+                "typical_watts": 850.0,
+                "occurrence_count": 5,
+                "confidence": 0.9,
+            },
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "mixed-configured-primary",
+                "signature_fingerprints": ["fingerprint-condensate"],
+                "lifecycle_state": "assigned",
+                "confidence": 0.9,
+            }
+        ]
+    }
 
     primary = nilm_workspace_payload(
         [coordinator], circuit_id="mixed", entry_id="entry-1"
@@ -2934,12 +3086,16 @@ def test_nilm_workspace_omits_configured_primary_for_pure_mixed() -> None:
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
     )
     coordinator = _coordinator(config=config, configs=(config,))
-    coordinator.store_data.nilm_signatures = {"mixed": [{
-        "signature_id": "signature-1",
-        "typical_watts": 900.0,
-        "occurrence_count": 5,
-        "confidence": 0.9,
-    }]}
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-1",
+                "typical_watts": 900.0,
+                "occurrence_count": 5,
+                "confidence": 0.9,
+            }
+        ]
+    }
 
     assert "configured_primary" not in nilm_workspace_payload(
         [coordinator], circuit_id="mixed"
@@ -2960,14 +3116,24 @@ async def test_configured_primary_service_creation_is_entry_scoped() -> None:
     coordinators = {}
     for entry_id, name in (("entry-1", "First Blower"), ("entry-2", "Second Blower")):
         config = CircuitConfig(
-            circuit_id="mixed", name=name,
-            appliance_profile=ApplianceProfile.HVAC_BLOWER, mode=CircuitMode.MIXED,
+            circuit_id="mixed",
+            name=name,
+            appliance_profile=ApplianceProfile.HVAC_BLOWER,
+            mode=CircuitMode.MIXED,
         )
         coordinator = EnergyAnalyzerCoordinator(
-            SimpleNamespace(data={}), entry_id=entry_id,
-            store_data=FeatureStoreData(nilm_signatures={"mixed": [{
-                "signature_id": "sig-1", "feedback_fingerprint": "fp-1",
-            }]}),
+            SimpleNamespace(data={}),
+            entry_id=entry_id,
+            store_data=FeatureStoreData(
+                nilm_signatures={
+                    "mixed": [
+                        {
+                            "signature_id": "sig-1",
+                            "feedback_fingerprint": "fp-1",
+                        }
+                    ]
+                }
+            ),
         )
         coordinator.circuit_configs = (config,)
         coordinators[entry_id] = coordinator
@@ -2976,8 +3142,10 @@ async def test_configured_primary_service_creation_is_entry_scoped() -> None:
         SimpleNamespace(data={DOMAIN: coordinators}),
         SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
         {
-            "entry_id": "entry-2", "circuit_id": "mixed",
-            "signature_id": "sig-1", "label": "spoofed",
+            "entry_id": "entry-2",
+            "circuit_id": "mixed",
+            "signature_id": "sig-1",
+            "label": "spoofed",
             "assignment_id": "mixed-configured-primary",
         },
     )
@@ -3221,11 +3389,15 @@ async def test_nilm_workspace_history_view_forwards_requested_entry_id(
 
     payload = await panel.NilmWorkspaceHistoryView().get(request)
 
-    assert payload == [[{
-        "entity_id": "sensor.second_mains_power",
-        "effective_role": "real_power",
-        "source_unit": "W",
-    }]]
+    assert payload == [
+        [
+            {
+                "entity_id": "sensor.second_mains_power",
+                "effective_role": "real_power",
+                "source_unit": "W",
+            }
+        ]
+    ]
 
 
 def test_nilm_workspace_payload_accepts_sensor_backed_mixed_source() -> None:
@@ -3345,14 +3517,22 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
     )
     coordinator = _coordinator(config=source, configs=(source, *helpers))
     coordinator.entry_id = "entry-1"
-    coordinator.store_data.nilm_signatures = {"mains": [{
-        "signature_id": "sig-1",
-        "helper_candidates": [{"helper_circuit_id": "helper-2"}],
-    }]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [{
-        "assignment_id": "assignment-1",
-        "helper_links": [{"helper_circuit_id": "helper-1"}],
-    }]}
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
+            {
+                "signature_id": "sig-1",
+                "helper_candidates": [{"helper_circuit_id": "helper-2"}],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-1",
+                "helper_links": [{"helper_circuit_id": "helper-1"}],
+            }
+        ]
+    }
     other = _nilm_workspace_coordinator(
         entry_id="entry-2", name="Other", entity_id="sensor.other"
     )
@@ -3378,13 +3558,22 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
         circuit_id="mains",
         entry_id="entry-1",
         helper_circuit_ids=[
-            "helper-2", "mains", "unknown", "helper-2", "cross-entry",
-            "helper-1", "helper-3", "helper-4", "helper-5",
+            "helper-2",
+            "mains",
+            "unknown",
+            "helper-2",
+            "cross-entry",
+            "helper-1",
+            "helper-3",
+            "helper-4",
+            "helper-5",
         ],
     )
 
     assert queried == [
-        "sensor.mains_w", "sensor.helper_2_w", "sensor.helper_1_w",
+        "sensor.mains_w",
+        "sensor.helper_2_w",
+        "sensor.helper_1_w",
     ]
 
 
@@ -3415,19 +3604,21 @@ async def test_nilm_history_ignores_malformed_persisted_helper_containers(
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.arbitrary_w", SensorRole.REAL_POWER),),
     )
-    coordinator = _coordinator(
-        config=source, configs=(source, helper, arbitrary)
-    )
-    coordinator.store_data.nilm_signatures = {"mains": [
-        {"helper_candidates": None},
-        {"helper_candidates": "bad"},
-        {"helper_candidates": [None, "bad"]},
-    ]}
-    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": [
-        {"helper_links": None},
-        {"helper_links": "bad"},
-        {"helper_links": [None, "bad", {"helper_circuit_id": "helper"}]},
-    ]}
+    coordinator = _coordinator(config=source, configs=(source, helper, arbitrary))
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
+            {"helper_candidates": None},
+            {"helper_candidates": "bad"},
+            {"helper_candidates": [None, "bad"]},
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {"helper_links": None},
+            {"helper_links": "bad"},
+            {"helper_links": [None, "bad", {"helper_circuit_id": "helper"}]},
+        ]
+    }
     queried = []
 
     async def history_rows(_hass, _start, _end, entity_ids):
@@ -3682,25 +3873,29 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
     )
     coordinator = _coordinator(config=mains, configs=(mains,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
-        "mains": [{
-            "assignment_id": "washer",
-            "display_name": "Washer",
-            "mains_circuit_id": "mains",
-            "lifecycle_state": "published",
-            "helper_links": [{"status": "degraded"}],
-        }]
+        "mains": [
+            {
+                "assignment_id": "washer",
+                "display_name": "Washer",
+                "mains_circuit_id": "mains",
+                "lifecycle_state": "published",
+                "helper_links": [{"status": "degraded"}],
+            }
+        ]
     }
-    coordinator.state.nilm_component_runtime_by_circuit = {"mains": {
-        "washer": {"status": "uncertain", "consistent": False}
-    }}
-    coordinator.state.nilm_reconciliation_by_circuit = {"mains": {
-        "residual_w": 42.0,
-        "residual_energy_kwh": 0.25,
-        "tolerance_w": 30.0,
-        "consistent": False,
-        "conflict": "over_allocation",
-        "review_item": {"type": "model_conflict", "reason": "over_allocation"},
-    }}
+    coordinator.state.nilm_component_runtime_by_circuit = {
+        "mains": {"washer": {"status": "uncertain", "consistent": False}}
+    }
+    coordinator.state.nilm_reconciliation_by_circuit = {
+        "mains": {
+            "residual_w": 42.0,
+            "residual_energy_kwh": 0.25,
+            "tolerance_w": 30.0,
+            "consistent": False,
+            "conflict": "over_allocation",
+            "review_item": {"type": "model_conflict", "reason": "over_allocation"},
+        }
+    }
 
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
     virtual = payload["virtual_appliances"][0]
@@ -3722,9 +3917,12 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
     coordinator.state.nilm_reconciliation_by_circuit["mains"].update(
         consistent=True, conflict=None
     )
-    assert nilm_workspace_payload(
-        [coordinator], circuit_id="mains"
-    )["virtual_appliances"][0]["model_status"] == "conflict"
+    assert (
+        nilm_workspace_payload([coordinator], circuit_id="mains")["virtual_appliances"][
+            0
+        ]["model_status"]
+        == "conflict"
+    )
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
         {
@@ -3745,9 +3943,9 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
     }
     virtuals = {
         item["assignment_id"]: item
-        for item in nilm_workspace_payload(
-            [coordinator], circuit_id="mains"
-        )["virtual_appliances"]
+        for item in nilm_workspace_payload([coordinator], circuit_id="mains")[
+            "virtual_appliances"
+        ]
     }
     assert virtuals["washer"]["is_running"] is None
     assert virtuals["dryer"]["is_running"] is True
@@ -4859,9 +5057,7 @@ def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> 
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mixed": []}
 
     healthy = setup_health_payload([coordinator])
-    assert not [
-        item for item in healthy["issues"] if item["issue"].startswith("nilm_")
-    ]
+    assert not [item for item in healthy["issues"] if item["issue"].startswith("nilm_")]
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
         "mixed": [{"helper_links": [{"status": "degraded"}]}]
@@ -4970,9 +5166,7 @@ def test_setup_health_payload_links_actions_to_supported_integration_page() -> N
         for item in payload["issues"]
         if item["issue"] == "missing_capacity_setting"
     )
-    integration_path = (
-        "/config/integrations/integration/circuitsetup_energy_analyzer"
-    )
+    integration_path = "/config/integrations/integration/circuitsetup_energy_analyzer"
     assert capacity_issue["open_path"] == integration_path
 
     checklist = {item["item_id"]: item for item in payload["checklist"]}
@@ -5306,9 +5500,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
         STATIC_URL_PATH,
     )
 
-    resource_url = (
-        f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
-    )
+    resource_url = f"{STATIC_URL_PATH}/{PANEL_MODULE_NAME}?v={PANEL_MODULE_VERSION}"
     resource_items = [
         {
             "id": "dashboard-graph-module",
@@ -5579,9 +5771,7 @@ def test_nilm_workspace_history_rejects_non_watts_metadata(unit: str) -> None:
         ),
     )
 
-    history = _nilm_workspace_history_payload(
-        config, [], [], hours=6
-    )
+    history = _nilm_workspace_history_payload(config, [], [], hours=6)
 
     assert history["entities"] == []
     assert history["entity_series"] == []
@@ -5606,11 +5796,41 @@ def test_nilm_workspace_history_preserves_real_power_unit(unit: str) -> None:
 
     history = _nilm_workspace_history_payload(config, [], [], hours=6)
 
-    assert history["entity_series"] == [{
-        "entity_id": "sensor.mixed_power",
-        "effective_role": "real_power",
-        "source_unit": unit,
-    }]
+    assert history["entity_series"] == [
+        {
+            "entity_id": "sensor.mixed_power",
+            "effective_role": "real_power",
+            "source_unit": unit,
+        }
+    ]
+
+
+def test_nilm_workspace_history_includes_both_mains_real_power_legs() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_history_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(
+            SensorRef(
+                "sensor.mains_l1_watts", SensorRole.REAL_POWER, leg="a", unit="W"
+            ),
+            SensorRef(
+                "sensor.mains_l2_watts", SensorRole.REAL_POWER, leg="b", unit="W"
+            ),
+        ),
+    )
+
+    history = _nilm_workspace_history_payload(config, [], [], hours=6)
+
+    assert history["entities"] == [
+        "sensor.mains_l1_watts",
+        "sensor.mains_l2_watts",
+    ]
 
 
 @pytest.mark.asyncio
@@ -5624,19 +5844,21 @@ async def test_nilm_workspace_history_rows_include_role_and_unit_metadata(
         name="Mixed",
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
-        sensors=(
-            SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="kW"),
-        ),
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="kW"),),
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
 
     async def history_rows(_hass, _start, _end, _entity_ids):
-        return [[{
-            "entity_id": "sensor.mixed_power",
-            "state": "1.2",
-            "last_changed": "2026-08-03T12:00:00+00:00",
-        }]]
+        return [
+            [
+                {
+                    "entity_id": "sensor.mixed_power",
+                    "state": "1.2",
+                    "last_changed": "2026-08-03T12:00:00+00:00",
+                }
+            ]
+        ]
 
     monkeypatch.setattr(panel, "_async_history_rows", history_rows)
 
@@ -5678,11 +5900,15 @@ async def test_nilm_workspace_history_uses_live_real_power_unit(
     )
 
     async def history_rows(_hass, _start, _end, _entity_ids):
-        return [[{
-            "entity_id": "sensor.mixed_power",
-            "state": "1.2",
-            "last_changed": "2026-08-03T12:00:00+00:00",
-        }]]
+        return [
+            [
+                {
+                    "entity_id": "sensor.mixed_power",
+                    "state": "1.2",
+                    "last_changed": "2026-08-03T12:00:00+00:00",
+                }
+            ]
+        ]
 
     monkeypatch.setattr(panel, "_async_history_rows", history_rows)
 
@@ -5723,11 +5949,15 @@ async def test_nilm_workspace_history_rejects_live_reactive_metadata(
     )
 
     async def history_rows(_hass, _start, _end, _entity_ids):
-        return [[{
-            "entity_id": "sensor.mixed_power",
-            "state": "12",
-            "last_changed": "2026-08-03T12:00:00+00:00",
-        }]]
+        return [
+            [
+                {
+                    "entity_id": "sensor.mixed_power",
+                    "state": "12",
+                    "last_changed": "2026-08-03T12:00:00+00:00",
+                }
+            ]
+        ]
 
     monkeypatch.setattr(panel, "_async_history_rows", history_rows)
 
@@ -5782,22 +6012,28 @@ async def test_nilm_workspace_history_falls_through_to_live_watts(
 
     async def history_rows(_hass, _start, _end, entity_ids):
         requested_entity_ids.extend(entity_ids)
-        return [[{
-            "entity_id": "sensor.mixed_watts",
-            "state": "420",
-            "last_changed": "2026-08-03T12:00:00+00:00",
-        }]]
+        return [
+            [
+                {
+                    "entity_id": "sensor.mixed_watts",
+                    "state": "420",
+                    "last_changed": "2026-08-03T12:00:00+00:00",
+                }
+            ]
+        ]
 
     monkeypatch.setattr(panel, "_async_history_rows", history_rows)
 
     payload = nilm_workspace_payload(
         [coordinator], circuit_id="mixed", entry_id="entry-1"
     )
-    assert payload["history"]["entity_series"] == [{
-        "entity_id": "sensor.mixed_watts",
-        "effective_role": "real_power",
-        "source_unit": "W",
-    }]
+    assert payload["history"]["entity_series"] == [
+        {
+            "entity_id": "sensor.mixed_watts",
+            "effective_role": "real_power",
+            "source_unit": "W",
+        }
+    ]
 
     rows = await panel.nilm_workspace_history_payload(
         hass,

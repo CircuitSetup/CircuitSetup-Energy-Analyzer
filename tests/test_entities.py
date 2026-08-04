@@ -3710,6 +3710,14 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         options={},
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+            nilm_signatures={"mains": [{
+                "signature_id": "signature_1",
+                "direction": "on",
+                "median_delta_w": 820.0,
+                "median_delta_var": 120.0,
+                "median_delta_va": 830.0,
+                "median_delta_pf": -0.05,
+            }]},
         ),
         _nilm_unmatched_edges={
             "mains": [

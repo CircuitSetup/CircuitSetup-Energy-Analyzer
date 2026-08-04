@@ -118,9 +118,7 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     states = assignment.get("power_states_w")
     confidence = _model_number(assignment.get("model_confidence"))
     valid_states = (
-        [_model_number(value) for value in states]
-        if isinstance(states, list)
-        else []
+        [_model_number(value) for value in states] if isinstance(states, list) else []
     )
     prototypes = []
     stored_prototypes = assignment.get("transition_prototypes")
@@ -135,8 +133,10 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
             continue
         spread_var = _model_number(item.get("spread_var"))
         prototype = {
-            "direction": item["direction"], "from_state_w": values[0],
-            "to_state_w": values[1], "delta_w": values[2],
+            "direction": item["direction"],
+            "from_state_w": values[0],
+            "to_state_w": values[1],
+            "delta_w": values[2],
             "spread_w": max(values[3], 0.0),
             "sample_count": _model_nonnegative_int(item.get("sample_count")),
         }
@@ -192,12 +192,14 @@ def _transition_prototype(
     }
     if var_values:
         var_center = median(var_values)
-        prototype.update({
-            "delta_var": round(var_center, 3),
-            "spread_var": round(
-                median(abs(value - var_center) for value in var_values), 3
-            ),
-        })
+        prototype.update(
+            {
+                "delta_var": round(var_center, 3),
+                "spread_var": round(
+                    median(abs(value - var_center) for value in var_values), 3
+                ),
+            }
+        )
     return prototype
 
 
@@ -222,7 +224,9 @@ def _session_transition_values(
         _model_number(session.get("on_delta_w")) if "on_delta_w" in session else legacy,
         _model_number(session.get("off_delta_w"))
         if "off_delta_w" in session
-        else -abs(legacy) if legacy is not None else None,
+        else -abs(legacy)
+        if legacy is not None
+        else None,
     )
 
 
@@ -239,23 +243,39 @@ class NilmApplianceIdentity:
     appliance_profile: str
 
 
+def nilm_display_name(
+    display_name: str,
+    configured_circuit_names: Iterable[str] = (),
+) -> str:
+    """Disambiguate an estimated appliance from configured circuit names."""
+    name = str(display_name or "").strip()
+    configured = {
+        str(value or "").strip().casefold()
+        for value in configured_circuit_names
+        if str(value or "").strip()
+    }
+    return f"{name} (estimated)" if name.casefold() in configured else name
+
+
 def build_nilm_appliance_identity(
     assignment: Mapping[str, Any],
     *,
     mains_source_entity_id: str | None = None,
+    configured_circuit_names: Iterable[str] = (),
 ) -> NilmApplianceIdentity:
     """Build an appliance identity without conflating it with its mains source."""
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     if not assignment_id:
         raise ValueError("Missing assignment_id.")
     appliance_id = str(assignment.get("appliance_id") or assignment_id).strip()
+    display_name = str(
+        assignment.get("display_name") or appliance_id or assignment_id
+    ).strip()
     return NilmApplianceIdentity(
         appliance_key=f"nilm:{assignment_id}",
         assignment_id=assignment_id,
         appliance_id=appliance_id,
-        display_name=str(
-            assignment.get("display_name") or appliance_id or assignment_id
-        ).strip(),
+        display_name=nilm_display_name(display_name, configured_circuit_names),
         mains_circuit_id=str(assignment.get("mains_circuit_id") or "").strip(),
         mains_source_entity_id=(
             str(mains_source_entity_id).strip() if mains_source_entity_id else None
@@ -708,9 +728,7 @@ def reconcile_nilm_edge(
     # ponytail: four simultaneous transitions bound combinatorial work; already-active
     # components remain unlimited. Raise only if labelled replay needs larger groups.
     for size in range(2, min(4, len(ordered_transitions)) + 1):
-        sized_compounds: list[
-            tuple[float, tuple[NilmTransitionPrototype, ...]]
-        ] = []
+        sized_compounds: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
         for group in combinations(ordered_transitions, size):
             combined = _nilm_combined_transition(group)
             residual = abs(edge.delta_w - combined.delta_w)
@@ -726,11 +744,7 @@ def reconcile_nilm_edge(
             score = _nilm_candidate_score(
                 edge,
                 combined,
-                {
-                    combined.assignment_id: _nilm_mean_available(
-                        helper_scores, group
-                    )
-                },
+                {combined.assignment_id: _nilm_mean_available(helper_scores, group)},
                 {
                     combined.assignment_id: _nilm_mean_available(
                         duration_state_scores, group
@@ -748,17 +762,13 @@ def reconcile_nilm_edge(
             compounds = sized_compounds
             break
     compounds.sort(reverse=True, key=lambda item: item[0])
-    if compounds and (
-        len(compounds) == 1 or compounds[0][0] - compounds[1][0] >= 0.15
-    ):
+    if compounds and (len(compounds) == 1 or compounds[0][0] - compounds[1][0] >= 0.15):
         return _nilm_reconciliation(edge, compounds[0][1], reason="compound")
     return _nilm_reconciliation(
         edge,
         (),
         reason=(
-            "ambiguous"
-            if compounds or single_reason == "ambiguous"
-            else single_reason
+            "ambiguous" if compounds or single_reason == "ambiguous" else single_reason
         ),
     )
 
@@ -1218,22 +1228,30 @@ def nilm_signature_fingerprint(signature: NilmSignature) -> str:
     )
 
 
+def nilm_signature_is_off_direction(value: Any) -> bool:
+    """Return whether a signature direction or fingerprint is OFF-only."""
+    text = str(value or "").strip().casefold()
+    return text == "off" or text.startswith(("off-", "direction=off|"))
+
+
 def resolve_nilm_signature_fingerprint(
     saved_fingerprint: str,
     signatures: Iterable[Mapping[str, Any]],
 ) -> str | None:
     """Resolve a stale review fingerprint only when one current shape wins."""
     saved = str(saved_fingerprint or "").strip()
-    current = list(dict.fromkeys(
-        value
-        for signature in signatures
-        for value in (
-            str(signature.get("feedback_fingerprint") or "").strip(),
-            str(signature.get("signature_fingerprint") or "").strip(),
-            str(signature.get("signature_id") or "").strip(),
+    current = list(
+        dict.fromkeys(
+            value
+            for signature in signatures
+            for value in (
+                str(signature.get("feedback_fingerprint") or "").strip(),
+                str(signature.get("signature_fingerprint") or "").strip(),
+                str(signature.get("signature_id") or "").strip(),
+            )
+            if value
         )
-        if value
-    ))
+    )
     if saved in current:
         return saved
     saved_parts = _nilm_fingerprint_parts(saved)
@@ -1506,15 +1524,19 @@ def _nilm_electrical_features(
         apparent_power = consistency.expected_apparent_power_va
         apparent_power_role = SensorRole.VOLTAGE
     apparent_power_timestamp = (
-        _aligned_source_updated_at(
-            sample,
-            (SensorRole.VOLTAGE, SensorRole.CURRENT),
-            real_power_updated_at,
-            max_interval,
+        (
+            _aligned_source_updated_at(
+                sample,
+                (SensorRole.VOLTAGE, SensorRole.CURRENT),
+                real_power_updated_at,
+                max_interval,
+            )
+            if apparent_power_role is SensorRole.VOLTAGE
+            else _source_updated_at(sample, apparent_power_role)
         )
-        if apparent_power_role is SensorRole.VOLTAGE
-        else _source_updated_at(sample, apparent_power_role)
-    ) if apparent_power is not None else None
+        if apparent_power is not None
+        else None
+    )
 
     power_factor = consistency.reported_power_factor
     power_factor_timestamp = (
@@ -1733,9 +1755,7 @@ def classify_signature(signature: NilmSignature) -> str:
         if signature.median_delta_pf is not None
         else None
     )
-    reactive_ratio = (
-        abs_var / max(abs_w, 1.0) if abs_var is not None else None
-    )
+    reactive_ratio = abs_var / max(abs_w, 1.0) if abs_var is not None else None
 
     if (
         abs_var is not None
@@ -1791,15 +1811,13 @@ def pair_nilm_sessions_for_signatures(
         spec
         for spec in signature_specs
         if _nilm_session_spec_fingerprint(spec)
+        and not nilm_signature_is_off_direction(spec.get("direction"))
+        and not nilm_signature_is_off_direction(
+            _nilm_session_spec_fingerprint(spec)
+        )
         and (
-            _nilm_session_spec_assignment_id(spec)
-            or (
-                str(spec.get("direction") or "").lower() != "off"
-                and (
-                    _nilm_number(spec.get("median_delta_w")) is None
-                    or float(spec["median_delta_w"]) >= 0
-                )
-            )
+            _nilm_number(spec.get("median_delta_w")) is None
+            or float(spec["median_delta_w"]) >= 0
         )
     ]
     if not specs:
@@ -2233,8 +2251,11 @@ def _optional_edge_features_compatible(
             tolerance_ratio=tolerance_ratio,
             floor=floor,
         )
-        if score is None and value is not None and expected is not None and (
-            abs(float(value)) >= floor or abs(float(expected)) >= floor
+        if (
+            score is None
+            and value is not None
+            and expected is not None
+            and (abs(float(value)) >= floor or abs(float(expected)) >= floor)
         ):
             return False
     return True

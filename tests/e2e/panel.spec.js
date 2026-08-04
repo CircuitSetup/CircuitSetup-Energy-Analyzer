@@ -5875,6 +5875,7 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
   });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
 
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(0);
   await panel.locator('[data-nilm-review-item="signature:signature-1"]').click();
   const controls = panel.locator("[data-nilm-occurrence-controls]");
   await expect(controls).toContainText("45m");
@@ -5886,6 +5887,11 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
   await expect(controls).toContainText("30m");
   await expect(controls.locator('[data-nilm-occurrence-step="-1"]')).toBeDisabled();
   await expect(controls.locator('[data-nilm-occurrence-step="1"]')).toBeEnabled();
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(0);
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
   await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
 });
 
@@ -6062,6 +6068,18 @@ test("NILM workspace separates expected and hidden lanes and restores hidden ass
   await expect(panel.getByText("Ignored and retired loads remain hidden until restored.")).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:retired-load"]')).toBeVisible();
+  const descriptionBox = await panel.locator("[data-nilm-lane-description]").boundingBox();
+  const listBox = await panel.locator(".nilm-review-list").boundingBox();
+  const inspectorBox = await panel.locator(".nilm-review-inspector").boundingBox();
+  expect(descriptionBox).not.toBeNull();
+  expect(listBox).not.toBeNull();
+  expect(inspectorBox).not.toBeNull();
+  expect(listBox.y).toBeGreaterThanOrEqual(descriptionBox.y + descriptionBox.height - 1);
+  if (page.viewportSize().width > 800) {
+    expect(Math.abs(inspectorBox.y - listBox.y)).toBeLessThanOrEqual(1);
+  } else {
+    expect(inspectorBox.y).toBeGreaterThanOrEqual(listBox.y + listBox.height - 1);
+  }
   await panel.locator('[data-nilm-review-item="assignment:ignored-load"]').click();
   await panel.locator('[data-nilm-assignment-action="restore"]').click();
   await expect(panel.locator('[data-nilm-lane="assigned"]')).toHaveAttribute("aria-selected", "true");
@@ -6174,6 +6192,54 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await page.goto(`${HARNESS}?nilm_workspace=1&entry_id=entry-1&circuit_id=pure_mixed`);
   await page.waitForFunction(() => window.__panelReady === true);
   await expect(page.locator("circuitsetup-energy-analyzer-panel [data-nilm-configured-primary]")).toHaveCount(0);
+});
+
+test("NILM workspace lets the configured primary assignment be approved from Needs Review", async ({ page }) => {
+  let confirmed = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.circuit = { circuit_id: "hvac_1", name: "HVAC 1" };
+    payload.assignments = [{
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      lifecycle_state: confirmed ? "validated" : "needs_validation",
+      signature_fingerprints: ["blower-component"],
+      confidence: 0.95,
+      actions: confirmed ? {} : {
+        confirm_primary: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "confirm_nilm_configured_primary",
+          data: {
+            entry_id: "entry-1",
+            circuit_id: "hvac_1",
+            assignment_id: "hvac_1-configured-primary",
+          },
+        },
+      },
+    }];
+    payload.lanes.needs_review.assignment_ids = ["hvac_1-configured-primary"];
+    payload.lanes.needs_review.signature_ids = [];
+    payload.lane_counts.needs_review = 1;
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_1");
+  await panel.locator('[data-nilm-review-item="assignment:hvac_1-configured-primary"]').click();
+  const confirm = panel.locator('[data-nilm-assignment-action="confirm_primary"]');
+  await expect(confirm).toHaveText("Confirm primary appliance");
+  confirmed = true;
+  await confirm.click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "confirm_nilm_configured_primary",
+    data: {
+      entry_id: "entry-1",
+      circuit_id: "hvac_1",
+      assignment_id: "hvac_1-configured-primary",
+    },
+  });
+  await expect(panel.locator('[data-nilm-assignment-action="confirm_primary"]')).toHaveCount(0);
 });
 
 test("NILM workspace keeps recommendations qualified and permits manual helper changes", async ({ page }) => {

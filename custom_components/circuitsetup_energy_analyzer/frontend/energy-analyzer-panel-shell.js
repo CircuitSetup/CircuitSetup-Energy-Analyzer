@@ -1228,6 +1228,9 @@ export class PanelShellMethods {
           gap: 10px;
           min-width: 0;
         }
+        [data-nilm-lane-description] {
+          grid-column: 1 / -1;
+        }
         .nilm-review-card {
           background: var(--ha-card-background, var(--card-background-color));
           border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
@@ -1331,7 +1334,7 @@ export class PanelShellMethods {
           .nilm-review-inspector {
             align-self: start;
             grid-column: 2;
-            grid-row: 1;
+            grid-row: auto;
             padding: 16px;
           }
         }
@@ -1585,10 +1588,10 @@ export class PanelShellMethods {
       button.addEventListener("click", () => {
         this._nilmSelectedReviewKey = button.dataset.nilmReviewItem;
         const fingerprint = button.dataset.nilmSignatureFingerprint || "";
+        this._nilmSyncHelperSelection(this._nilmWorkspace);
         if (fingerprint) {
           void this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
         } else {
-          this._nilmSyncHelperSelection(this._nilmWorkspace);
           void this._loadNilmWorkspaceHistory();
         }
       });

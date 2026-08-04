@@ -17,6 +17,7 @@ except ModuleNotFoundError:
     class HomeAssistantError(Exception):
         """Fallback Home Assistant service error for tests without HA installed."""
 
+
 try:
     from homeassistant.helpers import entity_registry as er
 except ModuleNotFoundError:
@@ -40,6 +41,7 @@ SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE = "assign_interval_to_appliance"
 SERVICE_VALIDATE_NILM_SESSION = "validate_nilm_session"
 SERVICE_REJECT_NILM_SESSION = "reject_nilm_session"
 SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY = "validate_nilm_assignment_history"
+SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY = "confirm_nilm_configured_primary"
 SERVICE_RENAME_NILM_APPLIANCE = "rename_nilm_appliance"
 SERVICE_CHANGE_NILM_APPLIANCE_PROFILE = "change_nilm_appliance_profile"
 SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER = (
@@ -457,11 +459,13 @@ def _nilm_restore_schema(data: Mapping[str, Any] | None) -> dict[str, Any]:
 
 NILM_RESTORE_SERVICE_SCHEMA = _nilm_restore_schema
 
+
 def _nilm_helper_link_schema(*, relationship: bool) -> Callable:
     required = {ATTR_CIRCUIT_ID, ATTR_ASSIGNMENT_ID, ATTR_HELPER_CIRCUIT_ID}
     if relationship:
         required.add(ATTR_RELATIONSHIP)
     allowed = required | {ATTR_ENTRY_ID}
+
     def validate(data: Mapping[str, Any] | None) -> dict[str, Any]:
         values = dict(data or {})
         missing, extra = required - values.keys(), values.keys() - allowed
@@ -470,11 +474,14 @@ def _nilm_helper_link_schema(*, relationship: bool) -> Callable:
         if extra:
             raise ValueError(f"Unsupported field: {', '.join(sorted(extra))}")
         if relationship and values[ATTR_RELATIONSHIP] not in {
-            "corroborates", "direct_component"
+            "corroborates",
+            "direct_component",
         }:
             raise ValueError("relationship must be corroborates or direct_component")
         return values
+
     return validate
+
 
 NILM_SET_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=True)
 NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=False)
@@ -534,6 +541,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_VALIDATE_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
     SERVICE_REJECT_NILM_SESSION: NILM_SESSION_VALIDATION_SERVICE_SCHEMA,
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY: NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA,
+    SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY: NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA,
     SERVICE_RENAME_NILM_APPLIANCE: NILM_RENAME_APPLIANCE_SERVICE_SCHEMA,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE: (
         NILM_CHANGE_APPLIANCE_PROFILE_SERVICE_SCHEMA
@@ -542,15 +550,11 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
         NILM_DIRECT_METER_CONVERSION_SERVICE_SCHEMA
     ),
     SERVICE_MERGE_NILM_ASSIGNMENTS: NILM_MERGE_ASSIGNMENTS_SERVICE_SCHEMA,
-    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
-        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
-    ),
+    SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT: (NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA),
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
-    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (
-        NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
-    ),
+    SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA),
     SERVICE_RESTORE_NILM_ITEM: NILM_RESTORE_SERVICE_SCHEMA,
     SERVICE_SET_NILM_HELPER_LINK: NILM_SET_HELPER_LINK_SERVICE_SCHEMA,
     SERVICE_REMOVE_NILM_HELPER_LINK: NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA,
@@ -820,7 +824,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_ignore_nilm_signature",
                 circuit_id,
                 data.get(ATTR_SIGNATURE_ID),
-        )
+            )
         return
 
     if service == SERVICE_LABEL_NILM_INTERVAL:
@@ -857,7 +861,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_delete_nilm_label_interval",
                 circuit_id,
                 data.get(ATTR_INTERVAL_ID),
-        )
+            )
         return
 
     if service == SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS:
@@ -1006,6 +1010,19 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         return
 
+    if service == SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_confirm_nilm_configured_primary",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
     if service == SERVICE_RENAME_NILM_APPLIANCE:
         circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_coordinators(
@@ -1048,13 +1065,15 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 keep_assignment_for_masking=data.get(
                     ATTR_KEEP_ASSIGNMENT_FOR_MASKING,
                     True,
-                ) if ATTR_KEEP_ASSIGNMENT_FOR_MASKING not in data else _boolean_value(
-                    data[ATTR_KEEP_ASSIGNMENT_FOR_MASKING]
+                )
+                if ATTR_KEEP_ASSIGNMENT_FOR_MASKING not in data
+                else _boolean_value(data[ATTR_KEEP_ASSIGNMENT_FOR_MASKING]),
+                keep_published_estimate=_boolean_value(
+                    data.get(
+                        ATTR_KEEP_PUBLISHED_ESTIMATE,
+                        False,
+                    )
                 ),
-                keep_published_estimate=_boolean_value(data.get(
-                    ATTR_KEEP_PUBLISHED_ESTIMATE,
-                    False,
-                )),
             )
         return
 
@@ -1139,7 +1158,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
     if service in {SERVICE_SET_NILM_HELPER_LINK, SERVICE_REMOVE_NILM_HELPER_LINK}:
         circuit_id = str(data.get(ATTR_CIRCUIT_ID) or "").strip()
         target = _target_nilm_helper_link_coordinator(
-            hass, circuit_id, str(data.get(ATTR_ASSIGNMENT_ID) or "").strip(),
+            hass,
+            circuit_id,
+            str(data.get(ATTR_ASSIGNMENT_ID) or "").strip(),
             str(data.get(ATTR_HELPER_CIRCUIT_ID) or "").strip(),
             data.get(ATTR_ENTRY_ID),
         )
@@ -1402,19 +1423,14 @@ def _service_entity_ids(data: Mapping[str, Any]) -> tuple[str, ...]:
         normalized = entity_id.strip()
         return (normalized,) if normalized else ()
     if isinstance(entity_id, Iterable) and not isinstance(entity_id, (str, bytes)):
-        values = [
-            str(value).strip()
-            for value in entity_id
-            if str(value).strip()
-        ]
+        values = [str(value).strip() for value in entity_id if str(value).strip()]
         return tuple(dict.fromkeys(values))
     return ()
 
 
 def _circuit_id_from_service_entity_ids(hass: Any, entity_ids: Iterable[str]) -> str:
     resolved_circuit_ids = {
-        _circuit_id_from_analyzer_entity_id(hass, entity_id)
-        for entity_id in entity_ids
+        _circuit_id_from_analyzer_entity_id(hass, entity_id) for entity_id in entity_ids
     }
     if len(resolved_circuit_ids) == 1:
         return next(iter(resolved_circuit_ids))
@@ -1566,21 +1582,34 @@ def _target_entry_circuit_coordinator(
         )
     return [coordinator]
 
+
 def _target_nilm_helper_link_coordinator(
-    hass: Any, circuit_id: str, assignment_id: str,
-    helper_circuit_id: str, entry_id: Any = None,
+    hass: Any,
+    circuit_id: str,
+    assignment_id: str,
+    helper_circuit_id: str,
+    entry_id: Any = None,
 ) -> Any:
     """Require one entry that owns both assignment and helper circuit."""
-    candidates = (_target_entry_circuit_coordinator(
-        hass, entry_id.strip(), circuit_id
-    ) if isinstance(entry_id, str) and entry_id.strip()
-        else _loaded_coordinators(hass))
-    matched = [coordinator for coordinator in candidates
-        if any(item.get("assignment_id") == assignment_id for item in getattr(
-            getattr(coordinator, "store_data", None),
-            "nilm_appliance_assignments_by_circuit", {}
-        ).get(circuit_id, ()) if isinstance(item, Mapping))
-        and helper_circuit_id in _known_circuit_ids(coordinator)]
+    candidates = (
+        _target_entry_circuit_coordinator(hass, entry_id.strip(), circuit_id)
+        if isinstance(entry_id, str) and entry_id.strip()
+        else _loaded_coordinators(hass)
+    )
+    matched = [
+        coordinator
+        for coordinator in candidates
+        if any(
+            item.get("assignment_id") == assignment_id
+            for item in getattr(
+                getattr(coordinator, "store_data", None),
+                "nilm_appliance_assignments_by_circuit",
+                {},
+            ).get(circuit_id, ())
+            if isinstance(item, Mapping)
+        )
+        and helper_circuit_id in _known_circuit_ids(coordinator)
+    ]
     if len(matched) != 1:
         reason = "ambiguous" if len(matched) > 1 else "not found"
         raise HomeAssistantError(f"NILM helper link target is {reason}.")
@@ -1719,11 +1748,7 @@ def _active_alert_ids_for_circuit(coordinator: Any, circuit_id: str) -> set[str]
         iterator = iter(alerts)
     except TypeError:
         return set()
-    return {
-        alert_id
-        for alert in iterator
-        if (alert_id := _alert_id_from_alert(alert))
-    }
+    return {alert_id for alert in iterator if (alert_id := _alert_id_from_alert(alert))}
 
 
 def _alert_id_from_alert(alert: Any) -> str | None:
@@ -1826,9 +1851,8 @@ def _target_nilm_signature_coordinators(
     ]
     if not required_signature_ids:
         raise HomeAssistantError("Missing signature_id.")
-    if (
-        len(required_signature_ids) > 1
-        and len(set(required_signature_ids)) != len(required_signature_ids)
+    if len(required_signature_ids) > 1 and len(set(required_signature_ids)) != len(
+        required_signature_ids
     ):
         raise HomeAssistantError(
             "source_signature_id and target_signature_id must be different."

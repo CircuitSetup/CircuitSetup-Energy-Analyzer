@@ -795,6 +795,9 @@ export function createNilmWorkspaceMethods({
     if (actionKey === "validate_history") {
       return this._panelTextFormat("messages.validated_history", { name });
     }
+    if (actionKey === "confirm_primary") {
+      return this._panelTextFormat("messages.confirmed_assignment", { name });
+    }
     if (actionKey === "merge") {
       return this._panelTextFormat("messages.merged_assignment", { name });
     }
@@ -1012,7 +1015,16 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmSignatureFingerprint(signature) {
-    return String((signature && (signature.feedback_fingerprint || signature.signature_fingerprint || signature.signature_id)) || "").trim();
+    const fingerprints = signature && (signature.signature_fingerprints || signature.signature_ids);
+    const direct = signature
+      && (signature.feedback_fingerprint || signature.signature_fingerprint || signature.signature_id);
+    if (direct) return String(direct).trim();
+    if (!Array.isArray(fingerprints)) return "";
+    return String(
+      fingerprints.find((fingerprint) => this._nilmSignatureSessions(fingerprint).length)
+      || fingerprints[0]
+      || ""
+    ).trim();
   }
 
   _rememberNilmLabelDraft(input) {
@@ -1310,7 +1322,7 @@ export function createNilmWorkspaceMethods({
   _nilmFocusedGraphEvidence(workspace) {
     const occurrence = this._nilmFocusedOccurrence();
     if (!this._nilmFocusedSignature || !occurrence) {
-      return { sessions: workspace.sessions || [], edges: workspace.edges || [] };
+      return { sessions: [], edges: [] };
     }
     return {
       sessions: [{ ...occurrence, selected: true }],
@@ -1456,7 +1468,9 @@ export function createNilmWorkspaceMethods({
     );
     url.searchParams.set("hours", String(hours));
     const nextPath = `${url.pathname}${url.search}`;
-    return path.startsWith("/") ? nextPath : nextPath.replace(/^\//, "");
+    return this._nilmHistoryPathWithHelpers(
+      path.startsWith("/") ? nextPath : nextPath.replace(/^\//, ""),
+    );
   }
 
   _nilmSyncHelperSelection(workspace) {
@@ -1949,6 +1963,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmLaneItems(workspace, laneKey = this._nilmActiveLane) {
+    if (!workspace || !workspace.lanes) return [];
     const activeLaneKey = workspace.lanes[laneKey] ? laneKey : "needs_review";
     if (laneKey === this._nilmActiveLane) this._nilmActiveLane = activeLaneKey;
     const lane = workspace.lanes[activeLaneKey] || {};
@@ -1997,7 +2012,7 @@ export function createNilmWorkspaceMethods({
     const title = item.display_label || item.display_name || item.label || item.likely_type || this._panelText("common.unknown_load");
     const confidence = Math.max(0, Math.min(100, Math.round(Number(item.confidence || 0) * 100)));
     const power = item.typical_power_w ?? item.estimated_power_w ?? item.median_power_w;
-    const fingerprint = reviewItem.kind === "signature" ? this._nilmSignatureFingerprint(item) : "";
+    const fingerprint = reviewItem.kind === "interval" ? "" : this._nilmSignatureFingerprint(item);
     const contextFacts = reviewItem.kind === "signature" ? [
       item.seen_count !== undefined
         ? `${this._panelText("nilm_workspace.fact_seen_count")}: ${item.seen_count}`
@@ -2475,6 +2490,7 @@ export function createNilmWorkspaceMethods({
         ${hasSave ? `<button type="button" class="${saveDirty ? "" : "secondary"}" data-nilm-assignment-index="${index}" data-nilm-assignment-action="save" data-nilm-assignment-save-key="${this._escape(item.assignment_id || "")}" ${this._busyAction === `nilm_assignments_${index}_save` || !saveDirty ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.save"))}</button>` : ""}
         ${actions.merge ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="merge" ${this._busyAction === `nilm_assignments_${index}_merge` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.merge"))}</button>` : ""}
         ${actions.convert_to_direct_meter ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="convert_to_direct_meter" ${this._busyAction === `nilm_assignments_${index}_convert_to_direct_meter` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.convert_to_direct_meter"))}</button>` : ""}
+        ${actions.confirm_primary ? `<button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="confirm_primary" ${this._busyAction === `nilm_assignments_${index}_confirm_primary` ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.primary_confirm"))}</button>` : ""}
         ${actions.validate_history ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="validate_history" ${this._busyAction === `nilm_assignments_${index}_validate_history` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.validate_history"))}</button>` : ""}
         ${actions.publish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="publish" ${this._busyAction === `nilm_assignments_${index}_publish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>` : ""}
         ${actions.unpublish ? `<button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="unpublish" ${this._busyAction === `nilm_assignments_${index}_unpublish` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.remove_ha_device"))}</button>` : ""}

@@ -87,8 +87,7 @@ def _coordinator(
         attention,
         "nilm_virtual_appliance_states",
         lambda _coordinator, published_only=False: tuple(
-            SimpleNamespace(assignment_id=assignment_id)
-            for assignment_id in nilm_by_id
+            SimpleNamespace(assignment_id=assignment_id) for assignment_id in nilm_by_id
         ),
     )
     monkeypatch.setattr(
@@ -128,6 +127,33 @@ def test_blocking_setup_item_sorts_first(monkeypatch) -> None:
     assert isinstance(items[0], attention.AttentionItem)
     assert [item.appliance_key for item in items] == ["dryer", "refrigerator"]
     assert items[0].category == "fix_setup_or_data"
+
+
+def test_hidden_nilm_assignment_is_not_a_setup_attention_item(monkeypatch) -> None:
+    hidden = _detail(
+        "mains",
+        "off-1",
+        _expectation(
+            "assignment-hidden:nilm_validation",
+            title="NILM assignment needs validation",
+            status="watch",
+            source_type="nilm_estimate",
+        ),
+        assignment_id="assignment-hidden",
+    )
+    coordinator = _coordinator(monkeypatch, nilm_details=(hidden,))
+    monkeypatch.setattr(
+        attention,
+        "nilm_virtual_appliance_states",
+        lambda _coordinator, published_only=False: (
+            SimpleNamespace(
+                assignment_id="assignment-hidden",
+                model_status="ignored",
+            ),
+        ),
+    )
+
+    assert attention.attention_items_for_coordinators((coordinator,)) == ()
 
 
 def test_direct_electrical_item_sorts_before_nilm_validation(monkeypatch) -> None:

@@ -694,6 +694,24 @@ validate_nilm_assignment_history:
       example: assignment-abc123def456
       selector:
         text:
+confirm_nilm_configured_primary:
+  name: Confirm configured primary appliance
+  description: "Advanced/script action: approve the appliance identity already configured for a primary-mixed circuit. Detection evidence continues to model its usage. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Configured primary-mixed circuit identifier.
+      required: true
+      example: hvac_1
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Stable configured-primary assignment identifier.
+      required: true
+      example: hvac_1-configured-primary
+      selector:
+        text:
 rename_nilm_appliance:
   name: Rename NILM appliance
   description: "Advanced/script action: rename a NILM appliance assignment without changing its stable entity identifiers. The normal user path is the NILM workspace panel."

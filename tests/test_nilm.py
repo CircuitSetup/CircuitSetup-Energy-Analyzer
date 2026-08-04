@@ -64,7 +64,8 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assert model["role"] == "component"
     assert model["power_states_w"] == [0.0, 81.0]
     assert [item["direction"] for item in model["transition_prototypes"]] == [
-        "on", "off"
+        "on",
+        "off",
     ]
     assert model["transition_prototypes"][0]["sample_count"] == 32
     assert model["transition_prototypes"][0]["spread_w"] == 1.0
@@ -103,12 +104,16 @@ def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:
 
 def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> None:
     assignment = {"assignment_id": "pump", "confirmed_session_ids": ["one"]}
-    sessions = [{
-        "session_id": "one", "assignment_id": "pump",
-        "start": "2026-06-01T10:00:00+00:00",
-        "end": "2026-06-01T10:05:00+00:00",
-        "median_power_w": 83.0, "confidence": 0.8,
-    }]
+    sessions = [
+        {
+            "session_id": "one",
+            "assignment_id": "pump",
+            "start": "2026-06-01T10:00:00+00:00",
+            "end": "2026-06-01T10:05:00+00:00",
+            "median_power_w": 83.0,
+            "confidence": 0.8,
+        }
+    ]
 
     first = build_nilm_assignment_model(assignment, sessions)
     second = build_nilm_assignment_model({**assignment, **first}, sessions)
@@ -123,14 +128,24 @@ def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> No
 def test_assignment_model_discards_invalid_before_recent_cap() -> None:
     ids = [f"bad-{index}" for index in range(35)] + ["good"]
     assignment = {"assignment_id": "pump", "confirmed_session_ids": ids}
-    sessions = [{
-        "session_id": value, "assignment_id": "pump",
-        "end": "2026-07-01T10:00:00+00:00", "confidence": 1.0,
-    } for value in ids[:-1]] + [{
-        "session_id": "good", "assignment_id": "pump",
-        "end": "2026-06-01T10:00:00+00:00", "on_delta_w": 80.0,
-        "off_delta_w": -80.0, "confidence": 0.9,
-    }]
+    sessions = [
+        {
+            "session_id": value,
+            "assignment_id": "pump",
+            "end": "2026-07-01T10:00:00+00:00",
+            "confidence": 1.0,
+        }
+        for value in ids[:-1]
+    ] + [
+        {
+            "session_id": "good",
+            "assignment_id": "pump",
+            "end": "2026-06-01T10:00:00+00:00",
+            "on_delta_w": 80.0,
+            "off_delta_w": -80.0,
+            "confidence": 0.9,
+        }
+    ]
 
     model = build_nilm_assignment_model(assignment, sessions)
 
@@ -140,15 +155,25 @@ def test_assignment_model_discards_invalid_before_recent_cap() -> None:
 
 def test_assignment_model_tolerates_malformed_optional_fields() -> None:
     assignment = {
-        "assignment_id": "pump", "confirmed_session_ids": ["one"],
-        "model_revision": 10**10_000, "model_confidence": float("nan"),
+        "assignment_id": "pump",
+        "confirmed_session_ids": ["one"],
+        "model_revision": 10**10_000,
+        "model_confidence": float("nan"),
         "transition_prototypes": [{"direction": "on", "sample_count": "bad"}],
     }
-    model = build_nilm_assignment_model(assignment, [{
-        "session_id": "one", "assignment_id": "pump",
-        "end": "2026-06-01T10:00:00+00:00", "on_delta_w": 80.0,
-        "off_delta_w": -80.0, "confidence": float("nan"),
-    }])
+    model = build_nilm_assignment_model(
+        assignment,
+        [
+            {
+                "session_id": "one",
+                "assignment_id": "pump",
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": float("nan"),
+            }
+        ],
+    )
 
     assert model["model_revision"] == 1
     assert model["model_confidence"] == 0.0
@@ -161,20 +186,28 @@ def test_assignment_model_requires_directional_evidence_and_conservative_confide
     assignment = {"assignment_id": "pump", "confirmed_session_ids": session_ids}
     sessions = [
         {
-            "session_id": "wrong-on", "assignment_id": "pump",
-            "end": "2026-07-02T10:00:00+00:00", "on_delta_w": -80.0,
-            "off_delta_w": -80.0, "confidence": 1.0,
+            "session_id": "wrong-on",
+            "assignment_id": "pump",
+            "end": "2026-07-02T10:00:00+00:00",
+            "on_delta_w": -80.0,
+            "off_delta_w": -80.0,
+            "confidence": 1.0,
         },
         {
-            "session_id": "wrong-off", "assignment_id": "pump",
-            "end": "2026-07-01T10:00:00+00:00", "on_delta_w": 80.0,
-            "off_delta_w": 80.0, "confidence": 1.0,
+            "session_id": "wrong-off",
+            "assignment_id": "pump",
+            "end": "2026-07-01T10:00:00+00:00",
+            "on_delta_w": 80.0,
+            "off_delta_w": 80.0,
+            "confidence": 1.0,
         },
         *[
             {
-                "session_id": f"valid-{suffix}", "assignment_id": "pump",
+                "session_id": f"valid-{suffix}",
+                "assignment_id": "pump",
                 "end": f"2026-06-0{index}T10:00:00+00:00",
-                "on_delta_w": 80.0, "off_delta_w": -80.0,
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
                 **({"confidence": 0.9} if index == 1 else {}),
             }
             for index, suffix in enumerate(("a", "b", "c"), start=1)
@@ -462,8 +495,11 @@ def test_nilm_helper_unavailability_and_explicit_conflict() -> None:
     result = reconcile(edge(0, 100), [a], {"a": 0.0}, helpers={"a": None})
     assert result.reason == "single"
     result = reconcile(
-        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0},
-        helpers={"a": 0.9, "b": 0.9}, helper_conflict=True,
+        edge(0, 100),
+        [a, b],
+        {"a": 0.0, "b": 0.0},
+        helpers={"a": 0.9, "b": 0.9},
+        helper_conflict=True,
     )
     assert not result.accepted and result.reason == "helper_conflict"
 
@@ -473,7 +509,9 @@ def test_nilm_independent_helpers_may_support_a_compound() -> None:
     b = assignment_model("b", transition("b", 40))
 
     result = reconcile(
-        edge(0, 100), [a, b], {"a": 0.0, "b": 0.0},
+        edge(0, 100),
+        [a, b],
+        {"a": 0.0, "b": 0.0},
         helpers={"a": 0.9, "b": 0.9},
     )
 
@@ -528,8 +566,12 @@ def test_nilm_multi_transition_rejects_equal_decompositions() -> None:
     models = [
         assignment_model(name, transition(name, watts))
         for name, watts in (
-            ("a", 40), ("b", 30), ("c", 30),
-            ("d", 50), ("e", 25), ("f", 25),
+            ("a", 40),
+            ("b", 30),
+            ("c", 30),
+            ("d", 50),
+            ("e", 25),
+            ("f", 25),
         )
     ]
 
@@ -866,24 +908,26 @@ def test_edge_detector_keeps_missing_auxiliary_evidence_unavailable() -> None:
 def test_edge_detector_preserves_measured_zero_auxiliary_delta() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0)
 
-    edges = detector.process_many([
-        CircuitSample(
-            timestamp=BASE_TIME,
-            circuit_id="mains",
-            real_power=100.0,
-            reactive_power=10.0,
-            apparent_power=120.0,
-            power_factor=0.833,
-        ),
-        CircuitSample(
-            timestamp=BASE_TIME + timedelta(seconds=10),
-            circuit_id="mains",
-            real_power=220.0,
-            reactive_power=10.0,
-            apparent_power=240.0,
-            power_factor=0.917,
-        ),
-    ])
+    edges = detector.process_many(
+        [
+            CircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=100.0,
+                reactive_power=10.0,
+                apparent_power=120.0,
+                power_factor=0.833,
+            ),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=220.0,
+                reactive_power=10.0,
+                apparent_power=240.0,
+                power_factor=0.917,
+            ),
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].delta_var == 0.0
@@ -896,47 +940,49 @@ def test_confirmed_edge_uses_final_sample_for_delayed_auxiliary_evidence() -> No
         confirmation_max_interval=timedelta(seconds=15),
     )
 
-    edges = detector.process_many([
-        timed_sample(
-            0,
-            0.0,
-            reactive_power=10.0,
-            apparent_power=100.0,
-            power_factor=0.0,
-            updated_at={
-                SensorRole.REAL_POWER: 0,
-                SensorRole.REACTIVE_POWER: 0,
-                SensorRole.APPARENT_POWER: 0,
-                SensorRole.POWER_FACTOR: 0,
-            },
-        ),
-        timed_sample(
-            10,
-            200.0,
-            reactive_power=10.0,
-            apparent_power=200.0,
-            power_factor=1.0,
-            updated_at={
-                SensorRole.REAL_POWER: 10,
-                SensorRole.REACTIVE_POWER: 0,
-                SensorRole.APPARENT_POWER: 0,
-                SensorRole.POWER_FACTOR: 0,
-            },
-        ),
-        timed_sample(
-            20,
-            195.0,
-            reactive_power=55.0,
-            apparent_power=205.0,
-            power_factor=0.95,
-            updated_at={
-                SensorRole.REAL_POWER: 20,
-                SensorRole.REACTIVE_POWER: 20,
-                SensorRole.APPARENT_POWER: 20,
-                SensorRole.POWER_FACTOR: 20,
-            },
-        ),
-    ])
+    edges = detector.process_many(
+        [
+            timed_sample(
+                0,
+                0.0,
+                reactive_power=10.0,
+                apparent_power=100.0,
+                power_factor=0.0,
+                updated_at={
+                    SensorRole.REAL_POWER: 0,
+                    SensorRole.REACTIVE_POWER: 0,
+                    SensorRole.APPARENT_POWER: 0,
+                    SensorRole.POWER_FACTOR: 0,
+                },
+            ),
+            timed_sample(
+                10,
+                200.0,
+                reactive_power=10.0,
+                apparent_power=200.0,
+                power_factor=1.0,
+                updated_at={
+                    SensorRole.REAL_POWER: 10,
+                    SensorRole.REACTIVE_POWER: 0,
+                    SensorRole.APPARENT_POWER: 0,
+                    SensorRole.POWER_FACTOR: 0,
+                },
+            ),
+            timed_sample(
+                20,
+                195.0,
+                reactive_power=55.0,
+                apparent_power=205.0,
+                power_factor=0.95,
+                updated_at={
+                    SensorRole.REAL_POWER: 20,
+                    SensorRole.REACTIVE_POWER: 20,
+                    SensorRole.APPARENT_POWER: 20,
+                    SensorRole.POWER_FACTOR: 20,
+                },
+            ),
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
@@ -946,55 +992,58 @@ def test_confirmed_edge_uses_final_sample_for_delayed_auxiliary_evidence() -> No
     assert edges[0].delta_pf == pytest.approx(0.95)
 
 
-def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window(
-) -> None:
+def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window() -> (
+    None
+):
     detector = NilmEdgeDetector(
         min_delta_w=100.0,
         confirmation_samples=2,
         confirmation_max_interval=timedelta(seconds=15),
     )
 
-    edges = detector.process_many([
-        timed_sample(
-            0,
-            0.0,
-            reactive_power=10.0,
-            apparent_power=100.0,
-            power_factor=0.0,
-            updated_at={
-                SensorRole.REAL_POWER: 0,
-                SensorRole.REACTIVE_POWER: 0,
-                SensorRole.APPARENT_POWER: 0,
-                SensorRole.POWER_FACTOR: 0,
-            },
-        ),
-        timed_sample(
-            10,
-            200.0,
-            reactive_power=10.0,
-            apparent_power=200.0,
-            power_factor=1.0,
-            updated_at={
-                SensorRole.REAL_POWER: 10,
-                SensorRole.REACTIVE_POWER: 0,
-                SensorRole.APPARENT_POWER: 0,
-                SensorRole.POWER_FACTOR: 0,
-            },
-        ),
-        timed_sample(
-            20,
-            200.0,
-            reactive_power=55.0,
-            apparent_power=205.0,
-            power_factor=0.95,
-            updated_at={
-                SensorRole.REAL_POWER: 20,
-                SensorRole.REACTIVE_POWER: 0,
-                SensorRole.APPARENT_POWER: 0,
-                SensorRole.POWER_FACTOR: 0,
-            },
-        ),
-    ])
+    edges = detector.process_many(
+        [
+            timed_sample(
+                0,
+                0.0,
+                reactive_power=10.0,
+                apparent_power=100.0,
+                power_factor=0.0,
+                updated_at={
+                    SensorRole.REAL_POWER: 0,
+                    SensorRole.REACTIVE_POWER: 0,
+                    SensorRole.APPARENT_POWER: 0,
+                    SensorRole.POWER_FACTOR: 0,
+                },
+            ),
+            timed_sample(
+                10,
+                200.0,
+                reactive_power=10.0,
+                apparent_power=200.0,
+                power_factor=1.0,
+                updated_at={
+                    SensorRole.REAL_POWER: 10,
+                    SensorRole.REACTIVE_POWER: 0,
+                    SensorRole.APPARENT_POWER: 0,
+                    SensorRole.POWER_FACTOR: 0,
+                },
+            ),
+            timed_sample(
+                20,
+                200.0,
+                reactive_power=55.0,
+                apparent_power=205.0,
+                power_factor=0.95,
+                updated_at={
+                    SensorRole.REAL_POWER: 20,
+                    SensorRole.REACTIVE_POWER: 0,
+                    SensorRole.APPARENT_POWER: 0,
+                    SensorRole.POWER_FACTOR: 0,
+                },
+            ),
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].delta_w == 200.0
@@ -1006,22 +1055,24 @@ def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window(
 def test_edge_detector_derives_va_and_pf_from_synchronized_voltage_current() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0)
 
-    edges = detector.process_many([
-        CircuitSample(
-            timestamp=BASE_TIME,
-            circuit_id="mains",
-            real_power=0.0,
-            voltage=120.0,
-            current=1.0,
-        ),
-        CircuitSample(
-            timestamp=BASE_TIME + timedelta(seconds=10),
-            circuit_id="mains",
-            real_power=200.0,
-            voltage=120.0,
-            current=2.0,
-        ),
-    ])
+    edges = detector.process_many(
+        [
+            CircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=0.0,
+                voltage=120.0,
+                current=1.0,
+            ),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=200.0,
+                voltage=120.0,
+                current=2.0,
+            ),
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].delta_w == 200.0
@@ -1029,39 +1080,40 @@ def test_edge_detector_derives_va_and_pf_from_synchronized_voltage_current() -> 
     assert edges[0].delta_pf == pytest.approx(round(200.0 / 240.0, 3))
 
 
-def test_edge_detector_rejects_derived_evidence_when_voltage_is_out_of_window(
-) -> None:
+def test_edge_detector_rejects_derived_evidence_when_voltage_is_out_of_window() -> None:
     detector = NilmEdgeDetector(
         min_delta_w=100.0,
         confirmation_max_interval=timedelta(seconds=15),
     )
 
-    edges = detector.process_many([
-        NormalizedCircuitSample(
-            timestamp=BASE_TIME,
-            circuit_id="mains",
-            real_power=0.0,
-            voltage=120.0,
-            current=1.0,
-            source_updated_at_by_role=(
-                (SensorRole.REAL_POWER, BASE_TIME),
-                (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=30)),
-                (SensorRole.CURRENT, BASE_TIME),
+    edges = detector.process_many(
+        [
+            NormalizedCircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=0.0,
+                voltage=120.0,
+                current=1.0,
+                source_updated_at_by_role=(
+                    (SensorRole.REAL_POWER, BASE_TIME),
+                    (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=30)),
+                    (SensorRole.CURRENT, BASE_TIME),
+                ),
             ),
-        ),
-        NormalizedCircuitSample(
-            timestamp=BASE_TIME + timedelta(seconds=10),
-            circuit_id="mains",
-            real_power=200.0,
-            voltage=120.0,
-            current=2.0,
-            source_updated_at_by_role=(
-                (SensorRole.REAL_POWER, BASE_TIME + timedelta(seconds=10)),
-                (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=20)),
-                (SensorRole.CURRENT, BASE_TIME + timedelta(seconds=10)),
+            NormalizedCircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=200.0,
+                voltage=120.0,
+                current=2.0,
+                source_updated_at_by_role=(
+                    (SensorRole.REAL_POWER, BASE_TIME + timedelta(seconds=10)),
+                    (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=20)),
+                    (SensorRole.CURRENT, BASE_TIME + timedelta(seconds=10)),
+                ),
             ),
-        ),
-    ])
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].delta_w == 200.0
@@ -1072,24 +1124,26 @@ def test_edge_detector_rejects_derived_evidence_when_voltage_is_out_of_window(
 def test_edge_detector_does_not_use_conflicting_va_as_strong_evidence() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0)
 
-    edges = detector.process_many([
-        CircuitSample(
-            timestamp=BASE_TIME,
-            circuit_id="mains",
-            real_power=100.0,
-            apparent_power=120.0,
-            voltage=120.0,
-            current=1.0,
-        ),
-        CircuitSample(
-            timestamp=BASE_TIME + timedelta(seconds=10),
-            circuit_id="mains",
-            real_power=220.0,
-            apparent_power=100.0,
-            voltage=120.0,
-            current=2.0,
-        ),
-    ])
+    edges = detector.process_many(
+        [
+            CircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=100.0,
+                apparent_power=120.0,
+                voltage=120.0,
+                current=1.0,
+            ),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=220.0,
+                apparent_power=100.0,
+                voltage=120.0,
+                current=2.0,
+            ),
+        ]
+    )
 
     assert len(edges) == 1
     assert edges[0].delta_w == 120.0
@@ -1377,57 +1431,53 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
 
 
 def test_cluster_recurring_signatures_separates_same_w_by_apparent_power() -> None:
-    signatures = cluster_recurring_signatures([
-        *[
-            edge(
-                index * 30,
-                300.0,
-                delta_var=40.0,
-                delta_va=320.0,
-            )
-            for index in range(3)
-        ],
-        *[
-            edge(
-                100 + index * 30,
-                300.0,
-                delta_var=40.0,
-                delta_va=600.0,
-            )
-            for index in range(3)
-        ],
-    ])
+    signatures = cluster_recurring_signatures(
+        [
+            *[
+                edge(
+                    index * 30,
+                    300.0,
+                    delta_var=40.0,
+                    delta_va=320.0,
+                )
+                for index in range(3)
+            ],
+            *[
+                edge(
+                    100 + index * 30,
+                    300.0,
+                    delta_var=40.0,
+                    delta_va=600.0,
+                )
+                for index in range(3)
+            ],
+        ]
+    )
 
     assert len(signatures) == 2
     assert {signature.median_delta_va for signature in signatures} == {320.0, 600.0}
 
 
-def test_cluster_recurring_signatures_does_not_bridge_distinct_reactive_loads(
-) -> None:
-    signatures = cluster_recurring_signatures([
-        *[
-            edge(index * 30, 500.0, delta_var=100.0)
-            for index in range(3)
-        ],
-        *[
-            edge(100 + index * 30, 500.0, delta_var=150.0)
-            for index in range(3)
-        ],
-        *[
-            edge(200 + index * 30, 500.0, delta_var=225.0)
-            for index in range(3)
-        ],
-    ])
+def test_cluster_recurring_signatures_does_not_bridge_distinct_reactive_loads() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            *[edge(index * 30, 500.0, delta_var=100.0) for index in range(3)],
+            *[edge(100 + index * 30, 500.0, delta_var=150.0) for index in range(3)],
+            *[edge(200 + index * 30, 500.0, delta_var=225.0) for index in range(3)],
+        ]
+    )
 
     assert [signature.occurrence_count for signature in signatures] == [6, 3]
     assert [signature.median_delta_var for signature in signatures] == [125.0, 225.0]
 
 
 def test_w_only_signatures_keep_missing_features_and_still_pair() -> None:
-    signatures = cluster_recurring_signatures([
-        edge(index * 30, 300.0, delta_var=None, delta_va=None, delta_pf=None)
-        for index in range(3)
-    ])
+    signatures = cluster_recurring_signatures(
+        [
+            edge(index * 30, 300.0, delta_var=None, delta_va=None, delta_pf=None)
+            for index in range(3)
+        ]
+    )
 
     assert len(signatures) == 1
     assert signatures[0].median_delta_var is None
@@ -1441,10 +1491,12 @@ def test_w_only_signatures_keep_missing_features_and_still_pair() -> None:
             edge(60, -300.0, delta_var=None, delta_va=None, delta_pf=None),
         ],
         mains_circuit_id="mains",
-        signature_specs=[{
-            "signature_fingerprint": "w-only",
-            "median_delta_w": 300.0,
-        }],
+        signature_specs=[
+            {
+                "signature_fingerprint": "w-only",
+                "median_delta_w": 300.0,
+            }
+        ],
     )
 
     assert len(sessions) == 1
@@ -1762,28 +1814,35 @@ def test_legacy_fingerprint_resolves_unique_w_direction_despite_var_drift() -> N
     resolved = nilm_domain.resolve_nilm_signature_fingerprint(
         "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.00-0.05|"
         "split=unknown|leg=unknown|balance=unknown",
-        [{
-            "signature_id": "off-1",
-            "feedback_fingerprint": current_fingerprint,
-            "signature_fingerprint": current_fingerprint,
-        }],
+        [
+            {
+                "signature_id": "off-1",
+                "feedback_fingerprint": current_fingerprint,
+                "signature_fingerprint": current_fingerprint,
+            }
+        ],
     )
 
     assert resolved == current_fingerprint
 
 
 def test_legacy_fingerprint_does_not_cross_known_split_phase_topology() -> None:
-    assert nilm_domain.resolve_nilm_signature_fingerprint(
-        "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
-        "split=single_leg_a|leg=a|balance=unknown",
-        [{
-            "signature_id": "on-1",
-            "feedback_fingerprint": (
-                "direction=on|watts=0-100|var=100-200|va=unknown|pf=unknown|"
-                "split=single_leg_b|leg=b|balance=unknown"
-            ),
-        }],
-    ) is None
+    assert (
+        nilm_domain.resolve_nilm_signature_fingerprint(
+            "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
+            "split=single_leg_a|leg=a|balance=unknown",
+            [
+                {
+                    "signature_id": "on-1",
+                    "feedback_fingerprint": (
+                        "direction=on|watts=0-100|var=100-200|va=unknown|pf=unknown|"
+                        "split=single_leg_b|leg=b|balance=unknown"
+                    ),
+                }
+            ],
+        )
+        is None
+    )
 
 
 def test_legacy_fingerprint_does_not_resolve_ambiguous_same_w_components() -> None:
@@ -1799,11 +1858,14 @@ def test_legacy_fingerprint_does_not_resolve_ambiguous_same_w_components() -> No
         for signature in signatures
     ]
 
-    assert nilm_domain.resolve_nilm_signature_fingerprint(
-        "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
-        "split=unknown|leg=unknown|balance=unknown",
-        payloads,
-    ) is None
+    assert (
+        nilm_domain.resolve_nilm_signature_fingerprint(
+            "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
+            "split=unknown|leg=unknown|balance=unknown",
+            payloads,
+        )
+        is None
+    )
 
 
 def test_session_specs_resolve_unique_structured_assignment_fingerprint() -> None:
@@ -1811,19 +1873,23 @@ def test_session_specs_resolve_unique_structured_assignment_fingerprint() -> Non
     current_fingerprint = nilm_domain.nilm_signature_fingerprint(current)
 
     assert _nilm_session_specs(
-        [{
-            "signature_id": "off-1",
-            "feedback_fingerprint": current_fingerprint,
-            "median_delta_w": -84.0,
-        }],
-        [{
-            "assignment_id": "pump",
-            "lifecycle_state": "published",
-            "signature_fingerprints": [
-                "direction=off|watts=0-100|var=0-100|va=0-100|"
-                "pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown"
-            ],
-        }],
+        [
+            {
+                "signature_id": "off-1",
+                "feedback_fingerprint": current_fingerprint,
+                "median_delta_w": -84.0,
+            }
+        ],
+        [
+            {
+                "assignment_id": "pump",
+                "lifecycle_state": "published",
+                "signature_fingerprints": [
+                    "direction=off|watts=0-100|var=0-100|va=0-100|"
+                    "pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown"
+                ],
+            }
+        ],
     ) == [(current_fingerprint, "pump")]
 
 
@@ -2015,14 +2081,13 @@ def test_global_session_pairing_preserves_earlier_owner_ambiguous_pair() -> None
     assert session.assignment_id is None
 
 
-def test_global_session_pairing_keeps_assigned_off_signature() -> None:
+def test_global_session_pairing_rejects_assigned_off_signature() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(300, -500.0)],
         mains_circuit_id="mains",
         signature_specs=[
             {
                 "signature_fingerprint": "off-500",
-                "median_delta_w": -500.0,
                 "assignment_id": "dryer",
             },
             {
@@ -2033,8 +2098,8 @@ def test_global_session_pairing_keeps_assigned_off_signature() -> None:
     )
 
     assert len(sessions) == 1
-    assert sessions[0].signature_fingerprint == "off-500"
-    assert sessions[0].assignment_id == "dryer"
+    assert sessions[0].signature_fingerprint == "on-500"
+    assert sessions[0].assignment_id is None
 
 
 def test_global_session_pairing_deduplicates_same_assignment_signatures() -> None:
