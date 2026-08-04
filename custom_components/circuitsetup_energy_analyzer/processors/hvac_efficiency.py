@@ -413,7 +413,7 @@ def _store_unresolved_active_call_markers(
                 config.circuit_id,
                 thermostat_id,
             ) or observation
-            _current, marker = advance_episode(
+            current, marker = advance_episode(
                 None,
                 replace(
                     current_observation,
@@ -432,6 +432,12 @@ def _store_unresolved_active_call_markers(
                     config.circuit_id,
                 ),
             )
+            if marker is None and current is not None:
+                marker = replace(
+                    current,
+                    ended_at=context.now,
+                    excluded_from_baseline=True,
+                )
             if marker is not None:
                 _store_finalized_episode(result, context, marker)
 
