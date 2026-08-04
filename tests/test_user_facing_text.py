@@ -6219,6 +6219,105 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
     )
 
 
+def test_nilm_interval_editor_can_cancel_and_remove_intervals() -> None:
+    _run_panel_node_script(
+        """
+const panel = makePanel({
+  _nilmIntervalEditorOpen: true,
+  _nilmLabelIntervalDraft: {
+    label: "Condensate Pump 2",
+    appliance_profile: "pump",
+    intervals: [{ start: "2026-08-04T08:00", end: "2026-08-04T08:10" }],
+  },
+});
+panel._render = () => {};
+let html = panel._renderNilmLabelIntervalEditor(makeWorkspace({
+  actions: { label_interval: { profile_options: [] } },
+}));
+assert.ok(html.includes('data-nilm-cancel-interval-editor'));
+assert.ok(html.includes(">Cancel<"));
+assert.ok(html.includes('data-nilm-remove-interval="0"'));
+assert.ok(html.includes(">Remove Interval<"));
+
+panel._removeNilmDraftInterval(0);
+assert.equal(
+  JSON.stringify(panel._nilmLabelIntervalDraft.intervals),
+  JSON.stringify([{ start: "", end: "", interval_id: "" }]),
+);
+panel._cancelNilmIntervalEditor();
+assert.equal(panel._nilmIntervalEditorOpen, false);
+assert.deepEqual(panel._nilmLabelIntervalDraft, panel._emptyNilmLabelIntervalDraft());
+
+html = panel._renderNilmReviewInspector({
+  kind: "interval",
+  index: 2,
+  item: {
+    interval_id: "saved-interval",
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+    actions: { delete: makeAction("delete_nilm_label_interval") },
+  },
+});
+assert.ok(html.includes('data-nilm-label-interval-action="delete"'));
+assert.ok(html.includes("Remove Interval"));
+"""
+    )
+
+
+def test_nilm_existing_interval_edit_updates_preview_and_saves_same_interval() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const interval = {
+  interval_id: "saved-interval",
+  label: "Condensate Pump 2",
+  appliance_id: "condensate_pump_2",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+};
+const workspace = makeWorkspace({
+  label_intervals: [interval],
+  actions: { label_interval: makeAction("label_nilm_interval") },
+});
+const calls = [];
+let renders = 0;
+const panel = makePanel({ _nilmWorkspace: workspace });
+panel._render = () => { renders += 1; };
+panel._refreshNilmWorkspaceData = async () => true;
+panel._restoreNilmIntervalScroll = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._hass = { callService: async (domain, service, data) => {
+  calls.push({ domain, service, data });
+} };
+
+await panel._callNilmLabelIntervalAction(0, "adjust");
+assert.equal(panel._nilmLabelIntervalDraft.intervals[0].interval_id, "saved-interval");
+renders = 0;
+const changedStart = panel._datetimeLocalFromMillis(Date.parse("2026-08-04T08:02:00Z"));
+panel._rememberNilmLabelIntervalDraft({
+  dataset: { nilmLabelIntervalInput: "start", nilmIntervalIndex: "0" },
+  value: changedStart,
+});
+assert.equal(renders, 1);
+const bands = panel._nilmGraphBands(workspace, []);
+assert.equal(bands.length, 1);
+assert.equal(bands[0].band_kind, "draft");
+assert.equal(bands[0].start, changedStart);
+
+await panel._callNilmLabelIntervalAction(-1, "save");
+assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
+assert.equal(calls[0].data.interval_id, "saved-interval");
+assert.equal(calls[0].data.start, "2026-08-04T08:02:00.000Z");
+assert.ok(!("appliance_profile" in calls[0].data));
+assert.equal(panel._nilmIntervalEditorOpen, false);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
 def test_nilm_interval_action_contracts() -> None:
     _run_panel_node_script(
         """

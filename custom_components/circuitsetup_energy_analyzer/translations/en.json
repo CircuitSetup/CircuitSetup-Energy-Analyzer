@@ -1509,6 +1509,7 @@
         "labels": {
           "apply": "Apply",
           "assign_appliance": "Assign Appliance",
+          "cancel": "Cancel",
           "confirm_appliance": "Confirm Appliance",
           "confirm_issue": "Confirm Issue",
           "correct": "Correct",

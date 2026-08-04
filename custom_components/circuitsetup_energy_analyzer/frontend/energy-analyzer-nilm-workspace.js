@@ -420,7 +420,10 @@ export function createNilmWorkspaceMethods({
       const label = String(draft.label || "").trim();
       const applianceProfile = String(draft.appliance_profile || "").trim();
       const draftIntervals = this._nilmIntervalDraftItems();
-      if (!label || !applianceProfile || !draftIntervals.length) {
+      const editingExisting = draftIntervals.length > 0 && draftIntervals.every(
+        (interval) => String(interval.interval_id || "").trim(),
+      );
+      if (!label || (!applianceProfile && !editingExisting) || !draftIntervals.length) {
         this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
         return;
       }
@@ -443,8 +446,8 @@ export function createNilmWorkspaceMethods({
           start,
           end,
           appliance_id: String(draft.appliance_id || label).trim(),
-          appliance_profile: applianceProfile,
         };
+        if (applianceProfile) data.appliance_profile = applianceProfile;
         if (transitionText) data.observed_transition_w = observedTransitionW;
         const intervalId = String(interval.interval_id || "").trim();
         if (intervalId) data.interval_id = intervalId;
@@ -1065,6 +1068,7 @@ export function createNilmWorkspaceMethods({
       intervals[index] = { ...(intervals[index] || {}), [field]: input.value };
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
       this._nilmActiveIntervalIndex = index;
+      this._render();
       return;
     }
     this._nilmLabelIntervalDraft = {
@@ -1160,6 +1164,14 @@ export function createNilmWorkspaceMethods({
       intervals: intervals.length ? intervals : [{ start: "", end: "", interval_id: "" }],
     };
     this._nilmActiveIntervalIndex = Math.max(0, Math.min(index, this._nilmLabelIntervalDraft.intervals.length - 1));
+    this._render();
+  }
+
+  _cancelNilmIntervalEditor() {
+    this._nilmIntervalEditorOpen = false;
+    this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
+    this._nilmActiveIntervalIndex = 0;
+    this._clearNilmIntervalFeedback();
     this._render();
   }
 
@@ -2030,7 +2042,7 @@ export function createNilmWorkspaceMethods({
       `
       : reviewItem.kind === "interval"
         ? `<p class="muted">${this._escape(this._formatNilmSessionRange(item))}</p>
-          <div class="actions"><button type="button" class="secondary" data-nilm-label-interval-index="${reviewItem.index}" data-nilm-label-interval-action="adjust">${this._escape(this._panelText("actions.labels.complete_interval"))}</button></div>`
+          <div class="actions"><button type="button" class="secondary" data-nilm-label-interval-index="${reviewItem.index}" data-nilm-label-interval-action="adjust">${this._escape(this._panelText("actions.labels.complete_interval"))}</button>${item.actions && item.actions.delete ? `<button type="button" class="secondary" data-nilm-label-interval-index="${reviewItem.index}" data-nilm-label-interval-action="delete">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>` : ""}</div>`
         : `
         ${this._renderNilmSignatureFacts(item)}
         ${this._renderNilmSignatureReview(item, reviewItem.index)}
@@ -2318,7 +2330,7 @@ export function createNilmWorkspaceMethods({
             <div class="nilm-interval-row-heading">
               <strong>${this._escape(this._panelTextFormat("nilm_workspace.interval_number", { number: index + 1 }))}</strong>
               <span data-nilm-editing-indicator="${index}" ${index === this._nilmActiveIntervalIndex ? "" : "hidden"}>${this._escape(this._panelTextFormat("nilm_workspace.editing_interval", { number: index + 1 }))}</span>
-              <button type="button" class="secondary icon-button" data-nilm-remove-interval="${index}" title="${this._escape(this._panelText("actions.labels.remove_interval"))}" aria-label="${this._escape(this._panelText("actions.labels.remove_interval"))}"><ha-icon icon="mdi:delete-outline"></ha-icon></button>
+              <button type="button" class="secondary" data-nilm-remove-interval="${index}">${this._escape(this._panelText("actions.labels.remove_interval"))}</button>
             </div>
             <div class="nilm-interval-form">
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span><input type="datetime-local" data-nilm-label-interval-input="start" data-nilm-interval-index="${index}" value="${this._escape(interval.start || "")}"></label>
@@ -2328,6 +2340,7 @@ export function createNilmWorkspaceMethods({
         </div>
         <div class="actions">
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>${this._escape(this._panelText("actions.labels.save_interval"))}</button>
+          <button type="button" class="secondary" data-nilm-cancel-interval-editor>${this._escape(this._panelText("actions.labels.cancel"))}</button>
         </div>
         ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">${this._escape(this._panelTextFormat("nilm_workspace.interval_energy_preview", { energy: this._formatNumber(intervalPreview.energy_kwh), duration: this._formatNumber(intervalPreview.duration_minutes), source: intervalPreview.source_name }))}</p>` : ""}
       </div>`;
