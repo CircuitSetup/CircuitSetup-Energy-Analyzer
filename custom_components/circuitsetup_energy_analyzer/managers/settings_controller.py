@@ -88,6 +88,10 @@ from ..utility_comparison import (
 from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
+_COMPLETED_CYCLE_RECOMMENDATION_FEATURES = {
+    "always_on_standby",
+    "operating_detection_thresholds",
+}
 
 
 class SettingsController:
@@ -216,6 +220,15 @@ class SettingsController:
                     and stored.expires_at > now
                     and _recommendation_materially_matches(stored, recommendation)
                 ):
+                    refreshed = replace(
+                        recommendation,
+                        created_at=stored.created_at,
+                        expires_at=stored.expires_at,
+                    )
+                    if refreshed != stored:
+                        coordinator.store_data.settings_recommendations[
+                            recommendation.recommendation_id
+                        ] = refreshed
                     continue
                 if stored != recommendation:
                     coordinator.store_data.settings_recommendations[
@@ -2317,7 +2330,11 @@ def _recommendation_material_key(
         recommendation.feature,
         recommendation.group,
         round(recommendation.confidence, 3),
-        recommendation.reason,
+        (
+            None
+            if recommendation.feature in _COMPLETED_CYCLE_RECOMMENDATION_FEATURES
+            else recommendation.reason
+        ),
         tuple(sorted(dict(recommendation.apply_payload).items())),
         material_recommendation_evidence_key(
             recommendation.feature,
@@ -2334,6 +2351,14 @@ def material_recommendation_evidence_key(
     ignored_keys: set[str] = set()
     if feature == "capacity_warning_ratio":
         ignored_keys.add("observed_samples")
+    elif feature in _COMPLETED_CYCLE_RECOMMENDATION_FEATURES:
+        ignored_keys.update(
+            {
+                "completed_cycle_count",
+                "distinct_learning_days",
+                "latest_cycle_at",
+            }
+        )
     return tuple(
         sorted(
             (key, value)

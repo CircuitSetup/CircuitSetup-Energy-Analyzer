@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -855,6 +856,73 @@ def test_settings_controller_rebuilds_setting_recommendations(monkeypatch) -> No
         item["recommendation_id"]
         for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
     ] == [generated.recommendation_id]
+
+
+@pytest.mark.parametrize(
+    ("feature", "setting_key"),
+    [
+        ("operating_detection_thresholds", "operating_on_threshold_w"),
+        ("always_on_standby", "standby_threshold_w"),
+    ],
+)
+def test_completed_cycle_refresh_preserves_pending_lifetime(
+    monkeypatch,
+    feature: str,
+    setting_key: str,
+) -> None:
+    stored = _recommendation(
+        recommendation_id=f"fridge:{setting_key}:v1",
+        unique_key=f"fridge:{setting_key}",
+        setting_key=setting_key,
+        setting_label=setting_key,
+        feature=feature,
+        reason="Observed 20 completed cycles across 7 distinct days.",
+        evidence={
+            "completed_cycle_count": 20,
+            "distinct_learning_days": 7,
+            "idle_ceiling_w": 12.0,
+            "running_floor_w": 100.0,
+            "separation_w": 88.0,
+            "latest_cycle_at": "2026-06-29T12:00:00+00:00",
+            "calculation_basis": "completed_operating_cycles",
+        },
+        apply_payload={setting_key: 55.0},
+        current_value=25.0,
+        suggested_value=55.0,
+    )
+    candidate = replace(
+        stored,
+        reason="Observed 21 completed cycles across 8 distinct days.",
+        evidence={
+            **stored.evidence,
+            "completed_cycle_count": 21,
+            "distinct_learning_days": 8,
+            "latest_cycle_at": "2026-07-01T12:00:00+00:00",
+        },
+        created_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+        expires_at=datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+    )
+    coordinator = _SettingsCoordinator(stored)
+    controller = settings_controller.SettingsController(coordinator)
+    monkeypatch.setattr(
+        settings_controller,
+        "build_settings_recommendations",
+        lambda inputs: [candidate],
+    )
+
+    changed = controller.rebuild_setting_recommendations(candidate.created_at)
+
+    refreshed = coordinator.store_data.settings_recommendations[
+        stored.recommendation_id
+    ]
+    assert changed is False
+    assert refreshed.created_at == stored.created_at
+    assert refreshed.expires_at == stored.expires_at
+    assert refreshed.reason == candidate.reason
+    assert refreshed.evidence == candidate.evidence
+    assert coordinator.state.settings_recommendations_by_circuit["fridge"][0][
+        "evidence"
+    ] == dict(candidate.evidence)
 
 
 def test_settings_controller_waits_for_live_learning_state(monkeypatch) -> None:
