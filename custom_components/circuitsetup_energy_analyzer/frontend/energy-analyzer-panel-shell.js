@@ -1611,8 +1611,13 @@ export class PanelShellMethods {
       input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
-      input.addEventListener("input", () => this._rememberNilmLabelIntervalDraft(input));
-      input.addEventListener("change", () => this._rememberNilmLabelIntervalDraft(input));
+      const updateDraft = () => this._rememberNilmLabelIntervalDraft(input);
+      if (input.dataset.nilmIntervalIndex !== undefined) {
+        input.addEventListener("change", updateDraft);
+      } else {
+        input.addEventListener("input", updateDraft);
+        input.addEventListener("change", updateDraft);
+      }
       input.addEventListener("focus", () => {
         const index = Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10);
         if (index >= 0) this._selectNilmDraftInterval(index);
@@ -1643,6 +1648,9 @@ export class PanelShellMethods {
         event.stopPropagation();
         this._removeNilmDraftInterval(Number.parseInt(button.dataset.nilmRemoveInterval, 10));
       });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-cancel-interval-editor]")) {
+      button.addEventListener("click", () => this._cancelNilmIntervalEditor());
     }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));

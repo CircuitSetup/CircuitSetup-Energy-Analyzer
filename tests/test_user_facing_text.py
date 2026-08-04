@@ -163,7 +163,7 @@ function makeWorkspace({{ lanes = {{}}, lane_counts = {{}}, ...overrides }} = {{
     assigned: "Assigned",
     published: "Published",
     expected: "Expected",
-    hidden: "Hidden",
+    hidden: "Removed",
   }};
   const baseLanes = Object.fromEntries(Object.entries(labels).map(([key, label]) => [
     key, {{ label, signature_ids: [], assignment_ids: [], interval_ids: [] }},
@@ -3408,7 +3408,7 @@ def test_nilm_lane_rendering_contracts() -> None:
         "Ready to Publish",
         "Published",
         "Expected",
-        "Hidden",
+        "Removed",
       ]) {
         assert.ok(!summary.includes(duplicate));
       }
@@ -3417,7 +3417,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 5);
       for (const expected of [
         'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
-        "Needs Review", "Published", "Expected", "Hidden", "<strong>5</strong>",
+        "Needs Review", "Published", "Expected", "Removed", "<strong>5</strong>",
       ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
@@ -3806,9 +3806,9 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       for (const expected of [
         "Sessions, validation, and technical details",
         "Estimated Appliances",
-        "Validation",
         "NILM Sessions",
         "NILM Edges",
+        "Validation",
       ]) {
         assert.ok(html.includes(expected));
       }
@@ -4466,6 +4466,40 @@ assert.ok(!svg.includes('data-nilm-edge-direction="falling_outside"'));
     )
 
 
+def test_nilm_graph_uses_appliance_names_without_raw_session_metadata() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const rawSessionId = "hvac_2_direction_off_watts_0_100_var_0_100_va_0_100_pf_0_10";
+assert.equal(
+  panel._nilmSessionGraphLabel({ session_id: rawSessionId }),
+  "Unknown load",
+);
+const html = panel._chartSvg(
+  [{ name: "HVAC 2", points: [
+    { time: Date.parse("2026-08-04T08:00:00Z"), value: 20 },
+    { time: Date.parse("2026-08-04T09:00:00Z"), value: 102 },
+  ] }],
+  {
+    graph_window_start: "2026-08-04T08:00:00Z",
+    graph_window_end: "2026-08-04T09:00:00Z",
+    y_axis_label: "W",
+    nilm_sessions: [{
+      session_id: rawSessionId,
+      display_label: "Condensate Pump 2",
+      start: "2026-08-04T08:10:00Z",
+      end: "2026-08-04T08:30:00Z",
+      selected: true,
+    }],
+  },
+);
+assert.ok(html.includes('data-nilm-session-label="Condensate Pump 2"'));
+assert.ok(!html.includes(rawSessionId));
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
     asset = _frontend_source()
 
@@ -4609,7 +4643,7 @@ card._nilmWorkspace = {
       assignment_ids: []
     },
     hidden: {
-      label: "Hidden",
+      label: "Removed",
       signature_ids: ["sig-ignored"],
       assignment_ids: []
     }
@@ -6143,7 +6177,7 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   } } });
   const html = panel._renderNilmLabelIntervalEditor(workspace);
   assert.ok(html.includes("Label appliance interval"));
-  assert.ok(html.includes("Click and drag across the graph"));
+  assert.ok(html.includes("Select one full appliance run per interval"));
   assert.ok(html.includes('data-nilm-interval-row="0"'));
   assert.ok(html.includes('data-nilm-interval-row="1"'));
   assert.ok(html.includes('data-nilm-active="true"'));
@@ -6181,6 +6215,152 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   assert.ok(panel._nilmLabelIntervalDraft.intervals[2].start);
   assert.ok(panel._nilmLabelIntervalDraft.intervals[2].end);
 })();
+"""
+    )
+
+
+def test_nilm_interval_editor_can_cancel_and_remove_intervals() -> None:
+    _run_panel_node_script(
+        """
+const panel = makePanel({
+  _nilmIntervalEditorOpen: true,
+  _nilmLabelIntervalDraft: {
+    label: "Condensate Pump 2",
+    appliance_profile: "pump",
+    intervals: [{ start: "2026-08-04T08:00", end: "2026-08-04T08:10" }],
+  },
+});
+panel._render = () => {};
+let html = panel._renderNilmLabelIntervalEditor(makeWorkspace({
+  actions: { label_interval: { profile_options: [] } },
+}));
+assert.ok(html.includes('data-nilm-cancel-interval-editor'));
+assert.ok(html.includes(">Cancel<"));
+assert.ok(html.includes('data-nilm-remove-interval="0"'));
+assert.ok(html.includes(">Remove Interval<"));
+
+panel._removeNilmDraftInterval(0);
+assert.equal(
+  JSON.stringify(panel._nilmLabelIntervalDraft.intervals),
+  JSON.stringify([{ start: "", end: "", interval_id: "" }]),
+);
+panel._cancelNilmIntervalEditor();
+assert.equal(panel._nilmIntervalEditorOpen, false);
+assert.deepEqual(panel._nilmLabelIntervalDraft, panel._emptyNilmLabelIntervalDraft());
+
+html = panel._renderNilmReviewInspector({
+  kind: "interval",
+  index: 2,
+  item: {
+    interval_id: "saved-interval",
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+    actions: { delete: makeAction("delete_nilm_label_interval") },
+  },
+});
+assert.ok(html.includes('data-nilm-label-interval-action="delete"'));
+assert.ok(html.includes("Remove Interval"));
+"""
+    )
+
+
+def test_nilm_existing_interval_edit_updates_preview_and_saves_same_interval() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const interval = {
+  interval_id: "saved-interval",
+  label: "Condensate Pump 2",
+  appliance_id: "condensate_pump_2",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+};
+const workspace = makeWorkspace({
+  label_intervals: [interval],
+  actions: { label_interval: makeAction("label_nilm_interval") },
+});
+const calls = [];
+let renders = 0;
+const panel = makePanel({ _nilmWorkspace: workspace });
+panel._nilmWorkspaceHistorySeries = [[
+  { entity_id: "sensor.hvac_2_power", state: "100", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "184", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:02:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "184", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:09:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "100", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+]];
+panel._render = () => { renders += 1; };
+panel._refreshNilmWorkspaceData = async () => true;
+panel._restoreNilmIntervalScroll = () => {};
+panel.shadowRoot.querySelector = () => null;
+panel._hass = { callService: async (domain, service, data) => {
+  calls.push({ domain, service, data });
+} };
+
+await panel._callNilmLabelIntervalAction(0, "adjust");
+assert.equal(panel._nilmLabelIntervalDraft.intervals[0].interval_id, "saved-interval");
+renders = 0;
+const changedStart = panel._datetimeLocalFromMillis(Date.parse("2026-08-04T08:02:00Z"));
+panel._rememberNilmLabelIntervalDraft({
+  dataset: { nilmLabelIntervalInput: "start", nilmIntervalIndex: "0" },
+  value: changedStart,
+});
+assert.equal(renders, 1);
+const bands = panel._nilmGraphBands(workspace, []);
+assert.equal(bands.length, 1);
+assert.equal(bands[0].band_kind, "draft");
+assert.equal(bands[0].start, changedStart);
+assert.equal(panel._nilmLabelIntervalPowerPreview(), 84);
+const previewHtml = panel._renderNilmLabelIntervalEditor(workspace);
+assert.ok(previewHtml.includes("Estimated load 84 W"), previewHtml);
+assert.ok(!previewHtml.includes("Unknown W"), previewHtml);
+
+await panel._callNilmLabelIntervalAction(-1, "save");
+assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
+assert.equal(calls[0].data.interval_id, "saved-interval");
+assert.equal(calls[0].data.start, "2026-08-04T08:02:00.000Z");
+assert.equal(calls[0].data.observed_transition_w, 84);
+assert.ok(!("appliance_profile" in calls[0].data));
+assert.equal(panel._nilmIntervalEditorOpen, false);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    )
+
+
+def test_nilm_interval_power_combines_only_mains_source_legs() -> None:
+    _run_panel_node_script(
+        """
+const workspace = makeWorkspace({
+  history: { source_entities: ["sensor.mains_l1_watts", "sensor.mains_l2_watts"] },
+  label_intervals: [{
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+  }],
+});
+const panel = makePanel({ _nilmWorkspace: workspace, _nilmActiveIntervalIndex: 0 });
+panel._nilmWorkspaceHistorySeries = [
+  [
+    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.mains_l1_watts", state: "142", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+  ],
+  [
+    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.mains_l2_watts", state: "122", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+  ],
+  [
+    { entity_id: "sensor.helper_power", state: "0", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.helper_power", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+  ],
+];
+assert.equal(panel._nilmLabelIntervalPowerPreview(workspace.label_intervals[0]), 84);
 """
     )
 
@@ -6223,7 +6403,9 @@ def test_nilm_interval_action_contracts() -> None:
           { value: "dishwasher", label: "Dishwasher" },
         ] } } });
       for (const expected of [
-        "Label appliance interval", "Click and drag across the graph",
+        "Label appliance interval", "Select one full appliance run per interval",
+        "start just before its power-on step",
+        "avoid intervals where they also turn on or off",
         "Appliance Type", "Dishwasher", "Save Interval",
       ]) assert.ok(html.includes(expected), expected);
       assert.ok(!html.includes('data-nilm-label-interval-input="observed_transition_w"'));
@@ -7855,7 +8037,7 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
         "The workspace groups work into five lanes",
-        "Needs Review, Assigned, Published, Expected, and Hidden",
+        "Needs Review, Assigned, Published, Expected, and Removed",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
         "Published NILM appliances are marked as estimated",

@@ -6036,7 +6036,7 @@ test("NILM workspace separates expected and hidden lanes and restores hidden ass
     const retired = {
       ...payload.assignments[0],
       assignment_id: "retired-load",
-      display_name: "Retired Pump",
+      display_name: "Removed Pump",
       lifecycle_state: "retired",
       actions: {
         restore: {
@@ -6052,7 +6052,7 @@ test("NILM workspace separates expected and hidden lanes and restores hidden ass
       assigned: { label: "Assigned", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["dishwasher"] : ["dishwasher", "ignored-load"], interval_ids: [] },
       published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
       expected: { label: "Expected", signature_ids: [], assignment_ids: ["expected-load"], interval_ids: [] },
-      hidden: { label: "Hidden", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["ignored-load", "retired-load"] : ["retired-load"], interval_ids: [] },
+      hidden: { label: "Removed", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["ignored-load", "retired-load"] : ["retired-load"], interval_ids: [] },
     };
     payload.lane_counts = { needs_review: 1, assigned: workspaceRequests === 1 ? 1 : 2, published: 0, expected: 1, hidden: workspaceRequests === 1 ? 2 : 1 };
     await route.fulfill({ json: payload });
@@ -6065,7 +6065,7 @@ test("NILM workspace separates expected and hidden lanes and restores hidden ass
   await expect(panel.getByText("Expected loads remain part of matching but are not published.")).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:expected-load"]')).toBeVisible();
   await panel.locator('[data-nilm-lane="hidden"]').click();
-  await expect(panel.getByText("Ignored and retired loads remain hidden until restored.")).toBeVisible();
+  await expect(panel.getByText("Removed loads do not appear under Estimated Appliances and can be restored for review.")).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:retired-load"]')).toBeVisible();
   const descriptionBox = await panel.locator("[data-nilm-lane-description]").boundingBox();
@@ -6098,7 +6098,7 @@ test("NILM workspace restores hidden signatures and explains blocked publication
     const hiddenSignature = {
       ...payload.signatures[0],
       signature_id: "hidden-signature",
-      display_label: "Hidden condensate signature",
+      display_label: "Removed condensate signature",
       review_state: restored ? "needs_review" : "ignored",
       actions: restored ? {} : {
         restore: {

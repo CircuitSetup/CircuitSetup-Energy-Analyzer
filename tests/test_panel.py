@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-4"
+    assert PANEL_MODULE_VERSION == "20260804-6"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -1787,6 +1787,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
                 "signature_fingerprints": ["signature_1"],
                 "session_ids": ["session_1"],
                 "label_interval_ids": ["label-1"],
+                "typical_power_w": None,
                 "lifecycle_state": "assigned",
                 "confidence": 0.9,
                 "created_at": "2026-06-06T09:00:00+00:00",
@@ -1912,6 +1913,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     }
     assert payload["assignments"][0]["display_name"] == "Dishwasher"
     assert payload["assignments"][0]["lifecycle_state"] == "assigned"
+    assert payload["assignments"][0]["typical_power_w"] == 83.0
     assignment_detail_query = parse_qs(
         urlparse(payload["assignments"][0]["appliance_detail_path"]).query
     )
@@ -2068,6 +2070,13 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                 "confidence": 0.9,
                 "publish_entities": False,
             },
+            {
+                "assignment_id": "assignment-retired",
+                "display_name": "Removed Pump",
+                "lifecycle_state": "retired",
+                "confidence": 0.9,
+                "publish_entities": False,
+            },
         ]
     }
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -2118,7 +2127,11 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         "assignment-validation",
         "assignment-published",
     ]
-    assert payload["lanes"]["hidden"]["assignment_ids"] == ["assignment-ignored"]
+    assert payload["lanes"]["hidden"]["assignment_ids"] == [
+        "assignment-ignored",
+        "assignment-retired",
+    ]
+    assert payload["lanes"]["hidden"]["label"] == "Removed"
     assert payload["lanes"]["hidden"]["signature_ids"] == []
     assert payload["lanes"]["expected"]["assignment_ids"] == ["assignment-expected"]
     assert payload["lanes"]["expected"]["signature_ids"] == []
@@ -2149,6 +2162,11 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     assert virtual["appliance_detail_api_path"].endswith(
         "assignment_id=assignment-assigned"
     )
+    virtual_ids = {
+        appliance["assignment_id"] for appliance in payload["virtual_appliances"]
+    }
+    assert "assignment-ignored" not in virtual_ids
+    assert "assignment-retired" not in virtual_ids
 
 
 def test_nilm_workspace_lanes_only_show_complete_component_signatures() -> None:
@@ -4714,7 +4732,8 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
                 "display_name": "Dishwasher",
                 "mains_circuit_id": "mains",
                 "signature_fingerprints": ["signature_1"],
-                "session_ids": ["session-dishwasher"],
+                "session_ids": ["session-dishwasher", "session-rejected"],
+                "rejected_session_ids": ["session-rejected"],
                 "label_interval_ids": [],
                 "lifecycle_state": "assigned",
                 "confidence": 0.8,
@@ -4733,7 +4752,18 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
                 "median_power_w": 820.0,
                 "estimated_energy_kwh": 0.615,
                 "confidence": 0.9,
-            }
+            },
+            {
+                "session_id": "session-rejected",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T09:00:00+00:00",
+                "end": "2026-06-06T09:45:00+00:00",
+                "duration_seconds": 2700.0,
+                "median_power_w": 3200.0,
+                "estimated_energy_kwh": 2.4,
+                "confidence": 0.9,
+            },
         ]
     }
 
@@ -5309,6 +5339,32 @@ def test_nilm_sensitivity_uses_latest_three_ordered_observations() -> None:
     assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == (
         "sensitive"
     )
+
+
+def test_nilm_session_labels_keep_explicit_legacy_assignment_name() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _add_nilm_session_display_labels,
+        _nilm_session_display_labels,
+    )
+
+    session_id = "hvac_2_direction_off_watts_0_100_var_0_100"
+    labels = _nilm_session_display_labels(
+        [],
+        [
+            {
+                "assignment_id": "assignment-pump",
+                "display_name": "Condensate Pump 2",
+                "signature_fingerprints": ["direction=off|watts=0-100|var=0-100"],
+                "session_ids": [session_id],
+            }
+        ],
+    )
+
+    assert _add_nilm_session_display_labels(
+        [{"session_id": session_id}], labels
+    ) == [
+        {"session_id": session_id, "display_label": "Condensate Pump 2"}
+    ]
 
 
 def test_nilm_sensitivity_orders_observations_by_absolute_time() -> None:
@@ -6041,6 +6097,10 @@ def test_nilm_workspace_history_includes_both_mains_real_power_legs() -> None:
     history = _nilm_workspace_history_payload(config, [], [], hours=6)
 
     assert history["entities"] == [
+        "sensor.mains_l1_watts",
+        "sensor.mains_l2_watts",
+    ]
+    assert history["source_entities"] == [
         "sensor.mains_l1_watts",
         "sensor.mains_l2_watts",
     ]

@@ -43,7 +43,40 @@ def test_off_only_nilm_assignment_cannot_publish() -> None:
                 ],
             }
         )
-        == "Bind a complete ON/OFF component before publishing."
+        == (
+            "A complete appliance run is still missing. Confirm one session with "
+            "both the power-on and matching power-off transition so NILM can track "
+            "state and energy before publishing."
+        )
+    )
+
+
+def test_reviewed_on_off_model_can_publish_without_rebinding_signature() -> None:
+    assert (
+        nilm_assignment_publication_reason(
+            {
+                "assignment_id": "assignment-pump",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["direction=off|watts=0-100"],
+                "session_ids": ["session-complete"],
+                "confidence": 0.85,
+                "transition_prototypes": [
+                    {
+                        "direction": direction,
+                        "from_state_w": from_w,
+                        "to_state_w": to_w,
+                        "delta_w": delta_w,
+                        "spread_w": 0.0,
+                        "sample_count": 1,
+                    }
+                    for direction, from_w, to_w, delta_w in (
+                        ("on", 0.0, 82.0, 82.0),
+                        ("off", 82.0, 0.0, -82.0),
+                    )
+                ],
+            }
+        )
+        is None
     )
 
 
