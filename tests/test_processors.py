@@ -652,9 +652,15 @@ def test_hvac_instant_marker_deduplication_is_scoped_to_response_context() -> No
         (ApplianceProfile.HEAT_PUMP, {"cooling", "heating"}),
     ],
 )
+@pytest.mark.parametrize(
+    "actual_temperature_f",
+    [None, 72.0],
+    ids=["missing-actual", "exact-setpoint"],
+)
 def test_hvac_unresolved_auto_call_retains_excluded_date_marker(
     profile: ApplianceProfile,
     expected_modes: set[str],
+    actual_temperature_f: float | None,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
@@ -670,7 +676,7 @@ def test_hvac_unresolved_auto_call_retains_excluded_date_marker(
         observation=ThermostatObservation(
             thermostat,
             None,
-            None,
+            actual_temperature_f,
             72.0,
             "heat_cool",
             None,

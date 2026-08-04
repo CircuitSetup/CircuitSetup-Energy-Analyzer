@@ -168,9 +168,9 @@ def advance_episode(
             if not call_active:
                 return None, None
             episode_kind = "thermostat_call"
-            rejected_call = rejected_call or not _meets_minimum(
-                gap,
-                _MINIMUM_CALL_GAP_F,
+            rejected_call = rejected_call or (
+                not math.isclose(gap, 0.0, abs_tol=1e-6)
+                and not _meets_minimum(gap, _MINIMUM_CALL_GAP_F)
             )
         outdoor_temperature = _finite_float(
             environmental_context.get("outdoor_temperature_f")
@@ -274,7 +274,18 @@ def advance_episode(
         inactive_since=inactive_since,
     )
     if call_ended:
-        complete = _has_minimum_progress(updated)
+        complete = _has_minimum_progress(updated) or (
+            updated.active_minutes > 0.0
+            and math.isclose(
+                _directional_gap(
+                    updated.mode,
+                    actual=updated.start_temperature_f,
+                    target=updated.target_temperature_f,
+                ),
+                0.0,
+                abs_tol=1e-6,
+            )
+        )
         return None, replace(
             updated,
             ended_at=now,
@@ -984,7 +995,10 @@ def _is_valid_completed_episode(episode: HvacResponseEpisode) -> bool:
     return (
         _valid_start_gap(episode, target_gap)
         and (
-            _has_minimum_progress(episode)
+            (
+                _has_minimum_progress(episode)
+                or math.isclose(target_gap, 0.0, abs_tol=1e-6)
+            )
             if episode.episode_kind == "thermostat_call"
             else degrees_closed > 0.0
         )
@@ -1051,8 +1065,9 @@ def _degrees_closed(episode: HvacResponseEpisode) -> float:
 
 def _valid_start_gap(episode: HvacResponseEpisode, gap: float) -> bool:
     if episode.episode_kind == "thermostat_call":
-        return _meets_minimum(gap, _MINIMUM_CALL_GAP_F) and not _meets_minimum(
-            gap, _MINIMUM_START_GAP_F
+        return math.isclose(gap, 0.0, abs_tol=1e-6) or (
+            _meets_minimum(gap, _MINIMUM_CALL_GAP_F)
+            and not _meets_minimum(gap, _MINIMUM_START_GAP_F)
         )
     return _meets_minimum(gap, _MINIMUM_START_GAP_F)
 
