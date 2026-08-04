@@ -1659,6 +1659,26 @@ export class PanelShellMethods {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
     }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-reference-input]")) {
+      const remember = () => this._rememberNilmReferenceDraft(input);
+      input.addEventListener("input", remember);
+      input.addEventListener("change", () => {
+        remember();
+        if (input.dataset.nilmReferenceInput === "stateEntityId") this._render();
+      });
+    }
+    for (const details of this.shadowRoot.querySelectorAll("[data-nilm-reference-details]")) {
+      details.addEventListener("toggle", () => {
+        const draft = this._nilmReferenceDrafts.get(details.dataset.nilmReferenceKey);
+        if (draft) draft.open = details.open;
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-reference-action]")) {
+      button.addEventListener("click", () => this._callNilmReferenceAction(
+        Number.parseInt(button.dataset.nilmReferenceIndex || "-1", 10),
+        button.dataset.nilmReferenceAction,
+      ));
+    }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
     }

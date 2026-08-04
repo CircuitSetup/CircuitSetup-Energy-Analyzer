@@ -10,7 +10,14 @@ from typing import Any
 
 from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
-from ..models import AlertEvidence, ApplianceProfile, CircuitMode, NilmSourceKind
+from ..discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
+from ..models import (
+    AlertEvidence,
+    ApplianceProfile,
+    CircuitMode,
+    NilmSourceKind,
+    SensorRole,
+)
 from ..nilm import (
     NilmEdge,
     build_nilm_assignment_model,
@@ -532,6 +539,8 @@ class NilmController:
         source: str = "manual",
         confidence: float = 1.0,
         observed_transition_w: Any = None,
+        median_power_w: Any = None,
+        measured_energy_kwh: Any = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         label_text = str(label or "").strip()
@@ -568,6 +577,11 @@ class NilmController:
         assignment_id_text = str(
             assignment_id or (existing or {}).get("assignment_id") or ""
         ).strip()
+        linked_assignment = (
+            self.assignment_for_id(circuit_id, assignment_id_text)
+            if assignment_id_text
+            else None
+        )
         try:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
@@ -604,6 +618,20 @@ class NilmController:
             if not math.isfinite(transition_w) or transition_w < 0.0:
                 raise ValueError("Invalid observed transition watts.")
             payload["observed_transition_w"] = transition_w
+        for key, value in (
+            ("median_power_w", median_power_w),
+            ("measured_energy_kwh", measured_energy_kwh),
+        ):
+            if value is None:
+                if existing and self._float_or_none(existing.get(key)) is not None:
+                    payload[key] = float(existing[key])
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"Invalid {key}.")
+            parsed = self._float_or_none(value)
+            if parsed is None or parsed < 0:
+                raise ValueError(f"Invalid {key}.")
+            payload[key] = parsed
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text
@@ -628,6 +656,12 @@ class NilmController:
         else:
             existing.clear()
             existing.update(payload)
+        if linked_assignment is not None:
+            self._append_unique(
+                linked_assignment.setdefault("label_interval_ids", []),
+                interval_id_text,
+            )
+            linked_assignment["updated_at"] = now
         profile_text = str(appliance_profile or "").strip()
         if profile_text:
             assignment = self.upsert_assignment(
@@ -931,7 +965,10 @@ class NilmController:
                     matched_interval_ids.add(id(interval))
                     interval_power = self._float_or_none(interval.get("median_power_w"))
                     interval_energy = self._float_or_none(
-                        interval.get("estimated_energy_kwh"),
+                        interval.get(
+                            "measured_energy_kwh",
+                            interval.get("estimated_energy_kwh"),
+                        ),
                     )
                     if session_power is not None and interval_power is not None:
                         power_errors.append(abs(session_power - interval_power))
@@ -1803,6 +1840,105 @@ class NilmController:
             for link in assignment.get("helper_links", ())
             if isinstance(link, Mapping) and link.get("helper_circuit_id") != helper_id
         ]
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
+    async def async_set_nilm_reference_link(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        state_entity_id: str | None = None,
+        power_entity_id: str | None = None,
+        threshold_w: Any = 0.0,
+    ) -> dict[str, Any]:
+        """Link authoritative state and optional measured-power evidence."""
+        state_id = str(state_entity_id or "").strip()
+        power_id = str(power_entity_id or "").strip()
+        if not state_id and not power_id:
+            raise ValueError("Select a reference state or power entity.")
+        if isinstance(threshold_w, bool):
+            raise ValueError("reference_threshold_w must be a non-negative number.")
+        try:
+            threshold = float(threshold_w)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                "reference_threshold_w must be a non-negative number."
+            ) from err
+        if not math.isfinite(threshold) or threshold < 0:
+            raise ValueError("reference_threshold_w must be a non-negative number.")
+        self._validate_reference_entities(state_id, power_id)
+
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        if state_id:
+            assignment["reference_state_entity_id"] = state_id
+        else:
+            assignment.pop("reference_state_entity_id", None)
+        if power_id:
+            assignment["reference_power_entity_id"] = power_id
+        else:
+            assignment.pop("reference_power_entity_id", None)
+        assignment["reference_threshold_w"] = threshold
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        await self.async_save_assignment_change()
+        return dict(assignment)
+
+    def _validate_reference_entities(
+        self,
+        state_entity_id: str,
+        power_entity_id: str,
+    ) -> None:
+        get_state = getattr(
+            getattr(getattr(self._coordinator, "hass", None), "states", None),
+            "get",
+            None,
+        )
+        if not callable(get_state):
+            return
+        if state_entity_id:
+            if state_entity_id.partition(".")[0] not in {
+                "switch",
+                "binary_sensor",
+                "input_boolean",
+            } or get_state(state_entity_id) is None:
+                raise ValueError(
+                    "Reference state entity must be a loaded on/off entity."
+                )
+        if not power_entity_id:
+            return
+        state = get_state(power_entity_id)
+        attributes = getattr(state, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            attributes = {}
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        device_class = str(attributes.get("device_class") or "").strip()
+        if (
+            state is None
+            or power_entity_id.partition(".")[0] != "sensor"
+            or unit not in {"W", "kW", "mW", "MW"}
+            or sensor_metadata_role_conflict(device_class=device_class, unit=unit)
+            or sensor_role_from_metadata(device_class=device_class, unit=unit)
+            is not SensorRole.REAL_POWER
+        ):
+            raise ValueError(
+                "Reference power entity must unambiguously report real power in "
+                "W, kW, mW, or MW."
+            )
+
+    async def async_remove_nilm_reference_link(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Remove reference entities without deleting imported intervals."""
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        for key in (
+            "reference_state_entity_id",
+            "reference_power_entity_id",
+            "reference_threshold_w",
+        ):
+            assignment.pop(key, None)
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)

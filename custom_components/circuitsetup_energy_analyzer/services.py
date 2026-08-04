@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
+import math
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from functools import partial
+from statistics import median
 from typing import Any
 
 from . import notifications
 from .const import DOMAIN
+from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
+from .models import SensorRole
 from .ux import SENSITIVITY_VALUES
 
 try:
@@ -54,6 +59,8 @@ SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
 SERVICE_RESTORE_NILM_ITEM = "restore_nilm_item"
 SERVICE_SET_NILM_HELPER_LINK = "set_nilm_helper_link"
 SERVICE_REMOVE_NILM_HELPER_LINK = "remove_nilm_helper_link"
+SERVICE_SET_NILM_REFERENCE_LINK = "set_nilm_reference_link"
+SERVICE_REMOVE_NILM_REFERENCE_LINK = "remove_nilm_reference_link"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
@@ -149,6 +156,9 @@ ATTR_KEEP_ASSIGNMENT_FOR_MASKING = "keep_assignment_for_masking"
 ATTR_KEEP_PUBLISHED_ESTIMATE = "keep_published_estimate"
 ATTR_HELPER_CIRCUIT_ID = "helper_circuit_id"
 ATTR_RELATIONSHIP = "relationship"
+ATTR_REFERENCE_STATE_ENTITY_ID = "reference_state_entity_id"
+ATTR_REFERENCE_POWER_ENTITY_ID = "reference_power_entity_id"
+ATTR_REFERENCE_THRESHOLD_W = "reference_threshold_w"
 ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
@@ -365,9 +375,11 @@ NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
         ATTR_CIRCUIT_ID,
         ATTR_ENTRY_ID,
         ATTR_ENTITY_ID,
+        ATTR_ASSIGNMENT_ID,
         ATTR_APPLIANCE_ID,
         ATTR_MAINS_ENTITY_ID,
         ATTR_THRESHOLD_W,
+        ATTR_REFERENCE_POWER_ENTITY_ID,
         ATTR_CONFIDENCE,
     ),
 )
@@ -485,6 +497,53 @@ def _nilm_helper_link_schema(*, relationship: bool) -> Callable:
 
 NILM_SET_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=True)
 NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=False)
+
+
+def _nilm_reference_link_schema(*, remove: bool) -> Callable:
+    required = {ATTR_CIRCUIT_ID, ATTR_ASSIGNMENT_ID}
+    reference_fields = {
+        ATTR_REFERENCE_STATE_ENTITY_ID,
+        ATTR_REFERENCE_POWER_ENTITY_ID,
+        ATTR_REFERENCE_THRESHOLD_W,
+    }
+    allowed = required | {ATTR_ENTRY_ID} | (set() if remove else reference_fields)
+
+    def validate(data: Mapping[str, Any] | None) -> dict[str, Any]:
+        values = dict(data or {})
+        missing, extra = required - values.keys(), values.keys() - allowed
+        if missing:
+            raise ValueError(f"Missing required field: {', '.join(sorted(missing))}")
+        if extra:
+            raise ValueError(f"Unsupported field: {', '.join(sorted(extra))}")
+        if remove:
+            return values
+        if not any(
+            str(values.get(key) or "").strip()
+            for key in (
+                ATTR_REFERENCE_STATE_ENTITY_ID,
+                ATTR_REFERENCE_POWER_ENTITY_ID,
+            )
+        ):
+            raise ValueError("Select a reference state or power entity.")
+        threshold = values.get(ATTR_REFERENCE_THRESHOLD_W, 0.0)
+        if isinstance(threshold, bool):
+            raise ValueError("reference_threshold_w must be a non-negative number")
+        try:
+            threshold_number = float(threshold)
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                "reference_threshold_w must be a non-negative number"
+            ) from err
+        if not math.isfinite(threshold_number) or threshold_number < 0:
+            raise ValueError("reference_threshold_w must be a non-negative number")
+        values[ATTR_REFERENCE_THRESHOLD_W] = threshold_number
+        return values
+
+    return validate
+
+
+NILM_SET_REFERENCE_LINK_SERVICE_SCHEMA = _nilm_reference_link_schema(remove=False)
+NILM_REMOVE_REFERENCE_LINK_SERVICE_SCHEMA = _nilm_reference_link_schema(remove=True)
 NILM_SIGNATURE_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
@@ -558,6 +617,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RESTORE_NILM_ITEM: NILM_RESTORE_SERVICE_SCHEMA,
     SERVICE_SET_NILM_HELPER_LINK: NILM_SET_HELPER_LINK_SERVICE_SCHEMA,
     SERVICE_REMOVE_NILM_HELPER_LINK: NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA,
+    SERVICE_SET_NILM_REFERENCE_LINK: NILM_SET_REFERENCE_LINK_SERVICE_SCHEMA,
+    SERVICE_REMOVE_NILM_REFERENCE_LINK: NILM_REMOVE_REFERENCE_LINK_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
@@ -873,6 +934,21 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         ground_truth_entity_id = str(
             data.get(ATTR_GROUND_TRUTH_ENTITY_ID) or ""
         ).strip()
+        assignment_id = str(data.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        targets = (
+            [
+                _target_nilm_assignment_coordinator(
+                    hass,
+                    circuit_id,
+                    assignment_id,
+                    data.get(ATTR_ENTRY_ID),
+                )
+            ]
+            if assignment_id
+            else _target_nilm_coordinators(
+                hass, circuit_id, data.get(ATTR_ENTRY_ID)
+            )
+        )
         rows = await _async_nilm_sensor_history_rows(
             hass,
             ground_truth_entity_id,
@@ -890,10 +966,39 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             raise HomeAssistantError(
                 "No active ground-truth sensor intervals were found."
             )
-        for coordinator in _target_nilm_coordinators(
-            hass, circuit_id, data.get(ATTR_ENTRY_ID)
-        ):
+        reference_power_entity_id = str(
+            data.get(ATTR_REFERENCE_POWER_ENTITY_ID) or ""
+        ).strip()
+        power_rows: Any = []
+        power_unit = ""
+        if reference_power_entity_id:
+            power_unit = _nilm_reference_power_unit(
+                hass, reference_power_entity_id
+            )
+            if not power_unit:
+                raise HomeAssistantError(
+                    "Reference power entity must unambiguously report real power "
+                    "in W, kW, mW, or MW."
+                )
+            power_rows = await _async_nilm_sensor_history_rows(
+                hass,
+                reference_power_entity_id,
+                start_dt,
+                end_dt,
+            )
+        for coordinator in targets:
             for interval in intervals:
+                metrics = (
+                    _nilm_reference_power_metrics(
+                        power_rows,
+                        reference_power_entity_id,
+                        start=interval[ATTR_START],
+                        end=interval[ATTR_END],
+                        unit=power_unit,
+                    )
+                    if reference_power_entity_id
+                    else {}
+                )
                 await _call_if_present(
                     coordinator,
                     "async_label_nilm_interval",
@@ -906,8 +1011,17 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                     ground_truth_entity_id=ground_truth_entity_id,
                     validation_start=interval.get("validation_start"),
                     validation_end=interval.get("validation_end"),
-                    source="sensor",
+                    interval_id=_nilm_reference_interval_id(
+                        circuit_id,
+                        assignment_id,
+                        ground_truth_entity_id,
+                        interval[ATTR_START],
+                        interval[ATTR_END],
+                    ),
+                    source="reference_sensor",
                     confidence=data.get(ATTR_CONFIDENCE, 1.0),
+                    **({ATTR_ASSIGNMENT_ID: assignment_id} if assignment_id else {}),
+                    **metrics,
                 )
         return
 
@@ -1172,6 +1286,37 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         await _call_if_present(
             target, method, circuit_id, data.get(ATTR_ASSIGNMENT_ID), **kwargs
         )
+        return
+
+    if service in {
+        SERVICE_SET_NILM_REFERENCE_LINK,
+        SERVICE_REMOVE_NILM_REFERENCE_LINK,
+    }:
+        circuit_id = str(data.get(ATTR_CIRCUIT_ID) or "").strip()
+        assignment_id = str(data.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        target = _target_nilm_assignment_coordinator(
+            hass,
+            circuit_id,
+            assignment_id,
+            data.get(ATTR_ENTRY_ID),
+        )
+        if service == SERVICE_SET_NILM_REFERENCE_LINK:
+            await _call_if_present(
+                target,
+                "async_set_nilm_reference_link",
+                circuit_id,
+                assignment_id,
+                state_entity_id=data.get(ATTR_REFERENCE_STATE_ENTITY_ID),
+                power_entity_id=data.get(ATTR_REFERENCE_POWER_ENTITY_ID),
+                threshold_w=data.get(ATTR_REFERENCE_THRESHOLD_W, 0.0),
+            )
+        else:
+            await _call_if_present(
+                target,
+                "async_remove_nilm_reference_link",
+                circuit_id,
+                assignment_id,
+            )
         return
 
     if service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
@@ -1613,6 +1758,37 @@ def _target_nilm_helper_link_coordinator(
     if len(matched) != 1:
         reason = "ambiguous" if len(matched) > 1 else "not found"
         raise HomeAssistantError(f"NILM helper link target is {reason}.")
+    return matched[0]
+
+
+def _target_nilm_assignment_coordinator(
+    hass: Any,
+    circuit_id: str,
+    assignment_id: str,
+    entry_id: Any = None,
+) -> Any:
+    """Require one entry that owns the requested NILM assignment."""
+    candidates = (
+        _target_entry_circuit_coordinator(hass, entry_id.strip(), circuit_id)
+        if isinstance(entry_id, str) and entry_id.strip()
+        else _loaded_coordinators(hass)
+    )
+    matched = [
+        coordinator
+        for coordinator in candidates
+        if any(
+            item.get("assignment_id") == assignment_id
+            for item in getattr(
+                getattr(coordinator, "store_data", None),
+                "nilm_appliance_assignments_by_circuit",
+                {},
+            ).get(circuit_id, ())
+            if isinstance(item, Mapping)
+        )
+    ]
+    if len(matched) != 1:
+        reason = "ambiguous" if len(matched) > 1 else "not found"
+        raise HomeAssistantError(f"NILM assignment target is {reason}.")
     return matched[0]
 
 
@@ -2142,34 +2318,53 @@ def _nilm_sensor_label_intervals_from_history(
     end: Any,
     threshold_w: Any = 0.0,
 ) -> list[dict[str, str]]:
-    entity_id = str(ground_truth_entity_id or "").strip()
+    return _nilm_reference_intervals_from_history(
+        rows,
+        ground_truth_entity_id,
+        start=start,
+        end=end,
+        threshold_w=threshold_w,
+    )
+
+
+def _nilm_reference_intervals_from_history(
+    rows: Any,
+    entity_id: str,
+    *,
+    start: Any,
+    end: Any,
+    threshold_w: Any = 0.0,
+) -> list[dict[str, str]]:
+    entity_id = str(entity_id or "").strip()
     start_dt = _service_datetime(start, ATTR_START)
     end_dt = _service_datetime(end, ATTR_END)
-    try:
-        threshold = float(threshold_w)
-    except (TypeError, ValueError):
-        threshold = 0.0
+    threshold = None if isinstance(threshold_w, bool) else _float_or_none(threshold_w)
+    if threshold is None or threshold < 0:
+        raise HomeAssistantError("NILM reference threshold must be non-negative.")
 
-    samples: list[tuple[datetime, float]] = []
+    samples: list[tuple[datetime, bool | None]] = []
     for state in _iter_history_states(rows):
         state_entity_id = _state_value(state, "entity_id")
         if entity_id and state_entity_id and str(state_entity_id) != entity_id:
             continue
         timestamp = _state_timestamp(state)
-        value = _float_or_none(_state_value(state, "state"))
-        if timestamp is not None and value is not None:
-            samples.append((timestamp, value))
+        raw_value = str(_state_value(state, "state") or "").strip().lower()
+        value = _float_or_none(raw_value)
+        active = True if raw_value == "on" else False if raw_value == "off" else (
+            value > threshold if value is not None else None
+        )
+        if timestamp is not None:
+            samples.append((timestamp, active))
     samples.sort(key=lambda item: item[0])
 
     intervals: list[dict[str, str]] = []
     active_start: datetime | None = None
-    for timestamp, value in samples:
+    for timestamp, active in samples:
         if timestamp < start_dt or timestamp > end_dt:
             continue
-        active = value > threshold
         if active and active_start is None:
             active_start = timestamp
-        elif not active and active_start is not None:
+        elif active is not True and active_start is not None:
             if timestamp > active_start:
                 intervals.append(
                     {
@@ -2190,6 +2385,82 @@ def _nilm_sensor_label_intervals_from_history(
             }
         )
     return intervals
+
+
+def _nilm_reference_interval_id(
+    circuit_id: str,
+    assignment_id: str,
+    entity_id: str,
+    start: str,
+    end: str,
+) -> str:
+    seed = f"{circuit_id}|{assignment_id}|{entity_id}|{start}|{end}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    return f"reference-{digest}"
+
+
+def _nilm_reference_power_metrics(
+    rows: Any,
+    entity_id: str,
+    *,
+    start: Any,
+    end: Any,
+    unit: str,
+) -> dict[str, float]:
+    start_dt = _service_datetime(start, ATTR_START)
+    end_dt = _service_datetime(end, ATTR_END)
+    factor = {"W": 1.0, "kW": 1_000.0, "mW": 0.001, "MW": 1_000_000.0}.get(
+        unit
+    )
+    if factor is None:
+        return {}
+    samples: list[tuple[datetime, float | None]] = []
+    for state in _iter_history_states(rows):
+        state_entity_id = str(_state_value(state, "entity_id") or "")
+        if state_entity_id and state_entity_id != entity_id:
+            continue
+        timestamp = _state_timestamp(state)
+        value = _float_or_none(_state_value(state, "state"))
+        if timestamp is None or timestamp < start_dt or timestamp > end_dt:
+            continue
+        samples.append(
+            (timestamp, max(value * factor, 0.0) if value is not None else None)
+        )
+    samples.sort(key=lambda item: item[0])
+    known_values = [value for _, value in samples if value is not None]
+    if not known_values:
+        return {}
+    energy_kwh = sum(
+        ((left[1] + right[1]) / 2.0)
+        * (right[0] - left[0]).total_seconds()
+        / 3_600_000.0
+        for left, right in zip(samples, samples[1:], strict=False)
+        if left[1] is not None and right[1] is not None
+    )
+    return {
+        "median_power_w": round(float(median(known_values)), 3),
+        "measured_energy_kwh": round(energy_kwh, 6),
+    }
+
+
+def _nilm_reference_power_unit(hass: Any, entity_id: str) -> str:
+    get_state = getattr(getattr(hass, "states", None), "get", None)
+    state = get_state(entity_id) if callable(get_state) else None
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return ""
+    unit = str(attributes.get("unit_of_measurement") or "").strip()
+    device_class = str(attributes.get("device_class") or "").strip()
+    if unit not in {"W", "kW", "mW", "MW"}:
+        return ""
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return ""
+    return (
+        unit
+        if sensor_role_from_metadata(device_class=device_class, unit=unit)
+        is SensorRole.REAL_POWER
+        else ""
+    )
 
 
 async def _async_nilm_sensor_history_rows(
@@ -2266,9 +2537,10 @@ def _state_timestamp(state: Any) -> datetime | None:
 
 def _float_or_none(value: Any) -> float | None:
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
 
 
 def _service_datetime(value: Any, field_name: str) -> datetime:

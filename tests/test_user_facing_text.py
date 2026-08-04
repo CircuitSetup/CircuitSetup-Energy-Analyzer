@@ -408,7 +408,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "entry_id": "Entry ID",
     "entity_id": "Analyzer Entity",
     "goal_alert_ratio": "Goal Alert Ratio",
-    "ground_truth_entity_id": "Ground Truth Entity",
+    "ground_truth_entity_id": "Reference Entity",
     "helper_circuit_id": "Helper circuit ID",
     "label": "Label",
     "keep_assignment_for_masking": "Keep Assignment For Masking",
@@ -434,6 +434,9 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "preset": "Preset",
     "recommendation_id": "Recommendation ID",
     "relationship": "Relationship",
+    "reference_power_entity_id": "Reference Power Entity",
+    "reference_state_entity_id": "Reference State Entity",
+    "reference_threshold_w": "Reference Threshold W",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "signature_id": "Signature ID",
@@ -6214,6 +6217,102 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   assert.equal(panel._nilmActiveIntervalIndex, 2);
   assert.ok(panel._nilmLabelIntervalDraft.intervals[2].start);
   assert.ok(panel._nilmLabelIntervalDraft.intervals[2].end);
+})();
+"""
+    )
+
+
+def test_nilm_reference_sensor_controls_and_import_order() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+  const reference = {
+    state_entity_id: "switch.pump",
+    power_entity_id: null,
+    threshold_w: 25,
+    suggested_power_entity_id: "sensor.pump_power",
+    state_options: [
+      { entity_id: "switch.pump", name: "Pump switch", device_id: "device-1" },
+    ],
+    power_options: [
+      { entity_id: "sensor.pump_power", name: "Pump power", unit: "W", device_id: "device-1" },
+      { entity_id: "sensor.other_power", name: "Other power", unit: "W", device_id: "device-2" },
+    ],
+    actions: {
+      set: makeAction("set_nilm_reference_link", { circuit_id: "mixed", assignment_id: "pump" }),
+      import: makeAction("generate_nilm_sensor_label_intervals", { circuit_id: "mixed", assignment_id: "pump", label: "Pump" }),
+      remove: makeAction("remove_nilm_reference_link", { circuit_id: "mixed", assignment_id: "pump" }),
+    },
+  };
+  const item = { assignment_id: "pump", display_name: "Pump", reference };
+  const calls = [];
+  const panel = makePanel({
+    _nilmWorkspace: makeWorkspace({ assignments: [item] }),
+    _nilmReferenceDrafts: new Map(),
+    _nilmSelectedReviewKey: "assignment:pump",
+    _nilmGraphWindow: { start: Date.parse("2026-08-01T00:00:00Z"), end: Date.parse("2026-08-02T00:00:00Z") },
+    _hass: { async callService(domain, service, data) { calls.push({ domain, service, data }); } },
+  });
+  panel._render = () => {};
+  panel._refreshNilmWorkspaceData = async () => true;
+  panel._nilmWorkspaceActionContext = () => ({
+    requestId: 1, routeKey: "route", isCurrent: () => true, isRouteCurrent: () => true,
+  });
+  panel._restoreNilmIntervalScroll = () => {};
+
+  let html = panel._renderNilmReferenceSensors(item, 0);
+  assert.ok(html.includes("Reference sensors"));
+  assert.ok(!html.includes('value="sensor.pump_power" selected'));
+  assert.ok(html.includes("Pump power (suggested)"));
+  assert.ok(!html.includes('type="number"'));
+
+  panel._nilmReferenceDrafts.set("pump", {
+    stateEntityId: "",
+    powerEntityId: "sensor.other_power",
+    thresholdW: "12",
+    start: "2026-08-01T00:00",
+    end: "2026-08-02T00:00",
+    open: true,
+    error: "",
+  });
+  html = panel._renderNilmReferenceSensors(item, 0);
+  assert.ok(html.includes('value="sensor.other_power" selected'));
+  assert.ok(html.includes('type="number"'));
+  assert.ok(html.includes("<details open"));
+
+  panel._nilmReferenceDrafts.set("pump", {
+    stateEntityId: "switch.pump",
+    powerEntityId: "sensor.pump_power",
+    thresholdW: "25",
+    start: "2026-08-01T00:00",
+    end: "2026-08-02T00:00",
+    open: true,
+    error: "",
+  });
+  await panel._callNilmReferenceAction(0, "link_import");
+  assert.deepEqual(calls.map((call) => call.service), [
+    "generate_nilm_sensor_label_intervals",
+    "set_nilm_reference_link",
+  ]);
+  assert.equal(calls[0].data.ground_truth_entity_id, "switch.pump");
+  assert.equal(calls[0].data.reference_power_entity_id, "sensor.pump_power");
+  assert.equal(calls[1].data.reference_state_entity_id, "switch.pump");
+  assert.equal(panel._nilmReferenceDrafts.get("pump").open, true);
+
+  const failed = makePanel({
+    _nilmWorkspace: makeWorkspace({ assignments: [item] }),
+    _nilmReferenceDrafts: new Map([["pump", {
+      stateEntityId: "switch.pump", powerEntityId: "sensor.pump_power",
+      thresholdW: "25", start: "2026-08-01T00:00", end: "2026-08-02T00:00",
+      open: true, error: "",
+    }]]),
+    _hass: { async callService() { throw new Error("recorder failed"); } },
+  });
+  failed._render = () => {};
+  failed._nilmWorkspaceActionContext = panel._nilmWorkspaceActionContext;
+  await failed._callNilmReferenceAction(0, "link_import");
+  assert.equal(failed._nilmReferenceDrafts.get("pump").open, true);
+  assert.match(failed._nilmReferenceDrafts.get("pump").error, /recorder failed/);
 })();
 """
     )

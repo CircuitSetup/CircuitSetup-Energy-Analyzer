@@ -68,6 +68,12 @@ class NilmVirtualApplianceState:
     adjusted_session_ids: frozenset[str] = frozenset()
     reference_time: datetime | None = None
     time_zone: str = "UTC"
+    reference_available: bool = False
+    reference_state_entity_id: str | None = None
+    reference_power_entity_id: str | None = None
+    reference_measured_power_w: float | None = None
+    reference_source_entity_id: str | None = None
+    reference_fallback_to_nilm: bool = True
 
 
 def published_nilm_virtual_appliance_states(
@@ -406,6 +412,12 @@ def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
         "confidence": state.confidence,
         "model_status": state.model_status,
         "last_validation": state.last_validation,
+        "reference_available": state.reference_available,
+        "reference_state_entity_id": state.reference_state_entity_id,
+        "reference_power_entity_id": state.reference_power_entity_id,
+        "reference_measured_power_w": state.reference_measured_power_w,
+        "reference_source_entity_id": state.reference_source_entity_id,
+        "reference_fallback_to_nilm": state.reference_fallback_to_nilm,
     }
 
 
@@ -458,7 +470,14 @@ def _nilm_virtual_appliance_state(
     live_available = component_eligible and nilm_runtime_available(
         runtime, reconciliation
     )
-    is_running = runtime.get("status") == "on" if live_available else None
+    reference = nilm_reference_runtime(coordinator, assignment)
+    is_running = (
+        reference["is_running"]
+        if reference["available"]
+        else runtime.get("status") == "on"
+        if live_available
+        else None
+    )
     live_power = (
         round(_clamped_float(runtime.get("estimated_power_w")), 3)
         if live_available
@@ -550,7 +569,107 @@ def _nilm_virtual_appliance_state(
         ),
         reference_time=now,
         time_zone=time_zone,
+        reference_available=bool(reference["available"]),
+        reference_state_entity_id=(
+            str(assignment.get("reference_state_entity_id") or "") or None
+        ),
+        reference_power_entity_id=(
+            str(assignment.get("reference_power_entity_id") or "") or None
+        ),
+        reference_measured_power_w=reference["measured_power_w"],
+        reference_source_entity_id=reference["source_entity_id"],
+        reference_fallback_to_nilm=bool(reference["fallback_to_nilm"]),
     )
+
+
+def nilm_reference_runtime(
+    coordinator: Any,
+    assignment: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Resolve authoritative reference state without replacing NILM power."""
+    fallback = {
+        "available": False,
+        "is_running": None,
+        "measured_power_w": None,
+        "source_entity_id": None,
+        "fallback_to_nilm": True,
+    }
+    if str(assignment.get("lifecycle_state") or "").strip().lower() == "retired":
+        return fallback
+    state_entity_id = str(
+        assignment.get("reference_state_entity_id") or ""
+    ).strip()
+    power_entity_id = str(
+        assignment.get("reference_power_entity_id") or ""
+    ).strip()
+    if not state_entity_id and not power_entity_id:
+        return fallback
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(states, "get", None)
+    if not callable(get_state):
+        return fallback
+
+    measured_power_w = _nilm_reference_power_w(
+        get_state(power_entity_id) if power_entity_id else None,
+        power_entity_id,
+    )
+    if state_entity_id:
+        row = get_state(state_entity_id)
+        state = str(getattr(row, "state", "") or "").strip().lower()
+        if state_entity_id.partition(".")[0] in {
+            "switch",
+            "binary_sensor",
+            "input_boolean",
+        } and state in {"on", "off"}:
+            return {
+                "available": True,
+                "is_running": state == "on",
+                "measured_power_w": measured_power_w,
+                "source_entity_id": state_entity_id,
+                "fallback_to_nilm": False,
+            }
+        return {**fallback, "measured_power_w": measured_power_w}
+    if measured_power_w is None:
+        return fallback
+    threshold_w = _optional_nonnegative_float(
+        assignment.get("reference_threshold_w")
+    )
+    return {
+        "available": True,
+        "is_running": measured_power_w > (threshold_w or 0.0),
+        "measured_power_w": measured_power_w,
+        "source_entity_id": power_entity_id,
+        "fallback_to_nilm": False,
+    }
+
+
+def _nilm_reference_power_w(state: Any, entity_id: str) -> float | None:
+    if state is None or entity_id.partition(".")[0] != "sensor":
+        return None
+    attributes = getattr(state, "attributes", {})
+    if not isinstance(attributes, Mapping):
+        return None
+    unit = str(attributes.get("unit_of_measurement") or "").strip()
+    device_class = str(attributes.get("device_class") or "").strip()
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return None
+    if (
+        sensor_role_from_metadata(device_class=device_class, unit=unit)
+        is not SensorRole.REAL_POWER
+    ):
+        return None
+    try:
+        value = float(getattr(state, "state", None))
+    except (TypeError, ValueError):
+        return None
+    if not isfinite(value):
+        return None
+    factor = {"W": 1.0, "kW": 1_000.0, "mW": 0.001, "MW": 1_000_000.0}.get(
+        unit
+    )
+    if factor is None:
+        return None
+    return round(max(value * factor, 0.0), 3)
 
 
 def nilm_live_runtime(

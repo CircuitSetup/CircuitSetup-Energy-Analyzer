@@ -1263,6 +1263,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         source: str = "manual",
         confidence: float = 1.0,
         observed_transition_w: Any = None,
+        median_power_w: Any = None,
+        measured_energy_kwh: Any = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         return await self.nilm_controller.async_label_nilm_interval(
@@ -1281,6 +1283,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             source=source,
             confidence=confidence,
             observed_transition_w=observed_transition_w,
+            median_power_w=median_power_w,
+            measured_energy_kwh=measured_energy_kwh,
         )
 
     async def async_delete_nilm_label_interval(
@@ -1462,6 +1466,35 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             circuit_id,
             assignment_id,
             helper_circuit_id=helper_circuit_id,
+        )
+
+    async def async_set_nilm_reference_link(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        state_entity_id: str | None = None,
+        power_entity_id: str | None = None,
+        threshold_w: float = 0.0,
+    ) -> dict[str, Any]:
+        """Persist reference state and optional power evidence."""
+        return await self.nilm_controller.async_set_nilm_reference_link(
+            circuit_id,
+            assignment_id,
+            state_entity_id=state_entity_id,
+            power_entity_id=power_entity_id,
+            threshold_w=threshold_w,
+        )
+
+    async def async_remove_nilm_reference_link(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Remove reference entities without deleting imported intervals."""
+        return await self.nilm_controller.async_remove_nilm_reference_link(
+            circuit_id,
+            assignment_id,
         )
 
     async def async_restore_nilm_item(

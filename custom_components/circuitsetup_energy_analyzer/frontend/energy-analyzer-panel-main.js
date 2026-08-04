@@ -205,6 +205,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmDecisionDrafts = new Map();
     this._nilmSessionLabelDrafts = new Map();
     this._nilmAssignmentDrafts = new Map();
+    this._nilmReferenceDrafts = new Map();
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
     this._nilmActiveLane = "needs_review";
@@ -331,6 +332,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmDecisionDrafts.clear();
     this._nilmSessionLabelDrafts.clear();
     this._nilmAssignmentDrafts.clear();
+    this._nilmReferenceDrafts.clear();
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
     this._nilmGraphWindow = null;
