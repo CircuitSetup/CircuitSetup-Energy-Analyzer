@@ -25,6 +25,12 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     EventType,
     PowerFlowMode,
 )
+from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+    OPERATING_IDLE_SAMPLE_COUNT,
+    OPERATING_IDLE_UPPER_W,
+    OPERATING_RUNNING_LOWER_W,
+    OPERATING_RUNNING_SAMPLE_COUNT,
+)
 from custom_components.circuitsetup_energy_analyzer.settings_advisor import (
     RecommendationStatus,
     SettingRecommendation,
@@ -134,7 +140,11 @@ class _SettingsCoordinator:
         )
         self.processor_runtime = SimpleNamespace(
             learning_mature=lambda config, now: True,
+            learning_events_since_restart=(
+                lambda config, now, events=None: self.learning_events
+            ),
         )
+        self.learning_events: list[Any] = []
         self.circuit_configs = [
             SimpleNamespace(
                 circuit_id="fridge",
@@ -398,16 +408,6 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     coordinator.store_data.energy_usage_by_circuit["fridge"] = {
         "days": [{"date": "2026-06-30", "energy_kwh": 1.8}]
     }
-    coordinator.store_data.standby_by_circuit["fridge"] = {
-        "samples": [
-            {
-                "timestamp": coordinator.now.isoformat(),
-                "real_power_w": "4.5",
-                "sample_count": 3,
-            },
-            {"real_power_w": "bad"},
-        ]
-    }
     coordinator.store_data.demand_by_circuit["fridge"] = {
         "capacity_current_samples": [{"current_amps": "7.25", "sample_count": 4}],
         "samples": [{"current_a": "8.5"}],
@@ -419,6 +419,37 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
             timestamp=coordinator.now,
             features={"startup_power_w": "610"},
         )
+    ]
+    coordinator.learning_events = [
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now,
+            features={
+                OPERATING_IDLE_UPPER_W: 6.0,
+                OPERATING_RUNNING_LOWER_W: 80.0,
+                OPERATING_IDLE_SAMPLE_COUNT: 12,
+                OPERATING_RUNNING_SAMPLE_COUNT: 15,
+            },
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now - timedelta(days=1),
+            features={
+                OPERATING_IDLE_UPPER_W: 7.0,
+                OPERATING_RUNNING_LOWER_W: 90.0,
+                OPERATING_IDLE_SAMPLE_COUNT: 20,
+                OPERATING_RUNNING_SAMPLE_COUNT: 20,
+                "baseline_eligible": False,
+            },
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.STOP,
+            timestamp=coordinator.now - timedelta(days=2),
+            features={},
+        ),
     ]
     coordinator.state.leg_imbalance_evidence_by_circuit = {
         "fridge": {
@@ -442,10 +473,17 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     }
     config = coordinator.circuit_configs[0]
 
+    cycle_events: list[Any] | None = None
+
+    def _cycle_values(events: list[Any], **kwargs: Any) -> dict[str, list[int]]:
+        nonlocal cycle_events
+        cycle_events = events
+        return {RUN_CYCLE_DURATION_FEATURE: [900]}
+
     monkeypatch.setattr(
         settings_controller,
         "cycle_baseline_feature_values",
-        lambda events, **kwargs: {RUN_CYCLE_DURATION_FEATURE: [900]},
+        _cycle_values,
         raising=False,
     )
 
@@ -457,13 +495,23 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
         {"date": "2026-06-30", "energy_kwh": 1.8}
     ]
     assert history["cycles"] == [{"duration_minutes": 15.0}]
-    assert history["standby_samples_w"] == [4.5]
-    assert history["standby_sample_counts"] == [3]
+    assert cycle_events is coordinator.learning_events
+    assert history["operating_cycles"] == [
+        {
+            "timestamp": coordinator.now.isoformat(),
+            "date": coordinator.now.date().isoformat(),
+            "idle_upper_w": 6.0,
+            "running_lower_w": 80.0,
+            "idle_sample_count": 12,
+            "running_sample_count": 15,
+        }
+    ]
+    assert "operating_idle_samples" not in history
+    assert "operating_start_samples" not in history
+    assert "standby_samples_w" not in history
+    assert "standby_sample_counts" not in history
     assert history["current_samples"] == [7.25, 8.5]
     assert history["current_sample_counts"] == [4, 1]
-    assert history["operating_start_samples"] == [
-        {"timestamp": coordinator.now.isoformat(), "power_w": 610.0}
-    ]
     assert history["leg_imbalance_ratios"] == [0.12]
     assert history["dual_phase_total_power_w"] == [780]
     assert history["apparent_power_residual_percent"] == [3.5]

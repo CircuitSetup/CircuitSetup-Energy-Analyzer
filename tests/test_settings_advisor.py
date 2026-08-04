@@ -243,59 +243,39 @@ def _energy_usage_inputs(
     )
 
 
-def _operating_detection_inputs(
+def _operating_cycle_inputs(
     advisor: Any,
     *,
+    cycle_count: int = 20,
+    distinct_days: int = 7,
+    idle_upper_w: float = 12.0,
+    running_lower_w: float = 100.0,
     advanced_settings: dict[str, Any] | None = None,
     appliance_profile: str = "refrigerator",
-    circuit_mode: str = "single_phase",
-    power_flow: str = "load",
-    idle_samples: list[float] | None = None,
-    idle_sample_counts: list[int] | None = None,
-    start_samples: list[float] | None = None,
 ) -> Any:
     base = datetime(2026, 5, 25, 12, 0, tzinfo=UTC)
-    idle_values = (
-        idle_samples
-        if idle_samples is not None
-        else [4.2, 4.8, 5.1, 5.4, 5.8, 6.0, 6.2, 6.4, 6.5, 6.7, 6.8, 6.9, 7.0, 7.2]
-    )
-    start_values = (
-        start_samples
-        if start_samples is not None
-        else [84.5, 88.0, 90.0, 92.0, 96.0, 101.0]
-    )
+    cycles = [
+        {
+            "timestamp": (base + timedelta(days=index % distinct_days)).isoformat(),
+            "date": (base + timedelta(days=index % distinct_days)).date().isoformat(),
+            "idle_upper_w": idle_upper_w,
+            "running_lower_w": running_lower_w,
+            "idle_sample_count": 30,
+            "running_sample_count": 30,
+        }
+        for index in range(cycle_count)
+    ]
     return advisor.AdvisorInputs(
         now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
         context=advisor.AdvisorCircuitContext(
             circuit_id="fridge",
             circuit_name="Fridge",
             appliance_profile=appliance_profile,
-            circuit_mode=circuit_mode,
-            power_flow=power_flow,
+            circuit_mode="single_phase",
+            power_flow="load",
             advanced_settings=advanced_settings or {},
         ),
-        feature_history={
-            "operating_idle_samples": [
-                {
-                    "timestamp": (base + timedelta(hours=index * 16)).isoformat(),
-                    "real_power_w": value,
-                    **(
-                        {"sample_count": idle_sample_counts[index]}
-                        if idle_sample_counts is not None
-                        else {}
-                    ),
-                }
-                for index, value in enumerate(idle_values)
-            ],
-            "operating_start_samples": [
-                {
-                    "timestamp": (base + timedelta(days=index + 1)).isoformat(),
-                    "power_w": value,
-                }
-                for index, value in enumerate(start_values)
-            ],
-        },
+        feature_history={"operating_cycles": cycles},
     )
 
 
@@ -601,97 +581,167 @@ def test_legacy_hvac_threshold_evidence_hides_internal_context_key() -> None:
     assert recommendation_evidence_preview(recommendation.evidence) == ""
 
 
-def test_operating_detection_recommendations_use_idle_and_start_separation() -> None:
+def test_operating_recommendations_require_profile_cycles_and_seven_days() -> None:
     advisor = _advisor()
-    inputs = _operating_detection_inputs(advisor)
+
+    assert advisor.build_settings_recommendations(
+        _operating_cycle_inputs(advisor, cycle_count=19, distinct_days=7)
+    ) == []
+    assert advisor.build_settings_recommendations(
+        _operating_cycle_inputs(advisor, cycle_count=20, distinct_days=6)
+    ) == []
+
+
+def test_operating_and_standby_use_completed_cycle_boundaries() -> None:
+    advisor = _advisor()
+    recommendations = advisor.build_settings_recommendations(
+        _operating_cycle_inputs(advisor)
+    )
+
+    on = _only_setting(recommendations, "operating_on_threshold_w")
+    off = _only_setting(recommendations, "operating_off_threshold_w")
+    standby = _only_setting(recommendations, "standby_threshold_w")
+
+    assert on.suggested_value == 55.0
+    assert off.suggested_value == 20.0
+    assert standby.suggested_value == 16.0
+    assert on.evidence["completed_cycle_count"] == 20
+    assert on.evidence["distinct_learning_days"] == 7
+    assert on.evidence["idle_ceiling_w"] == 12.0
+    assert on.evidence["running_floor_w"] == 100.0
+    assert on.evidence["separation_w"] == 88.0
+    assert on.evidence["latest_cycle_at"] == "2026-05-31T12:00:00+00:00"
+    assert on.evidence["calculation_basis"] == "completed_operating_cycles"
+    assert standby.evidence == {
+        key: on.evidence[key]
+        for key in (
+            "completed_cycle_count",
+            "distinct_learning_days",
+            "idle_ceiling_w",
+            "running_floor_w",
+            "separation_w",
+            "latest_cycle_at",
+            "calculation_basis",
+        )
+    }
+    assert advisor.recommendation_evidence_fingerprint(on) == (
+        "operating_detection_thresholds:cycles=20;days=7;"
+        "idle_ceiling=12.0;running_floor=100.0"
+    )
+    assert advisor.recommendation_evidence_fingerprint(standby) == (
+        "always_on_standby:cycles=20;days=7;"
+        "idle_ceiling=12.0;running_floor=100.0"
+    )
+    assert "20 qualified completed cycles" in on.reason
+    assert "7 distinct days" in standby.reason
+
+
+def test_operating_cycles_are_not_weighted_by_sample_count() -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor)
+    inputs.feature_history["operating_cycles"][-1].update(
+        idle_upper_w=90.0,
+        idle_sample_count=100_000,
+        running_sample_count=100_000,
+    )
 
     recommendations = advisor.build_settings_recommendations(inputs)
-    on_recommendation = _only_setting(
-        recommendations,
-        "operating_on_threshold_w",
-    )
-    off_recommendation = _only_setting(
-        recommendations,
-        "operating_off_threshold_w",
-    )
 
-    assert on_recommendation.setting_label == "Turn-On Power"
-    assert on_recommendation.current_value == 25.0
-    assert on_recommendation.suggested_value == 45.0
-    assert on_recommendation.unit == "W"
-    assert on_recommendation.group == "Operating Detection"
-    assert on_recommendation.feature == "operating_detection_thresholds"
-    assert on_recommendation.evidence["idle_sample_count"] == 14
-    assert on_recommendation.evidence["running_sample_count"] == 6
-    assert on_recommendation.evidence["distinct_run_sessions"] == 6
-    assert on_recommendation.evidence["learning_days"] == 9
-    assert on_recommendation.evidence["idle_p95_w"] == 7.2
-    assert on_recommendation.evidence["running_p10_w"] == 84.5
-    assert on_recommendation.evidence["suggested_on_threshold_w"] == 45.0
-    assert on_recommendation.evidence["suggested_off_threshold_w"] == 15.0
-    assert "confirmed starts" in on_recommendation.reason
-    assert advisor.recommendation_evidence_fingerprint(on_recommendation) == (
-        "operating_detection_thresholds:days=9;idle_p95=7.2;running_p10=84.5"
-    )
-    assert on_recommendation.apply_payload == {
-        "operating_on_threshold_w": 45.0,
-        "operating_off_threshold_w": 15.0,
-    }
-
-    assert off_recommendation.setting_label == "Turn-Off Power"
-    assert off_recommendation.current_value == 10.0
-    assert off_recommendation.suggested_value == 15.0
-    assert off_recommendation.apply_payload == {
-        "operating_on_threshold_w": 45.0,
-        "operating_off_threshold_w": 15.0,
-    }
+    assert _only_setting(
+        recommendations, "operating_on_threshold_w"
+    ).suggested_value == 55.0
+    assert _only_setting(recommendations, "standby_threshold_w").suggested_value == 16.0
 
 
-def test_operating_detection_counts_compacted_idle_samples() -> None:
+def test_operating_and_standby_require_clear_cycle_separation() -> None:
     advisor = _advisor()
-    inputs = _operating_detection_inputs(
-        advisor,
-        idle_samples=[5.0, 7.0, 9.0],
-        idle_sample_counts=[20, 1, 1],
-    )
 
-    recommendation = _only_setting(
-        advisor.build_settings_recommendations(inputs),
-        "operating_on_threshold_w",
-    )
-
-    assert recommendation.evidence["idle_sample_count"] == 22
-    assert recommendation.evidence["idle_p95_w"] == 9.0
+    assert advisor.build_settings_recommendations(
+        _operating_cycle_inputs(advisor, idle_upper_w=90.0, running_lower_w=100.0)
+    ) == []
 
 
-def test_operating_detection_recommendations_require_clear_separation() -> None:
+def test_unclassified_standby_samples_do_not_change_cycle_recommendation() -> None:
     advisor = _advisor()
-    inputs = _operating_detection_inputs(
-        advisor,
-        idle_samples=[12.0, 13.0, 14.5, 15.0, 16.0, 17.0, 18.0, 18.5, 19.0],
-        start_samples=[25.0, 26.0, 27.0, 28.0, 29.0, 30.0],
-    )
-
-    setting_keys = _setting_keys(advisor.build_settings_recommendations(inputs))
-
-    assert "operating_on_threshold_w" not in setting_keys
-    assert "operating_off_threshold_w" not in setting_keys
-
-
-def test_operating_detection_recommendations_skip_near_optimal_settings() -> None:
-    advisor = _advisor()
-    inputs = _operating_detection_inputs(
-        advisor,
-        advanced_settings={
-            "operating_on_threshold_w": 45.0,
-            "operating_off_threshold_w": 15.0,
+    inputs = _operating_cycle_inputs(advisor)
+    inputs = advisor.AdvisorInputs(
+        now=inputs.now,
+        context=inputs.context,
+        feature_history={
+            **inputs.feature_history,
+            "standby_samples_w": [1_000.0] * 100,
+            "standby_sample_counts": [1_000] * 100,
         },
     )
 
-    setting_keys = _setting_keys(advisor.build_settings_recommendations(inputs))
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs), "standby_threshold_w"
+    )
 
-    assert "operating_on_threshold_w" not in setting_keys
-    assert "operating_off_threshold_w" not in setting_keys
+    assert recommendation.suggested_value == 16.0
+    assert recommendation.evidence["idle_ceiling_w"] == 12.0
+
+
+def test_legacy_operating_inputs_do_not_produce_recommendations() -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor)
+    base = datetime(2026, 5, 25, 12, 0, tzinfo=UTC)
+    inputs = advisor.AdvisorInputs(
+        now=inputs.now,
+        context=inputs.context,
+        feature_history={
+            "operating_idle_samples": [
+                {
+                    "timestamp": (base + timedelta(days=index % 7)).isoformat(),
+                    "real_power_w": 12.0,
+                }
+                for index in range(20)
+            ],
+            "operating_start_samples": [
+                {
+                    "timestamp": (base + timedelta(days=index % 7)).isoformat(),
+                    "power_w": 100.0,
+                }
+                for index in range(20)
+            ],
+        },
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
+
+
+def test_malformed_operating_cycle_does_not_satisfy_profile_minimum() -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor, cycle_count=19)
+    inputs.feature_history["operating_cycles"].append(
+        {
+            "timestamp": "not-a-timestamp",
+            "date": "2026-06-01",
+            "idle_upper_w": 12.0,
+            "running_lower_w": 100.0,
+            "idle_sample_count": 30,
+            "running_sample_count": 30,
+        }
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
+
+
+def test_operating_cycle_requires_a_learning_date() -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor, cycle_count=19)
+    inputs.feature_history["operating_cycles"].append(
+        {
+            "timestamp": "2026-06-01T12:00:00+00:00",
+            "date": None,
+            "idle_upper_w": 12.0,
+            "running_lower_w": 100.0,
+            "idle_sample_count": 30,
+            "running_sample_count": 30,
+        }
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
 
 
 def test_energy_usage_recommendation_uses_window_total_fraction() -> None:
@@ -767,51 +817,22 @@ def test_cycle_recommendation_uses_observed_runtime_pattern() -> None:
     assert "observed run cycles" in recommendation.reason
 
 
-def test_standby_recommendation_uses_low_power_distribution() -> None:
+def test_standby_recommendation_ignores_one_watt_change() -> None:
     advisor = _advisor()
-    inputs = advisor.AdvisorInputs(
-        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
-        context=advisor.AdvisorCircuitContext(
-            circuit_id="refrigerator",
-            circuit_name="Refrigerator",
-            appliance_profile="refrigerator",
-            circuit_mode="single_phase",
-            power_flow="load",
-            advanced_settings={"standby_threshold_w": 8.0},
-        ),
-        feature_history={
-            "standby_samples_w": [3.8, 4.1, 4.0, 5.2, 4.8, 4.4, 5.0, 4.6],
-            "always_on_w": [4.2, 4.4, 4.6, 4.8, 5.0, 5.1, 5.2],
+    inputs = _operating_cycle_inputs(
+        advisor,
+        idle_upper_w=190.0,
+        running_lower_w=300.0,
+        advanced_settings={
+            "standby_threshold_w": 248.0,
+            "operating_on_threshold_w": 245.0,
+            "operating_off_threshold_w": 200.0,
         },
     )
 
-    recommendation = _only_setting(
-        advisor.build_settings_recommendations(inputs),
-        "standby_threshold_w",
+    assert "standby_threshold_w" not in _setting_keys(
+        advisor.build_settings_recommendations(inputs)
     )
-
-    assert recommendation.suggested_value == 7.0
-    assert recommendation.setting_label == "Standby Power Threshold"
-    assert recommendation.group == "Standby"
-    assert recommendation.evidence["p95_standby_w"] == 5.2
-
-
-def test_standby_recommendation_ignores_one_watt_change() -> None:
-    advisor = _advisor()
-    inputs = advisor.AdvisorInputs(
-        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
-        context=advisor.AdvisorCircuitContext(
-            circuit_id="pressure_pump",
-            circuit_name="Pressure Pump",
-            appliance_profile="pump",
-            circuit_mode="single_phase",
-            power_flow="load",
-            advanced_settings={"standby_threshold_w": 248.0},
-        ),
-        feature_history={"standby_samples_w": [190.0] * 7},
-    )
-
-    assert advisor.build_settings_recommendations(inputs) == []
 
 
 def test_advisor_uses_compacted_sample_counts() -> None:
@@ -840,36 +861,6 @@ def test_advisor_uses_compacted_sample_counts() -> None:
     assert recommendation.evidence == {
         "observed_samples": 102,
         "p95_current_amps": 40.0,
-    }
-
-
-def test_standby_recommendation_uses_compacted_sample_counts() -> None:
-    advisor = _advisor()
-    inputs = advisor.AdvisorInputs(
-        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
-        context=advisor.AdvisorCircuitContext(
-            circuit_id="refrigerator",
-            circuit_name="Refrigerator",
-            appliance_profile="refrigerator",
-            circuit_mode="single_phase",
-            power_flow="load",
-            advanced_settings={"standby_threshold_w": 8.0},
-        ),
-        feature_history={
-            "standby_samples_w": [4.0, 5.0],
-            "standby_sample_counts": [100, 1],
-        },
-    )
-
-    recommendation = _only_setting(
-        advisor.build_settings_recommendations(inputs),
-        "standby_threshold_w",
-    )
-
-    assert recommendation.evidence == {
-        "observed_samples": 101,
-        "median_standby_w": 4.5,
-        "p95_standby_w": 5.0,
     }
 
 
