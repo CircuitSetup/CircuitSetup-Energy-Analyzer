@@ -6242,6 +6242,70 @@ test("NILM workspace lets the configured primary assignment be approved from Nee
   await expect(panel.locator('[data-nilm-assignment-action="confirm_primary"]')).toHaveCount(0);
 });
 
+test("NILM workspace merges a reviewed detection into the configured primary", async ({ page }) => {
+  let merged = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.circuit = { circuit_id: "hvac_1", name: "HVAC 1" };
+    payload.assignments = merged ? [{
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      lifecycle_state: "validated",
+      signature_fingerprints: ["direction=on|watts=300-400"],
+      label_interval_ids: ["label-hvac-1"],
+      confidence: 0.95,
+      actions: {},
+    }] : [{
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      lifecycle_state: "validated",
+      signature_fingerprints: ["direction=off|watts=200-300"],
+      actions: {},
+    }, {
+      assignment_id: "assignment-hvac-1",
+      display_name: "HVAC 1 (estimated)",
+      lifecycle_state: "assigned",
+      signature_fingerprints: ["direction=on|watts=300-400"],
+      label_interval_ids: ["label-hvac-1"],
+      confidence: 0.95,
+      actions: {
+        confirm_primary: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "merge_nilm_assignments",
+          data: {
+            entry_id: "entry-1",
+            circuit_id: "hvac_1",
+            source_assignment_id: "assignment-hvac-1",
+            target_assignment_id: "hvac_1-configured-primary",
+          },
+        },
+      },
+    }];
+    payload.lanes.needs_review.assignment_ids = merged ? [] : ["assignment-hvac-1"];
+    payload.lanes.assigned.assignment_ids = merged ? ["hvac_1-configured-primary"] : [];
+    payload.lane_counts.needs_review = merged ? 0 : 1;
+    payload.lane_counts.assigned = merged ? 1 : 0;
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_1");
+  await panel.locator('[data-nilm-review-item="assignment:assignment-hvac-1"]').click();
+  merged = true;
+  await panel.locator('[data-nilm-assignment-action="confirm_primary"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "merge_nilm_assignments",
+    data: {
+      entry_id: "entry-1",
+      circuit_id: "hvac_1",
+      source_assignment_id: "assignment-hvac-1",
+      target_assignment_id: "hvac_1-configured-primary",
+    },
+  });
+  await expect(panel.locator('[data-nilm-review-item="assignment:assignment-hvac-1"]')).toHaveCount(0);
+});
+
 test("NILM workspace keeps recommendations qualified and permits manual helper changes", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
@@ -6249,16 +6313,15 @@ test("NILM workspace keeps recommendations qualified and permits manual helper c
     const setAction = (helperCircuitId) => ({
       domain: "circuitsetup_energy_analyzer",
       service: "set_nilm_helper_link",
-      data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: helperCircuitId },
-      requires: ["relationship"],
+      data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: helperCircuitId, relationship: "corroborates" },
     });
     payload.assignments[0].helper_candidates = [
-      { helper_circuit_id: "ac_1", helper_name: "AC 1", matched_on_count: 8, source_on_count: 10, start_lag_seconds: 42, relationship_options: ["corroborates"], actions: { set: setAction("ac_1") } },
-      { helper_circuit_id: "weak", helper_name: "Weak zero-match circuit", matched_on_count: 0, source_on_count: 10, start_lag_seconds: 0, relationship_options: ["corroborates"], actions: { set: setAction("weak") } },
+      { helper_circuit_id: "ac_1", helper_name: "AC 1", matched_on_count: 8, source_on_count: 10, start_lag_seconds: 42, actions: { set: setAction("ac_1") } },
+      { helper_circuit_id: "weak", helper_name: "Weak zero-match circuit", matched_on_count: 0, source_on_count: 10, start_lag_seconds: 0, actions: { set: setAction("weak") } },
     ];
     payload.assignments[0].helper_options = [
-      { helper_circuit_id: "ac_1", helper_name: "AC 1", relationship_options: ["corroborates"], actions: { set: setAction("ac_1") } },
-      { helper_circuit_id: "ac_2", helper_name: "AC 2", relationship_options: ["corroborates", "direct_component"], actions: { set: setAction("ac_2") } },
+      { helper_circuit_id: "ac_1", helper_name: "AC 1", actions: { set: setAction("ac_1") } },
+      { helper_circuit_id: "ac_2", helper_name: "AC 2", actions: { set: setAction("ac_2") } },
     ];
     payload.assignments[0].helper_links = [{
       helper_circuit_id: "old_helper",
@@ -6284,12 +6347,12 @@ test("NILM workspace keeps recommendations qualified and permits manual helper c
   const helperEvidence = panel.locator("[data-nilm-helper-list]");
   await expect(helperEvidence.locator('[data-nilm-helper-circuit-id="ac_1"] button[aria-pressed]')).toBeVisible();
   await expect(helperEvidence.getByText("Weak zero-match circuit", { exact: true })).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-helper-relationship]")).toHaveCount(0);
   await panel.locator("[data-nilm-helper-option]").selectOption("ac_2");
-  await panel.locator("[data-nilm-helper-relationship]").selectOption("direct_component");
   await panel.locator("[data-nilm-assignment-action=helper_manual]").click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
     service: "set_nilm_helper_link",
-    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "ac_2", relationship: "direct_component" },
+    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "ac_2", relationship: "corroborates" },
   });
   await panel.locator('[data-nilm-helper-circuit-id="old_helper"] [data-nilm-assignment-action^="helper_remove"]').click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
@@ -6900,6 +6963,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   const secondary = panel.locator("[data-nilm-secondary-details]");
   await secondary.locator("summary").click();
   await panel.locator('[data-nilm-session-action="validate"]').click();
+  await expect(secondary).toHaveJSProperty("open", true);
 
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();

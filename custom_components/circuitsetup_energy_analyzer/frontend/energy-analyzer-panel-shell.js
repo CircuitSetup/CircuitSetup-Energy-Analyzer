@@ -1503,6 +1503,12 @@ export class PanelShellMethods {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
+    const nilmSecondaryDetails = this.shadowRoot.querySelector("[data-nilm-secondary-details]");
+    if (nilmSecondaryDetails) {
+      nilmSecondaryDetails.addEventListener("toggle", () => {
+        this._nilmSecondaryDetailsOpen = nilmSecondaryDetails.open;
+      });
+    }
     this._listen("[data-nilm-sensitivity-action]", () => this._applyNilmSensitivity());
     for (const select of this.shadowRoot.querySelectorAll("[data-nilm-source-picker]")) {
       select.addEventListener("change", () => this._navigate(select.value));
@@ -1644,9 +1650,6 @@ export class PanelShellMethods {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
-    }
-    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-helper-option]")) {
-      input.addEventListener("change", () => this._syncNilmHelperRelationship(input));
     }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));

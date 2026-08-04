@@ -9795,6 +9795,7 @@ async def test_nilm_virtual_needs_validation_notification_uses_review_category(
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
+        entry_id="entry-1",
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={
                 "mains": [
@@ -9823,6 +9824,7 @@ async def test_nilm_virtual_needs_validation_notification_uses_review_category(
     assert sent_notifications[0].features["notification_key"] == (
         "assignment-dishwasher:needs_validation"
     )
+    assert sent_notifications[0].features["entry_id"] == "entry-1"
 
 
 @pytest.mark.asyncio

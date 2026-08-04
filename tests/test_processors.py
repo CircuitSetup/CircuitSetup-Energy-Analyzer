@@ -8196,6 +8196,80 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
     ]
 
 
+def test_nilm_session_specs_do_not_let_placeholder_or_off_edges_own_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_specs,
+    )
+
+    assert _nilm_session_specs(
+        [
+            {"signature_id": "on-pump", "direction": "on"},
+            {"signature_id": "off-pump", "direction": "off"},
+        ],
+        [
+            {
+                "assignment_id": "broken",
+                "signature_fingerprints": ["unassigned", "off-pump"],
+            }
+        ],
+    ) == [("on-pump", None)]
+
+
+def test_placeholder_assignment_does_not_starve_three_recurring_load_groups() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        cluster_recurring_signatures,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _recover_unassigned_session_edges,
+        _runtime_assignment_model,
+    )
+
+    assignment = {
+        "assignment_id": "broken",
+        "signature_fingerprints": ["unassigned"],
+        "power_states_w": [0.0, 80.0],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 80.0,
+                "delta_w": 80.0,
+                "spread_w": 2.0,
+                "sample_count": 3,
+            }
+        ],
+    }
+    start = datetime(2026, 8, 4, tzinfo=UTC)
+    sessions = [
+        {
+            "signature_fingerprint": "unassigned",
+            "start": (start + timedelta(minutes=index)).isoformat(),
+            "on_delta_w": watts,
+            "on_delta_var": reactive,
+        }
+        for index, (watts, reactive) in enumerate(
+            [(80.0, 18.0), (82.0, 19.0), (84.0, 20.0),
+             (185.0, 65.0), (190.0, 68.0), (195.0, 70.0),
+             (315.0, 115.0), (320.0, 120.0), (325.0, 125.0)]
+        )
+    ]
+    edges = _recover_unassigned_session_edges(sessions, since=start)
+    hidden_edges = _recover_unassigned_session_edges(
+        [{**sessions[0], "assignment_id": "hidden"}],
+        since=start,
+        excluded_assignment_ids={"hidden"},
+    )
+
+    assert _runtime_assignment_model(assignment).transition_prototypes == ()
+    assert all(isinstance(edge, NilmEdge) for edge in edges)
+    assert hidden_edges == []
+    assert [
+        round(signature.median_delta_w)
+        for signature in cluster_recurring_signatures(edges)
+    ] == [82, 190, 320]
+
+
 def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (

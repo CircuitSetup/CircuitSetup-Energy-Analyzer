@@ -1521,12 +1521,6 @@ export function createNilmWorkspaceMethods({
       : evidence.actions && evidence.actions.set;
     if (!this._guardActionCall(action, `NILM helper ${kind}`)) return;
     const data = { ...(action.data || {}) };
-    if (kind === "set") {
-      const select = this.shadowRoot.querySelector(manual
-        ? `#nilm_helper_manual_relationship_${index}`
-        : `#nilm_helper_relationship_${index}_${offset}`);
-      data.relationship = select && select.value;
-    }
     await this._hass.callService(action.domain, action.service, data);
     const selected = new Set(this._nilmSelectedHelpers[assignment.assignment_id] || []);
     kind === "remove"
@@ -1549,7 +1543,7 @@ export function createNilmWorkspaceMethods({
         <button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_${confirmed ? "togglelink" : "toggle"}_${offset}" aria-pressed="${selected}" aria-label="${this._escape(this._panelTextFormat("nilm_workspace.helper_toggle", { name }))}">${this._escape(name)}</button>
         <span>${this._escape(this._panelTextFormat("nilm_workspace.helper_matched_starts", { matched: item.matched_on_count, total: item.source_on_count, name }))}</span>
         <span>${this._escape(this._panelTextFormat("nilm_workspace.helper_start_delay", { seconds: this._formatMetricValue(item.start_lag_seconds) }))}</span>
-        ${confirmed ? `<span>${this._escape(this._panelText(`nilm_workspace.helper_relationship_${item.relationship}`))}</span><button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_remove_${offset}">${this._escape(this._panelText("nilm_workspace.helper_remove"))}</button>` : `<label for="nilm_helper_relationship_${index}_${offset}">${this._escape(this._panelText("nilm_workspace.helper_relationship"))}</label><select style="max-width:100%" id="nilm_helper_relationship_${index}_${offset}">${(item.relationship_options || []).map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("")}</select><button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_set_${offset}">${this._escape(this._panelText("nilm_workspace.helper_confirm"))}</button>`}
+        ${confirmed ? `<span>${this._escape(this._panelText(`nilm_workspace.helper_relationship_${item.relationship}`))}</span><button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_remove_${offset}">${this._escape(this._panelText("nilm_workspace.helper_remove"))}</button>` : `<span class="muted">${this._escape(this._panelText("nilm_workspace.helper_relationship_corroborates"))}</span><button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_set_${offset}">${this._escape(this._panelText("nilm_workspace.helper_confirm"))}</button>`}
       </div>`;
     };
     const candidates = (assignment.helper_candidates || [])
@@ -1558,34 +1552,16 @@ export function createNilmWorkspaceMethods({
         && Number(item.matched_on_count) > 0
         && Number(item.source_on_count) > 0);
     const helperOptions = Array.isArray(assignment.helper_options) ? assignment.helper_options : [];
-    const firstOption = helperOptions[0] || {};
     const manual = helperOptions.length ? `<div class="nilm-helper-manual">
       <h3>${this._escape(this._panelText("nilm_workspace.helper_manual"))}</h3>
       <label for="nilm_helper_option_${index}">${this._escape(this._panelText("nilm_workspace.helper_select"))}</label>
       <select id="nilm_helper_option_${index}" data-nilm-helper-option data-nilm-assignment-index="${index}">
-        ${helperOptions.map((item) => `<option value="${this._escape(item.helper_circuit_id || "")}" data-relationships="${this._escape(JSON.stringify(item.relationship_options || []))}">${this._escape(item.helper_name || item.helper_circuit_id || "")}</option>`).join("")}
+        ${helperOptions.map((item) => `<option value="${this._escape(item.helper_circuit_id || "")}">${this._escape(item.helper_name || item.helper_circuit_id || "")}</option>`).join("")}
       </select>
-      <label for="nilm_helper_manual_relationship_${index}">${this._escape(this._panelText("nilm_workspace.helper_relationship"))}</label>
-      <select id="nilm_helper_manual_relationship_${index}" data-nilm-helper-relationship>
-        ${(firstOption.relationship_options || []).map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("")}
-      </select>
+      <span class="muted">${this._escape(this._panelText("nilm_workspace.helper_relationship_corroborates"))}</span>
       <button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_manual">${this._escape(this._panelText("nilm_workspace.helper_set"))}</button>
     </div>` : "";
     return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
-  }
-
-  _syncNilmHelperRelationship(input) {
-    const option = input.selectedOptions && input.selectedOptions[0];
-    const index = input.dataset.nilmAssignmentIndex;
-    const select = this.shadowRoot.querySelector(`#nilm_helper_manual_relationship_${index}`);
-    if (!option || !select) return;
-    let relationships = [];
-    try {
-      relationships = JSON.parse(option.dataset.relationships || "[]");
-    } catch (_error) {
-      relationships = [];
-    }
-    select.innerHTML = relationships.map((relationship) => `<option value="${this._escape(relationship)}">${this._escape(this._panelText(`nilm_workspace.helper_relationship_${relationship}`))}</option>`).join("");
   }
 
   async _callNilmConfiguredPrimaryAction() {
@@ -1913,7 +1889,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _renderNilmSecondaryCollections(workspace) {
-    return `<details class="disclosure section-surface" data-nilm-secondary-details>
+    return `<details class="disclosure section-surface" data-nilm-secondary-details${this._nilmSecondaryDetailsOpen ? " open" : ""}>
       <summary>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</summary>
       <div class="disclosure-content">
         ${this._renderNilmSessionValidationCards(workspace)}

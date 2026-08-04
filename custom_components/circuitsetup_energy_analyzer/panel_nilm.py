@@ -28,6 +28,7 @@ from .nilm import (
     NilmSession,
     nilm_display_name,
     nilm_session_to_dict,
+    nilm_signature_is_assignable,
     pair_nilm_sessions_for_signatures,
     resolve_nilm_signature_fingerprint,
 )
@@ -1104,6 +1105,8 @@ def _nilm_configured_primary_payload(
             fingerprint_text = str(fingerprint or "").strip()
             if not fingerprint_text:
                 continue
+            if not nilm_signature_is_assignable(fingerprint_text):
+                continue
             current_identifiers.add(fingerprint_text)
             signature = next(
                 (
@@ -1113,7 +1116,13 @@ def _nilm_configured_primary_payload(
                 ),
                 None,
             )
-            if signature is not None and current_binding is None:
+            if (
+                signature is not None
+                and nilm_signature_is_assignable(
+                    _nilm_signature_session_fingerprint(signature)
+                )
+                and current_binding is None
+            ):
                 current_signature = signature
                 current_binding = {
                     ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
@@ -1128,7 +1137,9 @@ def _nilm_configured_primary_payload(
             ),
             None,
         )
-        if signature is not None:
+        if signature is not None and nilm_signature_is_assignable(
+            _nilm_signature_session_fingerprint(signature)
+        ):
             current_signature = signature
             current_identifiers.update(_nilm_signature_identifiers(signature))
             current_binding = {
@@ -1151,6 +1162,10 @@ def _nilm_configured_primary_payload(
         confidence = _clamped_float(signature.get("confidence"), default=0.0)
         watts = abs(_clamped_float(signature.get("typical_watts"), default=0.0))
         if (
+            not nilm_signature_is_assignable(
+                _nilm_signature_session_fingerprint(signature)
+            )
+            or
             _nilm_review_state(signature) in {"expected", "ignored", "merged"}
             or identifiers & competing
             or identifiers & current_identifiers
@@ -1259,7 +1274,6 @@ def _add_nilm_helper_evidence(
             )
             option = helper_options_by_id[item[ATTR_HELPER_CIRCUIT_ID]]
             item.setdefault("helper_name", option["helper_name"])
-            item["relationship_options"] = option["relationship_options"]
             item["actions"] = {
                 "set": {
                     "domain": DOMAIN,
@@ -1268,8 +1282,8 @@ def _add_nilm_helper_evidence(
                         ATTR_CIRCUIT_ID: circuit_id,
                         ATTR_ASSIGNMENT_ID: assignment_id,
                         ATTR_HELPER_CIRCUIT_ID: item[ATTR_HELPER_CIRCUIT_ID],
+                        ATTR_RELATIONSHIP: "corroborates",
                     },
-                    "requires": [ATTR_RELATIONSHIP],
                 }
             }
         for item in links:
@@ -1302,8 +1316,8 @@ def _add_nilm_helper_evidence(
                             ATTR_CIRCUIT_ID: circuit_id,
                             ATTR_ASSIGNMENT_ID: assignment_id,
                             ATTR_HELPER_CIRCUIT_ID: option[ATTR_HELPER_CIRCUIT_ID],
+                            ATTR_RELATIONSHIP: "corroborates",
                         },
-                        "requires": [ATTR_RELATIONSHIP],
                     }
                 },
             }
@@ -1337,7 +1351,6 @@ def _nilm_helper_options(
             {
                 ATTR_HELPER_CIRCUIT_ID: helper.circuit_id,
                 "helper_name": helper.name,
-                "relationship_options": ["corroborates"],
             }
         )
     return options
@@ -1365,6 +1378,7 @@ def _nilm_assignment_payload(
     label_intervals: Iterable[Mapping[str, Any]] = (),
     configured_circuit_names: Iterable[str] = (),
 ) -> dict[str, Any]:
+    assignments = tuple(assignments)
     payload = {str(key): value for key, value in assignment.items() if key != "actions"}
     if payload.get("display_name"):
         payload["display_name"] = nilm_display_name(
@@ -1416,6 +1430,28 @@ def _nilm_assignment_payload(
                 "domain": DOMAIN,
                 "service": SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
                 "data": dict(action_data),
+            }
+        primary_id = configured_primary_assignment_id(circuit_id)
+        if (
+            assignment_id != primary_id
+            and state
+            in {"assigned", "needs_validation", "validated", "ready_to_publish"}
+            and any(
+                item.get(ATTR_ASSIGNMENT_ID) == primary_id for item in assignments
+            )
+            and any(
+                nilm_signature_is_assignable(value)
+                for value in _iter_items(payload.get("signature_fingerprints"))
+            )
+        ):
+            actions["confirm_primary"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_MERGE_NILM_ASSIGNMENTS,
+                "data": {
+                    ATTR_CIRCUIT_ID: circuit_id,
+                    ATTR_SOURCE_ASSIGNMENT_ID: assignment_id,
+                    ATTR_TARGET_ASSIGNMENT_ID: primary_id,
+                },
             }
         target_options = _nilm_assignment_target_options(assignment_id, assignments)
         if target_options:
@@ -2372,6 +2408,7 @@ def _nilm_workspace_session_specs(
         fingerprints = {
             resolved
             for value in saved_fingerprints
+            if nilm_signature_is_assignable(value)
             if (resolved := resolve_nilm_signature_fingerprint(value, signatures))
         }
         if _nilm_assignment_hidden(assignment):
@@ -2388,6 +2425,7 @@ def _nilm_workspace_session_specs(
         key = (fingerprint, None)
         if (
             fingerprint
+            and nilm_signature_is_assignable(fingerprint)
             and not _nilm_signature_hidden(signature)
             and fingerprint not in hidden_fingerprints
             and fingerprint not in seen_fingerprints
@@ -2395,9 +2433,7 @@ def _nilm_workspace_session_specs(
         ):
             specs.append(key)
             seen.add(key)
-    if specs or signatures or assignments:
-        return specs
-    return [(_nilm_workspace_signature_fingerprint(signatures), None)]
+    return specs
 
 
 def _nilm_workspace_visible_sessions(
@@ -2530,6 +2566,13 @@ def _nilm_session_display_labels(
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
         if assignment_id:
             labels[assignment_id] = label
+        fingerprints = [
+            str(value or "").strip()
+            for value in _iter_items(assignment.get("signature_fingerprints"))
+            if str(value or "").strip()
+        ]
+        if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
+            continue
         for field in ("signature_fingerprints", "session_ids"):
             for value in _iter_items(assignment.get(field)):
                 key = str(value or "").strip()
@@ -2589,24 +2632,28 @@ def _nilm_session_payload_with_actions(
 ) -> dict[str, Any]:
     session_id = str(payload.get("session_id") or "").strip()
     circuit_id = str(payload.get("mains_circuit_id") or "").strip()
+    signature_fingerprint = str(payload.get("signature_fingerprint") or "").strip()
+    if signature_fingerprint and not nilm_signature_is_assignable(
+        signature_fingerprint
+    ):
+        payload.pop(ATTR_ASSIGNMENT_ID, None)
     if session_id and circuit_id:
         data = {
             ATTR_CIRCUIT_ID: circuit_id,
             ATTR_SESSION_ID: session_id,
         }
-        signature_fingerprint = str(payload.get("signature_fingerprint") or "").strip()
-        if signature_fingerprint:
+        if nilm_signature_is_assignable(signature_fingerprint):
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
-        payload["actions"] = {
-            "assign": {
-                "domain": DOMAIN,
-                "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
-                "data": data,
-                "requires": [ATTR_LABEL],
+            payload["actions"] = {
+                "assign": {
+                    "domain": DOMAIN,
+                    "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+                    "data": data,
+                    "requires": [ATTR_LABEL],
+                }
             }
-        }
         assignment_id = str(payload.get("assignment_id") or "").strip()
-        if assignment_id and (
+        if assignment_id and "actions" in payload and (
             reviewed_session_ids is None
             or (
                 assignment_id in reviewed_session_ids
@@ -2629,14 +2676,6 @@ def _nilm_session_payload_with_actions(
                 "data": dict(action_data),
             }
     return payload
-
-
-def _nilm_workspace_signature_fingerprint(signatures: list[dict[str, Any]]) -> str:
-    for signature in signatures:
-        signature_id = _nilm_signature_session_fingerprint(signature)
-        if signature_id:
-            return signature_id
-    return "unassigned"
 
 
 def _bounded_float(
