@@ -1987,7 +1987,7 @@
         "reset_zoom": "Reset zoom",
         "graph_times": "Graph times shown in {time_zone}.",
         "point_title": "{name}: {value}{unit} at {time}",
-        "session_title": "{label} ({session_id})",
+        "session_title": "{label}",
         "session_confidence": ", confidence {confidence}%",
         "changed_by": "{feature} changed by {percent}%.",
         "changed_metrics": "Changed metrics: {metrics}.",

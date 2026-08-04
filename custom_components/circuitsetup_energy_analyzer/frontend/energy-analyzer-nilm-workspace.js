@@ -2531,8 +2531,8 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmSessionGraphLabel(session) {
-    const label = session && (session.display_label || session.display_name || session.appliance_id || session.assignment_id || session.session_id);
-    return String(label || "").trim();
+    const label = session && (session.display_label || session.display_name || session.appliance_id || session.assignment_id);
+    return String(label || this._panelText("common.unknown_load")).trim();
   }
 
   _truncateNilmGraphLabel(label, maxLength) {

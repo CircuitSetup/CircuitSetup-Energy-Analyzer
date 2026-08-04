@@ -4466,6 +4466,40 @@ assert.ok(!svg.includes('data-nilm-edge-direction="falling_outside"'));
     )
 
 
+def test_nilm_graph_uses_appliance_names_without_raw_session_metadata() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._hass = { config: { time_zone: "UTC" } };
+const rawSessionId = "hvac_2_direction_off_watts_0_100_var_0_100_va_0_100_pf_0_10";
+assert.equal(
+  panel._nilmSessionGraphLabel({ session_id: rawSessionId }),
+  "Unknown load",
+);
+const html = panel._chartSvg(
+  [{ name: "HVAC 2", points: [
+    { time: Date.parse("2026-08-04T08:00:00Z"), value: 20 },
+    { time: Date.parse("2026-08-04T09:00:00Z"), value: 102 },
+  ] }],
+  {
+    graph_window_start: "2026-08-04T08:00:00Z",
+    graph_window_end: "2026-08-04T09:00:00Z",
+    y_axis_label: "W",
+    nilm_sessions: [{
+      session_id: rawSessionId,
+      display_label: "Condensate Pump 2",
+      start: "2026-08-04T08:10:00Z",
+      end: "2026-08-04T08:30:00Z",
+      selected: true,
+    }],
+  },
+);
+assert.ok(html.includes('data-nilm-session-label="Condensate Pump 2"'));
+assert.ok(!html.includes(rawSessionId));
+"""
+    )
+
+
 def test_dashboard_graphs_custom_card_asset_is_registered() -> None:
     asset = _frontend_source()
 

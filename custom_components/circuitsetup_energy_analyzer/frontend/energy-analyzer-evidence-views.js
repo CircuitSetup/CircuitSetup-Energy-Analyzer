@@ -656,8 +656,7 @@ export function createEvidenceViewMethods({
       const bandWidth = Math.max(right - left, 1);
       const label = this._nilmSessionGraphLabel(session);
       const visibleLabel = bandWidth >= 56 ? this._truncateNilmGraphLabel(label, Math.floor((bandWidth - 10) / 7)) : "";
-      const sessionId = session.session_id || this._panelText("nilm_workspace.nilm_session");
-      const title = label ? this._panelTextFormat("chart.session_title", { label, session_id: sessionId }) : sessionId;
+      const title = this._panelTextFormat("chart.session_title", { label });
       const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
       return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${selectedAttr}${kindAttr}${draftAttr}${labelIntervalAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
     }).join("");

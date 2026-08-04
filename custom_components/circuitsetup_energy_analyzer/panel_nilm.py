@@ -2576,6 +2576,10 @@ def _nilm_session_display_labels(
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
         if assignment_id:
             labels[assignment_id] = label
+        for value in _iter_items(assignment.get("session_ids")):
+            key = str(value or "").strip()
+            if key:
+                labels[key] = label
         fingerprints = [
             str(value or "").strip()
             for value in _iter_items(assignment.get("signature_fingerprints"))
@@ -2583,11 +2587,8 @@ def _nilm_session_display_labels(
         ]
         if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
             continue
-        for field in ("signature_fingerprints", "session_ids"):
-            for value in _iter_items(assignment.get(field)):
-                key = str(value or "").strip()
-                if key:
-                    labels[key] = label
+        for key in fingerprints:
+            labels[key] = label
     return labels
 
 

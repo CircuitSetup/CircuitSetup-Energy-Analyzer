@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-4"
+    assert PANEL_MODULE_VERSION == "20260804-5"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -5321,6 +5321,32 @@ def test_nilm_sensitivity_uses_latest_three_ordered_observations() -> None:
     assert _nilm_sensitivity_recommendation("balanced", 100.0, intervals) == (
         "sensitive"
     )
+
+
+def test_nilm_session_labels_keep_explicit_legacy_assignment_name() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _add_nilm_session_display_labels,
+        _nilm_session_display_labels,
+    )
+
+    session_id = "hvac_2_direction_off_watts_0_100_var_0_100"
+    labels = _nilm_session_display_labels(
+        [],
+        [
+            {
+                "assignment_id": "assignment-pump",
+                "display_name": "Condensate Pump 2",
+                "signature_fingerprints": ["direction=off|watts=0-100|var=0-100"],
+                "session_ids": [session_id],
+            }
+        ],
+    )
+
+    assert _add_nilm_session_display_labels(
+        [{"session_id": session_id}], labels
+    ) == [
+        {"session_id": session_id, "display_label": "Condensate Pump 2"}
+    ]
 
 
 def test_nilm_sensitivity_orders_observations_by_absolute_time() -> None:
