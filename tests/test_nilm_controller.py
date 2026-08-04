@@ -34,15 +34,30 @@ def test_off_only_nilm_assignment_cannot_publish() -> None:
         nilm_assignment_publication_reason(
             {
                 "assignment_id": "assignment-pump",
-                "lifecycle_state": "validated",
+                "lifecycle_state": "published",
+                "publish_entities": True,
                 "signature_fingerprints": [
                     "direction=off|watts=0-100|var=0-100|va=0-100|pf=unknown|"
-                    "split=unknown|leg=unknown|balance=unknown"
+                    "split=unknown|leg=unknown|balance=unknown",
+                    "unassigned",
                 ],
             }
         )
         == "Bind a complete ON/OFF component before publishing."
     )
+
+
+@pytest.mark.asyncio
+async def test_synthetic_unassigned_session_cannot_be_assigned() -> None:
+    controller = _nilm_controller(object())
+
+    with pytest.raises(ValueError, match="complete detected component"):
+        await controller.async_assign_nilm_session(
+            "mains",
+            "session-unassigned",
+            label="Pump",
+            signature_fingerprint="unassigned",
+        )
 
 
 def test_nilm_controller_filters_known_load_events_from_registry() -> None:
@@ -1086,6 +1101,53 @@ async def test_assignment_merge_reowns_history_before_model_rebuild() -> None:
     assert history[0]["assignment_id"] == "target"
     assert merged["power_states_w"] == [0.0, 90.0]
     assert merged["transition_prototypes"][0]["sample_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_configured_primary_merge_keeps_labels_and_drops_invalid_binding(
+) -> None:
+    async def noop(*_args: object) -> None:
+        return None
+
+    target_id = configured_primary_assignment_id("hvac_1")
+    assignments = [
+        {
+            "assignment_id": "reviewed-hvac",
+            "signature_fingerprints": ["direction=on|watts=300-400"],
+            "label_interval_ids": ["label-hvac"],
+        },
+        {
+            "assignment_id": target_id,
+            "signature_fingerprints": ["direction=off|watts=200-300"],
+        },
+    ]
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 8, 4, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"hvac_1": assignments},
+            nilm_label_intervals_by_circuit={
+                "hvac_1": [
+                    {"interval_id": "label-hvac", "assignment_id": "reviewed-hvac"}
+                ]
+            },
+        ),
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=noop
+        ),
+        config_entry_controller=SimpleNamespace(async_reload=noop),
+    )
+
+    merged = await _nilm_controller(coordinator).async_merge_nilm_assignments(
+        "hvac_1", "reviewed-hvac", target_id
+    )
+
+    assert merged["signature_fingerprints"] == ["direction=on|watts=300-400"]
+    assert merged["label_interval_ids"] == ["label-hvac"]
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["hvac_1"][0][
+        "assignment_id"
+    ] == target_id
 
 
 @pytest.mark.asyncio

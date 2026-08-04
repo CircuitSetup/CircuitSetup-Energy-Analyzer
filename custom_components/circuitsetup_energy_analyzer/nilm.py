@@ -1234,6 +1234,16 @@ def nilm_signature_is_off_direction(value: Any) -> bool:
     return text == "off" or text.startswith(("off-", "direction=off|"))
 
 
+def nilm_signature_is_assignable(value: Any) -> bool:
+    """Return whether a signature can own a detected appliance component."""
+    text = str(value or "").strip()
+    return (
+        bool(text)
+        and text.casefold() != "unassigned"
+        and not nilm_signature_is_off_direction(text)
+    )
+
+
 def resolve_nilm_signature_fingerprint(
     saved_fingerprint: str,
     signatures: Iterable[Mapping[str, Any]],

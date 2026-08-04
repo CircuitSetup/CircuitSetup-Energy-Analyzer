@@ -14,7 +14,7 @@ from ..models import AlertEvidence, ApplianceProfile, CircuitMode, NilmSourceKin
 from ..nilm import (
     NilmEdge,
     build_nilm_assignment_model,
-    nilm_signature_is_off_direction,
+    nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
 )
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
@@ -36,6 +36,9 @@ def nilm_assignment_publication_reason(
         return "Restore or assign this expected load before publishing."
     if state in {"ignored", "retired"}:
         return "Restore this hidden load before publishing."
+    fingerprints = _clean_string_list(assignment.get("signature_fingerprints"))
+    if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
+        return "Bind a complete ON/OFF component before publishing."
     if assignment.get("publish_entities") is True or state == "published":
         return None
     if state not in {"assigned", "validated", "ready_to_publish"}:
@@ -46,9 +49,6 @@ def nilm_assignment_publication_reason(
         or assignment_id.endswith("-configured-primary")
     ) and not _clean_string_list(assignment.get("signature_fingerprints")):
         return "Bind the configured primary signature before publishing."
-    fingerprints = _clean_string_list(assignment.get("signature_fingerprints"))
-    if fingerprints and all(map(nilm_signature_is_off_direction, fingerprints)):
-        return "Bind a complete ON/OFF component before publishing."
     if not any(
         _clean_string_list(assignment.get(key))
         for key in ("signature_fingerprints", "session_ids", "label_interval_ids")
@@ -737,6 +737,12 @@ class NilmController:
         session_id_text = str(session_id or "").strip()
         if not session_id_text:
             raise ValueError("Missing session_id.")
+        if signature_fingerprint is not None and not nilm_signature_is_assignable(
+            signature_fingerprint
+        ):
+            raise ValueError(
+                "Assign a complete detected component, not a raw edge session."
+            )
         coordinator = self._coordinator
         assignment = self.upsert_assignment(
             circuit_id,
@@ -1919,6 +1925,14 @@ class NilmController:
             values = target.setdefault(key, [])
             for value in self._clean_string_list(source.get(key)):
                 self._append_unique(values, value)
+        if target_id == configured_primary_assignment_id(circuit_id):
+            target["signature_fingerprints"] = [
+                value
+                for value in self._clean_string_list(
+                    target.get("signature_fingerprints")
+                )
+                if nilm_signature_is_assignable(value)
+            ]
         confirmed = self._clean_string_list(target.get("confirmed_session_ids"))
         rejected = self._clean_string_list(target.get("rejected_session_ids"))
         target_confirmed_set = set(target_confirmed)

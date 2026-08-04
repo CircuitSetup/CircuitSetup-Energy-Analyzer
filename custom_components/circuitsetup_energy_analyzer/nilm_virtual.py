@@ -21,7 +21,7 @@ from .nilm import (
     build_nilm_appliance_identity,
     evaluate_nilm_validation_readiness,
     nilm_session_to_dict,
-    nilm_signature_is_off_direction,
+    nilm_signature_is_assignable,
     pair_nilm_sessions_for_signatures,
     summarize_nilm_assignment_sessions,
 )
@@ -51,6 +51,7 @@ class NilmVirtualApplianceState:
     model_status: str
     mains_circuit_id: str
     mains_source: str | None = None
+    entry_id: str = ""
     appliance_profile: str | None = None
     last_validation: str | None = None
     appliance_key: str = ""
@@ -416,13 +417,21 @@ def _nilm_virtual_appliance_state(
     circuit_sessions: Iterable[NilmSession],
 ) -> NilmVirtualApplianceState | None:
     assignment_id = str(assignment.get("assignment_id") or "").strip()
+    fingerprints = [
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    ]
+    component_eligible = not fingerprints or any(
+        map(nilm_signature_is_assignable, fingerprints)
+    )
     if not assignment_id:
         return None
     derived_sessions = [
         session
         for session in circuit_sessions
         if session.assignment_id == assignment_id
-    ]
+    ] if component_eligible else []
     session_payloads = _merged_assignment_session_payloads(
         coordinator,
         circuit_id,
@@ -446,7 +455,9 @@ def _nilm_virtual_appliance_state(
         ),
     )
     runtime, reconciliation = nilm_live_runtime(coordinator, circuit_id, assignment_id)
-    live_available = nilm_runtime_available(runtime, reconciliation)
+    live_available = component_eligible and nilm_runtime_available(
+        runtime, reconciliation
+    )
     is_running = runtime.get("status") == "on" if live_available else None
     live_power = (
         round(_clamped_float(runtime.get("estimated_power_w")), 3)
@@ -494,6 +505,7 @@ def _nilm_virtual_appliance_state(
         model_status=nilm_model_status(assignment, reconciliation),
         mains_circuit_id=identity.mains_circuit_id or circuit_id,
         mains_source=identity.mains_source_entity_id,
+        entry_id=str(getattr(coordinator, "entry_id", "") or ""),
         appliance_profile=identity.appliance_profile,
         last_validation=(
             str(assignment.get("last_validation"))
@@ -616,6 +628,13 @@ def _merged_assignment_session_payloads(
     derived_sessions: Iterable[NilmSession],
 ) -> list[dict[str, Any]]:
     assignment_id = str(assignment.get("assignment_id") or "").strip()
+    fingerprints = [
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    ]
+    if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
+        return []
     session_ids = {
         str(value or "").strip()
         for value in _iter_items(assignment.get("session_ids"))
@@ -628,7 +647,12 @@ def _merged_assignment_session_payloads(
     for session in _iter_items(stored):
         if not isinstance(session, Mapping):
             continue
-        if nilm_signature_is_off_direction(session.get("signature_fingerprint")):
+        session_fingerprint = str(
+            session.get("signature_fingerprint") or ""
+        ).strip()
+        if session_fingerprint and not nilm_signature_is_assignable(
+            session_fingerprint
+        ):
             continue
         session_id = str(session.get("session_id") or "").strip()
         owner = str(session.get("assignment_id") or "").strip()
@@ -776,6 +800,7 @@ def _nilm_alert_features(
         str(getattr(state, "appliance_key", "") or "") or f"nilm:{assignment_id}"
     )
     mains_circuit_id = str(getattr(state, "mains_circuit_id", "") or "")
+    entry_id = str(getattr(state, "entry_id", "") or "")
     session_id = str(
         getattr(state, "active_session_id", "")
         or getattr(state, "latest_session_id", "")
@@ -814,6 +839,7 @@ def _nilm_alert_features(
         "appliance_id": str(getattr(state, "appliance_id", "") or ""),
         "display_name": str(getattr(state, "display_name", "") or ""),
         "mains_circuit_id": mains_circuit_id,
+        **({"entry_id": entry_id} if entry_id else {}),
         "mains_source_entity_id": getattr(state, "mains_source", None),
         "session_id": session_id or None,
         "signature_fingerprint": signature_fingerprint or None,

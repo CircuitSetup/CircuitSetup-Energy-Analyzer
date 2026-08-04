@@ -1868,7 +1868,7 @@ def test_legacy_fingerprint_does_not_resolve_ambiguous_same_w_components() -> No
     )
 
 
-def test_session_specs_resolve_unique_structured_assignment_fingerprint() -> None:
+def test_session_specs_reject_off_only_assignment_fingerprint() -> None:
     current = NilmSignature("off-1", -84.0, -145.0, -168.0, 0.12, 8, 0.9)
     current_fingerprint = nilm_domain.nilm_signature_fingerprint(current)
 
@@ -1890,7 +1890,7 @@ def test_session_specs_resolve_unique_structured_assignment_fingerprint() -> Non
                 ],
             }
         ],
-    ) == [(current_fingerprint, "pump")]
+    ) == []
 
 
 def test_classify_signature_is_conservative_and_allows_user_label_override() -> None:

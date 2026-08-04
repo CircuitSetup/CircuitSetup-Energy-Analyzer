@@ -75,6 +75,29 @@ def test_alert_evidence_path_contains_alert_context() -> None:
     assert params["alert_id"][0].startswith("circuitsetup_energy_analyzer_alert_hvac_")
 
 
+def test_nilm_validation_alert_links_to_entry_scoped_workspace() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_evidence_path,
+    )
+
+    alert = replace(
+        _alert("nilm_assignment_needs_validation"),
+        circuit_id="hvac_2",
+        features={
+            "assignment_id": "assignment-pump-2",
+            "mains_circuit_id": "hvac_2",
+            "entry_id": "entry-1",
+        },
+    )
+
+    params = parse_qs(urlparse(alert_evidence_path(alert)).query)
+
+    assert params["circuit_id"] == ["hvac_2"]
+    assert params["entry_id"] == ["entry-1"]
+    assert params["nilm_workspace"] == ["1"]
+    assert "appliance_detail" not in params
+
+
 def test_alert_evidence_path_can_target_dashboard_fallback() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH,

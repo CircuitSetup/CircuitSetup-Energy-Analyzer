@@ -6213,6 +6213,8 @@ def test_nilm_interval_action_contracts() -> None:
         ] } } });
       for (const expected of [
         "Label appliance interval", "Click and drag across the graph",
+        "Power increase at start is optional",
+        "Power increase at interval start (W, optional)",
         "Appliance Type", "Dishwasher", "Save Interval",
       ]) assert.ok(html.includes(expected), expected);
     }

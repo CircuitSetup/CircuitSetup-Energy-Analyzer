@@ -12,6 +12,13 @@ DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
     "/circuitsetup-energy-analyzer/alert-evidence"
 )
 MAX_GRAPH_ENTITIES = 8
+_NILM_WORKSPACE_FEATURES = frozenset(
+    {
+        "nilm_assignment_needs_validation",
+        "nilm_low_confidence_change",
+        "nilm_model_drift",
+    }
+)
 
 _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] = (
     (
@@ -91,6 +98,7 @@ def alert_evidence_path(
 
     feature = _feature_for_alert(alert)
     assignment_id = str(alert.features.get("assignment_id") or "").strip()
+    entry_id = str(alert.features.get("entry_id") or "").strip()
     mains_circuit_id = str(
         alert.features.get("mains_circuit_id") or alert.circuit_id
     ).strip()
@@ -104,9 +112,12 @@ def alert_evidence_path(
             {
                 "assignment_id": assignment_id,
                 "nilm_workspace": "1",
-                "appliance_detail": "1",
             }
         )
+        if feature not in _NILM_WORKSPACE_FEATURES:
+            values["appliance_detail"] = "1"
+    if entry_id:
+        values["entry_id"] = entry_id
     params = urlencode(values)
     return f"{dashboard_path}?{params}"
 

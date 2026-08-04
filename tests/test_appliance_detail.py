@@ -1263,7 +1263,8 @@ def test_off_only_nilm_assignment_does_not_create_energy_or_history() -> None:
     ]
     assignment["signature_fingerprints"] = [
         "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.10-0.15|"
-        "split=unknown|leg=unknown|balance=unknown"
+        "split=unknown|leg=unknown|balance=unknown",
+        "unassigned",
     ]
     coordinator.store_data.nilm_signatures = {
         "mains": [
@@ -1285,7 +1286,27 @@ def test_off_only_nilm_assignment_does_not_create_energy_or_history() -> None:
                     energy_kwh=0.328,
                 ),
                 "signature_fingerprint": assignment["signature_fingerprints"][0],
-            }
+            },
+            {
+                **_nilm_session(
+                    "invalid-unassigned-session",
+                    start=datetime(2026, 6, 30, 13, 0, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 14, 0, tzinfo=UTC),
+                    duration_seconds=3600.0,
+                    energy_kwh=0.31,
+                ),
+                "signature_fingerprint": "unassigned",
+            },
+            {
+                **_nilm_session(
+                    "invalid-legacy-session",
+                    start=datetime(2026, 6, 30, 15, 0, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 16, 0, tzinfo=UTC),
+                    duration_seconds=3600.0,
+                    energy_kwh=0.5,
+                ),
+                "assignment_id": "assignment-dishwasher",
+            },
         ]
     }
     coordinator.hass = SimpleNamespace(

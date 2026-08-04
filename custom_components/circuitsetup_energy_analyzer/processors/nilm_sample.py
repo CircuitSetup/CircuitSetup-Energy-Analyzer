@@ -27,6 +27,7 @@ from ..nilm import (
     nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
+    nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
     pair_nilm_sessions_for_signatures,
     reconcile_nilm_edge,
@@ -136,8 +137,31 @@ class NilmSampleProcessor:
         known_events = (*pending_known_events, *current_known_events)
         alerts: list[AlertEvidence] = []
         store_dirty = False
+        assignments = tuple(
+            item
+            for item in context.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            )
+            if isinstance(item, Mapping)
+        )
+        hidden_assignment_ids = {
+            str(item.get("assignment_id") or "").strip()
+            for item in assignments
+            if str(item.get("lifecycle_state") or "").strip() in {"ignored", "retired"}
+            or (
+                item.get("conversion_state") == "direct_meter"
+                and item.get("keep_assignment_for_masking") is False
+            )
+        }
         existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
-        candidate_edges = [*existing_unmatched, *edges]
+        recovered_edges = _recover_unassigned_session_edges(
+            context.store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+            since=sample.timestamp - timedelta(days=7),
+            excluded_assignment_ids=hidden_assignment_ids,
+        )
+        candidate_edges = list(
+            dict.fromkeys((*existing_unmatched, *recovered_edges, *edges))
+        )
         matched_edges = ()
         defer_known_events = detector.has_pending_transition and not edges
         if candidate_edges and known_events and not defer_known_events:
@@ -149,13 +173,6 @@ class NilmSampleProcessor:
         if defer_known_events and known_events:
             self._pending_known_load_events[circuit_id] = known_events
 
-        assignments = tuple(
-            item
-            for item in context.store_data.nilm_appliance_assignments_by_circuit.get(
-                circuit_id, ()
-            )
-            if isinstance(item, Mapping)
-        )
         runtime = _initial_component_runtime(
             assignments,
             context.state.nilm_component_runtime_by_circuit.get(circuit_id, {}),
@@ -1016,6 +1033,14 @@ def _apply_direct_component_sample(
 def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentModel:
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     normalized = normalize_nilm_assignment_model(assignment)
+    fingerprints = [
+        str(value or "").strip()
+        for value in _list_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    ]
+    component_eligible = not fingerprints or any(
+        map(nilm_signature_is_assignable, fingerprints)
+    )
     prototypes = tuple(
         NilmTransitionPrototype(
             assignment_id=assignment_id,
@@ -1029,6 +1054,7 @@ def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentMo
             spread_var=item.get("spread_var"),
         )
         for item in normalized["transition_prototypes"]
+        if component_eligible
         if item["direction"] == ("on" if item["delta_w"] > 0 else "off")
     )
     return NilmAssignmentModel(
@@ -1591,6 +1617,38 @@ def _newest_nilm_edges(edges: Iterable[NilmEdge], max_items: int) -> list[NilmEd
     return sorted(edges, key=lambda edge: edge.timestamp)[-max_items:]
 
 
+def _recover_unassigned_session_edges(
+    sessions: Iterable[Any],
+    *,
+    since: datetime,
+    excluded_assignment_ids: set[str] | frozenset[str] = frozenset(),
+) -> list[NilmEdge]:
+    """Recover placeholder-owned ON transitions for normal recurring clustering."""
+    recovered: list[NilmEdge] = []
+    for session in sessions:
+        if (
+            not isinstance(session, Mapping)
+            or str(session.get("signature_fingerprint") or "").strip().casefold()
+            != "unassigned"
+            or str(session.get("assignment_id") or "").strip()
+            in excluded_assignment_ids
+        ):
+            continue
+        timestamp = _runtime_datetime(session.get("start"))
+        delta_w = _finite_float(session.get("on_delta_w"))
+        if timestamp is None or timestamp < since or delta_w is None or delta_w <= 0.0:
+            continue
+        recovered.append(
+            NilmEdge(
+                timestamp=timestamp,
+                delta_w=delta_w,
+                delta_var=_finite_float(session.get("on_delta_var")),
+                direction="on",
+            )
+        )
+    return recovered
+
+
 def _nilm_session_history_payloads(
     circuit_id: str,
     edges: Iterable[NilmEdge],
@@ -1657,7 +1715,7 @@ def _nilm_session_specs(
         fingerprints = [
             str(value or "").strip()
             for value in _list_items(assignment.get("signature_fingerprints"))
-            if str(value or "").strip()
+            if nilm_signature_is_assignable(value)
         ]
         hidden = str(assignment.get("lifecycle_state") or "").strip() in {
             "ignored",
@@ -1682,6 +1740,8 @@ def _nilm_session_specs(
     for signature in signatures:
         fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
+        if not nilm_signature_is_assignable(fingerprint):
+            continue
         if signature.get("ignored") or signature.get("review_state") == "ignored":
             seen_fingerprints.add(fingerprint)
             continue

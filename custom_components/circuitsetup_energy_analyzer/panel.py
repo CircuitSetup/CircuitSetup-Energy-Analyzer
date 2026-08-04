@@ -44,7 +44,7 @@ from .models import (
     CircuitMode,
     SensorRole,
 )
-from .nilm import nilm_signature_is_off_direction
+from .nilm import nilm_signature_is_assignable
 from .notifications import notification_id_for_alert
 from .panel_common import (
     _add_setting_impact_preview,
@@ -1195,6 +1195,13 @@ def _nilm_embedded_history_series(
     )
     if assignment is None:
         return []
+    fingerprints = [
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    ]
+    if fingerprints and not any(map(nilm_signature_is_assignable, fingerprints)):
+        return []
     session_ids = {
         str(value or "")
         for key in ("session_ids", "confirmed_session_ids")
@@ -1211,7 +1218,12 @@ def _nilm_embedded_history_series(
     for session in _iter_items(sessions_by_circuit.get(detail.circuit_id)):
         if not isinstance(session, Mapping):
             continue
-        if nilm_signature_is_off_direction(session.get("signature_fingerprint")):
+        session_fingerprint = str(
+            session.get("signature_fingerprint") or ""
+        ).strip()
+        if session_fingerprint and not nilm_signature_is_assignable(
+            session_fingerprint
+        ):
             continue
         session_owner = str(session.get("assignment_id") or "").strip()
         matches = (
