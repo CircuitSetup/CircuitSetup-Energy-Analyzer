@@ -285,6 +285,8 @@ def _converted_nilm_assignment(
             if (
                 isinstance(assignment, Mapping)
                 and assignment.get("conversion_state") == "direct_meter"
+                and str(assignment.get("lifecycle_state") or "").strip().lower()
+                not in {"ignored", "retired"}
                 and str(assignment.get("direct_circuit_id") or "") == circuit_id
             ):
                 return assignment
