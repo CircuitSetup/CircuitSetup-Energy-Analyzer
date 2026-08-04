@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from .baseline import build_baseline
 from .models import (
     ApplianceProfile,
     CircuitConfig,
@@ -24,6 +26,10 @@ OPERATING_OFF_DWELL_SECONDS = "operating_off_dwell_seconds"
 OPERATING_MERGE_GAP_SECONDS = "operating_merge_gap_seconds"
 OPERATING_MAX_SAMPLE_GAP_SECONDS = "operating_max_sample_gap_seconds"
 OPERATING_DETECTION_SOURCE = "operating_detection_source"
+OPERATING_IDLE_UPPER_W = "operating_idle_upper_w"
+OPERATING_RUNNING_LOWER_W = "operating_running_lower_w"
+OPERATING_IDLE_SAMPLE_COUNT = "operating_idle_sample_count"
+OPERATING_RUNNING_SAMPLE_COUNT = "operating_running_sample_count"
 OPERATING_DETECTION_OVERRIDE_FIELDS = (
     OPERATING_ON_THRESHOLD_W,
     OPERATING_OFF_THRESHOLD_W,
@@ -31,6 +37,8 @@ OPERATING_DETECTION_OVERRIDE_FIELDS = (
     OPERATING_OFF_DWELL_SECONDS,
     OPERATING_MERGE_GAP_SECONDS,
 )
+_OPERATING_LEARNING_SAMPLE_LIMIT = 512
+_OPERATING_LEARNING_MIN_SAMPLES = 3
 
 _GENERIC_PROFILE = {
     "on_threshold_w": 80.0,
@@ -450,6 +458,14 @@ class OperatingStateMachine:
         self._last_power_w: float | None = None
         self._last_on_power_w: float | None = None
         self._run_started_at: datetime | None = None
+        self._stable_off_power_w: deque[float] = deque(
+            maxlen=_OPERATING_LEARNING_SAMPLE_LIMIT
+        )
+        self._stable_running_power_w: deque[float] = deque(
+            maxlen=_OPERATING_LEARNING_SAMPLE_LIMIT
+        )
+        self._run_idle_upper_w: float | None = None
+        self._run_idle_sample_count = 0
         self._nominal_voltage: float | None = None
         self._sag_emitted_for_run = False
         self._transition_reason = "startup"
@@ -466,6 +482,7 @@ class OperatingStateMachine:
             and (sample.timestamp - self._last_sample_at).total_seconds()
             > self._profile.max_sample_gap_seconds
         ):
+            self._clear_learning_state()
             self._reset_pending_state(sample.timestamp)
 
         self._last_sample_at = sample.timestamp
@@ -476,6 +493,7 @@ class OperatingStateMachine:
             return self._handle_invalid_or_missing_power(sample)
 
         self._last_valid_power_at = sample.timestamp
+        self._record_stable_learning_sample(watts)
 
         if self._state is OperatingState.UNKNOWN:
             return self._initialize_from_first_valid_sample(sample, watts)
@@ -598,6 +616,24 @@ class OperatingStateMachine:
                     features["run_duration_s"] = (
                         event_timestamp - run_started_at
                     ).total_seconds()
+                running_values = list(self._stable_running_power_w)
+                if (
+                    self._run_idle_upper_w is not None
+                    and self._run_idle_sample_count
+                    >= _OPERATING_LEARNING_MIN_SAMPLES
+                    and len(running_values) >= _OPERATING_LEARNING_MIN_SAMPLES
+                ):
+                    features.update(
+                        {
+                            OPERATING_IDLE_UPPER_W: self._run_idle_upper_w,
+                            OPERATING_RUNNING_LOWER_W: build_baseline(
+                                "operating_running_power_w",
+                                running_values,
+                            ).p10,
+                            OPERATING_IDLE_SAMPLE_COUNT: self._run_idle_sample_count,
+                            OPERATING_RUNNING_SAMPLE_COUNT: len(running_values),
+                        }
+                    )
                 self._set_off(sample.timestamp)
                 if run_started_at is None:
                     return self._result("unknown_start_ended")
@@ -666,6 +702,16 @@ class OperatingStateMachine:
         self._run_started_at = (
             effective_timestamp if emit_event and start_known else None
         )
+        if len(self._stable_off_power_w) >= _OPERATING_LEARNING_MIN_SAMPLES:
+            self._run_idle_upper_w = build_baseline(
+                "operating_idle_power_w",
+                list(self._stable_off_power_w),
+            ).p90
+            self._run_idle_sample_count = len(self._stable_off_power_w)
+        else:
+            self._run_idle_upper_w = None
+            self._run_idle_sample_count = 0
+        self._stable_running_power_w.clear()
         self._sag_emitted_for_run = False
 
     def _set_off(self, timestamp: datetime) -> None:
@@ -675,6 +721,8 @@ class OperatingStateMachine:
         self._candidate_since = None
         self._transition_reason = "confirmed_stop"
         self._run_started_at = None
+        self._run_idle_upper_w = None
+        self._run_idle_sample_count = 0
         self._last_on_power_w = None
         self._sag_emitted_for_run = False
 
@@ -685,6 +733,7 @@ class OperatingStateMachine:
         self._candidate_since = None
         self._transition_reason = reason
         self._run_started_at = None
+        self._clear_learning_state()
         self._last_on_power_w = None
         self._sag_emitted_for_run = False
 
@@ -702,6 +751,26 @@ class OperatingStateMachine:
             self._stable_state = OperatingState.RUNNING
             self._candidate_since = None
             self._transition_reason = "pending_off_reset_after_gap"
+
+    def _record_stable_learning_sample(self, watts: float) -> None:
+        if (
+            self._state is OperatingState.OFF
+            and self._stable_state is OperatingState.OFF
+            and watts < self._profile.on_threshold_w
+        ):
+            self._stable_off_power_w.append(watts)
+        elif (
+            self._state is OperatingState.RUNNING
+            and self._stable_state is OperatingState.RUNNING
+            and watts > self._profile.off_threshold_w
+        ):
+            self._stable_running_power_w.append(watts)
+
+    def _clear_learning_state(self) -> None:
+        self._stable_off_power_w.clear()
+        self._stable_running_power_w.clear()
+        self._run_idle_upper_w = None
+        self._run_idle_sample_count = 0
 
     def _handle_invalid_or_missing_power(
         self,
