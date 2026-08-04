@@ -1293,7 +1293,10 @@ def _nilm_assignment_payload(
             "service": SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
             "data": dict(action_data),
         }
-    if state in {"expected", "ignored", "retired"}:
+    if (
+        state in {"expected", "ignored", "retired"}
+        or payload.get("conversion_state") == "direct_meter"
+    ):
         actions["restore"] = {
             "domain": DOMAIN,
             "service": SERVICE_RESTORE_NILM_ITEM,

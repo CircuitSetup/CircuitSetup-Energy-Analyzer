@@ -2336,6 +2336,14 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
             "signature_fingerprints": ["fingerprint-ready"],
             "confidence": 0.91,
         },
+        {
+            "assignment_id": "assignment-converted",
+            "lifecycle_state": "converted",
+            "conversion_state": "direct_meter",
+            "direct_circuit_id": "ac2",
+            "signature_fingerprints": ["fingerprint-converted"],
+            "confidence": 0.91,
+        },
     ]}
 
     payload = nilm_workspace_payload(
@@ -2356,6 +2364,10 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
     ready = next(
         item for item in payload["assignments"]
         if item["assignment_id"] == "assignment-ready"
+    )
+    converted = next(
+        item for item in payload["assignments"]
+        if item["assignment_id"] == "assignment-converted"
     )
 
     assert ignored["actions"]["restore"]["data"] == {
@@ -2378,6 +2390,15 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit(
     assert ready["actions"]["publish"]["service"] == (
         "publish_nilm_appliance_assignment"
     )
+    assert converted["actions"]["restore"] == {
+        "domain": DOMAIN,
+        "service": "restore_nilm_item",
+        "data": {
+            "entry_id": "entry-1",
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-converted",
+        },
+    }
 
 
 @pytest.mark.parametrize(
