@@ -641,6 +641,16 @@ def _merged_assignment_session_payloads(
         for value in _iter_items(assignment.get("session_ids"))
         if str(value or "").strip()
     }
+    confirmed_session_ids = {
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("confirmed_session_ids"))
+        if str(value or "").strip()
+    }
+    rejected_session_ids = {
+        str(value or "").strip()
+        for value in _iter_items(assignment.get("rejected_session_ids"))
+        if str(value or "").strip()
+    }
     store_data = getattr(coordinator, "store_data", None)
     histories = getattr(store_data, "nilm_session_history_by_circuit", {})
     stored = histories.get(circuit_id, ()) if isinstance(histories, Mapping) else ()
@@ -656,8 +666,10 @@ def _merged_assignment_session_payloads(
         if not session_id:
             continue
         explicitly_linked = session_id in session_ids
+        confirmed_linked = session_id in confirmed_session_ids
+        rejected_linked = session_id in rejected_session_ids
         if not component_eligible and (
-            not explicitly_linked or not session.get("end")
+            (not confirmed_linked and not rejected_linked) or not session.get("end")
         ):
             continue
         if owner and owner != assignment_id:
@@ -667,7 +679,8 @@ def _merged_assignment_session_payloads(
         if (
             session_fingerprint
             and not nilm_signature_is_assignable(session_fingerprint)
-            and not explicitly_linked
+            and not confirmed_linked
+            and not rejected_linked
         ):
             continue
         merged[session_id] = dict(session)
