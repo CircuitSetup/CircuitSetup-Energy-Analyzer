@@ -23,7 +23,6 @@ from ..nilm import (
     conservation_tolerance_w,
     discover_nilm_helper_candidates,
     mask_known_loads,
-    nilm_assignment_model_is_compound_eligible,
     nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
@@ -144,6 +143,11 @@ class NilmSampleProcessor:
             )
             if isinstance(item, Mapping)
         )
+        signature_specs = tuple(
+            item
+            for item in context.store_data.nilm_signatures.get(circuit_id, ())
+            if isinstance(item, Mapping)
+        )
         hidden_assignment_ids = {
             str(item.get("assignment_id") or "").strip()
             for item in assignments
@@ -186,7 +190,7 @@ class NilmSampleProcessor:
             ) or 0.0
             _restore_unique_component_state(
                 sample.real_power, standby_w, detector.noise_spread_w,
-                assignments, runtime, sample.timestamp
+                assignments, runtime, sample.timestamp, signature_specs
             )
             masked_ids = {id(match.edge) for match in matched_edges}
             new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
@@ -241,6 +245,7 @@ class NilmSampleProcessor:
                     helper_events=self._helper_events_by_source[circuit_id],
                     available_helper_ids=available_helper_ids,
                     direct_helper_powers=direct_helper_powers,
+                    signature_specs=signature_specs,
                     )
                 )
                 if (
@@ -261,6 +266,7 @@ class NilmSampleProcessor:
                             helper_events=self._helper_events_by_source[circuit_id],
                             available_helper_ids=available_helper_ids,
                             direct_helper_powers=direct_helper_powers,
+                            signature_specs=signature_specs,
                         )
                     )
                     completed_sessions.extend(followup_completed)
@@ -551,17 +557,21 @@ def reconcile_component_runtime(
     helper_events: Iterable[CircuitEvent] = (),
     available_helper_ids: set[str] | frozenset[str] = frozenset(),
     direct_helper_powers: Mapping[str, Any] | None = None,
+    signature_specs: Iterable[Mapping[str, Any]] = (),
 ) -> tuple[
     dict[str, dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[NilmEdge]
 ]:
     """Apply bounded assignment transitions and enforce source conservation."""
     assignments = tuple(assignments)
     edges = tuple(edges)
+    signature_specs = tuple(signature_specs)
     models = tuple(
         model
         for item in assignments
         if not _direct_helper_id(item)
-        if (model := _runtime_assignment_model(item)).transition_prototypes
+        if (
+            model := _runtime_assignment_model(item, signature_specs)
+        ).transition_prototypes
     )
     next_runtime = {key: dict(value) for key, value in runtime.items()}
     before_sample = {key: dict(value) for key, value in next_runtime.items()}
@@ -804,20 +814,20 @@ def _restore_unique_component_state(
     assignments: Iterable[Mapping[str, Any]],
     runtime: dict[str, dict[str, Any]],
     timestamp: datetime,
+    signature_specs: Iterable[Mapping[str, Any]] = (),
 ) -> None:
     source = _finite_float(source_power_w)
     if source is None:
         return
-    assignment_by_id = {
-        str(item.get("assignment_id") or ""): item for item in assignments
-    }
     models = tuple(sorted(
         (
             model
             for item in assignments
             if _direct_helper_id(item) is None
-            if (model := _runtime_assignment_model(item)).lifecycle_state
-            in {"expected", "validated", "published"}
+            if (
+                model := _runtime_assignment_model(item, signature_specs)
+            ).lifecycle_state
+            in {"assigned", "expected", "validated", "published"}
             and model.model_confidence >= 0.70
             and len(model.power_states_w) >= 2
             and any(state > 0.0 for state in model.power_states_w)
@@ -830,6 +840,16 @@ def _restore_unique_component_state(
             model.assignment_id,
         ),
     )[:20])
+    compound_eligible = {
+        model.assignment_id
+        for model in models
+        if {
+            prototype.direction
+            for prototype in model.transition_prototypes
+            if prototype.sample_count >= 3
+        }
+        == {"on", "off"}
+    }
     unknown = [
         model for model in models
         if runtime[model.assignment_id]["status"] == NilmComponentStatus.UNKNOWN
@@ -852,12 +872,7 @@ def _restore_unique_component_state(
         if total > target + tolerance or total + remaining[index] < target - tolerance:
             return
         if index == len(ordered):
-            if len(active_ids) > 1 and not all(
-                nilm_assignment_model_is_compound_eligible(
-                    assignment_by_id[assignment_id]
-                )
-                for assignment_id in active_ids
-            ):
+            if len(active_ids) > 1 and not set(active_ids) <= compound_eligible:
                 return
             residual = abs(target - total)
             if residual <= tolerance:
@@ -1030,9 +1045,53 @@ def _apply_direct_component_sample(
     return closes, unavailable
 
 
-def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentModel:
+def _runtime_assignment_model(
+    assignment: Mapping[str, Any],
+    signature_specs: Iterable[Mapping[str, Any]] = (),
+) -> NilmAssignmentModel:
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     normalized = normalize_nilm_assignment_model(assignment)
+    if not normalized["transition_prototypes"]:
+        signatures = tuple(signature_specs)
+        by_key = _nilm_signatures_by_key(signatures)
+        provisional = []
+        for fingerprint in _list_items(assignment.get("signature_fingerprints")):
+            resolved = resolve_nilm_signature_fingerprint(str(fingerprint), signatures)
+            signature = by_key.get(resolved or "")
+            watts = _finite_float(
+                signature.get("median_delta_w") if signature else None
+            )
+            if signature is None or watts is None or watts <= 0:
+                continue
+            reactive = _finite_float(signature.get("median_delta_var"))
+            sample_count = _nonnegative_int(signature.get("occurrence_count"))
+            confidence = _clamped_confidence(signature.get("confidence"))
+            provisional.append((watts, reactive, sample_count, confidence))
+        if provisional:
+            states = sorted({0.0, *(watts for watts, *_ in provisional)})
+            prototypes = [
+                {
+                    "direction": direction,
+                    "from_state_w": 0.0 if direction == "on" else watts,
+                    "to_state_w": watts if direction == "on" else 0.0,
+                    "delta_w": watts if direction == "on" else -watts,
+                    "spread_w": 0.0,
+                    "sample_count": sample_count,
+                    **(
+                        {"delta_var": reactive if direction == "on" else -reactive}
+                        if reactive is not None
+                        else {}
+                    ),
+                }
+                for watts, reactive, sample_count, _confidence in provisional
+                for direction in ("on", "off")
+            ]
+            normalized = {
+                **normalized,
+                "power_states_w": states,
+                "transition_prototypes": prototypes,
+                "model_confidence": max(item[3] for item in provisional),
+            }
     fingerprints = [
         str(value or "").strip()
         for value in _list_items(assignment.get("signature_fingerprints"))

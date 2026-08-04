@@ -2637,23 +2637,23 @@ def _nilm_session_payload_with_actions(
         signature_fingerprint
     ):
         payload.pop(ATTR_ASSIGNMENT_ID, None)
+    payload.pop("actions", None)
     if session_id and circuit_id:
         data = {
             ATTR_CIRCUIT_ID: circuit_id,
             ATTR_SESSION_ID: session_id,
         }
-        if nilm_signature_is_assignable(signature_fingerprint):
+        assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        actions: dict[str, Any] = {}
+        if nilm_signature_is_assignable(signature_fingerprint) and not assignment_id:
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
-            payload["actions"] = {
-                "assign": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
-                    "data": data,
-                    "requires": [ATTR_LABEL],
-                }
+            actions["assign"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+                "data": data,
+                "requires": [ATTR_LABEL],
             }
-        assignment_id = str(payload.get("assignment_id") or "").strip()
-        if assignment_id and "actions" in payload and (
+        if assignment_id and (
             reviewed_session_ids is None
             or (
                 assignment_id in reviewed_session_ids
@@ -2665,16 +2665,18 @@ def _nilm_session_payload_with_actions(
                 ATTR_SESSION_ID: session_id,
                 ATTR_ASSIGNMENT_ID: assignment_id,
             }
-            payload["actions"]["validate"] = {
+            actions["validate"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_VALIDATE_NILM_SESSION,
                 "data": dict(action_data),
             }
-            payload["actions"]["reject"] = {
+            actions["reject"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_REJECT_NILM_SESSION,
                 "data": dict(action_data),
             }
+        if actions:
+            payload["actions"] = actions
     return payload
 
 

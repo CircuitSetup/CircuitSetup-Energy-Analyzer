@@ -6970,12 +6970,11 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator("[data-nilm-sensitivity-action]").click();
 
   await page.evaluate(() => window.__panel._callNilmLabelIntervalAction(0, "adjust"));
-  await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveValue("83");
+  await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveCount(0);
   await panel.locator('[data-nilm-label-interval-input="label"]').fill("Dishwasher");
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
   await panel.locator('[data-nilm-label-interval-input="start"]').fill("2026-07-13T18:00");
   await panel.locator('[data-nilm-label-interval-input="end"]').fill("2026-07-13T18:45");
-  await panel.locator('[data-nilm-label-interval-input="observed_transition_w"]').fill("84");
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
@@ -6985,7 +6984,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     "set_circuit_sensitivity",
     "label_nilm_interval",
   ]);
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1).data.observed_transition_w)).toBe(84);
 });
 
 test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {

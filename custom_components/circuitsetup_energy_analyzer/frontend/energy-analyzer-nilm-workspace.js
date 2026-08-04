@@ -1889,6 +1889,9 @@ export function createNilmWorkspaceMethods({
   }
 
   _renderNilmSecondaryCollections(workspace) {
+    const unassignedSessions = (Array.isArray(workspace.sessions) ? workspace.sessions : [])
+      .map((item, index) => ({ ...item, workspace_index: index }))
+      .filter((item) => !String(item && item.assignment_id || "").trim());
     return `<details class="disclosure section-surface" data-nilm-secondary-details${this._nilmSecondaryDetailsOpen ? " open" : ""}>
       <summary>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</summary>
       <div class="disclosure-content">
@@ -1916,14 +1919,14 @@ export function createNilmWorkspaceMethods({
           <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
         </div>
       `, this._panelText("nilm_workspace.solar_net_overlays_description"))}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.sessions_title"), workspace.sessions, this._panelText("nilm_workspace.sessions_empty"), (item, index) => `
+        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.sessions_title"), unassignedSessions, this._panelText("nilm_workspace.sessions_empty"), (item, index) => `
         <div class="metric">
           <span>${this._escape(item.start || "")}</span>
           <strong>${this._escape(this._panelTextFormat("nilm_workspace.session_summary", { power: this._formatMetricValue(item.median_power_w), confidence: Math.round(Number(item.confidence || 0) * 100) }))}</strong>
           <p class="muted">${this._escape(item.end ? this._panelTextFormat("nilm_workspace.session_end", { end: item.end }) : this._panelText("common.open_session"))}</p>
-          ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, index) : ""}
+          ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, item.workspace_index) : ""}
           ${item.actions && item.actions.assign ? `<div class="actions">
-            <button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>
+            <button type="button" class="secondary" data-nilm-session-index="${item.workspace_index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${item.workspace_index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>
           </div>` : ""}
         </div>
       `, this._panelText("nilm_workspace.sessions_description"))}
@@ -2320,7 +2323,6 @@ export function createNilmWorkspaceMethods({
             <div class="nilm-interval-form">
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.start"))}</span><input type="datetime-local" data-nilm-label-interval-input="start" data-nilm-interval-index="${index}" value="${this._escape(interval.start || "")}"></label>
               <label><span class="muted">${this._escape(this._panelText("nilm_workspace.end"))}</span><input type="datetime-local" data-nilm-label-interval-input="end" data-nilm-interval-index="${index}" value="${this._escape(interval.end || "")}"></label>
-              <label><span class="muted">${this._escape(this._panelText("nilm_workspace.observed_transition_w"))}</span><input type="number" min="0" step="any" inputmode="decimal" data-nilm-label-interval-input="observed_transition_w" data-nilm-interval-index="${index}" value="${this._escape(interval.observed_transition_w ?? "")}"></label>
             </div>
           </div>`).join("")}
         </div>
