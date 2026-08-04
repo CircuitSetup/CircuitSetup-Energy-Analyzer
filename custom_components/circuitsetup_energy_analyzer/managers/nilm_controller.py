@@ -303,22 +303,20 @@ class NilmController:
                 circuit_id, ()
             )
             for assignment in assignments:
-                missing = any(
-                    key not in assignment
-                    for key in (
-                        "role",
-                        "power_states_w",
-                        "transition_prototypes",
-                        "model_confidence",
-                        "model_revision",
-                    )
-                )
+                normalized = normalize_nilm_assignment_model(assignment)
                 model = build_nilm_assignment_model(assignment, history)
-                if missing and model["transition_prototypes"]:
+                if (
+                    model["transition_prototypes"]
+                    and (
+                        model["power_states_w"] != normalized["power_states_w"]
+                        or model["transition_prototypes"]
+                        != normalized["transition_prototypes"]
+                    )
+                ):
                     assignment.update(model)
                     rebuilt = True
                 else:
-                    assignment.update(normalize_nilm_assignment_model(assignment))
+                    assignment.update(normalized)
         if rebuilt:
             coordinator.store_persistence.mark_dirty()
         for circuit_id, signatures in coordinator.store_data.nilm_signatures.items():

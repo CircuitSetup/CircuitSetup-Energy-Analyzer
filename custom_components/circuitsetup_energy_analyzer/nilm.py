@@ -42,7 +42,6 @@ def build_nilm_assignment_model(
             and session_id not in rejected
             and (not owner or owner == assignment_id)
             and session.get("end") is not None
-            and session.get("ambiguous") is not True
             and on_delta is not None
             and on_delta > 0
             and off_delta is not None
@@ -59,12 +58,28 @@ def build_nilm_assignment_model(
     on_var_values = [
         value
         for session, _, _ in eligible
-        if (value := _model_number(session.get("on_delta_var"))) is not None
+        if (
+            value := _session_edge_metric(
+                session,
+                value_key="on_delta_var",
+                edge_id_key="on_edge_id",
+                metric="var",
+            )
+        )
+        is not None
     ]
     off_var_values = [
         value
         for session, _, _ in eligible
-        if (value := _model_number(session.get("off_delta_var"))) is not None
+        if (
+            value := _session_edge_metric(
+                session,
+                value_key="off_delta_var",
+                edge_id_key="off_edge_id",
+                metric="var",
+            )
+        )
+        is not None
     ]
     confidences = [
         value
@@ -220,14 +235,40 @@ def _session_transition_values(
     session: Mapping[str, Any],
 ) -> tuple[float | None, float | None]:
     legacy = _model_number(session.get("median_power_w"))
-    return (
-        _model_number(session.get("on_delta_w")) if "on_delta_w" in session else legacy,
-        _model_number(session.get("off_delta_w"))
-        if "off_delta_w" in session
-        else -abs(legacy)
-        if legacy is not None
-        else None,
+    on_delta = _session_edge_metric(
+        session,
+        value_key="on_delta_w",
+        edge_id_key="on_edge_id",
+        metric="w",
     )
+    off_delta = _session_edge_metric(
+        session,
+        value_key="off_delta_w",
+        edge_id_key="off_edge_id",
+        metric="w",
+    )
+    return (
+        on_delta if on_delta is not None else legacy,
+        off_delta
+        if off_delta is not None
+        else (-abs(legacy) if legacy is not None else None),
+    )
+
+
+def _session_edge_metric(
+    session: Mapping[str, Any],
+    *,
+    value_key: str,
+    edge_id_key: str,
+    metric: str,
+) -> float | None:
+    if (value := _model_number(session.get(value_key))) is not None:
+        return value
+    prefix = f"{metric}="
+    for token in str(session.get(edge_id_key) or "").split("|"):
+        if token.startswith(prefix):
+            return _model_number(token.removeprefix(prefix))
+    return None
 
 
 @dataclass(frozen=True, slots=True)
