@@ -143,6 +143,11 @@ def _nilm_coordinator() -> SimpleNamespace:
         state=state,
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+            nilm_signatures={"mains": [{
+                "signature_id": "signature_1",
+                "direction": "on",
+                "median_delta_w": 820.0,
+            }]},
         ),
         _nilm_unmatched_edges={
             "mains": [
@@ -166,6 +171,20 @@ def _nilm_coordinator() -> SimpleNamespace:
         },
         entry_id="entry-1",
     )
+
+
+def test_nilm_assignment_without_signature_metadata_has_no_derived_usage() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    coordinator = _nilm_coordinator()
+    coordinator.store_data.nilm_signatures = {}
+
+    state = nilm_virtual_appliance_states(coordinator)[0]
+
+    assert state.estimated_energy_kwh_today == 0.0
+    assert state.latest_session_id is None
 
 
 def _nilm_session(
@@ -335,18 +354,19 @@ def test_sump_pump_detail_exposes_history_driver_entities() -> None:
         "period_hours": [24, 168, 720],
         "rain_response_window_minutes": 120,
         "pump_activity_entity_id": "sensor.renamed_sump_activity",
-        "compressor_activity_entity_ids": [
-            "sensor.renamed_compressor_activity"
-        ],
+        "compressor_activity_entity_ids": ["sensor.renamed_compressor_activity"],
         "blower_activity_entity_ids": ["sensor.renamed_blower_activity"],
         "rain_intensity_entity_id": "sensor.rain_rate",
         "rain_entity_id": "binary_sensor.rain",
         "humidity_entity_id": "weather.home",
     }
-    assert "sump_driver_context" not in appliance_detail_payload(
-        [coordinator],
-        circuit_id="fridge",
-    )["detail"]
+    assert (
+        "sump_driver_context"
+        not in appliance_detail_payload(
+            [coordinator],
+            circuit_id="fridge",
+        )["detail"]
+    )
 
     nilm_coordinator = _nilm_coordinator()
     nilm_coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
@@ -431,8 +451,9 @@ def test_water_flow_context_detail_projects_retained_evidence() -> None:
     }
 
 
-def test_water_flow_context_detail_omits_missing_metrics_and_keeps_zero_values(
-) -> None:
+def test_water_flow_context_detail_omits_missing_metrics_and_keeps_zero_values() -> (
+    None
+):
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
     )
@@ -639,9 +660,7 @@ def test_hvac_blower_detail_labels_heating_as_gas_furnace_proxy() -> None:
 
     assert detail is not None
     assert detail.hvac_efficiency is not None
-    assert detail.hvac_efficiency["heating"][0]["attribution"] == (
-        "gas_furnace_proxy"
-    )
+    assert detail.hvac_efficiency["heating"][0]["attribution"] == ("gas_furnace_proxy")
     assert detail.hvac_efficiency["cooling"] == []
 
 
@@ -869,9 +888,7 @@ def test_direct_appliance_detail_hides_missing_metric_prompt_when_metrics_exist(
     )
 
     coordinator = _direct_coordinator()
-    coordinator.state.metric_consistency_status_by_circuit["fridge"] = (
-        "missing_metrics"
-    )
+    coordinator.state.metric_consistency_status_by_circuit["fridge"] = "missing_metrics"
     coordinator.state.data_quality_checklist_by_circuit["fridge"].update(
         {
             "optional_sensors_present": True,
@@ -898,9 +915,7 @@ def test_direct_detail_keeps_missing_metric_prompt_for_incomplete_metrics() -> N
     )
 
     coordinator = _direct_coordinator()
-    coordinator.state.metric_consistency_status_by_circuit["fridge"] = (
-        "missing_metrics"
-    )
+    coordinator.state.metric_consistency_status_by_circuit["fridge"] = "missing_metrics"
     coordinator.state.data_quality_checklist_by_circuit["fridge"].update(
         {
             "optional_sensors_present": True,
@@ -1190,6 +1205,8 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["display_name"] == "Dishwasher"
     assert detail["appliance_profile"] == "dishwasher"
     assert detail["source_type"] == "nilm_estimate"
+    assert detail["source_quality"]["label"] == "Estimated from aggregate circuit"
+    assert "aggregate circuit power" in detail["expectations"][0]["why_it_matters"]
     assert payload["daily_totals"] == []
     assert detail["confidence"] == 0.72
     assert detail["model_status"] == "needs_validation"
@@ -1232,8 +1249,68 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert payload["actions"]["mark_wrong"]["service"] == "reject_nilm_session"
     assert payload["history"]["entities"] == [
         "sensor.dishwasher_estimated_power",
-        "sensor.dishwasher_estimated_daily_energy",
     ]
+
+
+def test_off_only_nilm_assignment_does_not_create_energy_or_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
+    assignment["signature_fingerprints"] = [
+        "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.10-0.15|"
+        "split=unknown|leg=unknown|balance=unknown"
+    ]
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
+            {
+                "feedback_fingerprint": assignment["signature_fingerprints"][0],
+                "direction": "off",
+                "median_delta_w": -82.0,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                **_nilm_session(
+                    "invalid-off-session",
+                    start=datetime(2026, 6, 30, 8, 0, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 12, 0, tzinfo=UTC),
+                    duration_seconds=14400.0,
+                    energy_kwh=0.328,
+                ),
+                "signature_fingerprint": assignment["signature_fingerprints"][0],
+            }
+        ]
+    }
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            async_all=lambda _domain: [
+                SimpleNamespace(
+                    entity_id="sensor.dishwasher_estimated_daily_energy",
+                    attributes={
+                        "assignment_id": "assignment-dishwasher",
+                        "unit_of_measurement": "kWh",
+                    },
+                ),
+            ]
+        )
+    )
+
+    payload = appliance_detail_payload(
+        [coordinator],
+        assignment_id="assignment-dishwasher",
+    )
+
+    assert payload["detail"]["daily_energy_kwh"] == 0.0
+    assert payload["detail"]["active_alerts"] == []
+    assert payload["history"]["entities"] == []
+    assert "embedded_series" not in payload["history"]
 
 
 def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:

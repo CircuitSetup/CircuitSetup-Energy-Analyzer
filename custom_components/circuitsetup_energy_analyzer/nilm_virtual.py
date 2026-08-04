@@ -8,6 +8,11 @@ from typing import Any
 
 from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import DOMAIN
+from .discovery import (
+    sensor_metadata_is_unsupported,
+    sensor_metadata_role_conflict,
+    sensor_role_from_metadata,
+)
 from .models import AlertEvidence, SensorRole, Severity
 from .nilm import (
     NilmEdge,
@@ -16,6 +21,7 @@ from .nilm import (
     build_nilm_appliance_identity,
     evaluate_nilm_validation_readiness,
     nilm_session_to_dict,
+    nilm_signature_is_off_direction,
     pair_nilm_sessions_for_signatures,
     summarize_nilm_assignment_sessions,
 )
@@ -434,10 +440,12 @@ def _nilm_virtual_appliance_state(
     identity = build_nilm_appliance_identity(
         assignment,
         mains_source_entity_id=_mains_source_entity_id(coordinator, circuit_id),
+        configured_circuit_names=(
+            getattr(config, "name", "")
+            for config in getattr(coordinator, "circuit_configs", ()) or ()
+        ),
     )
-    runtime, reconciliation = nilm_live_runtime(
-        coordinator, circuit_id, assignment_id
-    )
+    runtime, reconciliation = nilm_live_runtime(coordinator, circuit_id, assignment_id)
     live_available = nilm_runtime_available(runtime, reconciliation)
     is_running = runtime.get("status") == "on" if live_available else None
     live_power = (
@@ -454,8 +462,7 @@ def _nilm_virtual_appliance_state(
         [
             session
             for session in session_summary["sessions"]
-            if str(session.get("session_id") or "").strip()
-            not in rejected_session_ids
+            if str(session.get("session_id") or "").strip() not in rejected_session_ids
         ]
     )
     return NilmVirtualApplianceState(
@@ -576,10 +583,7 @@ def nilm_runtime_available(
             "energy_kwh" not in runtime
             or _optional_nonnegative_float(runtime.get("energy_kwh")) is not None
         )
-        and (
-            runtime.get("status") == "off"
-            or _runtime_start(runtime) is not None
-        )
+        and (runtime.get("status") == "off" or _runtime_start(runtime) is not None)
     )
 
 
@@ -624,6 +628,8 @@ def _merged_assignment_session_payloads(
     for session in _iter_items(stored):
         if not isinstance(session, Mapping):
             continue
+        if nilm_signature_is_off_direction(session.get("signature_fingerprint")):
+            continue
         session_id = str(session.get("session_id") or "").strip()
         owner = str(session.get("assignment_id") or "").strip()
         if not session_id:
@@ -648,8 +654,9 @@ def _latest_session_payload(
 ) -> Mapping[str, Any] | None:
     return max(
         sessions,
-        key=lambda session: _session_payload_seen(session)
-        or datetime.min.replace(tzinfo=UTC),
+        key=lambda session: (
+            _session_payload_seen(session) or datetime.min.replace(tzinfo=UTC)
+        ),
         default=None,
     )
 
@@ -752,7 +759,7 @@ def _nilm_alert_message(
 ) -> str:
     return (
         f"{getattr(state, 'display_name', 'NILM appliance')} {phrase}. "
-        "Estimated from mains power by NILM. "
+        "Estimated from aggregate circuit power by NILM. "
         f"Confidence: {round(confidence * 100)}%."
     )
 
@@ -766,12 +773,9 @@ def _nilm_alert_features(
 ) -> dict[str, Any]:
     assignment_id = str(getattr(state, "assignment_id", "") or "")
     appliance_key = (
-        str(getattr(state, "appliance_key", "") or "")
-        or f"nilm:{assignment_id}"
+        str(getattr(state, "appliance_key", "") or "") or f"nilm:{assignment_id}"
     )
-    mains_circuit_id = str(
-        getattr(state, "mains_circuit_id", "") or ""
-    )
+    mains_circuit_id = str(getattr(state, "mains_circuit_id", "") or "")
     session_id = str(
         getattr(state, "active_session_id", "")
         or getattr(state, "latest_session_id", "")
@@ -832,7 +836,10 @@ def _nilm_assignment_sessions(
             fingerprint = str(value or "").strip()
             if not fingerprint:
                 continue
-            spec = dict(signatures_by_id.get(fingerprint) or {})
+            signature = signatures_by_id.get(fingerprint)
+            if not signature:
+                continue
+            spec = dict(signature)
             spec["signature_fingerprint"] = fingerprint
             spec["assignment_id"] = assignment_id
             for key in ("min_duration_seconds", "max_duration_seconds"):
@@ -883,6 +890,8 @@ def _nilm_session_seen(session: NilmSession | None) -> datetime | None:
 
 
 def _mains_source_entity_id(coordinator: Any, circuit_id: str) -> str | None:
+    states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(states, "get", None)
     for config in getattr(coordinator, "circuit_configs", ()) or ():
         if str(getattr(config, "circuit_id", "")) != circuit_id:
             continue
@@ -892,8 +901,25 @@ def _mains_source_entity_id(coordinator: Any, circuit_id: str) -> str | None:
                 sensor_role = role if isinstance(role, SensorRole) else SensorRole(role)
             except (TypeError, ValueError):
                 continue
-            if sensor_role is SensorRole.REAL_POWER:
-                return str(getattr(sensor, "entity_id", "") or "") or None
+            entity_id = str(getattr(sensor, "entity_id", "") or "")
+            source = get_state(entity_id) if callable(get_state) and entity_id else None
+            attributes = getattr(source, "attributes", None)
+            attributes = attributes if isinstance(attributes, Mapping) else {}
+            device_class = attributes.get("device_class")
+            unit = attributes.get("unit_of_measurement")
+            if sensor_metadata_is_unsupported(
+                device_class=device_class, unit=unit
+            ) or sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+                continue
+            effective_role = (
+                sensor_role_from_metadata(
+                    device_class=device_class,
+                    unit=unit,
+                )
+                or sensor_role
+            )
+            if effective_role is SensorRole.REAL_POWER:
+                return entity_id or None
     return None
 
 

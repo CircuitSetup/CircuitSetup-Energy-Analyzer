@@ -699,7 +699,8 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceDetailBody() {
-    return `${this._renderApplianceDetail()}${this._renderRecommendations()}`;
+    const assignmentDetail = Boolean(this._applianceDetail?.requested_assignment_id);
+    return `${this._renderApplianceDetail()}${assignmentDetail ? "" : this._renderRecommendations()}`;
   }
 
   _renderSetupHealthBody() {
@@ -1600,7 +1601,7 @@ export function createApplianceViewMethods({
         <span>${this._escape(this._friendlyFeature(item.severity || item.feature))}</span>
         <strong>${this._escape(item.message || this._friendlyFeature(item.feature))}</strong>
         <p class="muted">${this._escape(this._panelTextFormat("appliance_detail.repeated_count", { count: this._formatMetricValue(item.repeated_count) }))}</p>
-        ${item.evidence_path ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
+        ${item.evidence_path && item.evidence_path !== this._routeKey() ? `<a class="button secondary" href="${this._escape(item.evidence_path)}">${this._escape(this._panelText("actions.labels.open_evidence"))}</a>` : ""}
       </div>
     `).join("")}</div>`;
   }

@@ -268,9 +268,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
-        await self.evidence_actions.async_expire_maintenance_if_due(
-            self.current_time()
-        )
+        await self.evidence_actions.async_expire_maintenance_if_due(self.current_time())
         if self._mixed_startup_direct_alert_ids:
             await self.notification_controller.async_dismiss_alert_notification_ids(
                 self._mixed_startup_direct_alert_ids
@@ -290,9 +288,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             {},
         )
         for raw in (
-            schedule_settings.values()
-            if isinstance(schedule_settings, Mapping)
-            else ()
+            schedule_settings.values() if isinstance(schedule_settings, Mapping) else ()
         ):
             if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
                 continue
@@ -352,9 +348,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             {},
         )
         for raw in (
-            schedule_settings.values()
-            if isinstance(schedule_settings, Mapping)
-            else ()
+            schedule_settings.values() if isinstance(schedule_settings, Mapping) else ()
         ):
             if not isinstance(raw, Mapping) or raw.get("enabled") is not True:
                 continue
@@ -405,8 +399,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._mark_store_dirty()
             await self._notify_alert(schedule_alert)
         current_appliance_keys = {
-            str(alert.features.get("appliance_key") or "")
-            for alert in active_alerts
+            str(alert.features.get("appliance_key") or "") for alert in active_alerts
         }
         contexts = getattr(self.state, "expected_schedule_by_appliance", {})
         for circuit_alerts in getattr(
@@ -561,9 +554,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         events: list[CircuitEvent] = []
         alerts: list[AlertEvidence] = []
         samples: list[tuple[CircuitConfig, NormalizedCircuitSample]] = []
-        processing_circuit_ids = {
-            config.circuit_id for config in processing_configs
-        }
+        processing_circuit_ids = {config.circuit_id for config in processing_configs}
         utility_settings = getattr(
             self.store_data,
             "utility_comparison_settings_by_circuit",
@@ -646,9 +637,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 utility_circuit_ids=(
                     utility_comparison_circuit_ids - processing_circuit_ids
                 ),
-                schedule_circuit_ids=(
-                    schedule_circuit_ids - processing_circuit_ids
-                ),
+                schedule_circuit_ids=(schedule_circuit_ids - processing_circuit_ids),
             ),
         ]
         active_alerts_by_circuit = getattr(
@@ -707,9 +696,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 utility_circuit_ids=(
                     utility_comparison_circuit_ids - processing_circuit_ids
                 ),
-                schedule_circuit_ids=(
-                    schedule_circuit_ids - processing_circuit_ids
-                ),
+                schedule_circuit_ids=(schedule_circuit_ids - processing_circuit_ids),
             )
         )
         alerts.extend(await self._async_apply_expected_schedule_contexts(now))
@@ -744,9 +731,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:
-            await (
-                self.notification_controller.async_notify_settings_recommendations_if_needed()
+            notify = (
+                self.notification_controller
+                .async_notify_settings_recommendations_if_needed
             )
+            await notify()
         return self.state
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
@@ -823,9 +812,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ):
             raise ValueError(f"Circuit cannot be marked mixed: {circuit_id}")
         if config.mode is not CircuitMode.MIXED:
-            circuits = [dict(item) for item in self.options.get(
-                CONF_CIRCUITS, self.entry_data.get(CONF_CIRCUITS, [])
-            )]
+            circuits = [
+                dict(item)
+                for item in self.options.get(
+                    CONF_CIRCUITS, self.entry_data.get(CONF_CIRCUITS, [])
+                )
+            ]
             found = False
             for item in circuits:
                 if item.get("circuit_id") == circuit_id:
@@ -1403,6 +1395,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             assignment_id,
         )
 
+    async def async_confirm_nilm_configured_primary(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> dict[str, Any]:
+        """Confirm the appliance identity configured for a primary-mixed source."""
+        return await self.nilm_controller.async_confirm_nilm_configured_primary(
+            circuit_id,
+            assignment_id,
+        )
+
     async def async_rename_nilm_appliance(
         self: Self,
         circuit_id: str,
@@ -1432,21 +1435,33 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
 
     async def async_set_nilm_helper_link(
-        self, circuit_id: str, assignment_id: str, *,
-        helper_circuit_id: str, relationship: str,
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        helper_circuit_id: str,
+        relationship: str,
     ) -> dict[str, Any]:
         """Persist one confirmed NILM helper relationship."""
         return await self.nilm_controller.async_set_nilm_helper_link(
-            circuit_id, assignment_id, helper_circuit_id=helper_circuit_id,
+            circuit_id,
+            assignment_id,
+            helper_circuit_id=helper_circuit_id,
             relationship=relationship,
         )
 
     async def async_remove_nilm_helper_link(
-        self, circuit_id: str, assignment_id: str, *, helper_circuit_id: str,
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        *,
+        helper_circuit_id: str,
     ) -> dict[str, Any]:
         """Remove one confirmed NILM helper relationship."""
         return await self.nilm_controller.async_remove_nilm_helper_link(
-            circuit_id, assignment_id, helper_circuit_id=helper_circuit_id,
+            circuit_id,
+            assignment_id,
+            helper_circuit_id=helper_circuit_id,
         )
 
     async def async_restore_nilm_item(
@@ -1803,7 +1818,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     def _registered_demo_source_entity_ids(self: Self) -> dict[str, str]:
         return self.source_samples.registered_demo_source_entity_ids()
-
 
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
         self.processor_runtime.clear_nilm_topology_state(circuit_id)

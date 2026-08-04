@@ -65,6 +65,12 @@ def attention_items_for_coordinators(
             coordinator,
             published_only=False,
         ):
+            if str(getattr(state, "model_status", "") or "").strip().casefold() in {
+                "ignored",
+                "expected",
+                "retired",
+            }:
+                continue
             detail = appliance_detail_for_assignment(coordinator, state.assignment_id)
             if detail is None or not detail.appliance_key:
                 continue
@@ -82,11 +88,7 @@ def _attention_item(
     now: datetime,
 ) -> AttentionItem | None:
     expectation = next(
-        (
-            item
-            for item in detail.expectations
-            if _expectation_is_actionable(item)
-        ),
+        (item for item in detail.expectations if _expectation_is_actionable(item)),
         None,
     )
     if expectation is None:
@@ -107,8 +109,7 @@ def _attention_item(
         next_step=(
             expectation.what_to_check_first[0]
             if expectation.what_to_check_first
-            else detail.next_step
-            or "Open appliance detail."
+            else detail.next_step or "Open appliance detail."
         ),
         action_path=_detail_path(detail),
         updated_at=now,

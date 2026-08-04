@@ -560,9 +560,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     refresh_mains = strings["options"]["step"]["refresh_mains"]
     assert refresh_mains["title"] == "Review Refreshed Mains Sensors"
     assert "current replacements" in refresh_mains["description"].lower()
-    assert refresh_mains["data"]["mains_source_entities"] == (
-        "Mains Source Entities"
-    )
+    assert refresh_mains["data"]["mains_source_entities"] == ("Mains Source Entities")
     entity_detail = strings["options"]["step"]["entity_detail"]
     assert entity_detail["data"]["entity_detail_level"] == "Entity Detail Level"
     assert entity_detail["data"]["selected_entity_groups"] == "Expert Entity Groups"
@@ -713,12 +711,13 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert "source sensors stay" in descriptions["remove_from_analysis"].lower()
         assert "home assistant" in descriptions["remove_from_analysis"].lower()
         assert "unchecked" in descriptions["included_sensors"].lower()
-        assert "several loads with no primary" in descriptions[
-            "appliance_profile"
-        ].lower()
-        assert "primary appliance plus other loads" in descriptions[
-            "circuit_composition"
-        ].lower()
+        assert (
+            "several loads with no primary" in descriptions["appliance_profile"].lower()
+        )
+        assert (
+            "primary appliance plus other loads"
+            in descriptions["circuit_composition"].lower()
+        )
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
@@ -941,8 +940,7 @@ def test_dashboard_example_keeps_energy_history_on_home() -> None:
     energy_cards = [
         card
         for card in home_cards
-        if card.get("type")
-        == "custom:circuitsetup-energy-analyzer-energy-cost"
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-energy-cost"
     ]
     home_summary = next(
         card
@@ -959,9 +957,11 @@ def test_dashboard_example_keeps_energy_history_on_home() -> None:
         "daily_energy_usage_entity": "sensor.mains_daily_energy_usage",
         "cost_today_entity": "sensor.mains_cost_today",
     }
-    assert {
-        appliance["circuit_id"] for appliance in energy_cards[0]["appliances"]
-    } == {"refrigerator", "hvac", "washer"}
+    assert {appliance["circuit_id"] for appliance in energy_cards[0]["appliances"]} == {
+        "refrigerator",
+        "hvac",
+        "washer",
+    }
     assert home_summary["primary_mains"]["average_kwh_per_day_entity"].endswith(
         "_average_kwh_per_day"
     )
@@ -1144,8 +1144,7 @@ def test_dashboard_example_graphs_hvac_energy_with_outdoor_temperature() -> None
     graph_cards = [
         card
         for card in _dashboard_cards(graphs)
-        if card.get("type")
-        == "custom:circuitsetup-energy-analyzer-context-graph"
+        if card.get("type") == "custom:circuitsetup-energy-analyzer-context-graph"
         and card.get("title") == "HVAC activity and outdoor temperature"
     ]
 
@@ -1208,9 +1207,7 @@ def test_dashboard_example_keeps_safety_notice_near_alert_philosophy() -> None:
 def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
     dashboard = yaml.safe_load((ROOT / "docs" / "dashboard-example.yaml").read_text())
     refs = set(
-        _dashboard_entity_refs(
-            (ROOT / "docs" / "dashboard-example.yaml").read_text()
-        )
+        _dashboard_entity_refs((ROOT / "docs" / "dashboard-example.yaml").read_text())
     )
     optional_entities = {
         "sensor.outdoor_temperature",
@@ -1229,9 +1226,7 @@ def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
         owners = [card for card in leaf_cards if entity in yaml.safe_dump(card)]
         assert 1 <= len(owners) <= 2
         assert all(
-            owner.get("type", "").startswith(
-                "custom:circuitsetup-energy-analyzer-"
-            )
+            owner.get("type", "").startswith("custom:circuitsetup-energy-analyzer-")
             or owner.get("type") == "history-graph"
             for owner in owners
         )
@@ -1294,8 +1289,7 @@ def test_readme_describes_blueprint_summary_sensor_evidence() -> None:
 
     assert (
         "The blueprint uses the selected summary sensor's explanation and "
-        "circuit-specific `evidence_path` when available."
-        in readme
+        "circuit-specific `evidence_path` when available." in readme
     )
 
 
@@ -1364,18 +1358,24 @@ def test_alert_blueprint_uses_summary_sensor_explanations() -> None:
             }
         ).strip()
 
-    assert render(
-        {
-            "friendly_name": "Washer Health Summary",
-            "status_explanation": "Reported electrical measurements disagree.",
-        }
-    ) == "Reported electrical measurements disagree."
-    assert render(
-        {
-            "friendly_name": "Washer Energy Summary",
-            "summary_explanation": "Energy use is above the configured threshold.",
-        }
-    ) == "Energy use is above the configured threshold."
+    assert (
+        render(
+            {
+                "friendly_name": "Washer Health Summary",
+                "status_explanation": "Reported electrical measurements disagree.",
+            }
+        )
+        == "Reported electrical measurements disagree."
+    )
+    assert (
+        render(
+            {
+                "friendly_name": "Washer Energy Summary",
+                "summary_explanation": "Energy use is above the configured threshold.",
+            }
+        )
+        == "Energy use is above the configured threshold."
+    )
 
 
 def test_alert_blueprint_matches_current_summary_alert_states() -> None:
@@ -3928,10 +3928,14 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
 
     name = "test_nilm_workspace_marks_low_confidence_estimated_sessions";
     {
-      const panel = makePanel({ _nilmWorkspace: makeWorkspace({
-        history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
-        sessions: [{ ...validationSession, confidence: 0.7 }],
-      }) });
+      const panel = makePanel({
+        _nilmFocusedSignature: "dishwasher-fingerprint",
+        _nilmFocusedOccurrenceIndex: 0,
+        _nilmWorkspace: makeWorkspace({
+          history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
+          sessions: [{ ...validationSession, confidence: 0.7 }],
+        }),
+      });
       panel._nilmWorkspaceHistorySeries = [[
         { entity_id: "sensor.mains_power", state: "200",
           effective_role: "real_power", source_unit: "W",
@@ -4736,13 +4740,13 @@ def test_appliance_detail_runtime_formatter_preserves_unknown_values() -> None:
     assert formatter.index(null_guard) < formatter.index(coercion)
 
     _run_panel_node_script(
-        '''
+        """
 const panel = new context.Panel();
 assert.equal(panel._formatDuration(0), "0s");
 assert.equal(panel._formatDuration(61), "1m 1s");
 assert.equal(panel._formatDuration(3661), "1h 1m 1s");
 assert.equal(panel._formatDuration(null), "Unknown");
-'''
+"""
     )
 
 
@@ -7093,6 +7097,118 @@ assert.ok(html.includes("data-nilm-occurrence-step=\\\"1\\\""));
     )
 
 
+def test_nilm_graph_has_no_detection_annotations_until_selected() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  sessions: [{ session_id: "raw", start: "2026-08-04T01:00:00Z",
+    end: "2026-08-04T01:05:00Z" }],
+  edges: [{ timestamp: "2026-08-04T01:00:00Z", direction: "on", delta_w: 300 }],
+};
+const evidence = panel._nilmFocusedGraphEvidence(panel._nilmWorkspace);
+assert.equal(evidence.sessions.length, 0);
+assert.equal(evidence.edges.length, 0);
+"""
+    )
+
+
+def test_nilm_assignment_review_card_focuses_its_component_signature() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderNilmReviewCard({
+  kind: "assignment",
+  item: {
+    assignment_id: "assignment-pump",
+    display_name: "Pump",
+    signature_fingerprints: ["component-fingerprint"],
+  },
+  index: 0,
+}, [], false);
+assert.match(html, /data-nilm-signature-fingerprint="component-fingerprint"/);
+"""
+    )
+
+
+def test_nilm_assignment_review_card_focuses_a_signature_with_an_occurrence() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+panel._nilmWorkspace = {
+  sessions: [{
+    signature_fingerprint: "current-component",
+    start: "2026-08-04T01:00:00Z",
+    end: "2026-08-04T01:05:00Z",
+  }],
+};
+const html = panel._renderNilmReviewCard({
+  kind: "assignment",
+  item: {
+    assignment_id: "assignment-pump",
+    display_name: "Pump",
+    signature_fingerprints: ["stale-component", "current-component"],
+  },
+  index: 0,
+}, [], false);
+assert.match(html, /data-nilm-signature-fingerprint="current-component"/);
+"""
+    )
+
+
+def test_nilm_configured_primary_assignment_renders_confirmation_action() -> None:
+    _run_panel_node_script(
+        """
+const panel = new context.Panel();
+const html = panel._renderNilmAssignmentActions({
+  assignment_id: "hvac_1-configured-primary",
+  actions: {
+    confirm_primary: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "confirm_nilm_configured_primary",
+      data: { circuit_id: "hvac_1", assignment_id: "hvac_1-configured-primary" },
+    },
+  },
+}, 0);
+assert.match(html, /data-nilm-assignment-action="confirm_primary"/);
+assert.match(html, /Confirm primary appliance/);
+"""
+    )
+
+
+def test_nilm_appliance_detail_omits_self_link_and_circuit_recommendations() -> None:
+    _run_panel_node_script(
+        """
+context.window.location.pathname = "/circuitsetup-energy-analyzer-evidence";
+context.window.location.search = "?circuit_id=hvac_2&alert_id=alert-1&assignment_id=pump&appliance_detail=1";
+const panel = new context.Panel();
+const currentPath = `${context.window.location.pathname}${context.window.location.search}`;
+let html = panel._renderApplianceAlerts([{
+  message: "Pump finished",
+  evidence_path: currentPath,
+}]);
+assert.ok(!html.includes("Open Evidence"));
+html = panel._renderApplianceAlerts([{
+  message: "Other evidence",
+  evidence_path: "/circuitsetup-energy-analyzer-evidence?alert_id=alert-2",
+}]);
+assert.ok(html.includes("Open Evidence"));
+
+panel._renderApplianceDetail = () => "<section>Assignment detail</section>";
+panel._payload = { setting_recommendations: [{
+  status: "applied",
+  display_label: "HVAC 2 circuit setting",
+}]} ;
+panel._applianceDetail = { requested_assignment_id: "pump" };
+html = panel._renderApplianceDetailBody();
+assert.ok(!html.includes("Applied Suggested Settings"));
+assert.ok(!html.includes("HVAC 2 circuit setting"));
+panel._applianceDetail = { requested_assignment_id: null };
+assert.ok(panel._renderApplianceDetailBody().includes("Applied Suggested Settings"));
+"""
+    )
+
+
 def test_show_on_graph_toggle_off_restores_full_nilm_window() -> None:
     _run_panel_node_script(
         """
@@ -7504,24 +7620,20 @@ def test_readme_documents_assignment_defaults() -> None:
     normalized_readme = " ".join(readme_text.split())
     assert (
         "Water-flow correlation applies to `water_pump`, `well_pump`, "
-        "`water_heater`, `washer`, and `dishwasher` circuits"
-        in normalized_readme
+        "`water_heater`, `washer`, and `dishwasher` circuits" in normalized_readme
     )
     assert (
         "Automatic source parsing treats explicit `gas_dryer` names as single "
-        "phase and explicit `electric_dryer` names as dual phase."
-        in normalized_readme
+        "phase and explicit `electric_dryer` names as dual phase." in normalized_readme
     )
     assert (
         "This context applies only to HVAC, HVAC compressor, HVAC blower, "
-        "Mini-Split, and electric heat profiles."
-        in normalized_readme
+        "Mini-Split, and electric heat profiles." in normalized_readme
     )
     assert (
         "Mini-Split inverter operation can remain at low power; tune the "
         "default `100 W` on and `40 W` off thresholds in Advanced Circuit "
-        "Settings when equipment or metering differs."
-        in normalized_readme
+        "Settings when equipment or metering differs." in normalized_readme
     )
 
 
@@ -7594,9 +7706,13 @@ def test_readme_explains_generated_dashboard_controls() -> None:
     assert "keeps graphs half-width on the left" in readme_text
     assert "HVAC overlays outdoor temperature on a second axis" in readme_text
     assert "Water flow context overlays correlated appliance power" in readme_text
-    assert "daily averages on a second line without percentage comparisons" in readme_text
+    assert (
+        "daily averages on a second line without percentage comparisons" in readme_text
+    )
     assert "shared Home Assistant-style date range control" in readme_text
-    assert "combining both phases of a dual-phase appliance into one line" in readme_text
+    assert (
+        "combining both phases of a dual-phase appliance into one line" in readme_text
+    )
     assert "previous, next, now, compare, and CSV download actions" in readme_text
     assert "without repeating a separate Active Now list" in readme_text
     assert "segmented Running intervals against the selected range" in readme_text
@@ -7683,8 +7799,9 @@ def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
 
 def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
     translations = json.loads(
-        Path("custom_components/circuitsetup_energy_analyzer/translations/en.json")
-        .read_text(encoding="utf-8")
+        Path(
+            "custom_components/circuitsetup_energy_analyzer/translations/en.json"
+        ).read_text(encoding="utf-8")
     )["config_panel"]["panel"]["nilm_workspace"]
 
     assert translations["helper_matched_starts"] == (
@@ -7738,9 +7855,11 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         assert expected in readme_text
 
 
-def test_nilm_workspace_source_picker_renders_and_navigates_only_for_multiple_sources() -> None:
+def test_nilm_workspace_source_picker_renders_and_navigates_only_for_multiple_sources() -> (
+    None
+):
     _run_panel_node_script(
-        r'''
+        r"""
 const panel = new context.Panel();
 const summary = (sources) => panel._renderNilmWorkspaceSummary({
   circuit: { circuit_id: "mains", name: "Mains" },
@@ -7778,13 +7897,13 @@ panel._renderActionConfirmation = () => "";
 panel._render();
 changed();
 if (navigated !== path) throw new Error(`picker did not navigate to backend path: ${navigated}`);
-'''
+"""
     )
 
 
 def test_evidence_views_render_and_navigate_load_separation_action() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 const path = "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mixed";
 const panel = makePanel({
   _payload: { actions: { open_load_separation: { type: "navigate", path } } },
@@ -7814,7 +7933,7 @@ panel._renderActionConfirmation = () => "";
 panel._render();
 click();
 if (navigated !== path) throw new Error(`Load Separation action did not navigate: ${navigated}`);
-'''
+"""
     )
 
 

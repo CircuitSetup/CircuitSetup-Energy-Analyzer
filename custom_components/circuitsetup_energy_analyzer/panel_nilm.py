@@ -26,6 +26,7 @@ from .models import (
 from .nilm import (
     NilmEdge,
     NilmSession,
+    nilm_display_name,
     nilm_session_to_dict,
     pair_nilm_sessions_for_signatures,
     resolve_nilm_signature_fingerprint,
@@ -47,7 +48,7 @@ from .panel_contracts import (
     NILM_WORKSPACE_HISTORY_API_PATH,
     PANEL_URL_PATH,
 )
-from .profiles import nilm_source_kind, supports_direct_appliance_analysis
+from .profiles import nilm_source_kind
 from .services import (
     ATTR_APPLIANCE_PROFILE,
     ATTR_ASSIGNMENT_ID,
@@ -70,7 +71,7 @@ from .services import (
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
-    SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER,
+    SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_INTERVAL,
@@ -271,9 +272,7 @@ def nilm_workspace_payload(
     payload = {
         "status": "ok",
         "circuit": _circuit_payload(config),
-        "reconciliation": _nilm_reconciliation_payload(
-            coordinator, config.circuit_id
-        ),
+        "reconciliation": _nilm_reconciliation_payload(coordinator, config.circuit_id),
         "source": _nilm_workspace_source(coordinator, config, include_path=False),
         "sensitivity": _nilm_workspace_sensitivity(
             coordinator, config.circuit_id, all_label_intervals
@@ -643,7 +642,8 @@ def _add_nilm_component_occurrences(
         signature = by_key.get(fingerprint)
         if signature is None:
             compatible = [
-                item for item in candidates
+                item
+                for item in candidates
                 if _nilm_session_signature_compatible(session, item)
             ]
             signature = compatible[0] if len(compatible) == 1 else None
@@ -676,8 +676,13 @@ def _add_nilm_component_occurrences(
         signature["latest_session"] = {
             key: latest[key]
             for key in (
-                "session_id", "start", "end", "duration_seconds",
-                "median_power_w", "estimated_energy_kwh", "confidence",
+                "session_id",
+                "start",
+                "end",
+                "duration_seconds",
+                "median_power_w",
+                "estimated_energy_kwh",
+                "confidence",
                 ATTR_ASSIGNMENT_ID,
             )
             if latest.get(key) is not None
@@ -705,8 +710,10 @@ def _nilm_session_signature_compatible(
         signature.get("typical_watts") or signature.get("median_delta_w"),
         default=0.0,
     )
-    if not observed_w or not expected_w or abs(abs(observed_w) - abs(expected_w)) > max(
-        50.0, abs(expected_w) * 0.25
+    if (
+        not observed_w
+        or not expected_w
+        or abs(abs(observed_w) - abs(expected_w)) > max(50.0, abs(expected_w) * 0.25)
     ):
         return False
     observed_var = session.get("on_delta_var")
@@ -918,20 +925,23 @@ def _nilm_workspace_signatures(
     signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
     topology = _nilm_topology_capability(config)
     return [
-        _apply_nilm_topology_capability({
-            **_nilm_signature_payload(signature),
-            "display_label": _nilm_signature_label(
-                signature,
-                str(signature[ATTR_SIGNATURE_ID]),
-            ),
-            "actions": _nilm_actions_for_signature(
-                circuit_id,
-                str(signature[ATTR_SIGNATURE_ID]),
-                signatures,
-                include_all_nilm=True,
-                restorable=_nilm_signature_restorable(signature),
-            ),
-        }, topology)
+        _apply_nilm_topology_capability(
+            {
+                **_nilm_signature_payload(signature),
+                "display_label": _nilm_signature_label(
+                    signature,
+                    str(signature[ATTR_SIGNATURE_ID]),
+                ),
+                "actions": _nilm_actions_for_signature(
+                    circuit_id,
+                    str(signature[ATTR_SIGNATURE_ID]),
+                    signatures,
+                    include_all_nilm=True,
+                    restorable=_nilm_signature_restorable(signature),
+                ),
+            },
+            topology,
+        )
         for signature in signatures
         if signature.get(ATTR_SIGNATURE_ID)
     ]
@@ -1022,9 +1032,10 @@ def _nilm_assignments_for_circuit(
         for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
         if isinstance(item, dict)
     ]
-    direct_circuit_options = _nilm_direct_circuit_options(
-        coordinator,
-        circuit_id,
+    configured_circuit_names = tuple(
+        config.name
+        for config in getattr(coordinator, "circuit_configs", ()) or ()
+        if isinstance(config, CircuitConfig)
     )
     return [
         _nilm_assignment_payload(
@@ -1033,7 +1044,7 @@ def _nilm_assignments_for_circuit(
             assignments,
             entry_id=str(getattr(coordinator, "entry_id", "") or ""),
             label_intervals=label_intervals,
-            direct_circuit_options=direct_circuit_options,
+            configured_circuit_names=configured_circuit_names,
         )
         for item in assignments
     ]
@@ -1045,10 +1056,12 @@ def _nilm_assignment_options(
     config: CircuitConfig | None = None,
 ) -> list[dict[str, str]]:
     options = (
-        [{
-            "value": configured_primary_assignment_id(config.circuit_id),
-            "label": f"Configured primary: {config.name}",
-        }]
+        [
+            {
+                "value": configured_primary_assignment_id(config.circuit_id),
+                "label": f"Configured primary: {config.name}",
+            }
+        ]
         if config is not None
         and nilm_source_kind(config) is NilmSourceKind.PRIMARY_MIXED
         else []
@@ -1080,11 +1093,7 @@ def _nilm_configured_primary_payload(
         return None
     assignment_id = configured_primary_assignment_id(config.circuit_id)
     assignment = next(
-        (
-            item
-            for item in assignments
-            if item.get(ATTR_ASSIGNMENT_ID) == assignment_id
-        ),
+        (item for item in assignments if item.get(ATTR_ASSIGNMENT_ID) == assignment_id),
         None,
     )
     current_binding = None
@@ -1128,9 +1137,7 @@ def _nilm_configured_primary_payload(
             }
 
     competing = _nilm_assigned_signature_ids(
-        item
-        for item in assignments
-        if item.get(ATTR_ASSIGNMENT_ID) != assignment_id
+        item for item in assignments if item.get(ATTR_ASSIGNMENT_ID) != assignment_id
     )
     candidates = []
     for signature in signatures:
@@ -1294,9 +1301,7 @@ def _add_nilm_helper_evidence(
                         "data": {
                             ATTR_CIRCUIT_ID: circuit_id,
                             ATTR_ASSIGNMENT_ID: assignment_id,
-                            ATTR_HELPER_CIRCUIT_ID: option[
-                                ATTR_HELPER_CIRCUIT_ID
-                            ],
+                            ATTR_HELPER_CIRCUIT_ID: option[ATTR_HELPER_CIRCUIT_ID],
                         },
                         "requires": [ATTR_RELATIONSHIP],
                     }
@@ -1324,19 +1329,17 @@ def _nilm_helper_options(
             {},
         )
         if isinstance(helper_assignments, Mapping) and any(
-            isinstance(item, Mapping)
-            and item.get("conversion_state") == "direct_meter"
+            isinstance(item, Mapping) and item.get("conversion_state") == "direct_meter"
             for item in _iter_items(helper_assignments.get(helper.circuit_id, ()))
         ):
             continue
-        relationships = ["corroborates"]
-        if supports_direct_appliance_analysis(helper):
-            relationships.append("direct_component")
-        options.append({
-            ATTR_HELPER_CIRCUIT_ID: helper.circuit_id,
-            "helper_name": helper.name,
-            "relationship_options": relationships,
-        })
+        options.append(
+            {
+                ATTR_HELPER_CIRCUIT_ID: helper.circuit_id,
+                "helper_name": helper.name,
+                "relationship_options": ["corroborates"],
+            }
+        )
     return options
 
 
@@ -1360,9 +1363,14 @@ def _nilm_assignment_payload(
     *,
     entry_id: str = "",
     label_intervals: Iterable[Mapping[str, Any]] = (),
-    direct_circuit_options: Iterable[Mapping[str, str]] = (),
+    configured_circuit_names: Iterable[str] = (),
 ) -> dict[str, Any]:
     payload = {str(key): value for key, value in assignment.items() if key != "actions"}
+    if payload.get("display_name"):
+        payload["display_name"] = nilm_display_name(
+            str(payload["display_name"]),
+            configured_circuit_names,
+        )
     assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
     if not assignment_id:
         return payload
@@ -1394,19 +1402,19 @@ def _nilm_assignment_payload(
         actions["change_profile"]["profile_options"] = _nilm_appliance_profile_options(
             payload.get(ATTR_APPLIANCE_PROFILE)
         )
-        direct_options = [dict(option) for option in direct_circuit_options]
-        if direct_options and payload.get("conversion_state") != "direct_meter":
-            actions["convert_to_direct_meter"] = {
-                "domain": DOMAIN,
-                "service": SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER,
-                "data": dict(action_data),
-                "requires": ["direct_circuit_id"],
-                "target_options": direct_options,
-            }
         if _nilm_assignment_has_ground_truth_intervals(payload, label_intervals):
             actions["validate_history"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
+                "data": dict(action_data),
+            }
+        if (
+            state == "needs_validation"
+            and assignment_id == configured_primary_assignment_id(circuit_id)
+        ):
+            actions["confirm_primary"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
                 "data": dict(action_data),
             }
         target_options = _nilm_assignment_target_options(assignment_id, assignments)
@@ -1450,33 +1458,6 @@ def _nilm_assignment_payload(
     if actions:
         payload["actions"] = actions
     return payload
-
-
-def _nilm_direct_circuit_options(
-    coordinator: Any,
-    mains_circuit_id: str,
-) -> list[dict[str, str]]:
-    options: list[dict[str, str]] = []
-    for config in getattr(coordinator, "circuit_configs", ()) or ():
-        if not isinstance(config, CircuitConfig):
-            continue
-        if (
-            config.circuit_id == mains_circuit_id
-            or config.mode
-            in {
-                CircuitMode.MAINS_NILM,
-                CircuitMode.MIXED,
-            }
-            or config.appliance_profile
-            in {
-                ApplianceProfile.MAINS_NILM,
-                ApplianceProfile.MIXED,
-                ApplianceProfile.SOLAR_INVERTER,
-            }
-        ):
-            continue
-        options.append({"value": config.circuit_id, "label": config.name})
-    return options
 
 
 def _nilm_assignment_has_ground_truth_intervals(
@@ -1632,16 +1613,11 @@ def _nilm_reconciliation_payload(
     }
 
 
-def _nilm_appliance_detail_panel_path(
-    assignment_id: str, *, entry_id: str = ""
-) -> str:
+def _nilm_appliance_detail_panel_path(assignment_id: str, *, entry_id: str = "") -> str:
     query = {ATTR_ASSIGNMENT_ID: assignment_id, "appliance_detail": "1"}
     if entry_id:
         query[ATTR_ENTRY_ID] = entry_id
-    return (
-        f"/{PANEL_URL_PATH}?"
-        f"{urlencode(query)}"
-    )
+    return f"/{PANEL_URL_PATH}?{urlencode(query)}"
 
 
 def _nilm_appliance_profile_options(
@@ -1680,13 +1656,15 @@ def _nilm_workspace_lanes(
         if not signature_id:
             continue
         review_state = _nilm_review_state(signature)
-        if review_state == "expected":
+        complete_component = _nilm_signature_direction(signature) == "on" and bool(
+            signature.get("session_ids")
+        )
+        if review_state == "expected" and complete_component:
             lanes["expected"]["signature_ids"].append(signature_id)
-        elif _nilm_signature_hidden(signature):
+        elif _nilm_signature_hidden(signature) and complete_component:
             lanes["hidden"]["signature_ids"].append(signature_id)
         elif (
-            _nilm_signature_direction(signature) == "on"
-            and signature.get("session_ids")
+            complete_component
             and not str(signature.get("matched_assignment_id") or "").strip()
             and _nilm_signature_identifiers(signature).isdisjoint(
                 assigned_signature_ids,
@@ -1756,10 +1734,7 @@ def _nilm_assignment_hidden(assignment: Mapping[str, Any]) -> bool:
 
 def _nilm_signature_hidden(signature: Mapping[str, Any]) -> bool:
     state = str(signature.get("review_state") or "").strip().lower()
-    return bool(
-        signature.get("ignored")
-        or state in {"ignored", "merged"}
-    )
+    return bool(signature.get("ignored") or state in {"ignored", "merged"})
 
 
 def _nilm_assigned_signature_ids(
@@ -2123,7 +2098,7 @@ def _nilm_workspace_history_payload(
     )
     end = datetime.now(UTC)
     start = end - timedelta(hours=requested_hours)
-    source_series = _nilm_real_power_series(config, hass=hass)[:1]
+    source_series = _nilm_real_power_series(config, hass=hass)
     entity_series = _nilm_workspace_history_series(
         config,
         known_load_overlays,
@@ -2195,7 +2170,9 @@ def _nilm_workspace_history_series(
     *,
     hass: Any = None,
 ) -> list[dict[str, str]]:
-    source_series = _nilm_real_power_series(config, hass=hass)[:1]
+    source_series = _nilm_real_power_series(config, hass=hass)
+    if config.mode != CircuitMode.MAINS_NILM:
+        source_series = source_series[:1]
     if not source_series:
         return []
     helper_series = [
@@ -2352,15 +2329,16 @@ def _nilm_workspace_sessions(
     if first_on_w is not None:
         for spec in matcher_specs:
             if not any(
-                spec.get(key) is not None
-                for key in ("typical_watts", "median_delta_w")
+                spec.get(key) is not None for key in ("typical_watts", "median_delta_w")
             ):
                 spec["typical_watts"] = first_on_w
         if not matcher_specs:
-            matcher_specs.append({
-                "signature_fingerprint": "unassigned",
-                "typical_watts": first_on_w,
-            })
+            matcher_specs.append(
+                {
+                    "signature_fingerprint": "unassigned",
+                    "typical_watts": first_on_w,
+                }
+            )
     sessions = pair_nilm_sessions_for_signatures(
         edges,
         signature_specs=matcher_specs,

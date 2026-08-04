@@ -85,11 +85,16 @@ def test_restore_nilm_item_schema_requires_one_scoped_identifier() -> None:
     )
 
     schema = _SERVICE_SCHEMAS[SERVICE_RESTORE_NILM_ITEM]
-    assert schema({
-        "entry_id": "entry-1",
-        "circuit_id": "mixed",
-        "signature_id": "signature-1",
-    })["signature_id"] == "signature-1"
+    assert (
+        schema(
+            {
+                "entry_id": "entry-1",
+                "circuit_id": "mixed",
+                "signature_id": "signature-1",
+            }
+        )["signature_id"]
+        == "signature-1"
+    )
     for invalid in (
         {"entry_id": "entry-1", "circuit_id": "mixed"},
         {
@@ -295,9 +300,9 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
     direct_message = alert_notification_message(direct_alert)
 
     assert message.startswith("**mains**\n\n")
-    assert "Estimated from mains power by NILM." in message
+    assert "Estimated from aggregate circuit power by NILM." in message
     assert "Confidence: 82%." in message
-    assert "Estimated from mains power by NILM." not in direct_message
+    assert "Estimated from aggregate circuit power by NILM." not in direct_message
     assert "Confidence: 82%." not in direct_message
 
 
@@ -408,7 +413,7 @@ def test_alert_notification_message_ignores_non_finite_nilm_confidence() -> None
 
     message = alert_notification_message(alert)
 
-    assert "Estimated from mains power by NILM." in message
+    assert "Estimated from aggregate circuit power by NILM." in message
     assert "Confidence:" not in message
 
 
@@ -557,12 +562,8 @@ async def test_weekly_digest_notification_renders_every_non_empty_section(
     digest = SimpleNamespace(
         week_start=date(2026, 7, 6),
         week_end=date(2026, 7, 12),
-        biggest_changes=(
-            SimpleNamespace(display_name="Dryer", change_ratio=0.25),
-        ),
-        top_energy_users=(
-            SimpleNamespace(display_name="EV Charger", energy_kwh=42.0),
-        ),
+        biggest_changes=(SimpleNamespace(display_name="Dryer", change_ratio=0.25),),
+        top_energy_users=(SimpleNamespace(display_name="EV Charger", energy_kwh=42.0),),
         observed_alerts=(SimpleNamespace(display_name="Dishwasher"),),
         unresolved_items=(SimpleNamespace(display_name="Refrigerator"),),
         nilm_review_items=(SimpleNamespace(display_name="Dehumidifier"),),
@@ -632,7 +633,10 @@ def test_alert_notification_message_marks_nilm_as_not_safety_evidence() -> None:
         timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
         circuit_id="mains",
         severity=Severity.INFO,
-        message="Dishwasher appears finished. Estimated from mains power by NILM.",
+        message=(
+            "Dishwasher appears finished. Estimated from aggregate circuit power "
+            "by NILM."
+        ),
         feature="nilm_appliance_finished",
         observed_value=0.8,
         baseline_value=0.8,
@@ -827,9 +831,7 @@ def test_nilm_mutation_schemas_accept_entry_id(
     from custom_components.circuitsetup_energy_analyzer import services
 
     schema = getattr(services, schema_name)
-    assert any(
-        getattr(field, "schema", field) == "entry_id" for field in schema.schema
-    )
+    assert any(getattr(field, "schema", field) == "entry_id" for field in schema.schema)
     assert schema({**data, "entry_id": "entry-2"})["entry_id"] == "entry-2"
 
 
@@ -2550,9 +2552,9 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
             mains_entity_id: str | None = None,
             ground_truth_entity_id: str | None = None,
             interval_id: str | None = None,
-                source: str = "manual",
-                confidence: float = 1.0,
-                observed_transition_w=None,
+            source: str = "manual",
+            confidence: float = 1.0,
+            observed_transition_w=None,
         ) -> None:
             self.calls.append(
                 (
@@ -3006,6 +3008,7 @@ async def test_nilm_assignment_services_dispatch_to_matching_coordinator() -> No
 @pytest.mark.asyncio
 async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
         SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
         SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
         SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -3047,6 +3050,18 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
                 )
             )
 
+        async def async_confirm_nilm_configured_primary(
+            self,
+            circuit_id: str,
+            assignment_id: str,
+        ) -> None:
+            self.calls.append(
+                (
+                    "async_confirm_nilm_configured_primary",
+                    (circuit_id, assignment_id),
+                )
+            )
+
         async def async_unpublish_nilm_appliance_assignment(
             self,
             circuit_id: str,
@@ -3080,6 +3095,7 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
 
     await async_setup_services(hass)
     for service in (
+        SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
         SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
         SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
         SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
@@ -3094,6 +3110,10 @@ async def test_nilm_publish_services_dispatch_to_matching_coordinator() -> None:
         )
 
     assert coordinator.calls == [
+        (
+            "async_confirm_nilm_configured_primary",
+            ("mains", "assignment-dishwasher"),
+        ),
         (
             "async_publish_nilm_appliance_assignment",
             ("mains", "assignment-dishwasher"),
@@ -4506,11 +4526,16 @@ def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> Non
 
 def test_nilm_helper_link_service_schemas_are_exact() -> None:
     from custom_components.circuitsetup_energy_analyzer import services
+
     set_schema = services._SERVICE_SCHEMAS[services.SERVICE_SET_NILM_HELPER_LINK]
     remove = services._SERVICE_SCHEMAS[services.SERVICE_REMOVE_NILM_HELPER_LINK]
-    data = {"circuit_id": "mixed", "assignment_id": "assignment-load",
-            "helper_circuit_id": "helper", "relationship": "corroborates",
-            "entry_id": "entry-1"}
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "helper_circuit_id": "helper",
+        "relationship": "corroborates",
+        "entry_id": "entry-1",
+    }
     assert set_schema(data) == data
     assert remove({k: v for k, v in data.items() if k != "relationship"})
     assert set_schema({**data, "relationship": "direct_component"})
@@ -4519,33 +4544,51 @@ def test_nilm_helper_link_service_schemas_are_exact() -> None:
     with pytest.raises(ValueError):
         set_schema({**data, "extra": "no"})
 
+
 @pytest.mark.asyncio
 async def test_nilm_helper_link_services_are_entry_isolated() -> None:
     from custom_components.circuitsetup_energy_analyzer import services
+
     def coordinator(helper: bool = True) -> SimpleNamespace:
         configs = [SimpleNamespace(circuit_id="mixed")]
         if helper:
             configs.append(SimpleNamespace(circuit_id="helper"))
-        return SimpleNamespace(async_set_updated_data=lambda _: None,
+        return SimpleNamespace(
+            async_set_updated_data=lambda _: None,
             circuit_configs=configs,
-            store_data=FeatureStoreData(nilm_appliance_assignments_by_circuit={
-                "mixed": [{"assignment_id": "assignment-load"}]}),
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mixed": [{"assignment_id": "assignment-load"}]
+                }
+            ),
             async_set_nilm_helper_link=AsyncMock(),
-            async_remove_nilm_helper_link=AsyncMock())
+            async_remove_nilm_helper_link=AsyncMock(),
+        )
+
     first, second = coordinator(), coordinator()
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
-    data = {"circuit_id": "mixed", "assignment_id": "assignment-load",
-            "helper_circuit_id": "helper"}
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "helper_circuit_id": "helper",
+    }
     with pytest.raises(services.HomeAssistantError, match="ambiguous"):
-        await services._dispatch_service(hass, services.SERVICE_SET_NILM_HELPER_LINK,
-            {**data, "relationship": "corroborates"})
+        await services._dispatch_service(
+            hass,
+            services.SERVICE_SET_NILM_HELPER_LINK,
+            {**data, "relationship": "corroborates"},
+        )
     first.async_set_nilm_helper_link.assert_not_awaited()
-    await services._dispatch_service(hass, services.SERVICE_SET_NILM_HELPER_LINK,
-        {**data, "relationship": "corroborates", "entry_id": "entry-2"})
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_SET_NILM_HELPER_LINK,
+        {**data, "relationship": "corroborates", "entry_id": "entry-2"},
+    )
     second.async_set_nilm_helper_link.assert_awaited_once()
     hass.data[DOMAIN] = {"entry-1": coordinator(False), "entry-2": second}
-    await services._dispatch_service(hass, services.SERVICE_REMOVE_NILM_HELPER_LINK,
-                                     data)
+    await services._dispatch_service(
+        hass, services.SERVICE_REMOVE_NILM_HELPER_LINK, data
+    )
     second.async_remove_nilm_helper_link.assert_awaited_once()
 
 
@@ -4641,8 +4684,9 @@ def _entry_scoped_nilm_coordinator() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_nilm_generic_action_scopes_duplicate_circuit_and_legacy_broadcasts(
-) -> None:
+async def test_nilm_generic_action_scopes_duplicate_circuit_and_legacy_broadcasts() -> (
+    None
+):
     """Catches label actions mutating every entry with the same circuit ID."""
     from custom_components.circuitsetup_energy_analyzer.services import (
         ATTR_CIRCUIT_ID,

@@ -3710,6 +3710,14 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         options={},
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+            nilm_signatures={"mains": [{
+                "signature_id": "signature_1",
+                "direction": "on",
+                "median_delta_w": 820.0,
+                "median_delta_var": 120.0,
+                "median_delta_va": 830.0,
+                "median_delta_pf": -0.05,
+            }]},
         ),
         _nilm_unmatched_edges={
             "mains": [
@@ -3969,6 +3977,52 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
 
     assert states["assignment-dishwasher"].is_running is None
     assert states["assignment-washer"].is_running is None
+
+
+def test_nilm_virtual_source_identity_prefers_metadata_real_power() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+    )
+
+    source_states = {
+        "sensor.hvac_var": SimpleNamespace(
+            attributes={"device_class": "reactive_power", "unit_of_measurement": "var"}
+        ),
+        "sensor.hvac_watts": SimpleNamespace(
+            attributes={"device_class": "power", "unit_of_measurement": "W"}
+        ),
+    }
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(
+            states=SimpleNamespace(get=lambda entity_id: source_states.get(entity_id))
+        ),
+        data=AnalyzerState(),
+        circuit_configs=(CircuitConfig(
+            circuit_id="hvac_1",
+            name="HVAC 1",
+            appliance_profile=ApplianceProfile.HVAC_BLOWER,
+            mode=CircuitMode.MIXED,
+            sensors=(
+                SensorRef("sensor.hvac_var", SensorRole.REAL_POWER),
+                SensorRef("sensor.hvac_watts", SensorRole.REAL_POWER),
+            ),
+        ),),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "hvac_1": [{
+                    "assignment_id": "assignment-pump",
+                    "display_name": "Condensate Pump",
+                    "mains_circuit_id": "hvac_1",
+                    "lifecycle_state": "published",
+                    "publish_entities": True,
+                }]
+            }
+        ),
+    )
+
+    state = nilm_virtual_appliance_states(coordinator)[0]
+
+    assert state.mains_source == "sensor.hvac_watts"
 
 
 def test_nilm_virtual_live_values_require_consistent_component_runtime() -> None:

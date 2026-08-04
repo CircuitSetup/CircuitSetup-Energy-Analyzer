@@ -44,6 +44,7 @@ from .models import (
     CircuitMode,
     SensorRole,
 )
+from .nilm import nilm_signature_is_off_direction
 from .notifications import notification_id_for_alert
 from .panel_common import (
     _add_setting_impact_preview,
@@ -798,15 +799,11 @@ def _sump_driver_context_payload(
         return None
     contexts = getattr(coordinator.state, "rain_pump_context_by_circuit", {})
     context = (
-        contexts.get(detail.circuit_id, {})
-        if isinstance(contexts, Mapping)
-        else {}
+        contexts.get(detail.circuit_id, {}) if isinstance(contexts, Mapping) else {}
     )
     context = context if isinstance(context, Mapping) else {}
     compressor_ids = tuple(
-        str(item)
-        for item in context.get("hvac_compressor_circuits", ())
-        if str(item)
+        str(item) for item in context.get("hvac_compressor_circuits", ()) if str(item)
     )
     blower_ids = tuple(
         config.circuit_id
@@ -838,13 +835,9 @@ def _sump_driver_context_payload(
             for circuit_id in blower_ids
             if (entity_id := _activity_summary_entity_id(coordinator, circuit_id))
         ],
-        "rain_intensity_entity_id": str(
-            context.get("rain_intensity_entity") or ""
-        ),
+        "rain_intensity_entity_id": str(context.get("rain_intensity_entity") or ""),
         "rain_entity_id": str(context.get("rain_sensor_entity") or ""),
-        "humidity_entity_id": str(
-            context.get("outdoor_humidity_source_entity") or ""
-        ),
+        "humidity_entity_id": str(context.get("outdoor_humidity_source_entity") or ""),
     }
 
 
@@ -916,10 +909,7 @@ def _appliance_daily_totals(
             continue
     complete = []
     for day in days:
-        if (
-            not isinstance(day, Mapping)
-            or day.get("complete") is not True
-        ):
+        if not isinstance(day, Mapping) or day.get("complete") is not True:
             continue
         date_text = str(day.get("date") or "")
         try:
@@ -943,9 +933,7 @@ def _appliance_daily_totals(
                 "date": date_text,
                 "energy_kwh": energy_kwh,
                 "cost": (
-                    recorded_cost
-                    if recorded_cost is not None
-                    else estimated_cost
+                    recorded_cost if recorded_cost is not None else estimated_cost
                 ),
                 "cost_source": (
                     "recorded"
@@ -1134,13 +1122,18 @@ def _source_history_series(config: Any) -> list[dict[str, str]]:
         except (TypeError, ValueError):
             role = None
         unit = str(getattr(sensor, "unit", "") or _HISTORY_UNIT_BY_ROLE.get(role, ""))
-        if role in {
-            SensorRole.APPARENT_POWER,
-            SensorRole.REACTIVE_POWER,
-        } or unit.lower().endswith(("va", "var")) or re.search(
-            r"(?:^|_)(?:apparent_power|reactive_power)(?:_|$)"
-            r"|(?:^|_)(?:[km]?va|[km]?var)$",
-            entity_id.split(".", 1)[-1].lower(),
+        if (
+            role
+            in {
+                SensorRole.APPARENT_POWER,
+                SensorRole.REACTIVE_POWER,
+            }
+            or unit.lower().endswith(("va", "var"))
+            or re.search(
+                r"(?:^|_)(?:apparent_power|reactive_power)(?:_|$)"
+                r"|(?:^|_)(?:[km]?va|[km]?var)$",
+                entity_id.split(".", 1)[-1].lower(),
+            )
         ):
             continue
         series.append({"entity_id": entity_id, "unit": unit})
@@ -1170,7 +1163,7 @@ def _nilm_history_series(
             continue
         unit = str(attributes.get("unit_of_measurement") or "").strip()
         entity_id = str(getattr(state, "entity_id", "") or "").strip()
-        if entity_id and unit:
+        if entity_id and unit.lower() in {"w", "kw", "mw"}:
             series.append({"entity_id": entity_id, "unit": unit})
     return series
 
@@ -1217,6 +1210,8 @@ def _nilm_embedded_history_series(
     rows: list[dict[str, str]] = []
     for session in _iter_items(sessions_by_circuit.get(detail.circuit_id)):
         if not isinstance(session, Mapping):
+            continue
+        if nilm_signature_is_off_direction(session.get("signature_fingerprint")):
             continue
         session_owner = str(session.get("assignment_id") or "").strip()
         matches = (
@@ -1460,10 +1455,7 @@ def _circuit_appliance_detail_panel_path(
     query = {ATTR_CIRCUIT_ID: circuit_id, "appliance_detail": "1"}
     if entry_id:
         query["entry_id"] = entry_id
-    return (
-        f"/{PANEL_URL_PATH}?"
-        f"{urlencode(query)}"
-    )
+    return f"/{PANEL_URL_PATH}?{urlencode(query)}"
 
 
 def hvac_associations_payload(
@@ -1978,9 +1970,7 @@ async def nilm_workspace_history_payload(
         if isinstance(candidate, CircuitConfig)
     }
     helper_configs = [
-        configs_by_id[value]
-        for value in requested_helpers
-        if value in configs_by_id
+        configs_by_id[value] for value in requested_helpers if value in configs_by_id
     ][:4]
     known_load_overlays = _nilm_known_load_overlays(
         coordinator,
@@ -2003,11 +1993,7 @@ async def nilm_workspace_history_payload(
     entity_series = [
         {**item, **metadata}
         for item in entity_series
-        if (
-            metadata := _nilm_history_live_real_power_metadata(
-                hass, item["entity_id"]
-            )
-        )
+        if (metadata := _nilm_history_live_real_power_metadata(hass, item["entity_id"]))
         is not None
     ]
     if source_entity_id and not any(
@@ -2016,9 +2002,7 @@ async def nilm_workspace_history_payload(
         return []
     history["entity_series"] = entity_series
     history["entities"] = [item["entity_id"] for item in entity_series]
-    metadata = {
-        item["entity_id"]: item for item in entity_series
-    }
+    metadata = {item["entity_id"]: item for item in entity_series}
     history_rows = _async_history_rows
     try:
         history_parameters = inspect.signature(history_rows).parameters.values()
@@ -2049,15 +2033,21 @@ async def nilm_workspace_history_payload(
         if not series:
             continue
         first = series[0]
-        row_role = str(
-            first.get("effective_role") or first.get("sensor_role") or ""
-        ).strip().lower()
-        row_unit = str(
-            first.get("source_unit")
-            or first.get("unit_of_measurement")
-            or first.get("unit")
-            or ""
-        ).strip().lower()
+        row_role = (
+            str(first.get("effective_role") or first.get("sensor_role") or "")
+            .strip()
+            .lower()
+        )
+        row_unit = (
+            str(
+                first.get("source_unit")
+                or first.get("unit_of_measurement")
+                or first.get("unit")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
         if row_role and row_role != SensorRole.REAL_POWER.value:
             continue
         if row_unit and row_unit not in {"w", "kw", "mw"}:
@@ -2168,9 +2158,7 @@ def _bounded_history_series(
         return items
     limit = MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY
     last_index = len(items) - 1
-    return [
-        items[round(index * last_index / (limit - 1))] for index in range(limit)
-    ]
+    return [items[round(index * last_index / (limit - 1))] for index in range(limit)]
 
 
 def _history_state_payload(

@@ -75,10 +75,7 @@ _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] =
         "Mini-Split power should modulate with outdoor temperature and demand.",
         "Low-load operation and brief defrost changes can be normal for an "
         "inverter heat pump.",
-        (
-            "Compare outdoor temperature, operating mode, and recent defrost "
-            "behavior.",
-        ),
+        ("Compare outdoor temperature, operating mode, and recent defrost behavior.",),
     ),
     ApplianceProfile.WASHER: (
         "Washer cycle check",
@@ -167,10 +164,9 @@ def appliance_detail_for_circuit(
         "data_quality_checklist_by_circuit",
         config.circuit_id,
     )
-    if (
-        electrical_attrs.get("metric_consistency_status") == "missing_metrics"
-        and _metric_comparison_sources_complete(quality)
-    ):
+    if electrical_attrs.get(
+        "metric_consistency_status"
+    ) == "missing_metrics" and _metric_comparison_sources_complete(quality):
         first_checks = ()
     comparisons = metric_comparisons_for_circuit(coordinator, config, state)
     expectations = appliance_expectations_for_circuit(
@@ -389,7 +385,7 @@ def _nilm_detail(
         evidence_path=evidence_path,
         source_quality={
             "status": "estimated",
-            "label": "Estimated from mains",
+            "label": "Estimated from aggregate circuit",
             "available_source_count": 1 if state.mains_source else 0,
             "stale_source_count": 0,
             "missing_required_roles": [],
@@ -636,7 +632,8 @@ def _nilm_session_timeline(
                 "kind": "running" if running else "completed",
                 "title": "Estimated run in progress" if running else "Estimated run",
                 "detail": (
-                    "Estimated from the assigned NILM signature on the mains source."
+                    "Estimated from the assigned NILM signature on the aggregate "
+                    "circuit source."
                 ),
             }
         )
@@ -1402,7 +1399,8 @@ def _nilm_expectations(
             observed=observed,
             expected="Estimated appliances should be validated before alerts.",
             why_it_matters=(
-                "NILM is an estimate from mains power, not a direct measurement."
+                "NILM is an estimate from aggregate circuit power, not a direct "
+                "measurement."
             ),
             what_to_check_first=(first_check,),
             evidence_path=evidence_path,
@@ -1780,9 +1778,7 @@ def _water_flow_context_detail(
     source_ids = retained.get("flow_sensor_entities", [])
     if not isinstance(source_ids, list):
         source_ids = []
-    sources = sorted(
-        {str(entity_id) for entity_id in source_ids if str(entity_id)}
-    )
+    sources = sorted({str(entity_id) for entity_id in source_ids if str(entity_id)})
     detail = {
         "status": str(retained.get("status") or "unconfigured"),
         "flow_sensors": [
@@ -1853,14 +1849,11 @@ def _hvac_efficiency_detail(
                 continue
             context = raw.get("context", {})
             context = context if isinstance(context, Mapping) else {}
-            mode = str(
-                context.get("mode") or str(stream_id).rsplit("|", 1)[-1]
-            )
+            mode = str(context.get("mode") or str(stream_id).rsplit("|", 1)[-1])
             if mode not in modes:
                 continue
             thermostat_id = str(
-                context.get("thermostat_entity_id")
-                or str(stream_id).split("|")[1]
+                context.get("thermostat_entity_id") or str(stream_id).split("|")[1]
             )
             participants = sorted(
                 {
@@ -1888,16 +1881,12 @@ def _hvac_efficiency_detail(
                     "required_reference_count": int(
                         raw.get("required_reference_count") or 50
                     ),
-                    "required_recent_count": int(
-                        raw.get("required_recent_count") or 5
-                    ),
+                    "required_recent_count": int(raw.get("required_recent_count") or 5),
                     "outdoor_temperature_f": _rounded_number(
                         context.get("outdoor_temperature_f")
                     ),
                     "season": str(context.get("season") or "") or None,
-                    "weather_mode": (
-                        str(context.get("weather_mode") or "") or None
-                    ),
+                    "weather_mode": (str(context.get("weather_mode") or "") or None),
                     "temperature_bin": (
                         str(context.get("temperature_bin") or "") or None
                     ),
@@ -1912,8 +1901,7 @@ def _hvac_efficiency_detail(
                     ),
                     "attribution": (
                         "gas_furnace_proxy"
-                        if config.appliance_profile
-                        is ApplianceProfile.HVAC_BLOWER
+                        if config.appliance_profile is ApplianceProfile.HVAC_BLOWER
                         else "assisted_system"
                         if len(participants) > 1
                         else "direct"
@@ -1939,9 +1927,7 @@ def _hvac_efficiency_detail(
             str(retained.get("finding") or "")
             or ("stable" if score is not None else None)
         ),
-        "threshold_pct": (
-            _rounded_number(retained.get("threshold_pct")) or 25.0
-        ),
+        "threshold_pct": (_rounded_number(retained.get("threshold_pct")) or 25.0),
         **modes,
         "learning": {
             "reference_count": max(
@@ -1964,11 +1950,7 @@ def _entity_display_name(entity_id: str) -> str:
 
 def _rounded_number(value: Any) -> float | None:
     parsed = _number_or_none(value)
-    return (
-        round(parsed, 2)
-        if parsed is not None and math.isfinite(parsed)
-        else None
-    )
+    return round(parsed, 2) if parsed is not None and math.isfinite(parsed) else None
 
 
 def _rounded_percent(value: Any) -> float | None:
