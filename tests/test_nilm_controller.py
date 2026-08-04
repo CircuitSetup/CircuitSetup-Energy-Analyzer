@@ -963,6 +963,11 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     assignment = {
         "assignment_id": "pump",
         "confirmed_session_ids": ["session-1"],
+        "role": "component",
+        "power_states_w": [],
+        "transition_prototypes": [],
+        "model_confidence": 0.0,
+        "model_revision": 0,
     }
     store_data = FeatureStoreData(
         nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
@@ -974,7 +979,20 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
                     "start": "2026-06-01T10:00:00+00:00",
                     "end": "2026-06-01T10:05:00+00:00",
                     "median_power_w": 83.0,
+                    "on_delta_w": 83.0,
+                    "off_delta_w": -83.0,
+                    "on_delta_var": None,
+                    "off_delta_var": None,
+                    "on_edge_id": (
+                        "on|2026-06-01T10:00:00+00:00|w=83.000|"
+                        "var=27.000|unknown|unknown"
+                    ),
+                    "off_edge_id": (
+                        "off|2026-06-01T10:05:00+00:00|w=-83.000|"
+                        "var=-4.000|unknown|unknown"
+                    ),
                     "confidence": 0.9,
+                    "ambiguous": True,
                 }
             ]
         },
@@ -992,8 +1010,21 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
 
     assert assignment["role"] == "component"
     assert assignment["power_states_w"] == [0.0, 83.0]
+    assert assignment["transition_prototypes"][0]["delta_var"] == 27.0
+    assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
     assert assignment["model_revision"] == 1
     assert dirty == [True]
+
+    for prototype in assignment["transition_prototypes"]:
+        prototype.pop("delta_var")
+        prototype.pop("spread_var")
+    controller.hydrate_state_from_store()
+    controller.hydrate_state_from_store()
+
+    assert assignment["transition_prototypes"][0]["delta_var"] == 27.0
+    assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
+    assert assignment["model_revision"] == 2
+    assert dirty == [True, True]
 
 
 def test_component_runtime_state_is_runtime_only() -> None:
