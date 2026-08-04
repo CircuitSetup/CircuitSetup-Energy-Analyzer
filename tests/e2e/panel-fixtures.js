@@ -495,9 +495,10 @@ export const nilmWorkspace = {
     needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [] },
     assigned: { label: "Assigned", signature_ids: [], assignment_ids: ["dishwasher"], interval_ids: [] },
     published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
-    ignored_expected: { label: "Ignored / Expected", signature_ids: [], assignment_ids: [], interval_ids: [] },
+    expected: { label: "Expected", signature_ids: [], assignment_ids: [], interval_ids: [] },
+    hidden: { label: "Hidden", signature_ids: [], assignment_ids: [], interval_ids: [] },
   },
-  lane_counts: { needs_review: 1, assigned: 1, published: 0, ignored_expected: 0 },
+  lane_counts: { needs_review: 1, assigned: 1, published: 0, expected: 0, hidden: 0 },
 };
 
 export const hvacAssociations = {

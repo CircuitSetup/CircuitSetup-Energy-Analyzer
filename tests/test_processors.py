@@ -8185,6 +8185,7 @@ def test_nilm_session_specs_skip_retired_direct_meter_assignment() -> None:
         ],
         assignments,
     ) == [
+        ("expected-signature", "expected"),
         ("masking-signature", "masking")
     ]
 
@@ -10217,7 +10218,7 @@ def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
         mode=CircuitMode.MIXED,
     )
     sample = NormalizedCircuitSample(
-        timestamp=now + timedelta(minutes=6),
+        timestamp=now + timedelta(days=1),
         circuit_id="ac-2",
         real_power=100.0,
         current=None,
@@ -10237,6 +10238,21 @@ def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
     ][0]
     assert retained_candidate["matched_on_count"] == 3
     assert retained_candidate["matched_off_count"] == 3
+
+    processor._helper_events_by_source["ac-2"] = [
+        CircuitEvent(
+            now + timedelta(seconds=index),
+            "hvac-2",
+            EventType.START,
+            features={},
+        )
+        for index in range(520)
+    ]
+    processor.process(sample, config, context, events=())
+
+    retained = processor._helper_events_by_source["ac-2"]
+    assert len(retained) == 512
+    assert retained[0].timestamp == now + timedelta(seconds=8)
 
 
 def test_nilm_helper_candidates_ignore_edges_before_observation_window() -> None:

@@ -24,6 +24,42 @@ def configured_primary_assignment_id(circuit_id: str) -> str:
     return f"{circuit_id}-configured-primary"
 
 
+def nilm_assignment_publication_reason(
+    assignment: Mapping[str, Any],
+) -> str | None:
+    """Return why an assignment cannot publish, or None when it can."""
+    state = str(assignment.get("lifecycle_state") or "").strip().lower()
+    if assignment.get("conversion_state") == "direct_meter":
+        return "A direct-meter conversion cannot republish duplicate NILM entities."
+    if state == "expected":
+        return "Restore or assign this expected load before publishing."
+    if state in {"ignored", "retired"}:
+        return "Restore this hidden load before publishing."
+    if assignment.get("publish_entities") is True or state == "published":
+        return None
+    if state not in {"assigned", "validated", "ready_to_publish"}:
+        return "Validate this assignment before publishing."
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if (
+        assignment.get("role") == "primary"
+        or assignment_id.endswith("-configured-primary")
+    ) and not _clean_string_list(assignment.get("signature_fingerprints")):
+        return "Bind the configured primary signature before publishing."
+    if not any(
+        _clean_string_list(assignment.get(key))
+        for key in ("signature_fingerprints", "session_ids", "label_interval_ids")
+    ):
+        return "Assign at least one detected load before publishing."
+    if (
+        assignment.get("helper_required") is True
+        or assignment.get("requires_helper") is True
+    ) and not _clean_string_list(assignment.get("helper_links")):
+        return "Confirm a qualifying helper circuit before publishing."
+    if _nonnegative_float_value(assignment.get("confidence"), default=0.0) < 0.8:
+        return "Confirm more matching cycles until confidence reaches 80%."
+    return None
+
+
 class NilmController:
     """Own NILM appliance assignment lifecycle workflows."""
 
@@ -638,6 +674,7 @@ class NilmController:
         coordinator = self._coordinator
         signature = self.signature_for_review(circuit_id, signature_id)
         fingerprint = self._signature_fingerprint_value(signature, signature_id)
+        primary_id = configured_primary_assignment_id(circuit_id)
         assignment = self.upsert_assignment(
             circuit_id,
             label=label,
@@ -648,10 +685,33 @@ class NilmController:
             lifecycle_state="assigned",
             confidence=signature.get("confidence", 1.0),
         )
+        if assignment["assignment_id"] == primary_id:
+            previous_fingerprints = set(
+                self._clean_string_list(assignment.get("signature_fingerprints"))
+            ) - {fingerprint}
+            assignment["signature_fingerprints"] = [fingerprint]
+            for previous in coordinator.store_data.nilm_signatures.get(
+                circuit_id, ()
+            ):
+                if (
+                    previous is not signature
+                    and (
+                        previous.get("assignment_id") == primary_id
+                        or self._signature_fingerprint_value(
+                            previous,
+                            str(previous.get("signature_id") or ""),
+                        )
+                        in previous_fingerprints
+                    )
+                ):
+                    previous.pop("assignment_id", None)
+                    previous["review_state"] = "new"
+                    previous.pop("user_label", None)
         signature["assignment_id"] = assignment["assignment_id"]
         signature["review_state"] = "assigned"
         signature["user_label"] = assignment["display_name"]
         signature.pop("ignored", None)
+        signature.pop("expected", None)
         coordinator.ignored_nilm_signatures.discard((circuit_id, signature_id))
         self.remove_signature_from_other_assignments(
             circuit_id,
@@ -1291,6 +1351,172 @@ class NilmController:
         signature["assignment_id"] = assignment["assignment_id"]
         await self._async_save_nilm_review_change(circuit_id)
 
+    async def async_restore_nilm_item(
+        self,
+        circuit_id: str,
+        *,
+        assignment_id: str | None = None,
+        signature_id: str | None = None,
+        entry_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Restore exactly one hidden signature or assignment."""
+        assignment_id_text = str(assignment_id or "").strip()
+        signature_id_text = str(signature_id or "").strip()
+        if bool(assignment_id_text) == bool(signature_id_text):
+            raise ValueError("Pass exactly one of assignment_id or signature_id.")
+
+        coordinator = self._coordinator
+        requested_entry_id = str(entry_id or "").strip()
+        current_entry_id = str(getattr(coordinator, "entry_id", "") or "").strip()
+        if (
+            requested_entry_id
+            and current_entry_id
+            and requested_entry_id != current_entry_id
+        ):
+            raise ValueError(
+                f"entry_id '{requested_entry_id}' does not own circuit '{circuit_id}'."
+            )
+        registry = getattr(coordinator, "circuit_registry", None)
+        config_for_circuit = getattr(registry, "config_for_circuit", None)
+        if callable(config_for_circuit):
+            if config_for_circuit(circuit_id) is None:
+                raise ValueError(f"Unknown circuit_id '{circuit_id}'.")
+        else:
+            store_data = getattr(coordinator, "store_data", None)
+            known_circuits = {
+                *getattr(store_data, "nilm_signatures", {})
+                .keys(),
+                *getattr(
+                    store_data,
+                    "nilm_appliance_assignments_by_circuit",
+                    {},
+                ).keys(),
+            }
+            if circuit_id not in known_circuits:
+                raise ValueError(f"Unknown circuit_id '{circuit_id}'.")
+        signatures = coordinator.store_data.nilm_signatures.get(circuit_id, [])
+        if signature_id_text:
+            signature = next(
+                (
+                    item
+                    for item in signatures
+                    if item.get("signature_id") == signature_id_text
+                ),
+                None,
+            )
+            if signature is None:
+                raise ValueError(
+                    f"Unknown signature_id '{signature_id_text}' for circuit_id "
+                    f"'{circuit_id}'."
+                )
+            fingerprint = self._signature_fingerprint_value(
+                signature, signature_id_text
+            )
+            was_expected = (
+                str(signature.get("review_state") or "").strip().lower()
+                == "expected"
+                or signature.get("expected") is True
+            )
+            owner_id = str(signature.get("assignment_id") or "").strip()
+            owner = (
+                self.assignment_for_id(circuit_id, owner_id)
+                if owner_id
+                else self.assignment_for_signature(circuit_id, fingerprint)
+            )
+            if was_expected and owner is not None:
+                owner["lifecycle_state"] = "assigned"
+                owner["publish_entities"] = False
+                owner["created_device"] = False
+                owner["updated_at"] = coordinator.current_time().isoformat()
+                signature["assignment_id"] = owner["assignment_id"]
+                signature["review_state"] = "assigned"
+                signature.pop("expected", None)
+                signature.pop("ignored", None)
+                if isinstance(
+                    getattr(coordinator, "ignored_nilm_signatures", None),
+                    set,
+                ):
+                    coordinator.ignored_nilm_signatures.discard(
+                        (circuit_id, signature_id_text)
+                    )
+                self._rebuild_assignment_model(circuit_id, owner)
+                await self._async_save_nilm_review_change(circuit_id)
+                return dict(signature)
+            for key in (
+                "ignored",
+                "expected",
+                "merged_into",
+                "merged_into_fingerprint",
+                "assignment_id",
+                "user_label",
+            ):
+                signature.pop(key, None)
+            signature["review_state"] = "new"
+            ignored = getattr(coordinator, "ignored_nilm_signatures", None)
+            if isinstance(ignored, set):
+                ignored.discard((circuit_id, signature_id_text))
+            if owner is not None:
+                owner["signature_fingerprints"] = [
+                    value
+                    for value in self._clean_string_list(
+                        owner.get("signature_fingerprints")
+                    )
+                    if value != fingerprint
+                ]
+                owner_has_history = any(
+                    self._clean_string_list(owner.get(key))
+                    for key in ("session_ids", "label_interval_ids")
+                )
+                if not owner["signature_fingerprints"] and not owner_has_history:
+                    assignments = (
+                        coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                            circuit_id, []
+                        )
+                    )
+                    assignments[:] = [item for item in assignments if item is not owner]
+                else:
+                    owner["lifecycle_state"] = "assigned"
+                    owner["updated_at"] = coordinator.current_time().isoformat()
+                    self._rebuild_assignment_model(circuit_id, owner)
+            await self._async_save_nilm_review_change(circuit_id)
+            return dict(signature)
+
+        assignment = self.assignment_for_id(circuit_id, assignment_id_text)
+        state = str(assignment.get("lifecycle_state") or "").strip().lower()
+        if state not in {"expected", "ignored", "retired"}:
+            raise ValueError(
+                f"Assignment '{assignment_id_text}' is not hidden or expected."
+            )
+        assignment["lifecycle_state"] = "assigned"
+        assignment["publish_entities"] = False
+        assignment["created_device"] = False
+        assignment["updated_at"] = coordinator.current_time().isoformat()
+        fingerprints = set(
+            self._clean_string_list(assignment.get("signature_fingerprints"))
+        )
+        ignored = getattr(coordinator, "ignored_nilm_signatures", None)
+        for signature in signatures:
+            signature_fingerprint = self._signature_fingerprint_value(
+                signature,
+                str(signature.get("signature_id") or ""),
+            )
+            if (
+                signature.get("assignment_id") != assignment_id_text
+                and signature_fingerprint not in fingerprints
+            ):
+                continue
+            signature["assignment_id"] = assignment_id_text
+            signature["review_state"] = "assigned"
+            signature.pop("ignored", None)
+            signature.pop("expected", None)
+            if isinstance(ignored, set):
+                ignored.discard(
+                    (circuit_id, str(signature.get("signature_id") or ""))
+                )
+        self._rebuild_assignment_model(circuit_id, assignment)
+        await self._async_save_nilm_review_change(circuit_id)
+        return dict(assignment)
+
     async def async_merge_nilm_signatures(
         self,
         circuit_id: str,
@@ -1399,10 +1625,9 @@ class NilmController:
         coordinator = self._coordinator
         coordinator.store_persistence.mark_dirty()
         self.refresh_state(circuit_id)
-        coordinator.refresh_ux_state_for_circuit(
-            circuit_id,
-            coordinator.current_time(),
-        )
+        refresh_ux = getattr(coordinator, "refresh_ux_state_for_circuit", None)
+        if callable(refresh_ux):
+            refresh_ux(circuit_id, coordinator.current_time())
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(
             coordinator.current_time()
@@ -1740,10 +1965,9 @@ class NilmController:
     ) -> dict[str, Any]:
         """Publish estimated HA entities for a NILM assignment."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
-        if assignment.get("conversion_state") == "direct_meter":
-            raise ValueError(
-                "A direct-meter conversion cannot republish duplicate NILM entities."
-            )
+        blocked_reason = nilm_assignment_publication_reason(assignment)
+        if blocked_reason is not None:
+            raise ValueError(blocked_reason)
         previous = dict(assignment)
         assignment["publish_entities"] = True
         assignment["created_device"] = True
@@ -1828,7 +2052,13 @@ class NilmController:
         await self._coordinator.store_persistence.async_save_if_dirty(
             self._coordinator.current_time()
         )
-        await self._coordinator.config_entry_controller.async_reload()
+        reload_entry = getattr(
+            getattr(self._coordinator, "config_entry_controller", None),
+            "async_reload",
+            None,
+        )
+        if callable(reload_entry):
+            await reload_entry()
 
     def _assignment_entities_present(
         self,

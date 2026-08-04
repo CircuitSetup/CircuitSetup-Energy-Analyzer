@@ -169,17 +169,19 @@ def _unknown_load_payload(
 
 def _matching_edges(signature: NilmSignature, edges: list[NilmEdge]) -> list[NilmEdge]:
     target_watts = abs(float(signature.median_delta_w))
-    target_var = abs(float(signature.median_delta_var))
+    target_var = _optional_abs(signature.median_delta_var)
     matches: list[NilmEdge] = []
     for edge in edges:
         watts_match = _within_tolerance(abs(edge.delta_w), target_watts, 0.2, 50.0)
-        var_match = _within_tolerance(abs(edge.delta_var), target_var, 0.35, 75.0)
+        evidence_match = target_var is None or edge.delta_var is None or (
+            _within_tolerance(abs(edge.delta_var), target_var, 0.35, 75.0)
+        )
         topology_match = (
             signature.split_phase_type == "unknown"
             or edge.split_phase_type == "unknown"
             or signature.split_phase_type == edge.split_phase_type
         )
-        if watts_match and var_match and topology_match:
+        if watts_match and evidence_match and topology_match:
             matches.append(edge)
     return matches
 
@@ -301,14 +303,16 @@ def _likely_type(
     signature: NilmSignature,
     *,
     typical_watts: float,
-    typical_var: float,
-    typical_va: float,
-    typical_power_factor: float,
+    typical_var: float | None,
+    typical_va: float | None,
+    typical_power_factor: float | None,
     voltage_class: str,
 ) -> str:
     if not _has_enough_evidence(signature):
         return "unknown"
 
+    if typical_var is None or typical_va is None or typical_power_factor is None:
+        return "unknown"
     reactive_ratio = typical_var / max(typical_watts, 1.0)
     if (
         voltage_class == "240 V"
@@ -368,9 +372,9 @@ def _evidence(
     likely_type: str,
     voltage_class: str,
     typical_watts: float,
-    typical_var: float,
-    typical_va: float,
-    typical_power_factor: float,
+    typical_var: float | None,
+    typical_va: float | None,
+    typical_power_factor: float | None,
 ) -> list[str]:
     evidence = [
         (
@@ -384,8 +388,9 @@ def _evidence(
         ),
         (
             f"Typical median change is {typical_watts:.1f} W, "
-            f"{typical_var:.1f} VAR, {typical_va:.1f} VA, "
-            f"estimated PF {typical_power_factor:.3f}."
+            f"{_optional_metric_text(typical_var, 1)} VAR, "
+            f"{_optional_metric_text(typical_va, 1)} VA, "
+            f"estimated PF {_optional_metric_text(typical_power_factor, 3)}."
         ),
     ]
 
@@ -425,11 +430,24 @@ def _voltage_label(voltage_class: str) -> str:
     return "unknown-voltage"
 
 
-def _typical_power_factor(typical_watts: float, typical_va: float) -> float:
-    if typical_va <= 0.0:
-        return 0.0
+def _typical_power_factor(
+    typical_watts: float,
+    typical_va: float | None,
+) -> float | None:
+    if typical_va is None or typical_va <= 0.0:
+        return None
     return round(min(typical_watts / typical_va, 1.0), 3)
 
 
-def _rounded_abs(value: float) -> float:
+def _rounded_abs(value: float | None) -> float | None:
+    if value is None:
+        return None
     return round(abs(float(value)), 3)
+
+
+def _optional_abs(value: float | None) -> float | None:
+    return None if value is None else abs(float(value))
+
+
+def _optional_metric_text(value: float | None, decimals: int) -> str:
+    return "unavailable" if value is None else f"{value:.{decimals}f}"

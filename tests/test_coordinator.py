@@ -6995,7 +6995,11 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics(
         def get(self, entity_id: str):
             return SimpleNamespace(
                 state=str(holder["watts"] if "power" in entity_id else holder["var"]),
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": (
+                        "var" if entity_id == "sensor.mains_reactive" else "W"
+                    )
+                },
                 last_updated=holder["time"],
             )
 
@@ -9286,6 +9290,8 @@ async def test_nilm_publish_waits_for_entities_added_after_reload() -> None:
                         "appliance_id": "dishwasher",
                         "display_name": "Dishwasher",
                         "lifecycle_state": "validated",
+                        "signature_fingerprints": ["dishwasher-signature"],
+                        "confidence": 0.9,
                         "publish_entities": False,
                     }
                 ]
@@ -9334,6 +9340,8 @@ async def test_nilm_publish_rolls_back_without_home_assistant_entities() -> None
                         "appliance_id": "dishwasher",
                         "display_name": "Dishwasher",
                         "lifecycle_state": "validated",
+                        "signature_fingerprints": ["dishwasher-signature"],
+                        "confidence": 0.9,
                         "publish_entities": False,
                     }
                 ]
@@ -13482,7 +13490,11 @@ async def test_runtime_power_quality_waits_while_optional_metrics_learn(
             }
             return SimpleNamespace(
                 state=values[entity_id],
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": (
+                        "var" if entity_id == "sensor.fridge_var" else "W"
+                    )
+                },
                 last_updated=holder["time"],
             )
 
@@ -13731,7 +13743,11 @@ async def test_runtime_reactive_drift_uses_ratio_when_raw_baseline_is_zero() -> 
             }
             return SimpleNamespace(
                 state=values[entity_id],
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": (
+                        "var" if entity_id == "sensor.fridge_var" else "W"
+                    )
+                },
                 last_updated=now,
             )
 
@@ -13851,7 +13867,13 @@ async def test_runtime_populates_readiness_health_and_checklist_state() -> None:
             }
             return SimpleNamespace(
                 state=values[entity_id],
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": {
+                        "sensor.fridge_power": "W",
+                        "sensor.fridge_var": "var",
+                        "sensor.fridge_pf": None,
+                    }[entity_id]
+                },
                 last_updated=now,
             )
 
@@ -14578,7 +14600,14 @@ async def test_runtime_learns_power_quality_baselines_for_optional_metrics() -> 
             }
             return SimpleNamespace(
                 state=values[entity_id],
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": {
+                        "sensor.fridge_power": "W",
+                        "sensor.fridge_var": "var",
+                        "sensor.fridge_va": "VA",
+                        "sensor.fridge_pf": None,
+                    }[entity_id]
+                },
                 last_updated=holder["time"],
             )
 
@@ -14645,7 +14674,14 @@ async def test_runtime_notifies_power_quality_relationship_change_after_maturity
             }
             return SimpleNamespace(
                 state=values[entity_id],
-                attributes={"unit_of_measurement": "W"},
+                attributes={
+                    "unit_of_measurement": {
+                        "sensor.fridge_power": "W",
+                        "sensor.fridge_var": "var",
+                        "sensor.fridge_va": "VA",
+                        "sensor.fridge_pf": None,
+                    }[entity_id]
+                },
                 last_updated=holder["time"],
             )
 

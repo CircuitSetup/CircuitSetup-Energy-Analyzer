@@ -87,6 +87,7 @@ class NilmSampleProcessor:
         self._helper_links_dirty = False
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
+        self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
 
     def process(
         self,
@@ -120,11 +121,11 @@ class NilmSampleProcessor:
         helper_events = list(
             {_helper_event_key(event): event for event in helper_events}.values()
         )
-        cutoff = sample.timestamp - timedelta(minutes=10)
+        cutoff = sample.timestamp - timedelta(days=7)
         retained = [event for event in helper_events if event.timestamp >= cutoff]
         self._helper_events_by_source[circuit_id] = (
-            retained[-self._unmatched_edges_max_items :]
-            if self._unmatched_edges_max_items
+            retained[-self._helper_events_max_items :]
+            if self._helper_events_max_items
             else []
         )
         helper_events_changed = previous_helper_event_keys != tuple(
@@ -783,7 +784,7 @@ def _restore_unique_component_state(
         for item in assignments
         if _direct_helper_id(item) is None
         if (model := _runtime_assignment_model(item)).lifecycle_state
-        in {"validated", "published"}
+        in {"expected", "validated", "published"}
         and model.model_confidence >= 0.70
         and len(model.power_states_w) >= 2
         and any(state > 0.0 for state in model.power_states_w)
@@ -1558,7 +1559,6 @@ def _nilm_session_specs(
         ]
         hidden = str(assignment.get("lifecycle_state") or "").strip() in {
             "ignored",
-            "expected",
             "retired",
         } or (
             assignment.get("conversion_state") == "direct_meter"
@@ -1577,6 +1577,9 @@ def _nilm_session_specs(
     for signature in signatures:
         fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
+        if signature.get("ignored") or signature.get("review_state") == "ignored":
+            seen_fingerprints.add(fingerprint)
+            continue
         if fingerprint and fingerprint not in seen_fingerprints and key not in seen:
             specs.append(key)
             seen.add(key)

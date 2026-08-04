@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitEvent,
     CircuitSample,
     EventType,
+    SensorRole,
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdge,
@@ -31,8 +32,12 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
 from custom_components.circuitsetup_energy_analyzer.normalize import (
     NormalizedCircuitSample,
 )
+from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+    _nilm_session_specs,
+)
 
 BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+_DEFAULT_DELTA_VA = object()
 
 
 def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
@@ -204,13 +209,39 @@ def split_sample(
     )
 
 
+def timed_sample(
+    seconds: int,
+    watts: float,
+    *,
+    reactive_power: float | None,
+    apparent_power: float | None,
+    power_factor: float | None,
+    updated_at: dict[SensorRole, int],
+) -> NormalizedCircuitSample:
+    return NormalizedCircuitSample(
+        timestamp=BASE_TIME + timedelta(seconds=seconds),
+        circuit_id="mains",
+        real_power=watts,
+        reactive_power=reactive_power,
+        apparent_power=apparent_power,
+        power_factor=power_factor,
+        source_updated_at_by_role=tuple(
+            (
+                role,
+                BASE_TIME + timedelta(seconds=source_seconds),
+            )
+            for role, source_seconds in updated_at.items()
+        ),
+    )
+
+
 def edge(
     seconds: int,
     delta_w: float,
     *,
-    delta_var: float = 0.0,
-    delta_va: float | None = None,
-    delta_pf: float = 0.0,
+    delta_var: float | None = 0.0,
+    delta_va: float | None | object = _DEFAULT_DELTA_VA,
+    delta_pf: float | None = 0.0,
     direction: str | None = None,
     leg_a_delta_w: float | None = None,
     leg_b_delta_w: float | None = None,
@@ -221,7 +252,7 @@ def edge(
         timestamp=BASE_TIME + timedelta(seconds=seconds),
         delta_w=delta_w,
         delta_var=delta_var,
-        delta_va=delta_va if delta_va is not None else delta_w,
+        delta_va=delta_w if delta_va is _DEFAULT_DELTA_VA else delta_va,
         delta_pf=delta_pf,
         direction=direction or ("on" if delta_w > 0 else "off"),
         leg_a_delta_w=leg_a_delta_w,
@@ -727,6 +758,265 @@ def test_edge_detector_emits_on_and_off_edges_from_current_sample_fields() -> No
     assert edges[1].delta_w == -165.0
 
 
+def test_edge_detector_keeps_missing_auxiliary_evidence_unavailable() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many(
+        [
+            CircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=0.0,
+            ),
+            CircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=220.0,
+            ),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 220.0
+    assert edges[0].delta_var is None
+    assert edges[0].delta_va is None
+    assert edges[0].delta_pf is None
+
+
+def test_edge_detector_preserves_measured_zero_auxiliary_delta() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many([
+        CircuitSample(
+            timestamp=BASE_TIME,
+            circuit_id="mains",
+            real_power=100.0,
+            reactive_power=10.0,
+            apparent_power=120.0,
+            power_factor=0.833,
+        ),
+        CircuitSample(
+            timestamp=BASE_TIME + timedelta(seconds=10),
+            circuit_id="mains",
+            real_power=220.0,
+            reactive_power=10.0,
+            apparent_power=240.0,
+            power_factor=0.917,
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].delta_var == 0.0
+
+
+def test_confirmed_edge_uses_final_sample_for_delayed_auxiliary_evidence() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        timed_sample(
+            0,
+            0.0,
+            reactive_power=10.0,
+            apparent_power=100.0,
+            power_factor=0.0,
+            updated_at={
+                SensorRole.REAL_POWER: 0,
+                SensorRole.REACTIVE_POWER: 0,
+                SensorRole.APPARENT_POWER: 0,
+                SensorRole.POWER_FACTOR: 0,
+            },
+        ),
+        timed_sample(
+            10,
+            200.0,
+            reactive_power=10.0,
+            apparent_power=200.0,
+            power_factor=1.0,
+            updated_at={
+                SensorRole.REAL_POWER: 10,
+                SensorRole.REACTIVE_POWER: 0,
+                SensorRole.APPARENT_POWER: 0,
+                SensorRole.POWER_FACTOR: 0,
+            },
+        ),
+        timed_sample(
+            20,
+            195.0,
+            reactive_power=55.0,
+            apparent_power=205.0,
+            power_factor=0.95,
+            updated_at={
+                SensorRole.REAL_POWER: 20,
+                SensorRole.REACTIVE_POWER: 20,
+                SensorRole.APPARENT_POWER: 20,
+                SensorRole.POWER_FACTOR: 20,
+            },
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 195.0
+    assert edges[0].delta_var == 45.0
+    assert edges[0].delta_va == 105.0
+    assert edges[0].delta_pf == pytest.approx(0.95)
+
+
+def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window(
+) -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        timed_sample(
+            0,
+            0.0,
+            reactive_power=10.0,
+            apparent_power=100.0,
+            power_factor=0.0,
+            updated_at={
+                SensorRole.REAL_POWER: 0,
+                SensorRole.REACTIVE_POWER: 0,
+                SensorRole.APPARENT_POWER: 0,
+                SensorRole.POWER_FACTOR: 0,
+            },
+        ),
+        timed_sample(
+            10,
+            200.0,
+            reactive_power=10.0,
+            apparent_power=200.0,
+            power_factor=1.0,
+            updated_at={
+                SensorRole.REAL_POWER: 10,
+                SensorRole.REACTIVE_POWER: 0,
+                SensorRole.APPARENT_POWER: 0,
+                SensorRole.POWER_FACTOR: 0,
+            },
+        ),
+        timed_sample(
+            20,
+            200.0,
+            reactive_power=55.0,
+            apparent_power=205.0,
+            power_factor=0.95,
+            updated_at={
+                SensorRole.REAL_POWER: 20,
+                SensorRole.REACTIVE_POWER: 0,
+                SensorRole.APPARENT_POWER: 0,
+                SensorRole.POWER_FACTOR: 0,
+            },
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 200.0
+    assert edges[0].delta_var is None
+    assert edges[0].delta_va is None
+    assert edges[0].delta_pf is None
+
+
+def test_edge_detector_derives_va_and_pf_from_synchronized_voltage_current() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many([
+        CircuitSample(
+            timestamp=BASE_TIME,
+            circuit_id="mains",
+            real_power=0.0,
+            voltage=120.0,
+            current=1.0,
+        ),
+        CircuitSample(
+            timestamp=BASE_TIME + timedelta(seconds=10),
+            circuit_id="mains",
+            real_power=200.0,
+            voltage=120.0,
+            current=2.0,
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 200.0
+    assert edges[0].delta_va == pytest.approx(120.0)
+    assert edges[0].delta_pf == pytest.approx(round(200.0 / 240.0, 3))
+
+
+def test_edge_detector_rejects_derived_evidence_when_voltage_is_out_of_window(
+) -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        NormalizedCircuitSample(
+            timestamp=BASE_TIME,
+            circuit_id="mains",
+            real_power=0.0,
+            voltage=120.0,
+            current=1.0,
+            source_updated_at_by_role=(
+                (SensorRole.REAL_POWER, BASE_TIME),
+                (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=30)),
+                (SensorRole.CURRENT, BASE_TIME),
+            ),
+        ),
+        NormalizedCircuitSample(
+            timestamp=BASE_TIME + timedelta(seconds=10),
+            circuit_id="mains",
+            real_power=200.0,
+            voltage=120.0,
+            current=2.0,
+            source_updated_at_by_role=(
+                (SensorRole.REAL_POWER, BASE_TIME + timedelta(seconds=10)),
+                (SensorRole.VOLTAGE, BASE_TIME - timedelta(seconds=20)),
+                (SensorRole.CURRENT, BASE_TIME + timedelta(seconds=10)),
+            ),
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 200.0
+    assert edges[0].delta_va is None
+    assert edges[0].delta_pf is None
+
+
+def test_edge_detector_does_not_use_conflicting_va_as_strong_evidence() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many([
+        CircuitSample(
+            timestamp=BASE_TIME,
+            circuit_id="mains",
+            real_power=100.0,
+            apparent_power=120.0,
+            voltage=120.0,
+            current=1.0,
+        ),
+        CircuitSample(
+            timestamp=BASE_TIME + timedelta(seconds=10),
+            circuit_id="mains",
+            real_power=220.0,
+            apparent_power=100.0,
+            voltage=120.0,
+            current=2.0,
+        ),
+    ])
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 120.0
+    assert edges[0].delta_va is None
+    assert edges[0].delta_pf is None
+
+
 def test_edge_detector_infers_balanced_split_phase_transition() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0)
 
@@ -888,7 +1178,7 @@ def test_edge_detector_keeps_original_timestamp_for_confirmed_level() -> None:
 
     assert len(edges) == 1
     assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
-    assert edges[0].delta_w == 1_000.0
+    assert edges[0].delta_w == 980.0
 
 
 def test_edge_detector_does_not_debounce_sparse_samples() -> None:
@@ -1004,6 +1294,119 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert signatures[0].median_delta_w == 300.0
     assert signatures[0].median_delta_var == 35.0
     assert signatures[0].confidence >= 0.6
+
+
+def test_cluster_recurring_signatures_separates_same_w_by_apparent_power() -> None:
+    signatures = cluster_recurring_signatures([
+        *[
+            edge(
+                index * 30,
+                300.0,
+                delta_var=40.0,
+                delta_va=320.0,
+            )
+            for index in range(3)
+        ],
+        *[
+            edge(
+                100 + index * 30,
+                300.0,
+                delta_var=40.0,
+                delta_va=600.0,
+            )
+            for index in range(3)
+        ],
+    ])
+
+    assert len(signatures) == 2
+    assert {signature.median_delta_va for signature in signatures} == {320.0, 600.0}
+
+
+def test_cluster_recurring_signatures_does_not_bridge_distinct_reactive_loads(
+) -> None:
+    signatures = cluster_recurring_signatures([
+        *[
+            edge(index * 30, 500.0, delta_var=100.0)
+            for index in range(3)
+        ],
+        *[
+            edge(100 + index * 30, 500.0, delta_var=150.0)
+            for index in range(3)
+        ],
+        *[
+            edge(200 + index * 30, 500.0, delta_var=225.0)
+            for index in range(3)
+        ],
+    ])
+
+    assert [signature.occurrence_count for signature in signatures] == [6, 3]
+    assert [signature.median_delta_var for signature in signatures] == [125.0, 225.0]
+
+
+def test_w_only_signatures_keep_missing_features_and_still_pair() -> None:
+    signatures = cluster_recurring_signatures([
+        edge(index * 30, 300.0, delta_var=None, delta_va=None, delta_pf=None)
+        for index in range(3)
+    ])
+
+    assert len(signatures) == 1
+    assert signatures[0].median_delta_var is None
+    assert signatures[0].median_delta_va is None
+    assert signatures[0].median_delta_pf is None
+    assert "var=unknown" in nilm_domain.nilm_signature_fingerprint(signatures[0])
+
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 300.0, delta_var=None, delta_va=None, delta_pf=None),
+            edge(60, -300.0, delta_var=None, delta_va=None, delta_pf=None),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[{
+            "signature_fingerprint": "w-only",
+            "median_delta_w": 300.0,
+        }],
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].off_edge_id is not None
+
+
+def test_expected_assignments_are_modeled_but_ignored_assignments_are_not() -> None:
+    signatures = [
+        {"signature_id": "expected", "median_delta_w": 300.0},
+        {"signature_id": "ignored", "median_delta_w": 300.0},
+    ]
+    assignments = [
+        {
+            "assignment_id": "expected-assignment",
+            "lifecycle_state": "expected",
+            "signature_fingerprints": ["expected"],
+        },
+        {
+            "assignment_id": "ignored-assignment",
+            "lifecycle_state": "ignored",
+            "signature_fingerprints": ["ignored"],
+        },
+    ]
+
+    assert _nilm_session_specs(signatures, assignments) == [
+        ("expected", "expected-assignment")
+    ]
+
+    expected = assignment_model(
+        "expected-assignment",
+        transition("expected-assignment", 300.0),
+        lifecycle_state="expected",
+    )
+    ignored = assignment_model(
+        "ignored-assignment",
+        transition("ignored-assignment", 300.0),
+        lifecycle_state="ignored",
+    )
+    assert reconcile(edge(0, 300.0), [expected], {"expected-assignment": 0.0}).accepted
+    assert not reconcile(
+        edge(0, 300.0), [ignored], {"ignored-assignment": 0.0}
+    ).accepted
 
 
 def test_cluster_recurring_signatures_keeps_split_phase_topologies_separate() -> None:
@@ -1282,6 +1685,17 @@ def test_classify_signature_is_conservative_and_allows_user_label_override() -> 
     )
     assert (
         classify_signature(NilmSignature("resistive", 500.0, 10.0, 501.0, 0.0, 4, 0.7))
+        == "possible resistive load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                signature_id="watts-only",
+                median_delta_w=500.0,
+                occurrence_count=4,
+                confidence=0.7,
+            )
+        )
         == "possible resistive load"
     )
     assert (

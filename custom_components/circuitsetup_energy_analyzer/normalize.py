@@ -4,6 +4,11 @@ import math
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
+from .discovery import (
+    sensor_metadata_is_unsupported,
+    sensor_metadata_role_conflict,
+    sensor_role_from_metadata,
+)
 from .models import CircuitConfig, CircuitSample, PowerFlowMode, SensorRole
 
 STALE_AFTER = timedelta(minutes=10)
@@ -71,6 +76,7 @@ class NormalizedCircuitSample(CircuitSample):
     leg_b_voltage: float | None = None
     leg_power_imbalance_ratio: float | None = None
     voltage_difference: float | None = None
+    source_updated_at_by_role: tuple[tuple[SensorRole, datetime], ...] = ()
 
     @property
     def real_power_w(self) -> float | None:
@@ -94,19 +100,50 @@ def build_circuit_sample(
 ) -> NormalizedCircuitSample:
     values: dict[SensorRole, float | None] = {}
     source_by_role: dict[SensorRole, str] = {}
+    source_updated_at_by_role: dict[SensorRole, datetime] = {}
     quality_issues: list[str] = []
     source_entity_ids = tuple(sensor.entity_id for sensor in config.sensors)
 
     for sensor in config.sensors:
         source = states.get(sensor.entity_id)
+        source_unit = source.unit if source is not None and source.unit else sensor.unit
+        metadata_unsupported = sensor_metadata_is_unsupported(
+            device_class=source.device_class if source is not None else None,
+            unit=source_unit,
+        )
+        if sensor_metadata_role_conflict(
+            device_class=source.device_class if source is not None else None,
+            unit=source_unit,
+        ):
+            quality_issues.append(
+                f"{sensor.entity_id} metadata role conflict: "
+                f"device_class={source.device_class} unit={source_unit}"
+            )
+            continue
+        metadata_role = sensor_role_from_metadata(
+            device_class=source.device_class if source is not None else None,
+            unit=source_unit,
+        )
+        effective_role = metadata_role or sensor.role
         if source is None:
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} missing")
             continue
 
+        if metadata_unsupported:
+            values.setdefault(effective_role, None)
+            quality_issues.append(f"{sensor.entity_id} unsupported_metadata")
+            continue
+
+        if metadata_role is not None and metadata_role is not sensor.role:
+            quality_issues.append(
+                f"{sensor.entity_id} configured {sensor.role.value} conflicts with "
+                f"metadata {metadata_role.value}"
+            )
+
         timestamp_issue = _timestamp_issue(now, source.last_updated)
         if timestamp_issue is not None:
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} {timestamp_issue}")
             continue
 
@@ -118,32 +155,33 @@ def build_circuit_sample(
 
         state = source.state.strip()
         if state.lower() in UNAVAILABLE_STATES:
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} unavailable")
             continue
         if is_stale:
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             continue
 
         try:
             value = float(state)
         except ValueError:
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} non_numeric")
             continue
         if not math.isfinite(value):
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
-        value = normalize_sensor_value(value, sensor.role, source.unit)
+        value = normalize_sensor_value(value, effective_role, source_unit)
         if not math.isfinite(value):
-            values.setdefault(sensor.role, None)
+            values.setdefault(effective_role, None)
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
-        values[sensor.role] = value
-        source_by_role[sensor.role] = sensor.entity_id
+        values[effective_role] = value
+        source_by_role[effective_role] = sensor.entity_id
+        source_updated_at_by_role[effective_role] = source_last_updated
 
     raw_real_power = values.get(SensorRole.REAL_POWER)
     real_power, power_flow_direction = _normalize_real_power(
@@ -170,6 +208,7 @@ def build_circuit_sample(
         raw_real_power=raw_real_power,
         power_flow=config.power_flow,
         power_flow_direction=power_flow_direction,
+        source_updated_at_by_role=tuple(source_updated_at_by_role.items()),
     )
     return suppress_inactive_stale_current_issues(
         config,

@@ -62,6 +62,7 @@ from .panel_contracts import (
 )
 from .panel_nilm import (
     MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
+    _nilm_history_live_real_power_metadata,
     _nilm_known_load_overlays,
     _nilm_payload_for_circuit,
     _nilm_solar_overlays,
@@ -1993,13 +1994,80 @@ async def nilm_workspace_history_payload(
         hours=hours,
         entry_id=str(getattr(coordinator, "entry_id", "") or ""),
         helper_configs=helper_configs,
+        hass=hass,
     )
-    return await _async_history_rows(
-        hass,
-        history["start"],
-        history["end"],
-        history["entities"],
-    )
+    entity_series = list(history.get("entity_series", ()))
+    if not entity_series:
+        return []
+    source_entity_id = entity_series[0]["entity_id"]
+    entity_series = [
+        {**item, **metadata}
+        for item in entity_series
+        if (
+            metadata := _nilm_history_live_real_power_metadata(
+                hass, item["entity_id"]
+            )
+        )
+        is not None
+    ]
+    if source_entity_id and not any(
+        item["entity_id"] == source_entity_id for item in entity_series
+    ):
+        return []
+    history["entity_series"] = entity_series
+    history["entities"] = [item["entity_id"] for item in entity_series]
+    metadata = {
+        item["entity_id"]: item for item in entity_series
+    }
+    history_rows = _async_history_rows
+    try:
+        history_parameters = inspect.signature(history_rows).parameters.values()
+        accepts_metadata = any(
+            parameter.name == "metadata"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in history_parameters
+        )
+    except (TypeError, ValueError):
+        accepts_metadata = False
+    if accepts_metadata:
+        rows = await history_rows(
+            hass,
+            history["start"],
+            history["end"],
+            history["entities"],
+            metadata=metadata,
+        )
+    else:
+        rows = await history_rows(
+            hass,
+            history["start"],
+            history["end"],
+            history["entities"],
+        )
+    annotated: list[list[dict[str, Any]]] = []
+    for series in rows:
+        if not series:
+            continue
+        first = series[0]
+        row_role = str(
+            first.get("effective_role") or first.get("sensor_role") or ""
+        ).strip().lower()
+        row_unit = str(
+            first.get("source_unit")
+            or first.get("unit_of_measurement")
+            or first.get("unit")
+            or ""
+        ).strip().lower()
+        if row_role and row_role != SensorRole.REAL_POWER.value:
+            continue
+        if row_unit and row_unit not in {"w", "kw", "mw"}:
+            continue
+        source = metadata.get(str(first.get("entity_id") or ""))
+        if source is not None:
+            for row in series:
+                row.update(source)
+        annotated.append(series)
+    return annotated
 
 
 async def _async_history_rows(
@@ -2007,6 +2075,8 @@ async def _async_history_rows(
     start: str,
     end: str,
     entity_ids: list[str],
+    *,
+    metadata: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[list[dict[str, Any]]]:
     if not entity_ids:
         return []
@@ -2035,7 +2105,7 @@ async def _async_history_rows(
             rows = await rows
     except Exception:
         return []
-    return _bounded_history_rows(rows)
+    return _bounded_history_rows(rows, metadata=metadata)
 
 
 def _recorder_get_instance(hass: Any) -> Any:
@@ -2057,7 +2127,11 @@ def _history_get_significant_states() -> Any:
     return get_significant_states
 
 
-def _bounded_history_rows(rows: Any) -> list[list[dict[str, Any]]]:
+def _bounded_history_rows(
+    rows: Any,
+    *,
+    metadata: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list[list[dict[str, Any]]]:
     series_rows: Iterable[tuple[str | None, Any]]
     if isinstance(rows, Mapping):
         series_rows = ((str(key), value) for key, value in rows.items())
@@ -2065,7 +2139,11 @@ def _bounded_history_rows(rows: Any) -> list[list[dict[str, Any]]]:
         series_rows = ((None, value) for value in _iter_items(rows))
     bounded = []
     for entity_id, series in series_rows:
-        payload = _bounded_history_series(series, entity_id=entity_id)
+        payload = _bounded_history_series(
+            series,
+            entity_id=entity_id,
+            metadata=metadata,
+        )
         if payload:
             bounded.append(payload)
     return bounded
@@ -2075,10 +2153,15 @@ def _bounded_history_series(
     series: Any,
     *,
     entity_id: str | None = None,
+    metadata: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     items = []
     for state in _iter_items(series):
-        payload = _history_state_payload(state, fallback_entity_id=entity_id)
+        payload = _history_state_payload(
+            state,
+            fallback_entity_id=entity_id,
+            metadata=metadata,
+        )
         if payload is not None:
             items.append(payload)
     if len(items) <= MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY:
@@ -2094,6 +2177,7 @@ def _history_state_payload(
     state: Any,
     *,
     fallback_entity_id: str | None,
+    metadata: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     if isinstance(state, Mapping):
         entity_id = state.get("entity_id") or fallback_entity_id
@@ -2112,11 +2196,24 @@ def _history_state_payload(
     changed_text = (
         changed.isoformat() if hasattr(changed, "isoformat") else str(changed)
     )
-    return {
+    payload = {
         "entity_id": str(entity_id),
         "state": str(value),
         "last_changed": changed_text,
     }
+    series_metadata = metadata.get(str(entity_id)) if metadata else None
+    if isinstance(series_metadata, Mapping):
+        for key in (
+            "effective_role",
+            "sensor_role",
+            "source_unit",
+            "unit_of_measurement",
+        ):
+            if series_metadata.get(key) is not None:
+                payload[key] = series_metadata[key]
+        if series_metadata.get("source_unit") is not None:
+            payload.setdefault("unit_of_measurement", series_metadata["source_unit"])
+    return payload
 
 
 def _pause_alerts_action(

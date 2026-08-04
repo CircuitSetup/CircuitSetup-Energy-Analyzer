@@ -16,7 +16,12 @@ from .context_sources import (
     string_list_from_sources as _string_list_from_sources,
 )
 from .demand import MAX_DEMAND_WINDOW_MINUTES
-from .discovery import friendly_source_name
+from .discovery import (
+    friendly_source_name,
+    sensor_metadata_is_unsupported,
+    sensor_metadata_role_conflict,
+    sensor_role_from_metadata,
+)
 from .managers.source_samples import (
     entity_id_leg_hint as _entity_id_leg_hint,
 )
@@ -765,7 +770,14 @@ def _optional_positive_float_value(
 
 def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
-        return raw_sensor
+        if sensor_metadata_is_unsupported(unit=raw_sensor.unit):
+            return None
+        metadata_role = sensor_role_from_metadata(unit=raw_sensor.unit)
+        return (
+            replace(raw_sensor, role=metadata_role)
+            if metadata_role is not None
+            else raw_sensor
+        )
     if isinstance(raw_sensor, str):
         if untyped_source_entity_excluded(raw_sensor):
             return None
@@ -782,12 +794,24 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         return None
     if _harmonic_source_entity_excluded(str(entity_id)):
         return None
+    unit = raw_sensor.get("unit")
+    device_class = raw_sensor.get("device_class")
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return None
+    if sensor_metadata_is_unsupported(device_class=device_class, unit=unit):
+        return None
+    metadata_role = sensor_role_from_metadata(
+        device_class=device_class,
+        unit=unit,
+    )
     raw_role = raw_sensor.get("role")
-    if raw_role == SensorRole.REAL_POWER.value and untyped_source_entity_excluded(
+    if metadata_role is not None:
+        role = metadata_role
+    elif raw_role == SensorRole.REAL_POWER.value and untyped_source_entity_excluded(
         str(entity_id)
     ):
         return None
-    if raw_role is None:
+    elif raw_role is None:
         if untyped_source_entity_excluded(str(entity_id)):
             return None
         role = sensor_role_from_entity_id(str(entity_id))
@@ -800,7 +824,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
         entity_id=str(entity_id),
         role=role,
         leg=raw_sensor.get("leg"),
-        unit=raw_sensor.get("unit"),
+        unit=unit,
     )
 
 

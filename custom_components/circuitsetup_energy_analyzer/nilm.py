@@ -12,7 +12,8 @@ from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .models import CircuitEvent, CircuitSample, EventType
+from .metric_consistency import evaluate_metric_consistency
+from .models import CircuitEvent, CircuitSample, EventType, SensorRole
 
 
 def build_nilm_assignment_model(
@@ -489,10 +490,10 @@ class NilmEdge:
 
     timestamp: datetime
     delta_w: float
-    delta_var: float
-    delta_va: float
-    delta_pf: float
-    direction: str
+    delta_var: float | None = None
+    delta_va: float | None = None
+    delta_pf: float | None = None
+    direction: str = "on"
     leg_a_delta_w: float | None = None
     leg_b_delta_w: float | None = None
     leg_balance_ratio: float | None = None
@@ -729,7 +730,7 @@ def _nilm_transition_legal(
     current_states_w: Mapping[str, float | None],
 ) -> bool:
     lifecycle = model.lifecycle_state.strip().lower()
-    if lifecycle in {"hidden", "ignored", "expected", "rejected", "converted"}:
+    if lifecycle in {"hidden", "ignored", "rejected", "converted"}:
         return False
     current = current_states_w.get(model.assignment_id)
     if current is None or not isfinite(current):
@@ -1077,11 +1078,11 @@ class NilmSignature:
 
     signature_id: str
     median_delta_w: float
-    median_delta_var: float
-    median_delta_va: float
-    median_delta_pf: float
-    occurrence_count: int
-    confidence: float
+    median_delta_var: float | None = None
+    median_delta_va: float | None = None
+    median_delta_pf: float | None = None
+    occurrence_count: int = 0
+    confidence: float = 0.0
     user_label: str | None = None
     median_leg_a_delta_w: float | None = None
     median_leg_b_delta_w: float | None = None
@@ -1146,9 +1147,9 @@ def nilm_signature_fingerprint(signature: NilmSignature) -> str:
         (
             f"direction={_signature_direction(signature.signature_id)}",
             f"watts={_abs_value_bucket(signature.median_delta_w, 100.0)}",
-            f"var={_abs_value_bucket(signature.median_delta_var, 100.0)}",
-            f"va={_abs_value_bucket(signature.median_delta_va, 100.0)}",
-            f"pf={_abs_value_bucket(signature.median_delta_pf, 0.05)}",
+            f"var={_optional_value_bucket(signature.median_delta_var, 100.0)}",
+            f"va={_optional_value_bucket(signature.median_delta_va, 100.0)}",
+            f"pf={_optional_value_bucket(signature.median_delta_pf, 0.05)}",
             f"split={signature.split_phase_type or 'unknown'}",
             f"leg={signature.dominant_leg or 'unknown'}",
             f"balance={_optional_ratio_bucket(signature.leg_balance_ratio)}",
@@ -1227,7 +1228,9 @@ class NilmEdgeDetector:
             if pending is not None:
                 baseline, candidate, _count = pending
                 if self._same_level(sample, candidate, baseline):
-                    edge = self._edge_between(baseline, candidate)
+                    edge = self._edge_between(baseline, sample)
+                    if edge is not None:
+                        edge = replace(edge, timestamp=candidate.timestamp)
                     return [edge] if edge is not None else []
                 if self._same_level(sample, baseline, baseline):
                     return []
@@ -1239,7 +1242,9 @@ class NilmEdgeDetector:
                 count += 1
                 if count >= self.confirmation_samples:
                     self._pending = None
-                    edge = self._edge_between(baseline, candidate)
+                    edge = self._edge_between(baseline, sample)
+                    if edge is not None:
+                        edge = replace(edge, timestamp=candidate.timestamp)
                     return [edge] if edge is not None else []
                 self._pending = (baseline, candidate, count)
                 return []
@@ -1285,13 +1290,51 @@ class NilmEdgeDetector:
             getattr(previous, "leg_b_real_power", None),
         )
         topology = _split_phase_topology(leg_a_delta, leg_b_delta)
+        previous_real_time = _source_updated_at(previous, SensorRole.REAL_POWER)
+        sample_real_time = _source_updated_at(sample, SensorRole.REAL_POWER)
+        previous_va, previous_pf = _nilm_electrical_features(
+            previous,
+            previous_real_time,
+            self.confirmation_max_interval,
+        )
+        sample_va, sample_pf = _nilm_electrical_features(
+            sample,
+            sample_real_time,
+            self.confirmation_max_interval,
+        )
+        previous_var_time = _source_updated_at(previous, SensorRole.REACTIVE_POWER)
+        sample_var_time = _source_updated_at(sample, SensorRole.REACTIVE_POWER)
 
         return NilmEdge(
             timestamp=sample.timestamp,
             delta_w=delta_w,
-            delta_var=_delta(sample.reactive_power, previous.reactive_power),
-            delta_va=_delta(sample.apparent_power, previous.apparent_power),
-            delta_pf=_delta(sample.power_factor, previous.power_factor),
+            delta_var=_aligned_optional_delta(
+                sample.reactive_power,
+                previous.reactive_power,
+                sample_var_time,
+                previous_var_time,
+                sample_real_time,
+                previous_real_time,
+                self.confirmation_max_interval,
+            ),
+            delta_va=_aligned_optional_delta(
+                sample_va[0],
+                previous_va[0],
+                sample_va[1],
+                previous_va[1],
+                sample_real_time,
+                previous_real_time,
+                self.confirmation_max_interval,
+            ),
+            delta_pf=_aligned_optional_delta(
+                sample_pf[0],
+                previous_pf[0],
+                sample_pf[1],
+                previous_pf[1],
+                sample_real_time,
+                previous_real_time,
+                self.confirmation_max_interval,
+            ),
             direction="on" if delta_w > 0 else "off",
             leg_a_delta_w=_round_optional(leg_a_delta),
             leg_b_delta_w=_round_optional(leg_b_delta),
@@ -1305,6 +1348,103 @@ class NilmEdgeDetector:
         for sample in samples:
             edges.extend(self.process(sample))
         return edges
+
+
+def _nilm_electrical_features(
+    sample: CircuitSample,
+    real_power_updated_at: datetime,
+    max_interval: timedelta | None,
+) -> tuple[tuple[float | None, datetime | None], tuple[float | None, datetime | None]]:
+    consistency = evaluate_metric_consistency(
+        real_power_w=getattr(sample, "real_power", None),
+        apparent_power_va=getattr(sample, "apparent_power", None),
+        power_factor=getattr(sample, "power_factor", None),
+        voltage_v=getattr(sample, "voltage", None),
+        current_a=getattr(sample, "current", None),
+        leg_a_voltage_v=getattr(sample, "leg_a_voltage", None),
+        leg_a_current_a=getattr(sample, "leg_a_current", None),
+        leg_b_voltage_v=getattr(sample, "leg_b_voltage", None),
+        leg_b_current_a=getattr(sample, "leg_b_current", None),
+    )
+    if consistency.status in {
+        "metric_mismatch",
+        "apparent_power_mismatch",
+        "power_factor_mismatch",
+    }:
+        return (None, None), (None, None)
+
+    apparent_power = consistency.reported_apparent_power_va
+    apparent_power_role = SensorRole.APPARENT_POWER
+    if apparent_power is None:
+        apparent_power = consistency.expected_apparent_power_va
+        apparent_power_role = SensorRole.VOLTAGE
+    apparent_power_timestamp = (
+        _aligned_source_updated_at(
+            sample,
+            (SensorRole.VOLTAGE, SensorRole.CURRENT),
+            real_power_updated_at,
+            max_interval,
+        )
+        if apparent_power_role is SensorRole.VOLTAGE
+        else _source_updated_at(sample, apparent_power_role)
+    ) if apparent_power is not None else None
+
+    power_factor = consistency.reported_power_factor
+    power_factor_timestamp = (
+        _source_updated_at(sample, SensorRole.POWER_FACTOR)
+        if power_factor is not None
+        else apparent_power_timestamp
+    )
+    if power_factor is None:
+        power_factor = consistency.expected_power_factor
+    return (
+        (apparent_power, apparent_power_timestamp),
+        (power_factor, power_factor_timestamp),
+    )
+
+
+def _source_updated_at(sample: CircuitSample, role: SensorRole) -> datetime:
+    for source_role, timestamp in getattr(sample, "source_updated_at_by_role", ()):
+        if source_role is role or str(source_role) == role.value:
+            return timestamp
+    return sample.timestamp
+
+
+def _aligned_source_updated_at(
+    sample: CircuitSample,
+    roles: tuple[SensorRole, ...],
+    real_power_updated_at: datetime,
+    max_interval: timedelta | None,
+) -> datetime | None:
+    timestamps = tuple(_source_updated_at(sample, role) for role in roles)
+    if max_interval is not None and any(
+        abs(timestamp - real_power_updated_at) > max_interval
+        for timestamp in timestamps
+    ):
+        return None
+    return max(timestamps)
+
+
+def _aligned_optional_delta(
+    current: float | None,
+    previous: float | None,
+    current_updated_at: datetime | None,
+    previous_updated_at: datetime | None,
+    current_real_updated_at: datetime,
+    previous_real_updated_at: datetime,
+    max_interval: timedelta | None,
+) -> float | None:
+    if current is None or previous is None:
+        return None
+    if max_interval is not None:
+        if current_updated_at is None or previous_updated_at is None:
+            return None
+        if (
+            abs(current_updated_at - current_real_updated_at) > max_interval
+            or abs(previous_updated_at - previous_real_updated_at) > max_interval
+        ):
+            return None
+    return float(current) - float(previous)
 
 
 def mask_known_loads(
@@ -1384,9 +1524,9 @@ def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignatur
             edge.direction,
             abs(edge.delta_w),
             edge.delta_w,
-            edge.delta_var,
-            edge.delta_va,
-            edge.delta_pf,
+            _optional_sort_key(edge.delta_var),
+            _optional_sort_key(edge.delta_va),
+            _optional_sort_key(edge.delta_pf),
             edge.timestamp,
         ),
     )
@@ -1406,9 +1546,9 @@ def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignatur
             continue
 
         median_w = float(median(candidate.delta_w for candidate in cluster))
-        median_var = float(median(candidate.delta_var for candidate in cluster))
-        median_va = float(median(candidate.delta_va for candidate in cluster))
-        median_pf = float(median(candidate.delta_pf for candidate in cluster))
+        median_var = _median_optional(candidate.delta_var for candidate in cluster)
+        median_va = _median_optional(candidate.delta_va for candidate in cluster)
+        median_pf = _median_optional(candidate.delta_pf for candidate in cluster)
         median_leg_a = _median_optional(
             candidate.leg_a_delta_w for candidate in cluster
         )
@@ -1451,19 +1591,51 @@ def classify_signature(signature: NilmSignature) -> str:
         return signature.user_label
 
     abs_w = abs(signature.median_delta_w)
-    abs_var = abs(signature.median_delta_var)
-    abs_va = abs(signature.median_delta_va)
-    reactive_ratio = abs_var / max(abs_w, 1.0)
+    abs_var = (
+        abs(signature.median_delta_var)
+        if signature.median_delta_var is not None
+        else None
+    )
+    abs_va = (
+        abs(signature.median_delta_va)
+        if signature.median_delta_va is not None
+        else None
+    )
+    abs_pf = (
+        abs(signature.median_delta_pf)
+        if signature.median_delta_pf is not None
+        else None
+    )
+    reactive_ratio = (
+        abs_var / max(abs_w, 1.0) if abs_var is not None else None
+    )
+
+    if abs_w >= 200 and abs_var is None and abs_va is None and abs_pf is None:
+        return _split_phase_label(signature, "resistive load")
 
     if (
-        abs_w >= 200
+        abs_var is not None
+        and abs_pf is not None
+        and abs_pf <= 0.08
+        and abs_w >= 200
+        and reactive_ratio is not None
         and reactive_ratio <= 0.12
-        and abs(signature.median_delta_pf) <= 0.08
     ):
         return _split_phase_label(signature, "resistive load")
-    if abs_w >= 200 and reactive_ratio >= 0.3:
+    if (
+        abs_var is not None
+        and abs_w >= 200
+        and reactive_ratio is not None
+        and reactive_ratio >= 0.3
+    ):
         return _split_phase_label(signature, "motor-like load")
-    if abs_va >= 100 and reactive_ratio >= 0.75:
+    if (
+        abs_var is not None
+        and abs_va is not None
+        and abs_va >= 100
+        and reactive_ratio is not None
+        and reactive_ratio >= 0.75
+    ):
         return _split_phase_label(signature, "power-electronics load")
     return "unknown recurring load"
 
@@ -1811,7 +1983,7 @@ def _nilm_signature_edge_score(
         ("median_delta_pf", edge.delta_pf, 0.5, 0.1),
     ):
         expected = _nilm_number(spec.get(field))
-        if expected is None:
+        if expected is None or edge_value is None:
             continue
         score = _nilm_optional_magnitude_score(
             edge_value,
@@ -1853,12 +2025,6 @@ def unmatched_load_percentage(total_events: int, unmatched_events: int) -> float
     return (unmatched_events / total_events) * 100.0
 
 
-def _delta(current: float | None, previous: float | None) -> float:
-    if current is None or previous is None:
-        return 0.0
-    return current - previous
-
-
 def _signature_direction(signature_id: str) -> str:
     direction = str(signature_id).split("-", 1)[0].strip().lower()
     return direction if direction in {"on", "off"} else "unknown"
@@ -1870,6 +2036,14 @@ def _abs_value_bucket(value: float, step: float) -> str:
     if step >= 1.0:
         return f"{bucket_start:.0f}-{bucket_end:.0f}"
     return f"{bucket_start:.2f}-{bucket_end:.2f}"
+
+
+def _optional_value_bucket(value: float | None, step: float) -> str:
+    return "unknown" if value is None else _abs_value_bucket(value, step)
+
+
+def _optional_sort_key(value: float | None) -> tuple[int, float]:
+    return (value is None, float(value or 0.0))
 
 
 def _optional_ratio_bucket(value: float | None) -> str:
@@ -1915,24 +2089,50 @@ def _edge_similar(edge: NilmEdge, reference: NilmEdge) -> bool:
         return False
     if not _split_phase_types_compatible(edge, reference):
         return False
-    return _within_ratio(edge.delta_w, reference.delta_w, 0.2) and _within_ratio(
-        edge.delta_var, reference.delta_var, 0.35
-    )
+    if not _within_ratio(edge.delta_w, reference.delta_w, 0.2):
+        return False
+    return _optional_edge_features_compatible(edge, reference)
+
+
+def _optional_edge_features_compatible(
+    edge: NilmEdge,
+    reference: NilmEdge,
+) -> bool:
+    for value, expected, tolerance_ratio, floor in (
+        (edge.delta_var, reference.delta_var, 0.5, 75.0),
+        (edge.delta_va, reference.delta_va, 0.35, 75.0),
+        (edge.delta_pf, reference.delta_pf, 0.5, 0.1),
+    ):
+        score = _nilm_optional_magnitude_score(
+            value,
+            expected,
+            tolerance_ratio=tolerance_ratio,
+            floor=floor,
+        )
+        if score is None and value is not None and expected is not None and (
+            abs(float(value)) >= floor or abs(float(expected)) >= floor
+        ):
+            return False
+    return True
 
 
 def _edge_similar_to_cluster(edge: NilmEdge, cluster: list[NilmEdge]) -> bool:
     reference = NilmEdge(
         timestamp=cluster[0].timestamp,
         delta_w=float(median(candidate.delta_w for candidate in cluster)),
-        delta_var=float(median(candidate.delta_var for candidate in cluster)),
-        delta_va=float(median(candidate.delta_va for candidate in cluster)),
-        delta_pf=float(median(candidate.delta_pf for candidate in cluster)),
+        delta_var=_median_optional(candidate.delta_var for candidate in cluster),
+        delta_va=_median_optional(candidate.delta_va for candidate in cluster),
+        delta_pf=_median_optional(candidate.delta_pf for candidate in cluster),
         direction=cluster[0].direction,
         split_phase_type=_dominant_text(
             candidate.split_phase_type for candidate in cluster
         ),
         dominant_leg=_dominant_text(candidate.dominant_leg for candidate in cluster),
     )
+    if not _split_phase_types_compatible(edge, reference):
+        return False
+    if not _optional_edge_features_compatible(edge, reference):
+        return False
     return _edge_similar(edge, reference) or any(
         _edge_similar(edge, candidate) for candidate in cluster
     )
@@ -2181,6 +2381,8 @@ def _nilm_session_pair_score(
         (off_edge.delta_va, on_edge.delta_va, 0.35, 75.0),
         (off_edge.delta_pf, on_edge.delta_pf, 0.5, 0.1),
     ):
+        if value is None or reference is None:
+            continue
         score = _nilm_optional_magnitude_score(
             value,
             reference,
@@ -2224,12 +2426,14 @@ def _nilm_magnitude_score(
 
 
 def _nilm_optional_magnitude_score(
-    value: float,
-    reference: float,
+    value: float | None,
+    reference: float | None,
     *,
     tolerance_ratio: float,
     floor: float,
 ) -> float | None:
+    if value is None or reference is None:
+        return None
     if abs(float(value)) < floor and abs(float(reference)) < floor:
         return None
     return _nilm_magnitude_score(
@@ -2293,11 +2497,15 @@ def _nilm_edge_id(edge: NilmEdge) -> str:
             edge.direction,
             edge.timestamp.isoformat(),
             f"w={edge.delta_w:.3f}",
-            f"var={edge.delta_var:.3f}",
+            f"var={_optional_number_text(edge.delta_var)}",
             edge.split_phase_type,
             edge.dominant_leg,
         )
     )
+
+
+def _optional_number_text(value: float | None) -> str:
+    return "unknown" if value is None else f"{value:.3f}"
 
 
 def _nilm_session_id(

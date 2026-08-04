@@ -10,7 +10,12 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
-from .managers.nilm_controller import configured_primary_assignment_id
+from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
+from .managers.nilm_controller import (
+    configured_primary_assignment_id,
+    nilm_assignment_publication_reason,
+)
+from .managers.source_samples import normalized_leg
 from .models import (
     ApplianceProfile,
     CircuitConfig,
@@ -41,7 +46,7 @@ from .panel_contracts import (
     NILM_WORKSPACE_HISTORY_API_PATH,
     PANEL_URL_PATH,
 )
-from .profiles import nilm_source_kind
+from .profiles import nilm_source_kind, supports_direct_appliance_analysis
 from .services import (
     ATTR_APPLIANCE_PROFILE,
     ATTR_ASSIGNMENT_ID,
@@ -76,6 +81,7 @@ from .services import (
     SERVICE_REJECT_NILM_SESSION,
     SERVICE_REMOVE_NILM_HELPER_LINK,
     SERVICE_RENAME_NILM_APPLIANCE,
+    SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
@@ -83,6 +89,7 @@ from .services import (
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
 )
+from .unknown_loads import MIN_CONFIDENCE, MIN_OCCURRENCES
 from .ux import friendly_feature_name
 
 MAX_NILM_PANEL_SIGNATURES = 5
@@ -95,6 +102,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "typical_watts",
     "typical_duration_seconds",
     "seen_count",
+    "occurrence_count",
     "confidence",
     "first_seen",
     "last_seen",
@@ -150,7 +158,11 @@ def nilm_workspace_payload(
     recent_edges = sorted(edges, key=lambda edge: edge.timestamp)[
         -MAX_NILM_WORKSPACE_EDGES:
     ]
-    signatures = _nilm_workspace_signatures(coordinator, config.circuit_id)
+    signatures = _nilm_workspace_signatures(
+        coordinator,
+        config.circuit_id,
+        config=config,
+    )
     known_load_overlays = _nilm_known_load_overlays(
         coordinator,
         config.circuit_id,
@@ -167,7 +179,13 @@ def nilm_workspace_payload(
         config.circuit_id,
         label_intervals=all_label_intervals,
     )
-    _add_nilm_helper_evidence(assignments, signatures, config.circuit_id)
+    _add_nilm_helper_evidence(
+        assignments,
+        signatures,
+        config.circuit_id,
+        coordinator=coordinator,
+        config=config,
+    )
     assignment_options = _nilm_assignment_options(assignments)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
     reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
@@ -228,6 +246,11 @@ def nilm_workspace_payload(
         assignments,
     )
     lanes = _nilm_workspace_lanes(signatures, assignments, label_intervals)
+    configured_primary = _nilm_configured_primary_payload(
+        config,
+        signatures,
+        assignments,
+    )
     payload = {
         "status": "ok",
         "circuit": _circuit_payload(config),
@@ -245,6 +268,7 @@ def nilm_workspace_payload(
             solar_overlays,
             hours=hours,
             entry_id=selected_entry_id,
+            hass=getattr(coordinator, "hass", None),
         ),
         "known_load_overlays": known_load_overlays,
         "solar_overlays": solar_overlays,
@@ -274,6 +298,8 @@ def nilm_workspace_payload(
         "sessions": sessions,
         "session_count": len(all_sessions),
     }
+    if configured_primary is not None:
+        payload["configured_primary"] = configured_primary
     return _scope_nilm_actions(payload, selected_entry_id)
 
 
@@ -374,6 +400,7 @@ def _nilm_payload_for_circuit(
                     str(signature[ATTR_SIGNATURE_ID]),
                     signatures,
                     include_all_nilm=include_all_nilm,
+                    restorable=_nilm_signature_restorable(signature),
                 ),
             }
             for signature in preview_signatures
@@ -473,6 +500,7 @@ def _nilm_actions_for_signature(
     signatures: list[dict[str, Any]],
     *,
     include_all_nilm: bool = False,
+    restorable: bool = False,
 ) -> dict[str, dict[str, Any]]:
     data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_SIGNATURE_ID: signature_id}
     merge_target_options = _nilm_merge_target_options(signatures, signature_id)
@@ -506,7 +534,7 @@ def _nilm_actions_for_signature(
                 ),
             }
         )
-    return {
+    actions = {
         "label": {
             "domain": DOMAIN,
             "service": SERVICE_LABEL_NILM_SIGNATURE,
@@ -531,6 +559,13 @@ def _nilm_actions_for_signature(
         },
         "merge": merge_action,
     }
+    if restorable:
+        actions["restore"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RESTORE_NILM_ITEM,
+            "data": dict(data),
+        }
+    return actions
 
 
 def _nilm_merge_target_options(
@@ -587,6 +622,61 @@ def _nilm_review_state(signature: Mapping[str, Any]) -> str | None:
     if str(signature.get("user_label") or "").strip():
         return "labeled"
     return None
+
+
+def _nilm_signature_restorable(signature: Mapping[str, Any]) -> bool:
+    return _nilm_review_state(signature) in {"expected", "ignored", "merged"}
+
+
+def _nilm_topology_capability(
+    config: CircuitConfig | None,
+) -> tuple[str, str | None]:
+    if config is None:
+        return "not_applicable", None
+    try:
+        mode = CircuitMode(config.mode)
+    except (TypeError, ValueError):
+        mode = None
+    if mode is CircuitMode.SINGLE_PHASE:
+        return "not_applicable", None
+    legs = {
+        normalized_leg(sensor.leg)
+        for sensor in config.sensors
+        if _nilm_real_power_sensor_series(sensor) is not None and sensor.leg
+    }
+    leg_a = "a" in legs
+    leg_b = "b" in legs
+    if not leg_a and not leg_b:
+        if mode is CircuitMode.DUAL_PHASE:
+            return (
+                "unavailable",
+                "Both leg real-power sensors are required for topology evidence.",
+            )
+        return "not_applicable", None
+    if leg_a and leg_b:
+        return "available", None
+    return (
+        "unavailable",
+        "Both leg real-power sensors are required for topology evidence.",
+    )
+
+
+def _apply_nilm_topology_capability(
+    payload: dict[str, Any],
+    topology: tuple[str, str | None],
+) -> dict[str, Any]:
+    applicability, requirement = topology
+    payload["topology_applicability"] = applicability
+    if applicability != "available":
+        payload.pop("voltage_class", None)
+        payload.pop("dominant_leg", None)
+    else:
+        for key in ("voltage_class", "dominant_leg"):
+            if str(payload.get(key) or "").strip().lower() == "unknown":
+                payload.pop(key, None)
+    if requirement:
+        payload["topology_requirement"] = requirement
+    return payload
 
 
 def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
@@ -677,10 +767,13 @@ def _nilm_workspace_path(entry_id: str, circuit_id: str) -> str:
 def _nilm_workspace_signatures(
     coordinator: Any,
     circuit_id: str,
+    *,
+    config: CircuitConfig | None = None,
 ) -> list[dict[str, Any]]:
     signatures = _nilm_signatures_for_circuit(coordinator, circuit_id)
+    topology = _nilm_topology_capability(config)
     return [
-        {
+        _apply_nilm_topology_capability({
             **_nilm_signature_payload(signature),
             "display_label": _nilm_signature_label(
                 signature,
@@ -691,8 +784,9 @@ def _nilm_workspace_signatures(
                 str(signature[ATTR_SIGNATURE_ID]),
                 signatures,
                 include_all_nilm=True,
+                restorable=_nilm_signature_restorable(signature),
             ),
-        }
+        }, topology)
         for signature in signatures
         if signature.get(ATTR_SIGNATURE_ID)
     ]
@@ -832,16 +926,157 @@ def _nilm_assignment_options(
     return options
 
 
+def _nilm_configured_primary_payload(
+    config: CircuitConfig,
+    signatures: list[dict[str, Any]],
+    assignments: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if nilm_source_kind(config) is not NilmSourceKind.PRIMARY_MIXED:
+        return None
+    assignment_id = configured_primary_assignment_id(config.circuit_id)
+    assignment = next(
+        (
+            item
+            for item in assignments
+            if item.get(ATTR_ASSIGNMENT_ID) == assignment_id
+        ),
+        None,
+    )
+    current_binding = None
+    current_signature = None
+    current_identifiers: set[str] = set()
+    if assignment is not None:
+        for fingerprint in _iter_items(assignment.get("signature_fingerprints")):
+            fingerprint_text = str(fingerprint or "").strip()
+            if not fingerprint_text:
+                continue
+            current_identifiers.add(fingerprint_text)
+            signature = next(
+                (
+                    item
+                    for item in signatures
+                    if fingerprint_text in _nilm_signature_identifiers(item)
+                ),
+                None,
+            )
+            if signature is not None and current_binding is None:
+                current_signature = signature
+                current_binding = {
+                    ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
+                    "display_label": signature.get("display_label"),
+                }
+    if current_binding is None:
+        signature = next(
+            (
+                item
+                for item in signatures
+                if str(item.get("assignment_id") or "").strip() == assignment_id
+            ),
+            None,
+        )
+        if signature is not None:
+            current_signature = signature
+            current_identifiers.update(_nilm_signature_identifiers(signature))
+            current_binding = {
+                ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
+                "display_label": signature.get("display_label"),
+            }
+
+    competing = _nilm_assigned_signature_ids(
+        item
+        for item in assignments
+        if item.get(ATTR_ASSIGNMENT_ID) != assignment_id
+    )
+    candidates = []
+    for signature in signatures:
+        identifiers = _nilm_signature_identifiers(signature)
+        occurrences = int(
+            _clamped_float(
+                signature.get("occurrence_count", signature.get("seen_count")),
+                default=0.0,
+            )
+        )
+        confidence = _clamped_float(signature.get("confidence"), default=0.0)
+        watts = abs(_clamped_float(signature.get("typical_watts"), default=0.0))
+        if (
+            _nilm_review_state(signature) in {"expected", "ignored", "merged"}
+            or identifiers & competing
+            or identifiers & current_identifiers
+            or occurrences < MIN_OCCURRENCES
+            or confidence < MIN_CONFIDENCE
+            or watts <= 0.0
+        ):
+            continue
+        stable_id = str(signature.get(ATTR_SIGNATURE_ID) or "")
+        candidates.append(
+            (
+                (-watts, -occurrences, -confidence, stable_id),
+                signature,
+                occurrences,
+                confidence,
+                watts,
+            )
+        )
+    selected = min(
+        candidates,
+        default=None,
+        key=lambda item: item[0],
+    )
+    if selected is not None and current_signature is not None:
+        current_watts = abs(
+            _clamped_float(current_signature.get("typical_watts"), default=0.0)
+        )
+        if selected[4] <= current_watts:
+            selected = None
+    suggestion = None
+    if selected is not None:
+        _rank, signature, occurrences, confidence, watts = selected
+        suggestion = {
+            ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
+            "display_label": signature.get("display_label"),
+            "confidence": confidence,
+            "evidence_summary": (
+                f"{occurrences} recurring events around {watts:.0f} W "
+                f"with {confidence:.0%} confidence."
+            ),
+            "action": {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
+                "data": {
+                    ATTR_CIRCUIT_ID: config.circuit_id,
+                    ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
+                    ATTR_ASSIGNMENT_ID: assignment_id,
+                    ATTR_LABEL: config.name,
+                    ATTR_APPLIANCE_PROFILE: config.appliance_profile.value,
+                },
+            },
+        }
+    return {
+        ATTR_ASSIGNMENT_ID: assignment_id,
+        "display_name": config.name,
+        ATTR_APPLIANCE_PROFILE: config.appliance_profile.value,
+        "current_binding": current_binding,
+        "suggestion": suggestion,
+    }
+
+
 def _add_nilm_helper_evidence(
     assignments: list[dict[str, Any]],
     signatures: list[dict[str, Any]],
     circuit_id: str,
+    *,
+    coordinator: Any,
+    config: CircuitConfig,
 ) -> None:
     signatures_by_fingerprint = {
         str(signature.get(key) or "").strip(): signature
         for signature in signatures
         for key in ("fingerprint", "feedback_fingerprint", "signature_fingerprint")
         if signature.get(key)
+    }
+    helper_options_by_id = {
+        option[ATTR_HELPER_CIRCUIT_ID]: option
+        for option in _nilm_helper_options(coordinator, config)
     }
     for assignment in assignments:
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
@@ -851,7 +1086,11 @@ def _add_nilm_helper_evidence(
             for candidate in signatures_by_fingerprint.get(str(fingerprint), {}).get(
                 "helper_candidates", ()
             )
-            if isinstance(candidate, Mapping) and candidate.get(ATTR_HELPER_CIRCUIT_ID)
+            if (
+                isinstance(candidate, Mapping)
+                and candidate.get("suggested") is True
+                and candidate.get(ATTR_HELPER_CIRCUIT_ID) in helper_options_by_id
+            )
         ]
         links = [
             dict(link)
@@ -866,7 +1105,9 @@ def _add_nilm_helper_evidence(
                 if item.get("suggested")
                 else "available"
             )
-            item["relationship_options"] = ["corroborates", "direct_component"]
+            option = helper_options_by_id[item[ATTR_HELPER_CIRCUIT_ID]]
+            item.setdefault("helper_name", option["helper_name"])
+            item["relationship_options"] = option["relationship_options"]
             item["actions"] = {
                 "set": {
                     "domain": DOMAIN,
@@ -898,6 +1139,60 @@ def _add_nilm_helper_evidence(
             }
         assignment["helper_candidates"] = candidates
         assignment["helper_links"] = links
+        assignment["helper_options"] = [
+            {
+                **option,
+                "actions": {
+                    "set": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_SET_NILM_HELPER_LINK,
+                        "data": {
+                            ATTR_CIRCUIT_ID: circuit_id,
+                            ATTR_ASSIGNMENT_ID: assignment_id,
+                            ATTR_HELPER_CIRCUIT_ID: option[
+                                ATTR_HELPER_CIRCUIT_ID
+                            ],
+                        },
+                        "requires": [ATTR_RELATIONSHIP],
+                    }
+                },
+            }
+            for option in helper_options_by_id.values()
+        ]
+
+
+def _nilm_helper_options(
+    coordinator: Any,
+    source_config: CircuitConfig,
+) -> list[dict[str, Any]]:
+    options = []
+    for helper in getattr(coordinator, "circuit_configs", ()) or ():
+        if (
+            not isinstance(helper, CircuitConfig)
+            or helper.circuit_id == source_config.circuit_id
+            or not _nilm_real_power_series(helper)
+        ):
+            continue
+        helper_assignments = getattr(
+            getattr(coordinator, "store_data", None),
+            "nilm_appliance_assignments_by_circuit",
+            {},
+        )
+        if isinstance(helper_assignments, Mapping) and any(
+            isinstance(item, Mapping)
+            and item.get("conversion_state") == "direct_meter"
+            for item in _iter_items(helper_assignments.get(helper.circuit_id, ()))
+        ):
+            continue
+        relationships = ["corroborates"]
+        if supports_direct_appliance_analysis(helper):
+            relationships.append("direct_component")
+        options.append({
+            ATTR_HELPER_CIRCUIT_ID: helper.circuit_id,
+            "helper_name": helper.name,
+            "relationship_options": relationships,
+        })
+    return options
 
 
 def _add_nilm_assignment_options(
@@ -933,6 +1228,11 @@ def _nilm_assignment_payload(
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
+    publication_reason = nilm_assignment_publication_reason(payload)
+    payload["publication"] = {
+        "available": publication_reason is None,
+        **({"reason": publication_reason} if publication_reason else {}),
+    }
     if state != "retired":
         actions["rename"] = {
             "domain": DOMAIN,
@@ -982,10 +1282,7 @@ def _nilm_assignment_payload(
                 "service": SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
                 "data": dict(action_data),
             }
-        elif (
-            state not in {"expected", "ignored"}
-            and payload.get("conversion_state") != "direct_meter"
-        ):
+        elif publication_reason is None:
             actions["publish"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -994,6 +1291,12 @@ def _nilm_assignment_payload(
         actions["retire"] = {
             "domain": DOMAIN,
             "service": SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+            "data": dict(action_data),
+        }
+    if state in {"expected", "ignored", "retired"}:
+        actions["restore"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_RESTORE_NILM_ITEM,
             "data": dict(action_data),
         }
     if actions:
@@ -1220,15 +1523,19 @@ def _nilm_workspace_lanes(
         "needs_review": _nilm_lane("Needs Review"),
         "assigned": _nilm_lane("Assigned"),
         "published": _nilm_lane("Published"),
-        "ignored_expected": _nilm_lane("Ignored / Expected"),
+        "expected": _nilm_lane("Expected"),
+        "hidden": _nilm_lane("Hidden"),
     }
     assigned_signature_ids = _nilm_assigned_signature_ids(assignments)
     for signature in signatures:
         signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
         if not signature_id:
             continue
-        if _nilm_signature_hidden(signature):
-            lanes["ignored_expected"]["signature_ids"].append(signature_id)
+        review_state = _nilm_review_state(signature)
+        if review_state == "expected":
+            lanes["expected"]["signature_ids"].append(signature_id)
+        elif _nilm_signature_hidden(signature):
+            lanes["hidden"]["signature_ids"].append(signature_id)
         elif _nilm_signature_identifiers(signature).isdisjoint(
             assigned_signature_ids,
         ):
@@ -1240,8 +1547,10 @@ def _nilm_workspace_lanes(
             continue
         state = str(assignment.get("lifecycle_state") or "").strip().lower()
         confidence = _clamped_float(assignment.get("confidence"), default=0.0)
-        if _nilm_assignment_hidden(assignment):
-            lane = "ignored_expected"
+        if state == "expected":
+            lane = "expected"
+        elif _nilm_assignment_hidden(assignment):
+            lane = "hidden"
         elif assignment.get("publish_entities") is True or state == "published":
             lane = "published"
         elif (
@@ -1288,7 +1597,6 @@ def _nilm_lane(label: str) -> dict[str, Any]:
 def _nilm_assignment_hidden(assignment: Mapping[str, Any]) -> bool:
     return str(assignment.get("lifecycle_state") or "").strip().lower() in {
         "ignored",
-        "expected",
         "retired",
     }
 
@@ -1297,8 +1605,7 @@ def _nilm_signature_hidden(signature: Mapping[str, Any]) -> bool:
     state = str(signature.get("review_state") or "").strip().lower()
     return bool(
         signature.get("ignored")
-        or signature.get("expected")
-        or state in {"ignored", "expected", "merged"}
+        or state in {"ignored", "merged"}
     )
 
 
@@ -1654,6 +1961,7 @@ def _nilm_workspace_history_payload(
     hours: Any,
     entry_id: str | None = None,
     helper_configs: Iterable[CircuitConfig] = (),
+    hass: Any = None,
 ) -> dict[str, Any]:
     requested_hours = _bounded_float(
         hours,
@@ -1662,12 +1970,15 @@ def _nilm_workspace_history_payload(
     )
     end = datetime.now(UTC)
     start = end - timedelta(hours=requested_hours)
-    entities = _nilm_workspace_history_entities(
+    source_series = _nilm_real_power_series(config, hass=hass)[:1]
+    entity_series = _nilm_workspace_history_series(
         config,
         known_load_overlays,
         solar_overlays,
         helper_configs,
+        hass=hass,
     )
+    entities = [item["entity_id"] for item in entity_series]
     history_query_values = {
         "circuit_id": config.circuit_id,
         "hours": str(requested_hours),
@@ -1683,12 +1994,13 @@ def _nilm_workspace_history_payload(
             "no_attributes": "1",
         }
     )
-    return {
+    payload = {
         "start": start.isoformat(),
         "end": end.isoformat(),
         "hours": requested_hours,
         "max_hours": MAX_NILM_WORKSPACE_HISTORY_HOURS,
         "entities": entities,
+        "entity_series": entity_series,
         "entity_count": len(entities),
         "max_entities": MAX_NILM_WORKSPACE_HISTORY_ENTITIES,
         "api_path": f"{DOMAIN}/nilm_workspace_history?{history_query}",
@@ -1698,6 +2010,11 @@ def _nilm_workspace_history_payload(
         ),
         "max_points_per_entity": MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
     }
+    if not source_series:
+        payload["missing_real_power_reason"] = (
+            "Configure a real-power sensor measured in W, kW, mW, or MW."
+        )
+    return payload
 
 
 def _nilm_workspace_history_entities(
@@ -1706,27 +2023,106 @@ def _nilm_workspace_history_entities(
     _solar_overlays: list[dict[str, Any]],
     helper_configs: Iterable[CircuitConfig] = (),
 ) -> list[str]:
-    sensors = tuple(getattr(config, "sensors", ()) or ())
-    real_power_ids = _unique_strings(
-        sensor.entity_id
-        for sensor in sensors
-        if getattr(sensor, "role", None) == SensorRole.REAL_POWER
-        and getattr(sensor, "entity_id", None)
-    )
-    if real_power_ids or any(getattr(sensor, "role", None) for sensor in sensors):
-        source_ids = real_power_ids[:1]
-    else:
-        source_ids = _sensor_entity_ids(config)[:1]
-    helper_ids = [
-        entity_id
-        for helper in helper_configs
-        for entity_id in _unique_strings(
-            sensor.entity_id
-            for sensor in getattr(helper, "sensors", ()) or ()
-            if getattr(sensor, "role", None) == SensorRole.REAL_POWER
-        )[:1]
+    return [
+        item["entity_id"]
+        for item in _nilm_workspace_history_series(
+            config,
+            _known_load_overlays,
+            _solar_overlays,
+            helper_configs,
+        )
     ]
-    return _unique_strings((*source_ids, *helper_ids))[:5]
+
+
+def _nilm_workspace_history_series(
+    config: CircuitConfig,
+    _known_load_overlays: list[dict[str, Any]],
+    _solar_overlays: list[dict[str, Any]],
+    helper_configs: Iterable[CircuitConfig] = (),
+    *,
+    hass: Any = None,
+) -> list[dict[str, str]]:
+    source_series = _nilm_real_power_series(config, hass=hass)[:1]
+    if not source_series:
+        return []
+    helper_series = [
+        series
+        for helper in helper_configs
+        for series in _nilm_real_power_series(helper, hass=hass)[:1]
+    ]
+    unique = {}
+    for series in (*source_series, *helper_series):
+        unique.setdefault(series["entity_id"], series)
+    return list(unique.values())[:5]
+
+
+def _nilm_real_power_series(
+    config: CircuitConfig,
+    *,
+    hass: Any = None,
+) -> list[dict[str, str]]:
+    series = []
+    for sensor in getattr(config, "sensors", ()) or ():
+        item = _nilm_real_power_sensor_series(sensor, hass=hass)
+        if item is not None and item["entity_id"] not in {
+            existing["entity_id"] for existing in series
+        }:
+            series.append(item)
+    return series
+
+
+def _nilm_real_power_sensor_series(
+    sensor: Any,
+    *,
+    hass: Any = None,
+) -> dict[str, str] | None:
+    entity_id = str(getattr(sensor, "entity_id", "") or "").strip()
+    if not entity_id:
+        return None
+    unit = str(getattr(sensor, "unit", "") or "").strip()
+    metadata_role = sensor_role_from_metadata(unit=unit)
+    configured_role = getattr(sensor, "role", None)
+    effective_role = metadata_role or configured_role
+    if effective_role != SensorRole.REAL_POWER:
+        return None
+    if unit and unit.lower() not in {"w", "kw", "mw"}:
+        return None
+    series = {
+        "entity_id": entity_id,
+        "effective_role": SensorRole.REAL_POWER.value,
+        "source_unit": unit or "W",
+    }
+    if hass is not None:
+        metadata = _nilm_history_live_real_power_metadata(hass, entity_id)
+        if metadata is None:
+            return None
+        series.update(metadata)
+    return series
+
+
+def _nilm_history_live_real_power_metadata(
+    hass: Any,
+    entity_id: str,
+) -> dict[str, str] | None:
+    states = getattr(hass, "states", None)
+    state_get = getattr(states, "get", None)
+    state = state_get(entity_id) if callable(state_get) else None
+    attributes = getattr(state, "attributes", None)
+    if not isinstance(attributes, Mapping):
+        return {"effective_role": SensorRole.REAL_POWER.value}
+    device_class = attributes.get("device_class")
+    unit = str(attributes.get("unit_of_measurement") or "").strip()
+    if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+        return None
+    role = sensor_role_from_metadata(device_class=device_class, unit=unit)
+    if role not in {None, SensorRole.REAL_POWER} or (
+        unit and unit.lower() not in {"w", "kw", "mw"}
+    ):
+        return None
+    metadata = {"effective_role": SensorRole.REAL_POWER.value}
+    if unit:
+        metadata["source_unit"] = unit
+    return metadata
 
 
 def _sensor_entity_ids(config: Any) -> list[str]:
@@ -1792,6 +2188,26 @@ def _nilm_workspace_sessions(
             if key in assignment:
                 spec[key] = assignment[key]
         matcher_specs.append(spec)
+    first_on_w = next(
+        (
+            abs(float(edge.delta_w))
+            for edge in sorted(edges, key=lambda item: item.timestamp)
+            if edge.direction == "on" and abs(float(edge.delta_w)) > 0.0
+        ),
+        None,
+    )
+    if first_on_w is not None:
+        for spec in matcher_specs:
+            if not any(
+                spec.get(key) is not None
+                for key in ("typical_watts", "median_delta_w")
+            ):
+                spec["typical_watts"] = first_on_w
+        if not matcher_specs:
+            matcher_specs.append({
+                "signature_fingerprint": "unassigned",
+                "typical_watts": first_on_w,
+            })
     sessions = pair_nilm_sessions_for_signatures(
         edges,
         signature_specs=matcher_specs,

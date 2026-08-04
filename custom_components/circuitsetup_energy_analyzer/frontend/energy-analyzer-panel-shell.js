@@ -1567,6 +1567,16 @@ export class PanelShellMethods {
         this._applyNilmDecision(Number.parseInt(button.dataset.nilmApplyDecision, 10));
       });
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-action]")) {
+      button.addEventListener("click", () => {
+        const index = Number.parseInt(button.dataset.nilmSignatureIndex || "-1", 10);
+        const signature = this._nilmReviewSignatures()[index];
+        this._callNilmAction(index, button.dataset.nilmSignatureAction, this._nilmDecisionDraftKey(signature));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-primary-confirm]")) {
+      button.addEventListener("click", () => this._callNilmConfiguredPrimaryAction());
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-lane]")) {
       button.addEventListener("click", () => this._activateNilmLane(button.dataset.nilmLane));
       button.addEventListener("keydown", (event) => this._handleNilmLaneKeydown(event, button));
@@ -1626,6 +1636,9 @@ export class PanelShellMethods {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
+    }
+    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-helper-option]")) {
+      input.addEventListener("change", () => this._syncNilmHelperRelationship(input));
     }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));

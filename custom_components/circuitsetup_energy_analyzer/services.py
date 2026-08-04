@@ -49,6 +49,7 @@ SERVICE_MERGE_NILM_ASSIGNMENTS = "merge_nilm_assignments"
 SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT = "publish_nilm_appliance_assignment"
 SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT = "unpublish_nilm_appliance_assignment"
 SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT = "retire_nilm_appliance_assignment"
+SERVICE_RESTORE_NILM_ITEM = "restore_nilm_item"
 SERVICE_SET_NILM_HELPER_LINK = "set_nilm_helper_link"
 SERVICE_REMOVE_NILM_HELPER_LINK = "remove_nilm_helper_link"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
@@ -433,6 +434,29 @@ NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA = _schema(
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
 
+
+def _nilm_restore_schema(data: Mapping[str, Any] | None) -> dict[str, Any]:
+    required = {ATTR_ENTRY_ID, ATTR_CIRCUIT_ID}
+    allowed = required | {ATTR_ASSIGNMENT_ID, ATTR_SIGNATURE_ID}
+    values = dict(data or {})
+    missing = required - values.keys()
+    extra = values.keys() - allowed
+    identifiers = [
+        key
+        for key in (ATTR_ASSIGNMENT_ID, ATTR_SIGNATURE_ID)
+        if str(values.get(key) or "").strip()
+    ]
+    if missing:
+        raise ValueError(f"Missing required field: {', '.join(sorted(missing))}")
+    if extra:
+        raise ValueError(f"Unsupported field: {', '.join(sorted(extra))}")
+    if len(identifiers) != 1:
+        raise ValueError("Pass exactly one of assignment_id or signature_id.")
+    return values
+
+
+NILM_RESTORE_SERVICE_SCHEMA = _nilm_restore_schema
+
 def _nilm_helper_link_schema(*, relationship: bool) -> Callable:
     required = {ATTR_CIRCUIT_ID, ATTR_ASSIGNMENT_ID, ATTR_HELPER_CIRCUIT_ID}
     if relationship:
@@ -527,6 +551,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT: (
         NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA
     ),
+    SERVICE_RESTORE_NILM_ITEM: NILM_RESTORE_SERVICE_SCHEMA,
     SERVICE_SET_NILM_HELPER_LINK: NILM_SET_HELPER_LINK_SERVICE_SCHEMA,
     SERVICE_REMOVE_NILM_HELPER_LINK: NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
@@ -1090,6 +1115,25 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 data.get(ATTR_ASSIGNMENT_ID),
             )
+        return
+
+    if service == SERVICE_RESTORE_NILM_ITEM:
+        circuit_id = str(data.get(ATTR_CIRCUIT_ID) or "").strip()
+        target = _target_entry_circuit_coordinator(
+            hass,
+            str(data.get(ATTR_ENTRY_ID) or "").strip(),
+            circuit_id,
+        )[0]
+        restore_target = target
+        if not callable(getattr(restore_target, "async_restore_nilm_item", None)):
+            restore_target = getattr(target, "nilm_controller", target)
+        await _call_if_present(
+            restore_target,
+            "async_restore_nilm_item",
+            circuit_id,
+            assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+            signature_id=data.get(ATTR_SIGNATURE_ID),
+        )
         return
 
     if service in {SERVICE_SET_NILM_HELPER_LINK, SERVICE_REMOVE_NILM_HELPER_LINK}:

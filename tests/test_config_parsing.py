@@ -49,6 +49,58 @@ def test_config_parser_groups_source_entities_for_runtime_configs() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("metadata", "expected_role"),
+    (
+        ({"unit": "var"}, SensorRole.REACTIVE_POWER),
+        ({"device_class": "apparent_power"}, SensorRole.APPARENT_POWER),
+        ({"device_class": "power", "unit": "kW"}, SensorRole.REAL_POWER),
+    ),
+)
+def test_config_parser_uses_unambiguous_metadata_over_saved_role(
+    metadata: dict[str, str],
+    expected_role: SensorRole,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data({
+        CONF_CIRCUITS: [{
+            "circuit_id": "meter",
+            "name": "Meter",
+            "sensors": [{
+                "entity_id": "sensor.meter_channel",
+                "role": SensorRole.REAL_POWER.value,
+                **metadata,
+            }],
+        }],
+    })
+
+    assert configs[0].sensors[0].role is expected_role
+
+
+def test_config_parser_omits_conflicting_sensor_metadata() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data({
+        CONF_CIRCUITS: [{
+            "circuit_id": "meter",
+            "name": "Meter",
+            "sensors": [{
+                "entity_id": "sensor.meter_channel",
+                "role": SensorRole.REAL_POWER.value,
+                "device_class": "power",
+                "unit": "A",
+            }],
+        }],
+    })
+
+    assert configs[0].sensors == ()
+
+
 def test_config_parser_clamps_demand_window_to_supported_maximum() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
