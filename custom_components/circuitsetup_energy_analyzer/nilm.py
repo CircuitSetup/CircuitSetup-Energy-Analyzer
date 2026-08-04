@@ -56,6 +56,16 @@ def build_nilm_assignment_model(
     eligible = eligible[:32]
     on_values = [item[1] for item in eligible]
     off_values = [item[2] for item in eligible]
+    on_var_values = [
+        value
+        for session, _, _ in eligible
+        if (value := _model_number(session.get("on_delta_var"))) is not None
+    ]
+    off_var_values = [
+        value
+        for session, _, _ in eligible
+        if (value := _model_number(session.get("off_delta_var"))) is not None
+    ]
     confidences = [
         value
         if (value := _model_number(session.get("confidence"))) is not None
@@ -77,8 +87,12 @@ def build_nilm_assignment_model(
     active_state = round(max(on_median, abs(off_median)), 3)
     model["power_states_w"] = [0.0, active_state]
     model["transition_prototypes"] = [
-        _transition_prototype("on", 0.0, active_state, on_median, on_values),
-        _transition_prototype("off", active_state, 0.0, off_median, off_values),
+        _transition_prototype(
+            "on", 0.0, active_state, on_median, on_values, on_var_values
+        ),
+        _transition_prototype(
+            "off", active_state, 0.0, off_median, off_values, off_var_values
+        ),
     ]
     model["model_confidence"] = round(
         min(max(median(confidences) if confidences else 0.0, 0.0), 1.0)
@@ -119,12 +133,18 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         ]
         if any(value is None for value in values):
             continue
-        prototypes.append({
+        spread_var = _model_number(item.get("spread_var"))
+        prototype = {
             "direction": item["direction"], "from_state_w": values[0],
             "to_state_w": values[1], "delta_w": values[2],
             "spread_w": max(values[3], 0.0),
             "sample_count": _model_nonnegative_int(item.get("sample_count")),
-        })
+        }
+        if (delta_var := _model_number(item.get("delta_var"))) is not None:
+            prototype["delta_var"] = delta_var
+        if spread_var is not None:
+            prototype["spread_var"] = max(spread_var, 0.0)
+        prototypes.append(prototype)
     return {
         "role": role.strip() if isinstance(role, str) and role.strip() else "component",
         "power_states_w": (
@@ -159,9 +179,10 @@ def _transition_prototype(
     to_state_w: float,
     delta_w: float,
     values: list[float],
+    var_values: list[float],
 ) -> dict[str, Any]:
     center = median(values)
-    return {
+    prototype = {
         "direction": direction,
         "from_state_w": round(from_state_w, 3),
         "to_state_w": round(to_state_w, 3),
@@ -169,6 +190,15 @@ def _transition_prototype(
         "spread_w": round(median(abs(value - center) for value in values), 3),
         "sample_count": len(values),
     }
+    if var_values:
+        var_center = median(var_values)
+        prototype.update({
+            "delta_var": round(var_center, 3),
+            "spread_var": round(
+                median(abs(value - var_center) for value in var_values), 3
+            ),
+        })
+    return prototype
 
 
 def _model_number(value: Any) -> float | None:
@@ -521,6 +551,8 @@ class NilmTransitionPrototype:
     delta_w: float
     spread_w: float
     sample_count: int
+    delta_var: float | None = None
+    spread_var: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -774,7 +806,22 @@ def _nilm_candidate_score(
         helper_score=helpers.get(prototype.assignment_id),
         duration_state_score=durations.get(prototype.assignment_id),
         validation_score=validations.get(prototype.assignment_id),
+        optional_electrical_fit=_nilm_reactive_fit(edge, prototype),
     )
+
+
+def _nilm_reactive_fit(
+    edge: NilmEdge,
+    prototype: NilmTransitionPrototype,
+) -> float | None:
+    if edge.delta_var is None or prototype.delta_var is None:
+        return None
+    tolerance = max(
+        25.0,
+        3.0 * (prototype.spread_var or 0.0),
+        0.40 * abs(prototype.delta_var),
+    )
+    return max(0.0, 1.0 - abs(edge.delta_var - prototype.delta_var) / tolerance)
 
 
 def _nilm_combined_transition(
@@ -1114,6 +1161,8 @@ class NilmSession:
     assignment_id: str | None = None
     on_delta_w: float | None = None
     off_delta_w: float | None = None
+    on_delta_var: float | None = None
+    off_delta_var: float | None = None
 
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
@@ -1138,6 +1187,8 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "assignment_id": session.assignment_id,
         "on_delta_w": session.on_delta_w,
         "off_delta_w": session.off_delta_w,
+        "on_delta_var": session.on_delta_var,
+        "off_delta_var": session.off_delta_var,
     }
 
 
@@ -1155,6 +1206,63 @@ def nilm_signature_fingerprint(signature: NilmSignature) -> str:
             f"balance={_optional_ratio_bucket(signature.leg_balance_ratio)}",
         )
     )
+
+
+def resolve_nilm_signature_fingerprint(
+    saved_fingerprint: str,
+    signatures: Iterable[Mapping[str, Any]],
+) -> str | None:
+    """Resolve a stale review fingerprint only when one current shape wins."""
+    saved = str(saved_fingerprint or "").strip()
+    current = [
+        value
+        for signature in signatures
+        for value in (
+            str(signature.get("feedback_fingerprint") or "").strip(),
+            str(signature.get("signature_fingerprint") or "").strip(),
+            str(signature.get("signature_id") or "").strip(),
+        )
+        if value
+    ]
+    current = [value for value in current if value]
+    if saved in current:
+        return saved
+    saved_parts = _nilm_fingerprint_parts(saved)
+    if not saved_parts.get("direction") or not saved_parts.get("watts"):
+        return saved or None
+    candidates = [
+        value
+        for value in current
+        if (parts := _nilm_fingerprint_parts(value)).get("direction")
+        == saved_parts["direction"]
+        and parts.get("watts") == saved_parts["watts"]
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) < 2:
+        return None
+    ranked = sorted(
+        (
+            sum(
+                saved_parts.get(key) not in {None, "unknown"}
+                and saved_parts.get(key) == parts.get(key)
+                for key in ("var", "va", "pf", "split", "leg", "balance")
+            ),
+            value,
+        )
+        for value in candidates
+        for parts in (_nilm_fingerprint_parts(value),)
+    )
+    return ranked[-1][1] if ranked[-1][0] > ranked[-2][0] else None
+
+
+def _nilm_fingerprint_parts(value: str) -> dict[str, str]:
+    return {
+        key: item
+        for token in str(value or "").split("|")
+        if "=" in token
+        for key, item in (token.split("=", 1),)
+    }
 
 
 class NilmEdgeDetector:
@@ -1609,9 +1717,6 @@ def classify_signature(signature: NilmSignature) -> str:
     reactive_ratio = (
         abs_var / max(abs_w, 1.0) if abs_var is not None else None
     )
-
-    if abs_w >= 200 and abs_var is None and abs_va is None and abs_pf is None:
-        return _split_phase_label(signature, "resistive load")
 
     if (
         abs_var is not None
@@ -2292,6 +2397,7 @@ def _open_nilm_session(
         ),
         assignment_id=assignment_id,
         on_delta_w=round(float(on_edge.delta_w), 3),
+        on_delta_var=_round_optional(on_edge.delta_var),
     )
 
 
@@ -2348,6 +2454,8 @@ def _closed_nilm_session(
         assignment_id=assignment_id,
         on_delta_w=round(float(on_edge.delta_w), 3),
         off_delta_w=round(float(off_edge.delta_w), 3),
+        on_delta_var=_round_optional(on_edge.delta_var),
+        off_delta_var=_round_optional(off_edge.delta_var),
     )
 
 

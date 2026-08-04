@@ -31,6 +31,7 @@ from ..nilm import (
     normalize_nilm_assignment_model,
     pair_nilm_sessions_for_signatures,
     reconcile_nilm_edge,
+    resolve_nilm_signature_fingerprint,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -928,6 +929,8 @@ def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentMo
             delta_w=item["delta_w"],
             spread_w=item["spread_w"],
             sample_count=item["sample_count"],
+            delta_var=item.get("delta_var"),
+            spread_var=item.get("spread_var"),
         )
         for item in normalized["transition_prototypes"]
         if item["direction"] == ("on" if item["delta_w"] > 0 else "off")
@@ -1546,6 +1549,7 @@ def _nilm_session_specs(
     signatures: Iterable[Mapping[str, Any]],
     assignments: Iterable[Any],
 ) -> list[tuple[str, str | None]]:
+    signatures = list(signatures)
     specs: list[tuple[str, str | None]] = []
     seen: set[tuple[str, str | None]] = set()
     seen_fingerprints: set[str] = set()
@@ -1569,11 +1573,14 @@ def _nilm_session_specs(
             continue
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
         for fingerprint in fingerprints:
-            key = (fingerprint, assignment_id)
+            resolved = resolve_nilm_signature_fingerprint(fingerprint, signatures)
+            if resolved is None:
+                continue
+            key = (resolved, assignment_id)
             if key not in seen:
                 specs.append(key)
                 seen.add(key)
-                seen_fingerprints.add(fingerprint)
+                seen_fingerprints.add(resolved)
     for signature in signatures:
         fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
