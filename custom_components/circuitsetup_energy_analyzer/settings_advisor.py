@@ -293,7 +293,13 @@ def should_suppress_recommendation(
     }.get(decision.status)
     if cooldown is None:
         return False
-    if now - decision.decided_at < cooldown:
+    decided_at = decision.decided_at
+    comparison_now = now
+    if decided_at.tzinfo is None and comparison_now.tzinfo is not None:
+        comparison_now = comparison_now.replace(tzinfo=None)
+    elif decided_at.tzinfo is not None and comparison_now.tzinfo is None:
+        comparison_now = comparison_now.replace(tzinfo=decided_at.tzinfo)
+    if comparison_now - decided_at < cooldown:
         return True
     if not evidence or evidence.get("calculation_basis") != (
         "completed_operating_cycles"
@@ -301,7 +307,17 @@ def should_suppress_recommendation(
         return False
     try:
         latest_cycle_at = datetime.fromisoformat(str(evidence["latest_cycle_at"]))
-        return latest_cycle_at <= decision.decided_at
+        comparison_decided_at = decided_at
+        if latest_cycle_at.tzinfo is None and comparison_decided_at.tzinfo is not None:
+            comparison_decided_at = comparison_decided_at.replace(tzinfo=None)
+        elif (
+            latest_cycle_at.tzinfo is not None
+            and comparison_decided_at.tzinfo is None
+        ):
+            comparison_decided_at = comparison_decided_at.replace(
+                tzinfo=latest_cycle_at.tzinfo
+            )
+        return latest_cycle_at <= comparison_decided_at
     except (KeyError, TypeError, ValueError):
         return True
 

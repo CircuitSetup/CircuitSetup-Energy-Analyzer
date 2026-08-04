@@ -164,6 +164,52 @@ def test_decision_cooldown_expiry_requires_fresh_completed_cycle_evidence(
     )
 
 
+def test_naive_decided_at_is_normalized_for_cooldown_and_freshness() -> None:
+    advisor = _advisor()
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+
+    recent = advisor.RecommendationDecision(
+        unique_key="dryer:operating_on_threshold_w",
+        status=advisor.RecommendationStatus.APPLIED,
+        decided_at=(now - timedelta(days=1)).replace(tzinfo=None),
+    )
+    assert advisor.should_suppress_recommendation(
+        recent,
+        now=now,
+        suggested_value=1400.0,
+        evidence_fingerprint="new",
+    )
+
+    decided_at = (now - timedelta(days=31)).replace(tzinfo=None)
+    expired = advisor.RecommendationDecision(
+        unique_key="dryer:operating_on_threshold_w",
+        status=advisor.RecommendationStatus.APPLIED,
+        decided_at=decided_at,
+    )
+    call = {
+        "decision": expired,
+        "now": now,
+        "suggested_value": 1400.0,
+        "evidence_fingerprint": "new",
+    }
+    assert advisor.should_suppress_recommendation(
+        **call,
+        evidence={
+            "calculation_basis": "completed_operating_cycles",
+            "latest_cycle_at": decided_at.replace(tzinfo=UTC).isoformat(),
+        },
+    )
+    assert not advisor.should_suppress_recommendation(
+        **call,
+        evidence={
+            "calculation_basis": "completed_operating_cycles",
+            "latest_cycle_at": (
+                decided_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+            ).isoformat(),
+        },
+    )
+
+
 def _only_setting(recommendations: list[Any], setting_key: str) -> Any:
     matches = [
         recommendation

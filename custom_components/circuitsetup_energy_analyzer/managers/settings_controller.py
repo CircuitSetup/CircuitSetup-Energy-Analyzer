@@ -1825,7 +1825,14 @@ class SettingsController:
         await coordinator.config_entry_controller.async_persist_options()
 
         now = coordinator.current_time()
+        applied_unique_keys: set[str] = set()
         for setting_key, value in recommendation.apply_payload.items():
+            applied_unique_keys.add(
+                recommendation_unique_key(
+                    recommendation.circuit_id,
+                    str(setting_key),
+                )
+            )
             self._record_setting_recommendation_decision(
                 recommendation,
                 setting_key=str(setting_key),
@@ -1833,6 +1840,18 @@ class SettingsController:
                 status=RecommendationStatus.APPLIED,
                 decided_at=now,
             )
+        for sibling_id, sibling in tuple(
+            coordinator.store_data.settings_recommendations.items()
+        ):
+            if (
+                sibling_id != recommendation_id
+                and sibling.status is RecommendationStatus.PENDING
+                and sibling.unique_key in applied_unique_keys
+            ):
+                coordinator.store_data.settings_recommendations[sibling_id] = replace(
+                    sibling,
+                    status=RecommendationStatus.STALE,
+                )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.APPLIED,

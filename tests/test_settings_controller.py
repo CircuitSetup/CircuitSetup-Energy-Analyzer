@@ -326,6 +326,42 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
 
 
 @pytest.mark.asyncio
+async def test_applying_operating_card_retires_pending_sibling() -> None:
+    on = _recommendation(
+        recommendation_id="fridge:operating_on_threshold_w:v1",
+        unique_key="fridge:operating_on_threshold_w",
+        setting_key="operating_on_threshold_w",
+        apply_payload={
+            "operating_on_threshold_w": 1200.0,
+            "operating_off_threshold_w": 250.0,
+        },
+    )
+    off = _recommendation(
+        recommendation_id="fridge:operating_off_threshold_w:v1",
+        unique_key="fridge:operating_off_threshold_w",
+        setting_key="operating_off_threshold_w",
+        apply_payload=dict(on.apply_payload),
+    )
+    coordinator = _SettingsCoordinator(on)
+    coordinator.store_data.settings_recommendations[off.recommendation_id] = off
+    controller = settings_controller.SettingsController(coordinator)
+
+    await controller.async_apply_setting_recommendation(on.recommendation_id)
+
+    assert coordinator.store_data.settings_recommendations[
+        on.recommendation_id
+    ].status is RecommendationStatus.APPLIED
+    assert coordinator.store_data.settings_recommendations[
+        off.recommendation_id
+    ].status is RecommendationStatus.STALE
+    assert coordinator.state.settings_recommendation_count_by_circuit == {}
+    assert {
+        item["recommendation_id"]
+        for item in coordinator.state.settings_recommendations_by_circuit["fridge"]
+    } == {on.recommendation_id}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("setting_key", "current_value", "suggested_value", "default_value"),
     [
