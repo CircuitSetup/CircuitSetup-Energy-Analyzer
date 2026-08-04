@@ -219,6 +219,39 @@ def test_exact_tenth_degree_thermostat_call_starts() -> None:
     assert completed is None
 
 
+def test_exact_setpoint_call_contributes_daily_runtime() -> None:
+    current, marker = _advance(
+        None,
+        _observation(actual=75.2, target=75.2),
+    )
+
+    assert marker is None
+    assert current is not None
+
+    current, completed = _advance(
+        current,
+        _observation(actual=75.2, target=75.2, action="idle"),
+        now=START + timedelta(minutes=40),
+        driver_active=False,
+        active_minutes_delta=40.0,
+    )
+
+    assert current is None
+    assert completed is not None
+    assert completed.complete is True
+
+    compacted = compact_completed_core_days(
+        [completed],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=1)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 1
+    assert compacted[0].episode_kind == "core_day"
+    assert compacted[0].active_minutes == 40.0
+
+
 def test_subtenth_active_call_creates_excluded_date_marker() -> None:
     current, marker = _advance(
         None,
