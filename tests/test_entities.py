@@ -3795,6 +3795,12 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "confidence": 0.92,
         "model_status": "published",
         "last_validation": None,
+        "reference_available": False,
+        "reference_state_entity_id": None,
+        "reference_power_entity_id": None,
+        "reference_measured_power_w": None,
+        "reference_source_entity_id": None,
+        "reference_fallback_to_nilm": True,
     }
     assert running.extra_state_attributes["estimated"] is True
     assert estimated_power.device_info == {

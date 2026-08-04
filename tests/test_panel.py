@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-6"
+    assert PANEL_MODULE_VERSION == "20260804-7"
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:
@@ -2409,6 +2409,101 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
     )
 
 
+def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    source = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=source)
+    coordinator.entry_id = "entry-1"
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "assignment-pump",
+                "display_name": "Pump",
+                "lifecycle_state": "assigned",
+                "reference_state_entity_id": "switch.pump",
+            }
+        ]
+    }
+    states = [
+        SimpleNamespace(
+            entity_id="switch.pump",
+            state="on",
+            attributes={"friendly_name": "AAA Pump"},
+        ),
+        *[
+            SimpleNamespace(
+                entity_id=f"binary_sensor.state_{index:03d}",
+                state="off",
+                attributes={"friendly_name": f"State {index:03d}"},
+            )
+            for index in range(512)
+        ],
+        SimpleNamespace(
+            entity_id="sensor.pump_power",
+            state="0.084",
+            attributes={
+                "friendly_name": "Pump Power",
+                "device_class": "power",
+                "unit_of_measurement": "kW",
+            },
+        ),
+        SimpleNamespace(
+            entity_id="sensor.pump_var",
+            state="27",
+            attributes={
+                "friendly_name": "Pump VAR",
+                "device_class": "reactive_power",
+                "unit_of_measurement": "var",
+            },
+        ),
+        SimpleNamespace(
+            entity_id="sensor.conflicting_power",
+            state="12",
+            attributes={"device_class": "power", "unit_of_measurement": "A"},
+        ),
+        SimpleNamespace(
+            entity_id="sensor.unknown_power",
+            state="unknown",
+            attributes={"device_class": "power", "unit_of_measurement": "W"},
+        ),
+    ]
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(async_all=lambda: states),
+        entity_registry=SimpleNamespace(
+            entities={
+                "switch.pump": SimpleNamespace(
+                    entity_id="switch.pump", device_id="device-pump"
+                ),
+                "sensor.pump_power": SimpleNamespace(
+                    entity_id="sensor.pump_power", device_id="device-pump"
+                ),
+            }
+        ),
+    )
+
+    reference = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )["assignments"][0]["reference"]
+
+    assert len(reference["state_options"]) == 512
+    assert reference["state_options"][0]["entity_id"] == "switch.pump"
+    assert [item["entity_id"] for item in reference["power_options"]] == [
+        "sensor.pump_power"
+    ]
+    assert reference["power_options"][0]["role"] == "real_power"
+    assert reference["suggested_power_entity_id"] == "sensor.pump_power"
+    assert reference["actions"]["set"]["data"]["entry_id"] == "entry-1"
+
+
 def test_nilm_workspace_placeholder_session_is_evidence_only() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_session_payload_with_actions,
@@ -4184,6 +4279,69 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
     assert virtuals["dryer"]["is_running"] is True
 
 
+def test_nilm_reference_state_overrides_running_without_replacing_estimated_power() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    source = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=source)
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [
+            {
+                "assignment_id": "pump",
+                "display_name": "Pump",
+                "mains_circuit_id": "mixed",
+                "lifecycle_state": "published",
+                "reference_state_entity_id": "switch.pump",
+                "reference_power_entity_id": "sensor.pump_power",
+            }
+        ]
+    }
+    coordinator.state.nilm_component_runtime_by_circuit = {
+        "mixed": {
+            "pump": {
+                "status": "on",
+                "consistent": True,
+                "estimated_power_w": 319,
+                "session_start": "2026-08-04T12:00:00+00:00",
+            }
+        }
+    }
+    coordinator.state.nilm_reconciliation_by_circuit = {
+        "mixed": {"consistent": True, "conflict": None}
+    }
+    rows = {
+        "switch.pump": SimpleNamespace(
+            entity_id="switch.pump", state="off", attributes={}
+        ),
+        "sensor.pump_power": SimpleNamespace(
+            entity_id="sensor.pump_power",
+            state="0.084",
+            attributes={"device_class": "power", "unit_of_measurement": "kW"},
+        ),
+    }
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(get=rows.get, async_all=lambda: list(rows.values())),
+        entity_registry=SimpleNamespace(entities={}),
+    )
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mixed")
+
+    assert payload["virtual_appliances"][0]["is_running"] is False
+    assert payload["virtual_appliances"][0]["estimated_power_w"] == 319.0
+    assert payload["assignments"][0]["reference"]["measured_power_w"] == 84.0
+    assert payload["assignments"][0]["reference"]["fallback_to_nilm"] is False
+
+
 def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
@@ -4303,6 +4461,12 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         "matched_session_id": payload["sessions"][0]["session_id"],
         "overlap_seconds": 1500.0,
         "prediction_confidence": payload["sessions"][0]["confidence"],
+        "measured_power_w": None,
+        "estimated_power_w": 817.5,
+        "power_error_w": None,
+        "measured_energy_kwh": None,
+        "estimated_energy_kwh": 0.341,
+        "energy_error_kwh": None,
     }
     assert validation["prediction_preview"][1] == {
         "interval_id": "label-dryer",
@@ -4314,6 +4478,12 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         "matched_session_id": None,
         "overlap_seconds": 0.0,
         "prediction_confidence": None,
+        "measured_power_w": None,
+        "estimated_power_w": None,
+        "power_error_w": None,
+        "measured_energy_kwh": None,
+        "estimated_energy_kwh": None,
+        "energy_error_kwh": None,
     }
     assert validation["prediction_preview"][2] == {
         "interval_id": "label-dishwasher-duplicate",
@@ -4325,6 +4495,12 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         "matched_session_id": None,
         "overlap_seconds": 0.0,
         "prediction_confidence": None,
+        "measured_power_w": None,
+        "estimated_power_w": None,
+        "power_error_w": None,
+        "measured_energy_kwh": None,
+        "estimated_energy_kwh": None,
+        "energy_error_kwh": None,
     }
 
 

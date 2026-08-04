@@ -1581,6 +1581,150 @@ export function createNilmWorkspaceMethods({
     return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
   }
 
+  _nilmReferenceDraft(assignment) {
+    const key = String((assignment && assignment.assignment_id) || "");
+    const existing = this._nilmReferenceDrafts.get(key);
+    if (existing) return existing;
+    const reference = (assignment && assignment.reference) || {};
+    const window = this._nilmGraphWindow || this._nilmWorkspaceGraphWindow(this._nilmWorkspace) || {};
+    const draft = {
+      stateEntityId: reference.state_entity_id || "",
+      powerEntityId: reference.power_entity_id || "",
+      thresholdW: String(reference.threshold_w ?? 0),
+      start: this._datetimeLocalFromMillis(window.start),
+      end: this._datetimeLocalFromMillis(window.end),
+      open: false,
+      error: "",
+    };
+    this._nilmReferenceDrafts.set(key, draft);
+    return draft;
+  }
+
+  _renderNilmReferenceSensors(assignment, index) {
+    const reference = assignment && assignment.reference;
+    if (!reference) return "";
+    const draft = this._nilmReferenceDraft(assignment);
+    const stateOptions = Array.isArray(reference.state_options) ? reference.state_options : [];
+    const powerOptions = Array.isArray(reference.power_options) ? reference.power_options : [];
+    const option = (item, selected) => {
+      const suggested = item.entity_id === reference.suggested_power_entity_id
+        ? ` (${this._panelText("nilm_workspace.reference_suggested")})`
+        : "";
+      return `<option value="${this._escape(item.entity_id || "")}" ${String(item.entity_id || "") === String(selected || "") ? "selected" : ""}>${this._escape(`${item.name || item.entity_id || ""}${suggested}`)}</option>`;
+    };
+    const busy = this._busyAction === `nilm_reference_${index}`;
+    return `<details ${draft.open ? "open" : ""} data-nilm-reference-details data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}">
+      <summary>${this._escape(this._panelText("nilm_workspace.reference_sensors"))}</summary>
+      <p class="muted">${this._escape(this._panelText("nilm_workspace.reference_description"))}</p>
+      <div class="grid">
+        <label><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_state"))}</span>
+          <select data-nilm-reference-input="stateEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}">
+            <option value="">${this._escape(this._panelText("nilm_workspace.reference_none"))}</option>
+            ${stateOptions.map((item) => option(item, draft.stateEntityId)).join("")}
+          </select>
+        </label>
+        <label><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_power"))}</span>
+          <select data-nilm-reference-input="powerEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}">
+            <option value="">${this._escape(this._panelText("nilm_workspace.reference_none"))}</option>
+            ${powerOptions.map((item) => option(item, draft.powerEntityId)).join("")}
+          </select>
+        </label>
+        ${!draft.stateEntityId ? `<label><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_threshold"))}</span><input type="number" min="0" step="0.1" data-nilm-reference-input="thresholdW" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.thresholdW)}"></label>` : ""}
+        <label><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_range_start"))}</span><input type="datetime-local" data-nilm-reference-input="start" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.start)}"></label>
+        <label><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_range_end"))}</span><input type="datetime-local" data-nilm-reference-input="end" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.end)}"></label>
+      </div>
+      ${reference.available ? `<p class="muted">${this._escape(reference.measured_power_w == null
+        ? this._panelTextFormat("nilm_workspace.reference_live_state", { state: reference.is_running ? this._panelText("nilm_workspace.reference_on") : this._panelText("nilm_workspace.reference_off") })
+        : this._panelTextFormat("nilm_workspace.reference_live", { state: reference.is_running ? this._panelText("nilm_workspace.reference_on") : this._panelText("nilm_workspace.reference_off"), power: this._formatMetricValue(reference.measured_power_w) }))}</p>` : ""}
+      ${draft.error ? `<p class="error" role="alert">${this._escape(draft.error)}</p>` : ""}
+      <div class="actions">
+        <button type="button" data-nilm-reference-action="link_import" data-nilm-reference-index="${index}" ${busy ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.reference_link_import"))}</button>
+        ${(reference.state_entity_id || reference.power_entity_id) ? `<button type="button" class="secondary" data-nilm-reference-action="refresh" data-nilm-reference-index="${index}" ${busy ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.reference_refresh"))}</button>` : ""}
+        ${reference.actions && reference.actions.remove ? `<button type="button" class="secondary" data-nilm-reference-action="remove" data-nilm-reference-index="${index}" ${busy ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.reference_remove"))}</button>` : ""}
+      </div>
+    </details>`;
+  }
+
+  _rememberNilmReferenceDraft(input) {
+    const key = input.dataset.nilmReferenceKey;
+    const draft = this._nilmReferenceDrafts.get(key) || {};
+    this._nilmReferenceDrafts.set(key, { ...draft, [input.dataset.nilmReferenceInput]: input.value, open: true, error: "" });
+  }
+
+  async _callNilmReferenceAction(index, actionKey) {
+    const assignment = this._nilmWorkspace && this._nilmWorkspace.assignments && this._nilmWorkspace.assignments[index];
+    const reference = assignment && assignment.reference;
+    const actions = reference && reference.actions;
+    if (!assignment || !actions) return;
+    const draft = this._nilmReferenceDraft(assignment);
+    draft.open = true;
+    draft.error = "";
+    const stateEntityId = String(actionKey === "refresh" ? reference.state_entity_id || "" : draft.stateEntityId || "").trim();
+    const powerEntityId = String(actionKey === "refresh" ? reference.power_entity_id || "" : draft.powerEntityId || "").trim();
+    const thresholdW = Number(actionKey === "refresh" ? reference.threshold_w || 0 : draft.thresholdW || 0);
+    const start = this._datetimeLocalToIso(draft.start);
+    const end = this._datetimeLocalToIso(draft.end);
+    if (actionKey !== "remove" && (!stateEntityId && !powerEntityId)) {
+      draft.error = this._panelText("errors.nilm_reference_required");
+      this._render();
+      return;
+    }
+    if (actionKey !== "remove" && (!start || !end || end <= start)) {
+      draft.error = this._panelText("errors.nilm_reference_range_required");
+      this._render();
+      return;
+    }
+    const actionContext = this._nilmWorkspaceActionContext();
+    this._busyAction = `nilm_reference_${index}`;
+    this._render();
+    let service = actionKey;
+    try {
+      if (actionKey === "remove") {
+        const action = actions.remove;
+        service = action.service;
+        await this._hass.callService(action.domain, action.service, { ...(action.data || {}) });
+      } else {
+        const action = actions.import;
+        service = action.service;
+        await this._hass.callService(action.domain, action.service, {
+          ...(action.data || {}),
+          ground_truth_entity_id: stateEntityId || powerEntityId,
+          ...(powerEntityId ? { reference_power_entity_id: powerEntityId } : {}),
+          threshold_w: Number.isFinite(thresholdW) && thresholdW >= 0 ? thresholdW : 0,
+          start,
+          end,
+        });
+        if (actionKey === "link_import") {
+          const setAction = actions.set;
+          service = setAction.service;
+          await this._hass.callService(setAction.domain, setAction.service, {
+            ...(setAction.data || {}),
+            ...(stateEntityId ? { reference_state_entity_id: stateEntityId } : {}),
+            ...(powerEntityId ? { reference_power_entity_id: powerEntityId } : {}),
+            reference_threshold_w: Number.isFinite(thresholdW) && thresholdW >= 0 ? thresholdW : 0,
+          });
+        }
+      }
+      if (!actionContext.isRouteCurrent()) return;
+      await this._refreshNilmWorkspaceData(actionContext.requestId, actionContext.routeKey);
+      if (!actionContext.isCurrent()) return;
+      draft.open = true;
+      draft.error = "";
+      if (actionKey === "remove") {
+        draft.stateEntityId = "";
+        draft.powerEntityId = "";
+        draft.thresholdW = "0";
+      }
+    } catch (error) {
+      if (!actionContext.isCurrent()) return;
+      draft.open = true;
+      draft.error = this._panelTextFormat("errors.run_service", { service, message: error.message });
+    } finally {
+      if (this._busyAction === `nilm_reference_${index}`) this._busyAction = "";
+      if (actionContext.isCurrent()) this._render();
+    }
+  }
+
   async _callNilmConfiguredPrimaryAction() {
     const primary = this._nilmWorkspace && this._nilmWorkspace.configured_primary;
     const action = primary && primary.suggestion && primary.suggestion.action;
@@ -2045,6 +2189,7 @@ export function createNilmWorkspaceMethods({
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
         ${this._renderNilmHelperEvidence(item, reviewItem.index)}
+        ${this._renderNilmReferenceSensors(item, reviewItem.index)}
         ${this._renderNilmAssignmentEditFields(item, reviewItem.index)}
         ${this._renderNilmAssignmentActions(item, reviewItem.index)}
         ${this._renderInlineFeedback(this._nilmReviewKey(reviewItem))}

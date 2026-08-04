@@ -6361,6 +6361,69 @@ test("NILM workspace keeps recommendations qualified and permits manual helper c
   });
 });
 
+test("NILM assignment links authoritative state and separate power history", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.assignments[0].reference = {
+      state_entity_id: null,
+      power_entity_id: null,
+      threshold_w: 25,
+      available: false,
+      is_running: null,
+      measured_power_w: null,
+      fallback_to_nilm: true,
+      suggested_power_entity_id: "sensor.pump_power",
+      state_options: [
+        { entity_id: "switch.pump", name: "Pump switch", device_id: "device-pump", role: "state", unit: null },
+      ],
+      power_options: [
+        { entity_id: "sensor.pump_power", name: "Pump power", device_id: "device-pump", role: "real_power", unit: "W" },
+      ],
+      actions: {
+        set: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "set_nilm_reference_link",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher" },
+        },
+        import: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "generate_nilm_sensor_label_intervals",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", label: "Dishwasher" },
+        },
+      },
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const details = panel.locator("[data-nilm-reference-details]");
+  await details.locator("summary").click();
+  await details.locator('[data-nilm-reference-input="stateEntityId"]').selectOption("switch.pump");
+  await details.locator('[data-nilm-reference-input="powerEntityId"]').selectOption("sensor.pump_power");
+  await details.locator('[data-nilm-reference-input="start"]').fill("2026-07-13T18:00");
+  await details.locator('[data-nilm-reference-input="end"]').fill("2026-07-13T18:45");
+  await details.locator('[data-nilm-reference-action="link_import"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service).slice(-2))).toEqual([
+    "generate_nilm_sensor_label_intervals",
+    "set_nilm_reference_link",
+  ]);
+  const calls = await page.evaluate(() => window.__serviceCalls.slice(-2));
+  expect(calls[0].data).toMatchObject({
+    ground_truth_entity_id: "switch.pump",
+    reference_power_entity_id: "sensor.pump_power",
+  });
+  expect(calls[1].data).toMatchObject({
+    reference_state_entity_id: "switch.pump",
+    reference_power_entity_id: "sensor.pump_power",
+  });
+  await expect(details).toHaveAttribute("open", "");
+  await toHaveNoViolations(page);
+});
+
 test("NILM workspace gates electrical topology facts by source capability", async ({ page }) => {
   let topologyMode = "single";
   await mockPanelApi(page, async ({ route, url }) => {

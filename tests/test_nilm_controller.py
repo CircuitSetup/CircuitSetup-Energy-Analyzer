@@ -408,6 +408,57 @@ def test_upsert_assignment_preserves_existing_role_when_omitted() -> None:
     assert assignment["role"] == "primary"
 
 
+def test_nilm_reference_runtime_uses_state_then_power_only_fallback() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_reference_runtime,
+    )
+
+    rows = {
+        "switch.pump": SimpleNamespace(state="off", attributes={}),
+        "sensor.pump_power": SimpleNamespace(
+            state="0.084",
+            attributes={"device_class": "power", "unit_of_measurement": "kW"},
+        ),
+    }
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(states=SimpleNamespace(get=rows.get))
+    )
+
+    state_reference = nilm_reference_runtime(
+        coordinator,
+        {
+            "reference_state_entity_id": "switch.pump",
+            "reference_power_entity_id": "sensor.pump_power",
+            "reference_threshold_w": 25,
+        },
+    )
+    assert state_reference == {
+        "available": True,
+        "is_running": False,
+        "measured_power_w": 84.0,
+        "source_entity_id": "switch.pump",
+        "fallback_to_nilm": False,
+    }
+
+    power_reference = nilm_reference_runtime(
+        coordinator,
+        {
+            "reference_power_entity_id": "sensor.pump_power",
+            "reference_threshold_w": 25,
+        },
+    )
+    assert power_reference["is_running"] is True
+    assert power_reference["source_entity_id"] == "sensor.pump_power"
+
+    assert nilm_reference_runtime(
+        coordinator,
+        {
+            "lifecycle_state": "retired",
+            "reference_state_entity_id": "switch.pump",
+        },
+    )["fallback_to_nilm"] is True
+
+
 @pytest.mark.asyncio
 async def test_configured_primary_uses_configured_identity_and_role() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -1388,6 +1439,118 @@ async def test_nilm_helper_links_validate_persist_replace_and_remove() -> None:
         helper_circuit_id="helper",
     )
     assert removed["helper_links"] == []
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_persists_updates_and_removes() -> None:
+    controller, assignment = _helper_link_controller()
+    assignment["label_interval_ids"] = ["label-1"]
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed",
+        "assignment-load",
+        state_entity_id=" switch.load ",
+        power_entity_id=" sensor.load_power ",
+        threshold_w=12.5,
+    )
+
+    assert linked["reference_state_entity_id"] == "switch.load"
+    assert linked["reference_power_entity_id"] == "sensor.load_power"
+    assert linked["reference_threshold_w"] == 12.5
+    assert linked["updated_at"] == "2026-06-02T12:00:00+00:00"
+
+    retired = await controller.async_retire_nilm_appliance_assignment(
+        "mixed", "assignment-load"
+    )
+    assert retired["reference_state_entity_id"] == "switch.load"
+    assert retired["reference_power_entity_id"] == "sensor.load_power"
+
+    removed = await controller.async_remove_nilm_reference_link(
+        "mixed", "assignment-load"
+    )
+    assert "reference_state_entity_id" not in removed
+    assert "reference_power_entity_id" not in removed
+    assert "reference_threshold_w" not in removed
+    assert removed["label_interval_ids"] == ["label-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("threshold", (-1, float("inf"), True))
+async def test_nilm_reference_link_rejects_invalid_values(threshold: object) -> None:
+    controller, _ = _helper_link_controller()
+
+    with pytest.raises(ValueError):
+        await controller.async_set_nilm_reference_link(
+            "mixed",
+            "assignment-load",
+            threshold_w=threshold,
+        )
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_rejects_incompatible_live_entities() -> None:
+    controller, _ = _helper_link_controller()
+    rows = {
+        "sensor.not_state": SimpleNamespace(state="on", attributes={}),
+        "sensor.pump_var": SimpleNamespace(
+            state="12",
+            attributes={
+                "device_class": "reactive_power",
+                "unit_of_measurement": "var",
+            },
+        ),
+    }
+    controller._coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(get=rows.get)
+    )
+
+    with pytest.raises(ValueError, match="state entity"):
+        await controller.async_set_nilm_reference_link(
+            "mixed", "assignment-load", state_entity_id="sensor.not_state"
+        )
+    with pytest.raises(ValueError, match="power entity"):
+        await controller.async_set_nilm_reference_link(
+            "mixed", "assignment-load", power_entity_id="sensor.pump_var"
+        )
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_history_updates_measured_interval_evidence() -> None:
+    controller, assignment = _helper_link_controller()
+
+    first = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:30:00+00:00",
+        interval_id="reference-stable",
+        assignment_id="assignment-load",
+        ground_truth_entity_id="switch.pump",
+        source="reference_sensor",
+        median_power_w=80,
+        measured_energy_kwh=0.04,
+    )
+    second = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:30:00+00:00",
+        interval_id="reference-stable",
+        assignment_id="assignment-load",
+        ground_truth_entity_id="switch.pump",
+        source="reference_sensor",
+        median_power_w=84,
+        measured_energy_kwh=0.042,
+    )
+
+    intervals = controller._coordinator.store_data.nilm_label_intervals_by_circuit[
+        "mixed"
+    ]
+    assert len(intervals) == 1
+    assert first["median_power_w"] == 80
+    assert second["median_power_w"] == 84
+    assert second["measured_energy_kwh"] == 0.042
+    assert assignment["label_interval_ids"] == ["reference-stable"]
 
 
 @pytest.mark.asyncio

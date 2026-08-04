@@ -884,11 +884,13 @@ def test_nilm_sensor_label_interval_schema_accepts_generation_fields() -> None:
             "start": "2026-06-02T12:00:00+00:00",
             "end": "2026-06-02T14:00:00+00:00",
             "ground_truth_entity_id": "sensor.dishwasher_power",
+            "assignment_id": "assignment-dishwasher",
             "threshold_w": 25,
         }
     )
 
     assert data["ground_truth_entity_id"] == "sensor.dishwasher_power"
+    assert data["assignment_id"] == "assignment-dishwasher"
     assert data["threshold_w"] == 25
 
 
@@ -951,6 +953,255 @@ def test_nilm_sensor_history_rows_generate_label_intervals() -> None:
             "validation_end": "2026-06-02T13:00:00+00:00",
         }
     ]
+
+
+def test_nilm_reference_intervals_generate_from_on_off_history() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _nilm_reference_intervals_from_history,
+    )
+
+    intervals = _nilm_reference_intervals_from_history(
+        [
+            [
+                {
+                    "entity_id": "switch.dishwasher",
+                    "state": "off",
+                    "last_changed": "2026-08-01T00:00:00+00:00",
+                },
+                {
+                    "entity_id": "switch.dishwasher",
+                    "state": "on",
+                    "last_changed": "2026-08-01T00:10:00+00:00",
+                },
+                {
+                    "entity_id": "switch.dishwasher",
+                    "state": "off",
+                    "last_changed": "2026-08-01T00:40:00+00:00",
+                },
+            ]
+        ],
+        "switch.dishwasher",
+        start="2026-08-01T00:00:00+00:00",
+        end="2026-08-01T02:00:00+00:00",
+    )
+
+    assert intervals == [
+        {
+            "start": "2026-08-01T00:10:00+00:00",
+            "end": "2026-08-01T00:40:00+00:00",
+            "validation_start": "2026-08-01T00:00:00+00:00",
+            "validation_end": "2026-08-01T02:00:00+00:00",
+        }
+    ]
+
+
+def test_nilm_reference_intervals_close_on_unknown_history_gaps() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _nilm_reference_intervals_from_history,
+    )
+
+    intervals = _nilm_reference_intervals_from_history(
+        [
+            [
+                {
+                    "entity_id": "binary_sensor.dishwasher",
+                    "state": "on",
+                    "last_changed": "2026-08-01T00:10:00+00:00",
+                },
+                {
+                    "entity_id": "binary_sensor.dishwasher",
+                    "state": "unknown",
+                    "last_changed": "2026-08-01T00:20:00+00:00",
+                },
+                {
+                    "entity_id": "binary_sensor.dishwasher",
+                    "state": "unavailable",
+                    "last_changed": "2026-08-01T00:30:00+00:00",
+                },
+                {
+                    "entity_id": "binary_sensor.dishwasher",
+                    "state": "on",
+                    "last_changed": "2026-08-01T00:40:00+00:00",
+                },
+                {
+                    "entity_id": "binary_sensor.dishwasher",
+                    "state": "off",
+                    "last_changed": "2026-08-01T00:50:00+00:00",
+                },
+            ]
+        ],
+        "binary_sensor.dishwasher",
+        start="2026-08-01T00:00:00+00:00",
+        end="2026-08-01T01:00:00+00:00",
+    )
+
+    assert [(item["start"], item["end"]) for item in intervals] == [
+        ("2026-08-01T00:10:00+00:00", "2026-08-01T00:20:00+00:00"),
+        ("2026-08-01T00:40:00+00:00", "2026-08-01T00:50:00+00:00"),
+    ]
+
+    with pytest.raises(Exception, match="threshold"):
+        _nilm_reference_intervals_from_history(
+            [],
+            "binary_sensor.dishwasher",
+            start="2026-08-01T00:00:00+00:00",
+            end="2026-08-01T01:00:00+00:00",
+            threshold_w=-1,
+        )
+
+
+def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _nilm_reference_interval_id,
+        _nilm_reference_power_metrics,
+    )
+
+    rows = [
+        [
+            {
+                "entity_id": "sensor.pump_power",
+                "state": state,
+                "last_changed": timestamp,
+            }
+            for state, timestamp in (
+                ("80", "2026-08-01T00:10:00+00:00"),
+                ("100", "2026-08-01T00:20:00+00:00"),
+                ("80", "2026-08-01T00:40:00+00:00"),
+            )
+        ]
+    ]
+
+    assert _nilm_reference_power_metrics(
+        rows,
+        "sensor.pump_power",
+        start="2026-08-01T00:10:00+00:00",
+        end="2026-08-01T00:40:00+00:00",
+        unit="W",
+    ) == {"median_power_w": 80.0, "measured_energy_kwh": 0.045}
+    interval_id = _nilm_reference_interval_id(
+        "mixed",
+        "assignment-pump",
+        "switch.pump",
+        "2026-08-01T00:10:00+00:00",
+        "2026-08-01T00:40:00+00:00",
+    )
+    assert interval_id == _nilm_reference_interval_id(
+        "mixed",
+        "assignment-pump",
+        "switch.pump",
+        "2026-08-01T00:10:00+00:00",
+        "2026-08-01T00:40:00+00:00",
+    )
+    assert interval_id.startswith("reference-")
+
+    assert _nilm_reference_power_metrics(
+        [[
+            {
+                "entity_id": "sensor.pump_power",
+                "state": state,
+                "last_changed": timestamp,
+            }
+            for state, timestamp in (
+                ("80", "2026-08-01T00:10:00+00:00"),
+                ("unknown", "2026-08-01T00:20:00+00:00"),
+                ("80", "2026-08-01T00:40:00+00:00"),
+            )
+        ]],
+        "sensor.pump_power",
+        start="2026-08-01T00:10:00+00:00",
+        end="2026-08-01T00:40:00+00:00",
+        unit="W",
+    ) == {"median_power_w": 80.0, "measured_energy_kwh": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_history_service_attaches_measured_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        side_effect=[
+            [
+                [
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "off",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+            [
+                [
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [{"assignment_id": "assignment-pump"}]
+            }
+        ),
+        async_label_nilm_interval=AsyncMock(),
+    )
+    other = SimpleNamespace(
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [{"assignment_id": "assignment-other"}]
+            }
+        ),
+        async_label_nilm_interval=AsyncMock(),
+    )
+    power_state = SimpleNamespace(
+        state="80",
+        attributes={"device_class": "power", "unit_of_measurement": "W"},
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator, "entry-2": other}},
+        states=SimpleNamespace(get=lambda entity_id: power_state),
+    )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+            "ground_truth_entity_id": "switch.pump",
+            "reference_power_entity_id": "sensor.pump_power",
+        },
+    )
+
+    kwargs = coordinator.async_label_nilm_interval.await_args.kwargs
+    assert kwargs["assignment_id"] == "assignment-pump"
+    assert kwargs["source"] == "reference_sensor"
+    assert kwargs["median_power_w"] == 80.0
+    assert kwargs["measured_energy_kwh"] == 0.04
+    assert kwargs["interval_id"].startswith("reference-")
+    other.async_label_nilm_interval.assert_not_awaited()
 
 
 def test_nilm_assignment_service_schemas_validate_required_fields() -> None:
@@ -2813,8 +3064,14 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
                 "sensor.dishwasher_power",
                 "2026-06-02T12:00:00+00:00",
                 "2026-06-02T13:00:00+00:00",
-                None,
-                "sensor",
+                    services._nilm_reference_interval_id(
+                        "mains",
+                        "",
+                        "sensor.dishwasher_power",
+                        "2026-06-02T12:10:00+00:00",
+                        "2026-06-02T12:40:00+00:00",
+                    ),
+                    "reference_sensor",
                 1.0,
             ),
         )
@@ -4543,6 +4800,97 @@ def test_nilm_helper_link_service_schemas_are_exact() -> None:
         set_schema({**data, "relationship": "other"})
     with pytest.raises(ValueError):
         set_schema({**data, "extra": "no"})
+
+
+def test_nilm_reference_link_service_schemas_are_exact() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    set_schema = services._SERVICE_SCHEMAS[services.SERVICE_SET_NILM_REFERENCE_LINK]
+    remove = services._SERVICE_SCHEMAS[services.SERVICE_REMOVE_NILM_REFERENCE_LINK]
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "reference_state_entity_id": "switch.load",
+        "reference_power_entity_id": "sensor.load_power",
+        "reference_threshold_w": 12.5,
+        "entry_id": "entry-1",
+    }
+    assert set_schema(data) == data
+    assert remove(
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-load",
+            "entry_id": "entry-1",
+        }
+    )
+    with pytest.raises(ValueError):
+        set_schema(
+            {
+                "circuit_id": "mixed",
+                "assignment_id": "assignment-load",
+            }
+        )
+    with pytest.raises(ValueError):
+        set_schema({**data, "reference_threshold_w": -1})
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_services_are_entry_isolated() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    def coordinator() -> SimpleNamespace:
+        return SimpleNamespace(
+            async_set_updated_data=lambda _: None,
+            circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mixed": [{"assignment_id": "assignment-load"}]
+                }
+            ),
+            async_set_nilm_reference_link=AsyncMock(),
+            async_remove_nilm_reference_link=AsyncMock(),
+        )
+
+    first, second = coordinator(), coordinator()
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "reference_state_entity_id": "switch.load",
+        "reference_power_entity_id": "sensor.load_power",
+        "reference_threshold_w": 12.5,
+    }
+    with pytest.raises(services.HomeAssistantError, match="ambiguous"):
+        await services._dispatch_service(
+            hass, services.SERVICE_SET_NILM_REFERENCE_LINK, data
+        )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_SET_NILM_REFERENCE_LINK,
+        {**data, "entry_id": "entry-2"},
+    )
+    first.async_set_nilm_reference_link.assert_not_awaited()
+    second.async_set_nilm_reference_link.assert_awaited_once_with(
+        "mixed",
+        "assignment-load",
+        state_entity_id="switch.load",
+        power_entity_id="sensor.load_power",
+        threshold_w=12.5,
+    )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_REMOVE_NILM_REFERENCE_LINK,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-load",
+            "entry_id": "entry-2",
+        },
+    )
+    second.async_remove_nilm_reference_link.assert_awaited_once_with(
+        "mixed", "assignment-load"
+    )
 
 
 @pytest.mark.asyncio

@@ -292,8 +292,8 @@ label_nilm_interval:
           domain:
             - sensor
     ground_truth_entity_id:
-      name: Ground Truth Entity
-      description: Optional directly metered appliance power entity for this interval.
+      name: Reference Entity
+      description: Optional directly measured appliance entity used as reference evidence for this interval.
       required: false
       example: sensor.dishwasher_power
       selector:
@@ -355,7 +355,7 @@ generate_nilm_sensor_label_intervals:
             - number
     label:
       name: Label
-      description: Friendly appliance name for generated ground-truth intervals.
+      description: Friendly appliance name for generated reference intervals.
       required: true
       example: Dishwasher
       selector:
@@ -375,17 +375,20 @@ generate_nilm_sensor_label_intervals:
       selector:
         text:
     ground_truth_entity_id:
-      name: Ground Truth Entity
-      description: Directly metered appliance power entity used to generate labels.
+      name: Reference Entity
+      description: On/off entity or directly metered real-power entity used to generate reference intervals.
       required: true
       example: sensor.dishwasher_power
       selector:
         entity:
           domain:
             - sensor
+            - binary_sensor
+            - switch
+            - input_boolean
     threshold_w:
       name: Threshold W
-      description: Sensor watts above this threshold are treated as appliance running. Defaults to greater than zero.
+      description: Numeric sensor watts above this threshold are treated as appliance running. On/off entities ignore this value.
       required: false
       example: 25
       selector:
@@ -393,11 +396,25 @@ generate_nilm_sensor_label_intervals:
           min: 0
           max: 100000
           mode: box
+    reference_power_entity_id:
+      name: Reference Power Entity
+      description: Optional separate W-family real-power sensor used to measure each generated interval.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
     appliance_id:
       name: Appliance ID
       description: Optional stable appliance/profile identifier for generated intervals.
       required: false
       example: dishwasher
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Optional existing NILM assignment that owns the generated intervals.
+      required: false
       selector:
         text:
     mains_entity_id:
@@ -666,7 +683,7 @@ reject_nilm_session:
         text:
 validate_nilm_assignment_history:
   name: Validate NILM assignment history
-  description: "Advanced/script action: confirm stored NILM sessions that overlap saved ground-truth intervals for an assignment. The normal user path is the NILM workspace panel."
+  description: "Advanced/script action: confirm stored NILM sessions that overlap saved reference intervals for an assignment. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
       name: Circuit ID
@@ -689,7 +706,7 @@ validate_nilm_assignment_history:
             - number
     assignment_id:
       name: Assignment ID
-      description: NILM appliance assignment identifier to validate against saved ground-truth intervals. The NILM workspace passes this internally.
+      description: NILM appliance assignment identifier to validate against saved reference intervals. The NILM workspace passes this internally.
       required: true
       example: assignment-abc123def456
       selector:
@@ -938,6 +955,78 @@ remove_nilm_helper_link:
     entry_id:
       name: Entry ID
       description: Optional config entry that owns the source and helper circuits.
+      required: false
+      selector:
+        text:
+set_nilm_reference_link:
+  name: Set NILM reference sensors
+  description: "Advanced/script action: link authoritative state and optional measured-power evidence to one NILM appliance. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Load Separation source circuit identifier.
+      required: true
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment receiving the reference sensors.
+      required: true
+      selector:
+        text:
+    reference_state_entity_id:
+      name: Reference State Entity
+      description: Optional switch, binary sensor, or input boolean that authoritatively reports on/off state.
+      required: false
+      selector:
+        entity:
+          domain:
+            - switch
+            - binary_sensor
+            - input_boolean
+    reference_power_entity_id:
+      name: Reference Power Entity
+      description: Optional separate real-power sensor used as supporting evidence.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+    reference_threshold_w:
+      name: Reference Threshold W
+      description: Watts above this threshold indicate running when no state entity is linked.
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    entry_id:
+      name: Entry ID
+      description: Optional config entry that owns the source circuit and assignment.
+      required: false
+      selector:
+        text:
+remove_nilm_reference_link:
+  name: Remove NILM reference sensors
+  description: "Advanced/script action: remove linked reference sensors without deleting imported validation intervals. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Load Separation source circuit identifier.
+      required: true
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: NILM appliance assignment losing the reference sensors.
+      required: true
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry that owns the source circuit and assignment.
       required: false
       selector:
         text:

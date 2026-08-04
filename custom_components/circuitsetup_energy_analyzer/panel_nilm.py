@@ -11,6 +11,7 @@ from urllib.parse import quote, urlencode
 
 from .const import DOMAIN
 from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
+from .entity import _entity_registry_for_hass
 from .managers.nilm_controller import (
     configured_primary_assignment_id,
     nilm_assignment_publication_reason,
@@ -35,6 +36,7 @@ from .nilm import (
 from .nilm_virtual import (
     nilm_live_runtime,
     nilm_model_status,
+    nilm_reference_runtime,
     nilm_runtime_available,
 )
 from .panel_common import (
@@ -56,11 +58,13 @@ from .services import (
     ATTR_CIRCUIT_ID,
     ATTR_END,
     ATTR_ENTRY_ID,
+    ATTR_GROUND_TRUTH_ENTITY_ID,
     ATTR_HELPER_CIRCUIT_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
     ATTR_PRESET,
+    ATTR_REFERENCE_POWER_ENTITY_ID,
     ATTR_RELATIONSHIP,
     ATTR_SESSION_ID,
     ATTR_SIGNATURE_FINGERPRINT,
@@ -68,12 +72,14 @@ from .services import (
     ATTR_SOURCE_ASSIGNMENT_ID,
     ATTR_START,
     ATTR_TARGET_ASSIGNMENT_ID,
+    ATTR_THRESHOLD_W,
     SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
     SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
     SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
+    SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
@@ -83,11 +89,13 @@ from .services import (
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_REJECT_NILM_SESSION,
     SERVICE_REMOVE_NILM_HELPER_LINK,
+    SERVICE_REMOVE_NILM_REFERENCE_LINK,
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
+    SERVICE_SET_NILM_REFERENCE_LINK,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
@@ -203,6 +211,11 @@ def nilm_workspace_payload(
         config.circuit_id,
         coordinator=coordinator,
         config=config,
+    )
+    _add_nilm_reference_evidence(
+        assignments,
+        config.circuit_id,
+        coordinator=coordinator,
     )
     assignment_options = _nilm_assignment_options(assignments)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
@@ -1356,6 +1369,171 @@ def _nilm_helper_options(
     return options
 
 
+def _add_nilm_reference_evidence(
+    assignments: list[dict[str, Any]],
+    circuit_id: str,
+    *,
+    coordinator: Any,
+) -> None:
+    state_options, power_options = _nilm_reference_options(coordinator)
+    power_device_ids = {
+        item["device_id"]: item["entity_id"]
+        for item in power_options
+        if item.get("device_id")
+    }
+    state_device_ids = {
+        item["entity_id"]: item.get("device_id") for item in state_options
+    }
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not assignment_id:
+            continue
+        state_entity_id = str(
+            assignment.get("reference_state_entity_id") or ""
+        ).strip()
+        power_entity_id = str(
+            assignment.get("reference_power_entity_id") or ""
+        ).strip()
+        suggested_power_entity_id = power_device_ids.get(
+            state_device_ids.get(state_entity_id)
+        )
+        action_data = {
+            ATTR_CIRCUIT_ID: circuit_id,
+            ATTR_ASSIGNMENT_ID: assignment_id,
+        }
+        actions: dict[str, Any] = {
+            "set": {
+                "domain": DOMAIN,
+                "service": SERVICE_SET_NILM_REFERENCE_LINK,
+                "data": dict(action_data),
+                "requires": [
+                    "reference_state_entity_id",
+                    "reference_power_entity_id",
+                    "reference_threshold_w",
+                ],
+            }
+        }
+        actions["import"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+            "data": {
+                **action_data,
+                ATTR_LABEL: str(
+                    assignment.get("display_name")
+                    or assignment.get("appliance_id")
+                    or assignment_id
+                ),
+            },
+            "requires": [
+                ATTR_GROUND_TRUTH_ENTITY_ID,
+                ATTR_REFERENCE_POWER_ENTITY_ID,
+                ATTR_THRESHOLD_W,
+                ATTR_START,
+                ATTR_END,
+            ],
+        }
+        if state_entity_id or power_entity_id:
+            actions["remove"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_REMOVE_NILM_REFERENCE_LINK,
+                "data": dict(action_data),
+            }
+        runtime = nilm_reference_runtime(coordinator, assignment)
+        assignment["reference"] = {
+            "state_entity_id": state_entity_id or None,
+            "power_entity_id": power_entity_id or None,
+            "threshold_w": _clamped_float(
+                assignment.get("reference_threshold_w"), default=0.0
+            ),
+            **runtime,
+            "state_options": state_options,
+            "power_options": power_options,
+            "suggested_power_entity_id": suggested_power_entity_id,
+            "actions": actions,
+        }
+
+
+def _nilm_reference_options(
+    coordinator: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    hass = getattr(coordinator, "hass", None)
+    states = getattr(hass, "states", None)
+    async_all = getattr(states, "async_all", None)
+    if not callable(async_all):
+        return [], []
+    try:
+        state_rows = tuple(async_all())
+    except (AttributeError, TypeError):
+        return [], []
+
+    registry = _entity_registry_for_hass(hass)
+    entries = getattr(registry, "entities", {})
+    if hasattr(entries, "get"):
+        registry_entry = entries.get
+    else:
+        by_id = {
+            str(getattr(item, "entity_id", "") or ""): item
+            for item in entries or ()
+        }
+        registry_entry = by_id.get
+
+    state_options: list[dict[str, Any]] = []
+    power_options: list[dict[str, Any]] = []
+    for row in state_rows:
+        entity_id = str(getattr(row, "entity_id", "") or "").strip()
+        domain = entity_id.partition(".")[0]
+        attributes = getattr(row, "attributes", {})
+        if not isinstance(attributes, Mapping):
+            attributes = {}
+        name = str(attributes.get("friendly_name") or entity_id).strip()
+        registry_row = registry_entry(entity_id)
+        device_id = str(getattr(registry_row, "device_id", "") or "") or None
+        if domain in {"switch", "binary_sensor", "input_boolean"}:
+            state_options.append(
+                {
+                    "entity_id": entity_id,
+                    "name": name,
+                    "device_id": device_id,
+                    "role": "state",
+                    "unit": None,
+                }
+            )
+            continue
+        if domain != "sensor":
+            continue
+        unit = str(attributes.get("unit_of_measurement") or "").strip()
+        device_class = str(attributes.get("device_class") or "").strip()
+        if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
+            continue
+        if (
+            sensor_role_from_metadata(device_class=device_class, unit=unit)
+            is not SensorRole.REAL_POWER
+        ):
+            continue
+        try:
+            value = float(getattr(row, "state", None))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        power_options.append(
+            {
+                "entity_id": entity_id,
+                "name": name,
+                "device_id": device_id,
+                "role": SensorRole.REAL_POWER.value,
+                "unit": unit,
+            }
+        )
+
+    def sort_key(item: Mapping[str, Any]) -> tuple[str, str]:
+        return str(item["name"]).casefold(), str(item["entity_id"])
+
+    state_options.sort(key=sort_key)
+    power_options.sort(key=sort_key)
+    return state_options[:512], power_options[:512]
+
+
 def _add_nilm_assignment_options(
     items: Iterable[dict[str, Any]],
     assignment_options: list[dict[str, str]],
@@ -1604,6 +1782,7 @@ def _nilm_virtual_appliances_for_assignments(
             assignment_id,
         )
         live_available = nilm_runtime_available(runtime, reconciliation)
+        reference = nilm_reference_runtime(coordinator, assignment)
         helper_status = (
             "degraded"
             if any(
@@ -1626,7 +1805,11 @@ def _nilm_virtual_appliances_for_assignments(
                     or assignment_id
                 ),
                 "is_running": (
-                    runtime.get("status") == "on" if live_available else None
+                    reference["is_running"]
+                    if reference["available"]
+                    else runtime.get("status") == "on"
+                    if live_available
+                    else None
                 ),
                 "estimated_power_w": (
                     _round_float(runtime.get("estimated_power_w"))
@@ -1893,6 +2076,18 @@ def _nilm_validation_payload(
         )
         if session is not None:
             matched_prediction_ids.add(str(session.get("session_id") or ""))
+        measured_power_w = _optional_round_float(interval.get("median_power_w"))
+        measured_energy_kwh = _optional_round_float(
+            interval.get("measured_energy_kwh"), digits=6
+        )
+        estimated_power_w = (
+            _optional_round_float(session.get("median_power_w")) if session else None
+        )
+        estimated_energy_kwh = (
+            _optional_round_float(session.get("estimated_energy_kwh"), digits=6)
+            if session
+            else None
+        )
         preview.append(
             {
                 "interval_id": interval.get("interval_id"),
@@ -1908,6 +2103,21 @@ def _nilm_validation_payload(
                 ),
                 "overlap_seconds": overlap,
                 "prediction_confidence": session.get("confidence") if session else None,
+                "measured_power_w": measured_power_w,
+                "estimated_power_w": estimated_power_w,
+                "power_error_w": (
+                    round(abs(estimated_power_w - measured_power_w), 3)
+                    if measured_power_w is not None and estimated_power_w is not None
+                    else None
+                ),
+                "measured_energy_kwh": measured_energy_kwh,
+                "estimated_energy_kwh": estimated_energy_kwh,
+                "energy_error_kwh": (
+                    round(abs(estimated_energy_kwh - measured_energy_kwh), 6)
+                    if measured_energy_kwh is not None
+                    and estimated_energy_kwh is not None
+                    else None
+                ),
             }
         )
 
@@ -2073,6 +2283,16 @@ def _nilm_daily_energy(
 
 def _round_float(value: Any) -> float:
     return round(_clamped_float(value, default=0.0), 3)
+
+
+def _optional_round_float(value: Any, *, digits: int = 3) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number, digits) if math.isfinite(number) and number >= 0 else None
 
 
 def _clamped_float(value: Any, *, default: float, upper: float | None = None) -> float:
