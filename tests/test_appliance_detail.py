@@ -1387,6 +1387,36 @@ def test_direct_meter_conversion_preserves_nilm_identity_in_appliance_detail() -
     assert assignment_detail == detail
 
 
+@pytest.mark.parametrize("lifecycle_state", ["ignored", "retired"])
+def test_hidden_direct_meter_conversion_releases_configured_circuit_identity(
+    lifecycle_state: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    ac2 = _config("ac2", name="AC 2", profile=ApplianceProfile.HVAC)
+    coordinator.circuit_configs = (*coordinator.circuit_configs, ac2)
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
+        0
+    ]
+    assignment.update(
+        {
+            "display_name": "Condensate Pump 2",
+            "conversion_state": "direct_meter",
+            "direct_circuit_id": "ac2",
+            "lifecycle_state": lifecycle_state,
+        }
+    )
+
+    detail = appliance_detail_payload([coordinator], circuit_id="ac2")["detail"]
+
+    assert detail["display_name"] == "AC 2"
+    assert detail["appliance_key"] == "circuit:ac2"
+    assert detail["assignment_id"] is None
+
+
 def test_appliance_detail_payload_includes_notification_preferences() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         appliance_detail_payload,
