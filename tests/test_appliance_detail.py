@@ -1377,7 +1377,13 @@ def test_explicitly_linked_legacy_off_session_is_retained() -> None:
         "split=unknown|leg=unknown|balance=unknown"
     )
     assignment["signature_fingerprints"] = [fingerprint, "unassigned"]
-    assignment["session_ids"] = ["legacy-complete", "legacy-open"]
+    assignment["session_ids"] = [
+        "legacy-complete",
+        "legacy-open",
+        "legacy-rejected",
+    ]
+    assignment["confirmed_session_ids"] = ["legacy-complete", "legacy-open"]
+    assignment["rejected_session_ids"] = ["legacy-rejected"]
     coordinator.store_data.nilm_session_history_by_circuit = {
         "mains": [
             {
@@ -1404,6 +1410,17 @@ def test_explicitly_linked_legacy_off_session_is_retained() -> None:
             },
             {
                 **_nilm_session(
+                    "legacy-rejected",
+                    start=datetime(2026, 6, 30, 8, 45, tzinfo=UTC),
+                    end=datetime(2026, 6, 30, 12, 45, tzinfo=UTC),
+                    duration_seconds=14400.0,
+                    energy_kwh=0.4,
+                ),
+                "signature_fingerprint": fingerprint,
+                "assignment_id": assignment["assignment_id"],
+            },
+            {
+                **_nilm_session(
                     "unlinked",
                     start=datetime(2026, 6, 30, 9, 0, tzinfo=UTC),
                     end=datetime(2026, 6, 30, 9, 5, tzinfo=UTC),
@@ -1423,7 +1440,10 @@ def test_explicitly_linked_legacy_off_session_is_retained() -> None:
         (),
     )
 
-    assert [session["session_id"] for session in sessions] == ["legacy-complete"]
+    assert [session["session_id"] for session in sessions] == [
+        "legacy-complete",
+        "legacy-rejected",
+    ]
 
 
 def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:

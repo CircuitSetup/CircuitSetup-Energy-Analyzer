@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Mapping, MutableMapping, Mutable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
+from statistics import median
 from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
@@ -144,6 +145,12 @@ class NilmSampleProcessor:
             )
             if isinstance(item, Mapping)
         )
+        if _recover_confirmed_assignment_models(
+            assignments,
+            context.store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+            sample.timestamp,
+        ):
+            store_dirty = True
         signature_specs = tuple(
             item
             for item in context.store_data.nilm_signatures.get(circuit_id, ())
@@ -1076,6 +1083,101 @@ def _apply_direct_component_sample(
             "confidence": _finite_float(link.get("confidence")) or 0.0,
         })
     return closes, unavailable
+
+
+def _recover_confirmed_assignment_models(
+    assignments: Iterable[Any],
+    sessions: Iterable[Any],
+    timestamp: datetime,
+) -> bool:
+    """Seed missing ON/OFF models from explicitly confirmed complete sessions."""
+    session_list = [session for session in sessions if isinstance(session, Mapping)]
+    changed = False
+    for assignment in assignments:
+        if not isinstance(assignment, dict):
+            continue
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
+        if (
+            not assignment_id
+            or normalize_nilm_assignment_model(assignment)["transition_prototypes"]
+            or str(assignment.get("lifecycle_state") or "").strip().casefold()
+            in {"hidden", "ignored", "retired", "rejected", "converted"}
+            or assignment.get("conversion_state") == "direct_meter"
+        ):
+            continue
+        confirmed = {
+            str(value or "").strip()
+            for value in _list_items(assignment.get("confirmed_session_ids"))
+            if str(value or "").strip()
+        }
+        rejected = {
+            str(value or "").strip()
+            for value in _list_items(assignment.get("rejected_session_ids"))
+            if str(value or "").strip()
+        }
+        samples = [
+            session
+            for session in session_list
+            if str(session.get("session_id") or "").strip() in confirmed - rejected
+            and session.get("end")
+            and str(session.get("assignment_id") or "").strip()
+            in {"", assignment_id}
+            and (_finite_float(session.get("on_delta_w")) or 0.0) > 0.0
+            and (_finite_float(session.get("off_delta_w")) or 0.0) < 0.0
+        ]
+        if not samples:
+            continue
+        on_watts = [_finite_float(session.get("on_delta_w")) for session in samples]
+        off_watts = [_finite_float(session.get("off_delta_w")) for session in samples]
+        on_values = [float(value) for value in on_watts if value is not None]
+        off_values = [float(value) for value in off_watts if value is not None]
+        state_w = round(median([*on_values, *map(abs, off_values)]), 3)
+        sample_count = len(samples)
+        prototypes = [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": state_w,
+                "delta_w": round(median(on_values), 3),
+                "spread_w": 0.0,
+                "sample_count": sample_count,
+            },
+            {
+                "direction": "off",
+                "from_state_w": state_w,
+                "to_state_w": 0.0,
+                "delta_w": round(median(off_values), 3),
+                "spread_w": 0.0,
+                "sample_count": sample_count,
+            },
+        ]
+        for prototype, key in zip(
+            prototypes,
+            ("on_delta_var", "off_delta_var"),
+            strict=True,
+        ):
+            values = [
+                value
+                for session in samples
+                if (value := _finite_float(session.get(key))) is not None
+            ]
+            if values:
+                prototype["delta_var"] = round(median(values), 3)
+        confidence = max(
+            _clamped_confidence(assignment.get("confidence")),
+            *(
+                _clamped_confidence(session.get("confidence"))
+                for session in samples
+            ),
+        )
+        assignment.update({
+            "power_states_w": [0.0, state_w],
+            "transition_prototypes": prototypes,
+            "model_confidence": confidence,
+            "updated_at": timestamp.isoformat(),
+        })
+        changed = True
+    return changed
 
 
 def _runtime_assignment_model(
