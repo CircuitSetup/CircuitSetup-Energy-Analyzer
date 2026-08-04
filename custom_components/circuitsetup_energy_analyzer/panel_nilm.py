@@ -1388,6 +1388,37 @@ def _nilm_assignment_payload(
     assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
     if not assignment_id:
         return payload
+    interval_ids = {
+        str(value or "").strip()
+        for value in _iter_items(payload.get("label_interval_ids"))
+        if str(value or "").strip()
+    }
+    interval_watts = []
+    for interval in label_intervals:
+        if (
+            str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip() != assignment_id
+            and str(interval.get(ATTR_INTERVAL_ID) or "").strip() not in interval_ids
+        ):
+            continue
+        try:
+            watts = float(interval.get("observed_transition_w"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(watts) and watts >= 0:
+            interval_watts.append(watts)
+    try:
+        existing_watts = float(payload.get("typical_power_w"))
+    except (TypeError, ValueError):
+        existing_watts = None
+    if (
+        (
+            existing_watts is None
+            or not math.isfinite(existing_watts)
+            or existing_watts < 0
+        )
+        and interval_watts
+    ):
+        payload["typical_power_w"] = round(median(interval_watts), 3)
 
     payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
         assignment_id, entry_id=entry_id
@@ -1540,7 +1571,7 @@ def _nilm_virtual_appliances_for_assignments(
     virtual_appliances = []
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip()
-        if not assignment_id:
+        if not assignment_id or _nilm_assignment_hidden(assignment):
             continue
         assignment_session_ids = {
             str(value or "").strip()
@@ -1694,7 +1725,7 @@ def _nilm_workspace_lanes(
         "assigned": _nilm_lane("Assigned"),
         "published": _nilm_lane("Published"),
         "expected": _nilm_lane("Expected"),
-        "hidden": _nilm_lane("Hidden"),
+        "hidden": _nilm_lane("Removed"),
     }
     assigned_signature_ids = _nilm_assigned_signature_ids(assignments)
     for signature in signatures:
@@ -2174,6 +2205,7 @@ def _nilm_workspace_history_payload(
         "hours": requested_hours,
         "max_hours": MAX_NILM_WORKSPACE_HISTORY_HOURS,
         "entities": entities,
+        "source_entities": [item["entity_id"] for item in source_series],
         "entity_series": entity_series,
         "entity_count": len(entities),
         "max_entities": MAX_NILM_WORKSPACE_HISTORY_ENTITIES,

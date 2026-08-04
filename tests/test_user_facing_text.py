@@ -163,7 +163,7 @@ function makeWorkspace({{ lanes = {{}}, lane_counts = {{}}, ...overrides }} = {{
     assigned: "Assigned",
     published: "Published",
     expected: "Expected",
-    hidden: "Hidden",
+    hidden: "Removed",
   }};
   const baseLanes = Object.fromEntries(Object.entries(labels).map(([key, label]) => [
     key, {{ label, signature_ids: [], assignment_ids: [], interval_ids: [] }},
@@ -3408,7 +3408,7 @@ def test_nilm_lane_rendering_contracts() -> None:
         "Ready to Publish",
         "Published",
         "Expected",
-        "Hidden",
+        "Removed",
       ]) {
         assert.ok(!summary.includes(duplicate));
       }
@@ -3417,7 +3417,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 5);
       for (const expected of [
         'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
-        "Needs Review", "Published", "Expected", "Hidden", "<strong>5</strong>",
+        "Needs Review", "Published", "Expected", "Removed", "<strong>5</strong>",
       ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
@@ -3806,9 +3806,9 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       for (const expected of [
         "Sessions, validation, and technical details",
         "Estimated Appliances",
-        "Validation",
         "NILM Sessions",
         "NILM Edges",
+        "Validation",
       ]) {
         assert.ok(html.includes(expected));
       }
@@ -4643,7 +4643,7 @@ card._nilmWorkspace = {
       assignment_ids: []
     },
     hidden: {
-      label: "Hidden",
+      label: "Removed",
       signature_ids: ["sig-ignored"],
       assignment_ids: []
     }
@@ -6282,6 +6282,16 @@ const workspace = makeWorkspace({
 const calls = [];
 let renders = 0;
 const panel = makePanel({ _nilmWorkspace: workspace });
+panel._nilmWorkspaceHistorySeries = [[
+  { entity_id: "sensor.hvac_2_power", state: "100", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "184", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:02:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "184", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:09:00Z" },
+  { entity_id: "sensor.hvac_2_power", state: "100", effective_role: "real_power",
+    source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+]];
 panel._render = () => { renders += 1; };
 panel._refreshNilmWorkspaceData = async () => true;
 panel._restoreNilmIntervalScroll = () => {};
@@ -6303,17 +6313,54 @@ const bands = panel._nilmGraphBands(workspace, []);
 assert.equal(bands.length, 1);
 assert.equal(bands[0].band_kind, "draft");
 assert.equal(bands[0].start, changedStart);
+assert.equal(panel._nilmLabelIntervalPowerPreview(), 84);
+const previewHtml = panel._renderNilmLabelIntervalEditor(workspace);
+assert.ok(previewHtml.includes("Estimated load 84 W"), previewHtml);
+assert.ok(!previewHtml.includes("Unknown W"), previewHtml);
 
 await panel._callNilmLabelIntervalAction(-1, "save");
 assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
 assert.equal(calls[0].data.interval_id, "saved-interval");
 assert.equal(calls[0].data.start, "2026-08-04T08:02:00.000Z");
+assert.equal(calls[0].data.observed_transition_w, 84);
 assert.ok(!("appliance_profile" in calls[0].data));
 assert.equal(panel._nilmIntervalEditorOpen, false);
 })().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+"""
+    )
+
+
+def test_nilm_interval_power_combines_only_mains_source_legs() -> None:
+    _run_panel_node_script(
+        """
+const workspace = makeWorkspace({
+  history: { source_entities: ["sensor.mains_l1_watts", "sensor.mains_l2_watts"] },
+  label_intervals: [{
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+  }],
+});
+const panel = makePanel({ _nilmWorkspace: workspace, _nilmActiveIntervalIndex: 0 });
+panel._nilmWorkspaceHistorySeries = [
+  [
+    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.mains_l1_watts", state: "142", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+  ],
+  [
+    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.mains_l2_watts", state: "122", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
+  ],
+  [
+    { entity_id: "sensor.helper_power", state: "0", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
+    { entity_id: "sensor.helper_power", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
+  ],
+];
+assert.equal(panel._nilmLabelIntervalPowerPreview(workspace.label_intervals[0]), 84);
 """
     )
 
@@ -7990,7 +8037,7 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
         "The workspace groups work into five lanes",
-        "Needs Review, Assigned, Published, Expected, and Hidden",
+        "Needs Review, Assigned, Published, Expected, and Removed",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
         "Published NILM appliances are marked as estimated",

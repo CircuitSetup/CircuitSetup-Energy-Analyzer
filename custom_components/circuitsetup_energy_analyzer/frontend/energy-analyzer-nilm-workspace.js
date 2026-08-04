@@ -435,7 +435,10 @@ export function createNilmWorkspaceMethods({
           return;
         }
         const transitionText = String(interval.observed_transition_w ?? "").trim();
-        const observedTransitionW = Number(transitionText);
+        const previewTransitionW = this._nilmLabelIntervalPowerPreview(interval);
+        const observedTransitionW = Number.isFinite(previewTransitionW)
+          ? previewTransitionW
+          : transitionText ? Number(transitionText) : null;
         if (transitionText && (!Number.isFinite(observedTransitionW) || observedTransitionW < 0)) {
           this._setNilmIntervalError(this._panelText("errors.nilm_interval_transition_invalid"));
           return;
@@ -448,7 +451,9 @@ export function createNilmWorkspaceMethods({
           appliance_id: String(draft.appliance_id || label).trim(),
         };
         if (applianceProfile) data.appliance_profile = applianceProfile;
-        if (transitionText) data.observed_transition_w = observedTransitionW;
+        if (Number.isFinite(observedTransitionW) && observedTransitionW >= 0) {
+          data.observed_transition_w = observedTransitionW;
+        }
         const intervalId = String(interval.interval_id || "").trim();
         if (intervalId) data.interval_id = intervalId;
         if (draft.assignment_id) data.assignment_id = draft.assignment_id;
@@ -2003,6 +2008,10 @@ export function createNilmWorkspaceMethods({
     const title = item.display_label || item.display_name || item.label || item.likely_type || this._panelText("common.unknown_load");
     const confidence = Math.max(0, Math.min(100, Math.round(Number(item.confidence || 0) * 100)));
     const power = item.typical_power_w ?? item.estimated_power_w ?? item.median_power_w;
+    const state = String(item.review_state || item.lifecycle_state || this._nilmActiveLane).toLowerCase();
+    const stateLabel = state === "retired"
+      ? this._panelText("nilm_workspace.lane_hidden")
+      : this._friendlyFeature(state);
     const fingerprint = reviewItem.kind === "interval" ? "" : this._nilmSignatureFingerprint(item);
     const contextFacts = reviewItem.kind === "signature" ? [
       item.seen_count !== undefined
@@ -2019,7 +2028,7 @@ export function createNilmWorkspaceMethods({
       </button>`;
     }
     return `<button type="button" class="nilm-review-card" data-nilm-review-item="${this._escape(this._nilmReviewKey(reviewItem))}" ${fingerprint ? `data-nilm-signature-fingerprint="${this._escape(fingerprint)}"` : ""} aria-pressed="${selected}">
-      <span class="review-card-heading"><strong>${this._escape(title)}</strong><span>${this._escape(this._friendlyFeature(item.review_state || item.lifecycle_state || this._nilmActiveLane))}</span></span>
+      <span class="review-card-heading"><strong>${this._escape(title)}</strong><span>${this._escape(stateLabel)}</span></span>
       <span class="power-meter" style="--power-percent:${this._nilmPowerPercent(reviewItem, reviewItems)}%"><span></span></span>
       <span class="review-card-facts"><span>${this._escape(this._formatMetricValue(power))} W</span><span>${confidence}%</span></span>
       ${contextFacts.length ? `<span class="review-card-facts review-card-context">${contextFacts.map((fact) => `<span>${this._escape(fact)}</span>`).join("")}</span>` : ""}
@@ -2342,8 +2351,51 @@ export function createNilmWorkspaceMethods({
           <button type="button" data-nilm-label-interval-action="save" ${saveBusy}>${this._escape(this._panelText("actions.labels.save_interval"))}</button>
           <button type="button" class="secondary" data-nilm-cancel-interval-editor>${this._escape(this._panelText("actions.labels.cancel"))}</button>
         </div>
-        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">${this._escape(this._panelTextFormat("nilm_workspace.interval_energy_preview", { energy: this._formatNumber(intervalPreview.energy_kwh), duration: this._formatNumber(intervalPreview.duration_minutes), source: intervalPreview.source_name }))}</p>` : ""}
+        ${intervalPreview ? `<p class="muted" data-field="nilm_interval_energy_preview">${this._escape(this._panelTextFormat(Number.isFinite(intervalPreview.power_w) ? "nilm_workspace.interval_power_energy_preview" : "nilm_workspace.interval_energy_preview", { power: this._formatNumber(intervalPreview.power_w), energy: this._formatNumber(intervalPreview.energy_kwh), duration: this._formatNumber(intervalPreview.duration_minutes), source: intervalPreview.source_name }))}</p>` : ""}
       </div>`;
+  }
+
+  _nilmLabelIntervalPowerPreview(interval = null) {
+    const selected = interval || this._nilmIntervalDraftItems()[this._nilmActiveIntervalIndex] || {};
+    const start = new Date(selected.start || "").getTime();
+    const end = new Date(selected.end || "").getTime();
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+    const powerSeries = this._nilmLabelIntervalPowerSeries();
+    const points = powerSeries && Array.isArray(powerSeries.points)
+      ? powerSeries.points.filter((point) => point.time >= start && point.time <= end)
+      : [];
+    let watts = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      watts = Math.max(watts, Math.abs(points[index].value - points[index - 1].value));
+    }
+    return Number.isFinite(watts) && watts > 0 ? Math.round(watts * 1000) / 1000 : null;
+  }
+
+  _nilmLabelIntervalPowerSeries() {
+    const series = this._nilmWorkspaceWattSeries();
+    const sourceEntityIds = new Set((this._nilmWorkspace?.history?.source_entities || []).map(String));
+    const sources = sourceEntityIds.size
+      ? series.filter((item) => sourceEntityIds.has(String(item.entity_id || "")))
+      : series.filter((item) => {
+      const label = `${item.entity_id || ""} ${item.name || ""}`;
+      return /power|watt|(?:^|[_\s-])w(?:$|[_\s-])/i.test(label);
+      }).slice(0, 1);
+    if (sources.length <= 1) return sources[0];
+    const times = [...new Set(sources.flatMap((item) => item.points.map((point) => point.time)))].sort((left, right) => left - right);
+    const positions = sources.map(() => 0);
+    const values = sources.map(() => null);
+    const points = times.flatMap((time) => {
+      sources.forEach((item, index) => {
+        while (positions[index] < item.points.length && item.points[positions[index]].time <= time) {
+          values[index] = item.points[positions[index]].value;
+          positions[index] += 1;
+        }
+      });
+      return values.every(Number.isFinite)
+        ? [{ time, value: values.reduce((sum, value) => sum + value, 0) }]
+        : [];
+    });
+    return { ...sources[0], name: this._panelText("nilm_workspace.displayed_power_samples"), points };
   }
 
   _nilmLabelIntervalEnergyPreview() {
@@ -2353,11 +2405,7 @@ export function createNilmWorkspaceMethods({
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return null;
     }
-    const series = this._nilmWorkspaceWattSeries();
-    const powerSeries = series.find((item) => {
-      const label = `${item.entity_id || ""} ${item.name || ""}`;
-      return /power|watt|(?:^|[_\s-])w(?:$|[_\s-])/i.test(label);
-    });
+    const powerSeries = this._nilmLabelIntervalPowerSeries();
     const points = powerSeries && Array.isArray(powerSeries.points)
       ? powerSeries.points.filter((point) => point.time >= start && point.time <= end)
       : [];
@@ -2378,6 +2426,7 @@ export function createNilmWorkspaceMethods({
     }
     return {
       energy_kwh: Math.max(wattHours / 1000, 0),
+      power_w: this._nilmLabelIntervalPowerPreview(interval),
       duration_minutes: (end - start) / 60000,
       source_name: powerSeries.name || powerSeries.entity_id || this._panelText("nilm_workspace.displayed_power_samples"),
     };
