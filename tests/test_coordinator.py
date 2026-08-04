@@ -12469,7 +12469,7 @@ async def test_runtime_synthetic_mains_keeps_split_phase_nilm_evidence() -> None
     assert signature["dominant_leg"] == "balanced"
     assert signature["median_leg_a_delta_w"] == 300.0
     assert signature["median_leg_b_delta_w"] == 300.0
-    assert signature["classification"] == "possible 240 V resistive load"
+    assert signature["classification"] == "unknown recurring load"
 
 
 @pytest.mark.asyncio
@@ -12524,7 +12524,7 @@ async def test_runtime_mains_requires_leg_hints_for_split_phase_nilm() -> None:
     assert signature["split_phase_type"] == "unknown"
     assert signature["median_leg_a_delta_w"] is None
     assert signature["median_leg_b_delta_w"] is None
-    assert signature["classification"] == "possible resistive load"
+    assert signature["classification"] == "unknown recurring load"
 
 
 def test_nilm_signature_payloads_do_not_reuse_label_for_changed_topology() -> None:

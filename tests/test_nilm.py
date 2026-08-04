@@ -72,6 +72,35 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assert nilm_assignment_model_is_compound_eligible(model) is True
 
 
+def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:
+    assignment = {
+        "assignment_id": "blower",
+        "confirmed_session_ids": ["one", "two", "three"],
+    }
+    sessions = [
+        {
+            "session_id": session_id,
+            "assignment_id": "blower",
+            "end": f"2026-06-0{index}T10:00:00+00:00",
+            "on_delta_w": 320.0,
+            "off_delta_w": -320.0,
+            "on_delta_var": on_var,
+            "off_delta_var": -on_var,
+            "confidence": 0.9,
+        }
+        for index, (session_id, on_var) in enumerate(
+            (("one", 118.0), ("two", 120.0), ("three", 122.0)),
+            start=1,
+        )
+    ]
+
+    model = build_nilm_assignment_model(assignment, sessions)
+
+    assert model["transition_prototypes"][0]["delta_var"] == 120.0
+    assert model["transition_prototypes"][0]["spread_var"] == 2.0
+    assert model["transition_prototypes"][1]["delta_var"] == -120.0
+
+
 def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> None:
     assignment = {"assignment_id": "pump", "confirmed_session_ids": ["one"]}
     sessions = [{
@@ -268,6 +297,8 @@ def transition(
     *,
     spread_w: float = 5.0,
     sample_count: int = 3,
+    delta_var: float | None = None,
+    spread_var: float | None = None,
 ) -> nilm_domain.NilmTransitionPrototype:
     on = delta_w > 0
     return nilm_domain.NilmTransitionPrototype(
@@ -278,6 +309,8 @@ def transition(
         delta_w=delta_w,
         spread_w=spread_w,
         sample_count=sample_count,
+        delta_var=delta_var,
+        spread_var=spread_var,
     )
 
 
@@ -360,6 +393,34 @@ def test_nilm_transition_score_uses_electrical_fit_and_renormalizes() -> None:
         validation_score=None,
         optional_electrical_fit=0.0,
     ) == pytest.approx(0.7)
+
+
+def test_reconciliation_uses_var_to_separate_equal_w_components() -> None:
+    resistive = assignment_model(
+        "heater",
+        transition("heater", 100.0, delta_var=0.0, spread_var=5.0),
+    )
+    motor = assignment_model(
+        "motor",
+        transition("motor", 100.0, delta_var=80.0, spread_var=5.0),
+    )
+
+    result = reconcile(
+        edge(0, 100.0, delta_var=78.0),
+        [resistive, motor],
+        {"heater": 0.0, "motor": 0.0},
+    )
+
+    assert result.accepted is True
+    assert [item.assignment_id for item in result.transitions] == ["motor"]
+
+    missing_var = reconcile(
+        edge(0, 100.0, delta_var=None),
+        [resistive, motor],
+        {"heater": 0.0, "motor": 0.0},
+    )
+    assert missing_var.accepted is False
+    assert missing_var.reason == "ambiguous"
 
 
 def test_nilm_single_candidate_applies_threshold_and_lead_gates() -> None:
@@ -449,7 +510,7 @@ def test_nilm_compound_is_bounded_to_twenty_recent_models() -> None:
     assert not result.accepted
 
 
-def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> None:
+def test_nilm_three_transition_edge_reconciles_unique_components() -> None:
     models = [
         assignment_model(name, transition(name, watts))
         for name, watts in (("a", 40), ("b", 30), ("c", 30))
@@ -457,8 +518,27 @@ def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> N
     result = reconcile(
         edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
     )
-    assert not result.accepted and result.reason == "compound_unknown"
-    assert result.consistent is False and result.energy_allocation_allowed is False
+    assert result.accepted and result.reason == "compound"
+    assert {item.assignment_id for item in result.transitions} == {"a", "b", "c"}
+    assert result.compound is True
+    assert result.consistent is True and result.energy_allocation_allowed is True
+
+
+def test_nilm_multi_transition_rejects_equal_decompositions() -> None:
+    models = [
+        assignment_model(name, transition(name, watts))
+        for name, watts in (
+            ("a", 40), ("b", 30), ("c", 30),
+            ("d", 50), ("e", 25), ("f", 25),
+        )
+    ]
+
+    result = reconcile(
+        edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
+    )
+
+    assert result.accepted is False
+    assert result.reason == "ambiguous"
 
 
 def test_nilm_reconciliation_requires_a_known_finite_current_state() -> None:
@@ -560,15 +640,15 @@ def test_nilm_recent_cutoff_and_equal_error_prototypes_are_order_independent() -
     assert [item.delta_w for item in normal.transitions] == [90, 10]
 
 
-def test_nilm_compound_unknown_check_never_enumerates_beyond_triples(
+def test_nilm_compound_search_never_enumerates_beyond_four_transitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checked_sizes: list[int] = []
 
     def bounded_combinations(iterable, size):
         checked_sizes.append(size)
-        if size > 3:
-            raise AssertionError("compound diagnostics exceeded the three-load bound")
+        if size > 4:
+            raise AssertionError("compound search exceeded the four-load bound")
         return stdlib_combinations(iterable, size)
 
     monkeypatch.setattr(nilm_domain, "combinations", bounded_combinations)
@@ -580,7 +660,7 @@ def test_nilm_compound_unknown_check_never_enumerates_beyond_triples(
         edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
     )
     assert not result.accepted and result.reason == "below_threshold"
-    assert max(checked_sizes) == 3
+    assert max(checked_sizes) == 4
 
 
 def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
@@ -1667,6 +1747,86 @@ def test_nilm_signature_fingerprint_ignores_cluster_order_id() -> None:
     )
 
 
+def test_legacy_fingerprint_resolves_unique_w_direction_despite_var_drift() -> None:
+    current = NilmSignature(
+        "off-1",
+        -84.0,
+        -145.0,
+        -168.0,
+        0.12,
+        8,
+        0.9,
+    )
+    current_fingerprint = nilm_domain.nilm_signature_fingerprint(current)
+
+    resolved = nilm_domain.resolve_nilm_signature_fingerprint(
+        "direction=off|watts=0-100|var=0-100|va=0-100|pf=0.00-0.05|"
+        "split=unknown|leg=unknown|balance=unknown",
+        [{
+            "signature_id": "off-1",
+            "feedback_fingerprint": current_fingerprint,
+            "signature_fingerprint": current_fingerprint,
+        }],
+    )
+
+    assert resolved == current_fingerprint
+
+
+def test_legacy_fingerprint_does_not_cross_known_split_phase_topology() -> None:
+    assert nilm_domain.resolve_nilm_signature_fingerprint(
+        "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
+        "split=single_leg_a|leg=a|balance=unknown",
+        [{
+            "signature_id": "on-1",
+            "feedback_fingerprint": (
+                "direction=on|watts=0-100|var=100-200|va=unknown|pf=unknown|"
+                "split=single_leg_b|leg=b|balance=unknown"
+            ),
+        }],
+    ) is None
+
+
+def test_legacy_fingerprint_does_not_resolve_ambiguous_same_w_components() -> None:
+    signatures = [
+        NilmSignature("on-1", 84.0, 20.0, 86.0, 0.0, 8, 0.9),
+        NilmSignature("on-2", 83.0, 95.0, 126.0, 0.0, 8, 0.9),
+    ]
+    payloads = [
+        {
+            "signature_id": signature.signature_id,
+            "feedback_fingerprint": nilm_domain.nilm_signature_fingerprint(signature),
+        }
+        for signature in signatures
+    ]
+
+    assert nilm_domain.resolve_nilm_signature_fingerprint(
+        "direction=on|watts=0-100|var=unknown|va=unknown|pf=unknown|"
+        "split=unknown|leg=unknown|balance=unknown",
+        payloads,
+    ) is None
+
+
+def test_session_specs_resolve_unique_structured_assignment_fingerprint() -> None:
+    current = NilmSignature("off-1", -84.0, -145.0, -168.0, 0.12, 8, 0.9)
+    current_fingerprint = nilm_domain.nilm_signature_fingerprint(current)
+
+    assert _nilm_session_specs(
+        [{
+            "signature_id": "off-1",
+            "feedback_fingerprint": current_fingerprint,
+            "median_delta_w": -84.0,
+        }],
+        [{
+            "assignment_id": "pump",
+            "lifecycle_state": "published",
+            "signature_fingerprints": [
+                "direction=off|watts=0-100|var=0-100|va=0-100|"
+                "pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown"
+            ],
+        }],
+    ) == [(current_fingerprint, "pump")]
+
+
 def test_classify_signature_is_conservative_and_allows_user_label_override() -> None:
     assert (
         classify_signature(
@@ -1696,7 +1856,7 @@ def test_classify_signature_is_conservative_and_allows_user_label_override() -> 
                 confidence=0.7,
             )
         )
-        == "possible resistive load"
+        == "unknown recurring load"
     )
     assert (
         classify_signature(

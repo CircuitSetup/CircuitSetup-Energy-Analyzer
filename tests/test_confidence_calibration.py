@@ -649,6 +649,25 @@ def test_nilm_signal_integrity_fixture_replays_optional_and_w_only_signatures() 
     )
 
 
+def test_nilm_multi_state_fixture_attributes_two_appliances_across_three_states(
+) -> None:
+    fixture = load_calibration_fixture(
+        FIXTURE_DIR / "nilm_multi_state_components.yaml"
+    )
+    result = replay_fixture_processors(fixture)
+
+    reconciliation = result.final_state.nilm_reconciliation_by_circuit["hvac_2"]
+    assert reconciliation["conflict"] is None
+    assert reconciliation["component_energy_kwh"] == pytest.approx(
+        reconciliation["source_energy_kwh"]
+    )
+    runtime = result.final_state.nilm_component_runtime_by_circuit["hvac_2"]
+    assert set(runtime) == {"blower", "pump"}
+    assert {item["status"] for item in runtime.values()} == {"off"}
+    sessions = result.store_data.nilm_session_history_by_circuit["hvac_2"]
+    assert {item["assignment_id"] for item in sessions} == {"blower", "pump"}
+
+
 @pytest.mark.parametrize(
     "fixture_name",
     [
@@ -1008,7 +1027,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 32 |" in report
+    assert "| Fixtures | 33 |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report

@@ -5850,6 +5850,45 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
 });
 
+test("NILM component graph focuses and navigates complete occurrences", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T15:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T16:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T16:30:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-review-item="signature:signature-1"]').click();
+  const controls = panel.locator("[data-nilm-occurrence-controls]");
+  await expect(controls).toContainText("45m");
+  await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"]')).toHaveCount(1);
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+  await expect(controls.locator('[data-nilm-occurrence-step="1"]')).toBeDisabled();
+
+  await controls.locator('[data-nilm-occurrence-step="-1"]').click();
+  await expect(controls).toContainText("30m");
+  await expect(controls.locator('[data-nilm-occurrence-step="-1"]')).toBeDisabled();
+  await expect(controls.locator('[data-nilm-occurrence-step="1"]')).toBeEnabled();
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+});
+
 test("NILM workspace renders kW history as watts", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
@@ -6829,7 +6868,9 @@ test("NILM workspace explains lifecycle and model evidence on narrow layouts", a
   await expect(evidence).toContainText("Source power is measured; component power and energy are estimated");
   await expect(evidence).toContainText("Ambiguous edges remain unknown");
   await expect(evidence).toContainText("Helper conflicts require review and are not resolved automatically");
-  await expect(evidence).toContainText("More than two simultaneous transitions remain a compound unknown");
+  await expect(evidence).toContainText(
+    "Simultaneous transitions are separated only when one bounded component combination fits uniquely",
+  );
   await expect(evidence).toContainText("Source unavailable means estimates unavailable");
   await expect(evidence).toContainText("suspended");
   await expect(evidence).toBeInViewport();

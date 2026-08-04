@@ -1593,6 +1593,11 @@ export class PanelShellMethods {
         }
       });
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-occurrence-step]")) {
+      button.addEventListener("click", () => {
+        void this._stepNilmOccurrence(Number(button.dataset.nilmOccurrenceStep || 0));
+      });
+    }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmLabelDraft(input));
     }

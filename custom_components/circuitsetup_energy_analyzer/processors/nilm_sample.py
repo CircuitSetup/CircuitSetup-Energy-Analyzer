@@ -6,7 +6,6 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from itertools import combinations
 from math import isfinite
 from typing import Any
 
@@ -31,6 +30,7 @@ from ..nilm import (
     normalize_nilm_assignment_model,
     pair_nilm_sessions_for_signatures,
     reconcile_nilm_edge,
+    resolve_nilm_signature_fingerprint,
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
@@ -626,6 +626,7 @@ def reconcile_component_runtime(
                     "last_observed": edge.timestamp.isoformat(),
                     "energy_kwh": 0.0,
                     "on_delta_w": transition.delta_w,
+                    "on_delta_var": edge.delta_var,
                     "helper_evidence": matched_helper_evidence,
                 })
             else:
@@ -651,6 +652,13 @@ def reconcile_component_runtime(
                     "state_power_w": transition.to_state_w,
                     "estimated_power_w": 0.0,
                 })
+        _scale_runtime_estimates(
+            assignments,
+            next_runtime,
+            source_power_w=source_power_w,
+            standby_w=standby_w,
+            tolerance_w=conservation_tolerance_w(source_power_w, noise_spread_w),
+        )
         tolerance = conservation_tolerance_w(source_power_w, noise_spread_w)
         if (
             _runtime_allocated_power(next_runtime)
@@ -664,6 +672,13 @@ def reconcile_component_runtime(
         session_closes.extend(pending_sessions)
 
     tolerance = conservation_tolerance_w(source_power_w, noise_spread_w)
+    _scale_runtime_estimates(
+        assignments,
+        next_runtime,
+        source_power_w=source_power_w,
+        standby_w=standby_w,
+        tolerance_w=tolerance,
+    )
     if _runtime_allocated_power(next_runtime) > source_power_w - standby_w + tolerance:
         _suspend_runtime(next_runtime)
         conflict = "over_allocation"
@@ -779,17 +794,25 @@ def _restore_unique_component_state(
     assignment_by_id = {
         str(item.get("assignment_id") or ""): item for item in assignments
     }
-    models = tuple(
-        model
-        for item in assignments
-        if _direct_helper_id(item) is None
-        if (model := _runtime_assignment_model(item)).lifecycle_state
-        in {"expected", "validated", "published"}
-        and model.model_confidence >= 0.70
-        and len(model.power_states_w) >= 2
-        and any(state > 0.0 for state in model.power_states_w)
-        and model.transition_prototypes
-    )
+    models = tuple(sorted(
+        (
+            model
+            for item in assignments
+            if _direct_helper_id(item) is None
+            if (model := _runtime_assignment_model(item)).lifecycle_state
+            in {"expected", "validated", "published"}
+            and model.model_confidence >= 0.70
+            and len(model.power_states_w) >= 2
+            and any(state > 0.0 for state in model.power_states_w)
+            and model.transition_prototypes
+        ),
+        key=lambda model: (
+            -model.last_observed.timestamp()
+            if model.last_observed is not None
+            else float("inf"),
+            model.assignment_id,
+        ),
+    )[:20])
     unknown = [
         model for model in models
         if runtime[model.assignment_id]["status"] == NilmComponentStatus.UNKNOWN
@@ -798,24 +821,47 @@ def _restore_unique_component_state(
         return
     known = _runtime_allocated_power(runtime)
     tolerance = conservation_tolerance_w(source, noise_spread_w)
-    fits: list[tuple[str, ...]] = []
-    for count in range(min(2, len(unknown)) + 1):
-        for group in combinations(unknown, count):
-            if count == 2 and not all(
+    target = source - standby_w - known
+    ordered = tuple(sorted(unknown, key=lambda model: model.assignment_id))
+    powers = tuple(max(model.power_states_w, default=0.0) for model in ordered)
+    remaining = [0.0] * (len(powers) + 1)
+    for index in range(len(powers) - 1, -1, -1):
+        remaining[index] = remaining[index + 1] + powers[index]
+    fits: list[tuple[float, tuple[str, ...]]] = []
+
+    def search(index: int, total: float, active_ids: tuple[str, ...]) -> None:
+        if len(fits) > 1 and fits[0][0] == fits[1][0] == 0.0:
+            return
+        if total > target + tolerance or total + remaining[index] < target - tolerance:
+            return
+        if index == len(ordered):
+            if len(active_ids) > 1 and not all(
                 nilm_assignment_model_is_compound_eligible(
-                    assignment_by_id[model.assignment_id]
+                    assignment_by_id[assignment_id]
                 )
-                for model in group
+                for assignment_id in active_ids
             ):
-                continue
-            allocated = known + sum(
-                max(model.power_states_w, default=0.0) for model in group
-            )
-            if abs(source - standby_w - allocated) <= tolerance:
-                fits.append(tuple(model.assignment_id for model in group))
-    if len(fits) != 1:
+                return
+            residual = abs(target - total)
+            if residual <= tolerance:
+                fits.append((residual, active_ids))
+                fits.sort(key=lambda item: (item[0], len(item[1]), item[1]))
+                del fits[2:]
+            return
+        search(index + 1, total, active_ids)
+        search(
+            index + 1,
+            total + powers[index],
+            (*active_ids, ordered[index].assignment_id),
+        )
+
+    search(0, 0.0, ())
+    uniqueness_margin = max(5.0, tolerance * 0.25)
+    if not fits or (
+        len(fits) > 1 and fits[1][0] - fits[0][0] <= uniqueness_margin
+    ):
         return
-    active = set(fits[0])
+    active = set(fits[0][1])
     for model in unknown:
         power = (
             max(model.power_states_w, default=0.0)
@@ -832,6 +878,57 @@ def _restore_unique_component_state(
             ),
             "session_start": timestamp.isoformat() if power else None,
         })
+
+
+def _scale_runtime_estimates(
+    assignments: Iterable[Mapping[str, Any]],
+    runtime: Mapping[str, dict[str, Any]],
+    *,
+    source_power_w: float,
+    standby_w: float,
+    tolerance_w: float,
+) -> None:
+    direct_ids = {
+        str(assignment.get("assignment_id") or "")
+        for assignment in assignments
+        if _direct_helper_id(assignment) is not None
+    }
+    for assignment_id, payload in runtime.items():
+        if (
+            assignment_id not in direct_ids
+            and payload.get("status") == NilmComponentStatus.ON
+        ):
+            payload["estimated_power_w"] = payload.get("state_power_w")
+    fixed_power = sum(
+        _finite_float(payload.get("estimated_power_w")) or 0.0
+        for assignment_id, payload in runtime.items()
+        if assignment_id in direct_ids
+        and payload.get("status") == NilmComponentStatus.ON
+    )
+    estimated_ids = [
+        assignment_id
+        for assignment_id, payload in runtime.items()
+        if assignment_id not in direct_ids
+        and payload.get("status") == NilmComponentStatus.ON
+        and (_finite_float(payload.get("estimated_power_w")) or 0.0) > 0.0
+    ]
+    estimated_total = sum(
+        _finite_float(runtime[assignment_id].get("estimated_power_w")) or 0.0
+        for assignment_id in estimated_ids
+    )
+    available = max(source_power_w - standby_w - fixed_power, 0.0)
+    if (
+        not estimated_ids
+        or estimated_total <= 0.0
+        or abs(estimated_total - available) > tolerance_w
+    ):
+        return
+    scale = available / estimated_total
+    for assignment_id in estimated_ids:
+        runtime[assignment_id]["estimated_power_w"] = (
+            (_finite_float(runtime[assignment_id].get("estimated_power_w")) or 0.0)
+            * scale
+        )
 
 
 def _direct_helper_id(assignment: Mapping[str, Any]) -> str | None:
@@ -928,6 +1025,8 @@ def _runtime_assignment_model(assignment: Mapping[str, Any]) -> NilmAssignmentMo
             delta_w=item["delta_w"],
             spread_w=item["spread_w"],
             sample_count=item["sample_count"],
+            delta_var=item.get("delta_var"),
+            spread_var=item.get("spread_var"),
         )
         for item in normalized["transition_prototypes"]
         if item["direction"] == ("on" if item["delta_w"] > 0 else "off")
@@ -1127,6 +1226,8 @@ def _completed_runtime_session(
         "end": edge.timestamp.isoformat(),
         "on_delta_w": runtime.get("on_delta_w"),
         "off_delta_w": transition.delta_w,
+        "on_delta_var": runtime.get("on_delta_var"),
+        "off_delta_var": edge.delta_var,
         "energy_kwh": _finite_float(runtime.get("energy_kwh")) or 0.0,
         "confidence": min(
             _finite_float(runtime.get("confidence")) or 0.0,
@@ -1546,6 +1647,7 @@ def _nilm_session_specs(
     signatures: Iterable[Mapping[str, Any]],
     assignments: Iterable[Any],
 ) -> list[tuple[str, str | None]]:
+    signatures = list(signatures)
     specs: list[tuple[str, str | None]] = []
     seen: set[tuple[str, str | None]] = set()
     seen_fingerprints: set[str] = set()
@@ -1569,11 +1671,14 @@ def _nilm_session_specs(
             continue
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
         for fingerprint in fingerprints:
-            key = (fingerprint, assignment_id)
+            resolved = resolve_nilm_signature_fingerprint(fingerprint, signatures)
+            if resolved is None:
+                continue
+            key = (resolved, assignment_id)
             if key not in seen:
                 specs.append(key)
                 seen.add(key)
-                seen_fingerprints.add(fingerprint)
+                seen_fingerprints.add(resolved)
     for signature in signatures:
         fingerprint = _nilm_signature_session_fingerprint(signature)
         key = (fingerprint, None)
