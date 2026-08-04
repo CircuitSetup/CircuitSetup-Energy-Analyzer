@@ -1015,7 +1015,7 @@ retire_nilm_appliance_assignment:
         text:
 restore_nilm_item:
   name: Restore NILM item
-  description: "Advanced/script action: restore one Expected, Ignored, or Retired NILM item. The normal user path is the Restore action in the NILM workspace. Provide exactly one assignment ID or signature ID."
+  description: "Advanced/script action: restore one Expected, Ignored, or Retired NILM item, or revert a direct-meter conversion. The normal user path is the Restore action in the NILM workspace. Provide exactly one assignment ID or signature ID."
   fields:
     entry_id:
       name: Entry ID

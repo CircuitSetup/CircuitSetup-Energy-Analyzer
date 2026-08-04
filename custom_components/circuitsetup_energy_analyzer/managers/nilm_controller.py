@@ -1359,7 +1359,7 @@ class NilmController:
         signature_id: str | None = None,
         entry_id: str | None = None,
     ) -> dict[str, Any]:
-        """Restore exactly one hidden signature or assignment."""
+        """Restore one hidden item or revert one direct-meter conversion."""
         assignment_id_text = str(assignment_id or "").strip()
         signature_id_text = str(signature_id or "").strip()
         if bool(assignment_id_text) == bool(signature_id_text):
@@ -1483,10 +1483,21 @@ class NilmController:
 
         assignment = self.assignment_for_id(circuit_id, assignment_id_text)
         state = str(assignment.get("lifecycle_state") or "").strip().lower()
-        if state not in {"expected", "ignored", "retired"}:
+        direct_conversion = assignment.get("conversion_state") == "direct_meter"
+        if state not in {"expected", "ignored", "retired"} and not direct_conversion:
             raise ValueError(
-                f"Assignment '{assignment_id_text}' is not hidden or expected."
+                f"Assignment '{assignment_id_text}' is not restorable."
             )
+        if direct_conversion:
+            for key in (
+                "conversion_state",
+                "direct_circuit_id",
+                "converted_at",
+                "pre_conversion_lifecycle_state",
+                "keep_assignment_for_masking",
+                "keep_published_estimate",
+            ):
+                assignment.pop(key, None)
         assignment["lifecycle_state"] = "assigned"
         assignment["publish_entities"] = False
         assignment["created_device"] = False

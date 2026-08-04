@@ -669,6 +669,58 @@ async def test_restore_nilm_item_requires_exactly_one_identifier(
 
 
 @pytest.mark.asyncio
+async def test_restore_nilm_item_reverts_direct_meter_conversion() -> None:
+    assignment = {
+        "assignment_id": "assignment-condensate",
+        "display_name": "Condensate Pump 2",
+        "signature_fingerprints": ["fingerprint-condensate"],
+        "session_ids": ["session-1"],
+        "lifecycle_state": "converted",
+        "conversion_state": "direct_meter",
+        "direct_circuit_id": "ac2",
+        "converted_at": "2026-06-01T12:00:00+00:00",
+        "pre_conversion_lifecycle_state": "assigned",
+        "keep_assignment_for_masking": True,
+        "keep_published_estimate": False,
+        "publish_entities": False,
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        ignored_nilm_signatures=set(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_signatures={"mixed": []},
+        ),
+        state=SimpleNamespace(),
+        refresh_ux_state_for_circuit=lambda *_args: None,
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+    )
+    controller = _nilm_controller(coordinator)
+    controller.refresh_state = lambda *_args, **_kwargs: None
+
+    restored = await controller.async_restore_nilm_item(
+        "mixed", assignment_id="assignment-condensate"
+    )
+
+    assert restored["lifecycle_state"] == "assigned"
+    assert restored["session_ids"] == ["session-1"]
+    for key in (
+        "conversion_state",
+        "direct_circuit_id",
+        "converted_at",
+        "pre_conversion_lifecycle_state",
+        "keep_assignment_for_masking",
+        "keep_published_estimate",
+    ):
+        assert key not in restored
+    coordinator.store_persistence.async_save_if_dirty.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_reserved_primary_is_rejected_outside_primary_mixed() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
