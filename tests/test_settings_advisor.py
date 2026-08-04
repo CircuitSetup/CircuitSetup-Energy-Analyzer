@@ -88,108 +88,79 @@ def test_recommendation_id_uses_unique_key_and_advisor_version() -> None:
     ) == "hvac:daily_spike_ratio:v2"
 
 
-def test_should_suppress_recommendation_respects_denial_cooldown_and_changes() -> None:
+@pytest.mark.parametrize(
+    "status",
+    [
+        "APPLIED",
+        "DISMISSED",
+        "DENIED",
+    ],
+)
+def test_active_decision_cooldown_ignores_candidate_drift(status: str) -> None:
     advisor = _advisor()
-    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
-    evidence_fingerprint = "observed-ratio-043"
-    recent_denial = advisor.RecommendationDecision(
-        unique_key="hvac:daily_spike_ratio",
-        status=advisor.RecommendationStatus.DENIED,
-        decided_at=now - timedelta(days=10),
-        denied_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+    decision = advisor.RecommendationDecision(
+        unique_key="dryer:operating_on_threshold_w",
+        status=getattr(advisor.RecommendationStatus, status),
+        decided_at=now - timedelta(days=1),
+        denied_value=1510.0,
+        evidence_fingerprint="old",
     )
 
     assert advisor.should_suppress_recommendation(
-        recent_denial,
+        decision,
         now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
+        suggested_value=1400.0,
+        evidence_fingerprint="new",
+        evidence={"latest_cycle_at": now.isoformat()},
     )
 
-    recent_dismissal = advisor.RecommendationDecision(
-        unique_key="hvac:daily_spike_ratio",
-        status=advisor.RecommendationStatus.DISMISSED,
-        decided_at=now - timedelta(days=10),
-        denied_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
-    assert advisor.should_suppress_recommendation(
-        recent_dismissal,
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
 
-    old_dismissal = advisor.RecommendationDecision(
-        unique_key="hvac:daily_spike_ratio",
-        status=advisor.RecommendationStatus.DISMISSED,
-        decided_at=now - advisor.DEFAULT_RECOMMENDATION_TTL,
-        denied_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
+@pytest.mark.parametrize(
+    ("status", "age_days"),
+    [
+        ("APPLIED", 31),
+        ("DISMISSED", 31),
+        ("DENIED", 91),
+    ],
+)
+def test_decision_cooldown_expiry_requires_fresh_completed_cycle_evidence(
+    status: str,
+    age_days: int,
+) -> None:
+    advisor = _advisor()
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+    decided_at = now - timedelta(days=age_days)
+    decision = advisor.RecommendationDecision(
+        unique_key="dryer:operating_on_threshold_w",
+        status=getattr(advisor.RecommendationStatus, status),
+        decided_at=decided_at,
+        denied_value=1510.0,
+        evidence_fingerprint="old",
     )
-    assert not advisor.should_suppress_recommendation(
-        old_dismissal,
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
+    call = {
+        "decision": decision,
+        "now": now,
+        "suggested_value": 1400.0,
+        "evidence_fingerprint": "new",
+    }
 
-    older_denial = advisor.RecommendationDecision(
-        unique_key="hvac:daily_spike_ratio",
-        status=advisor.RecommendationStatus.DENIED,
-        decided_at=now - advisor.DEFAULT_RECOMMENDATION_TTL,
-        denied_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
-    assert advisor.should_suppress_recommendation(
-        older_denial,
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
+    for latest_cycle_at in (None, "not-a-date", decided_at.isoformat()):
+        evidence = {"calculation_basis": "completed_operating_cycles"}
+        if latest_cycle_at is not None:
+            evidence["latest_cycle_at"] = latest_cycle_at
+        assert advisor.should_suppress_recommendation(**call, evidence=evidence)
 
     assert not advisor.should_suppress_recommendation(
-        None,
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
+        **call,
+        evidence={
+            "calculation_basis": "completed_operating_cycles",
+            "latest_cycle_at": (decided_at + timedelta(seconds=1)).isoformat(),
+        },
     )
     assert not advisor.should_suppress_recommendation(
-        advisor.RecommendationDecision(
-            unique_key="hvac:daily_spike_ratio",
-            status=advisor.RecommendationStatus.APPLIED,
-            decided_at=now - timedelta(days=10),
-            denied_value=0.35,
-            evidence_fingerprint=evidence_fingerprint,
-        ),
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
-    assert not advisor.should_suppress_recommendation(
-        advisor.RecommendationDecision(
-            unique_key="hvac:daily_spike_ratio",
-            status=advisor.RecommendationStatus.DENIED,
-            decided_at=now - advisor.DENIAL_COOLDOWN,
-            denied_value=0.35,
-            evidence_fingerprint=evidence_fingerprint,
-        ),
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint=evidence_fingerprint,
-    )
-    assert not advisor.should_suppress_recommendation(
-        recent_denial,
-        now=now,
-        suggested_value=0.4,
-        evidence_fingerprint=evidence_fingerprint,
-    )
-    assert not advisor.should_suppress_recommendation(
-        recent_denial,
-        now=now,
-        suggested_value=0.35,
-        evidence_fingerprint="different",
+        **call,
+        evidence={"calculation_basis": "other"},
     )
 
 
@@ -277,6 +248,66 @@ def _operating_cycle_inputs(
         ),
         feature_history={"operating_cycles": cycles},
     )
+
+
+def test_learned_watt_settings_require_more_than_five_watts_and_ten_percent() -> None:
+    advisor = _advisor()
+
+    dryer = _operating_cycle_inputs(
+        advisor,
+        cycle_count=8,
+        distinct_days=7,
+        idle_upper_w=240.0,
+        running_lower_w=2780.0,
+        appliance_profile="dryer",
+        advanced_settings={"operating_on_threshold_w": 1515.0},
+    )
+    assert "operating_on_threshold_w" not in _setting_keys(
+        advisor.build_settings_recommendations(dryer)
+    )
+
+    exact_ten_percent = _operating_cycle_inputs(
+        advisor,
+        idle_upper_w=20.0,
+        running_lower_w=200.0,
+        advanced_settings={"operating_on_threshold_w": 100.0},
+    )
+    assert "operating_on_threshold_w" not in _setting_keys(
+        advisor.build_settings_recommendations(exact_ten_percent)
+    )
+
+    off_and_standby_boundaries = _operating_cycle_inputs(
+        advisor,
+        idle_upper_w=34.6,
+        running_lower_w=200.0,
+        advanced_settings={
+            "operating_on_threshold_w": 80.0,
+            "operating_off_threshold_w": 50.0,
+            "standby_threshold_w": 50.0,
+        },
+    )
+    boundary_keys = _setting_keys(
+        advisor.build_settings_recommendations(off_and_standby_boundaries)
+    )
+    assert "operating_off_threshold_w" not in boundary_keys
+    assert "standby_threshold_w" not in boundary_keys
+
+    material = _operating_cycle_inputs(
+        advisor,
+        idle_upper_w=20.0,
+        running_lower_w=220.0,
+        advanced_settings={
+            "operating_on_threshold_w": 100.0,
+            "operating_off_threshold_w": 50.0,
+            "standby_threshold_w": 50.0,
+        },
+    )
+    material_keys = _setting_keys(advisor.build_settings_recommendations(material))
+    assert {
+        "operating_on_threshold_w",
+        "operating_off_threshold_w",
+        "standby_threshold_w",
+    } <= material_keys
 
 
 def test_energy_usage_recommendation_uses_7_day_pattern() -> None:

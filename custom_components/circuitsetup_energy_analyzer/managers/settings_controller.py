@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import replace
+from datetime import datetime
 from datetime import time as time_of_day
 from math import isfinite
 from typing import Any
@@ -503,6 +504,7 @@ class SettingsController:
             now=now,
             suggested_value=recommendation.suggested_value,
             evidence_fingerprint=recommendation_evidence_fingerprint(recommendation),
+            evidence=recommendation.evidence,
         ):
             return []
         return [recommendation]
@@ -1822,12 +1824,20 @@ class SettingsController:
             )
         await coordinator.config_entry_controller.async_persist_options()
 
+        now = coordinator.current_time()
+        for setting_key, value in recommendation.apply_payload.items():
+            self._record_setting_recommendation_decision(
+                recommendation,
+                setting_key=str(setting_key),
+                decided_value=value,
+                status=RecommendationStatus.APPLIED,
+                decided_at=now,
+            )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.APPLIED,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -1854,6 +1864,10 @@ class SettingsController:
             recommendation.current_value,
         )
         await coordinator.config_entry_controller.async_persist_options()
+        coordinator.store_data.settings_recommendation_decisions.pop(
+            recommendation.unique_key,
+            None,
+        )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.PENDING,
@@ -1887,12 +1901,19 @@ class SettingsController:
             default_value,
         )
         await coordinator.config_entry_controller.async_persist_options()
+        now = coordinator.current_time()
+        self._record_setting_recommendation_decision(
+            recommendation,
+            setting_key=recommendation.setting_key,
+            decided_value=default_value,
+            status=RecommendationStatus.DISMISSED,
+            decided_at=now,
+        )
         coordinator.store_data.settings_recommendations[recommendation_id] = replace(
             recommendation,
             status=RecommendationStatus.STALE,
         )
         coordinator.store_persistence.mark_dirty()
-        now = coordinator.current_time()
         self.refresh_settings_recommendation_state(now)
         coordinator.refresh_ux_state_for_circuit(recommendation.circuit_id, now)
         coordinator.async_set_updated_data(coordinator.state)
@@ -2273,21 +2294,42 @@ class SettingsController:
             recommendation,
             status=status,
         )
-        coordinator.store_data.settings_recommendation_decisions[
-            recommendation.unique_key
-        ] = RecommendationDecision(
-            unique_key=recommendation.unique_key,
+        self._record_setting_recommendation_decision(
+            recommendation,
+            setting_key=recommendation.setting_key,
+            decided_value=recommendation.suggested_value,
             status=status,
             decided_at=now,
-            denied_value=recommendation.suggested_value,
-            evidence_fingerprint=recommendation_evidence_fingerprint(
-                recommendation,
-            ),
         )
         coordinator.store_persistence.mark_dirty()
         self.refresh_settings_recommendation_state(now)
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)
+
+    def _record_setting_recommendation_decision(
+        self,
+        recommendation: SettingRecommendation,
+        *,
+        setting_key: str,
+        decided_value: Any,
+        status: RecommendationStatus,
+        decided_at: datetime,
+    ) -> None:
+        unique_key = recommendation_unique_key(
+            recommendation.circuit_id,
+            setting_key,
+        )
+        self._coordinator.store_data.settings_recommendation_decisions[unique_key] = (
+            RecommendationDecision(
+                unique_key=unique_key,
+                status=status,
+                decided_at=decided_at,
+                denied_value=decided_value,
+                evidence_fingerprint=recommendation_evidence_fingerprint(
+                    recommendation
+                ),
+            )
+        )
 
 
 def _merged_entry_settings_map(

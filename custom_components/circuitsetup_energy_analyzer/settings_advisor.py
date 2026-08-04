@@ -33,13 +33,20 @@ ADVISOR_VERSION = 1
 MIN_ADVISOR_DAYS = 7
 DAILY_SPIKE_RATIO_SAFETY_MARGIN = 0.10
 DEFAULT_RECOMMENDATION_TTL = timedelta(days=30)
+APPLIED_COOLDOWN = DEFAULT_RECOMMENDATION_TTL
 DENIAL_COOLDOWN = timedelta(days=90)
 DISMISSAL_COOLDOWN = DEFAULT_RECOMMENDATION_TTL
 OPERATING_THRESHOLD_MIN_SEPARATION_W = 15.0
-OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W = 5.0
-STANDBY_THRESHOLD_MIN_SIGNIFICANT_DELTA_W = 1.0
-STANDBY_THRESHOLD_MAX_SIGNIFICANT_DELTA_W = 5.0
-STANDBY_THRESHOLD_SIGNIFICANT_DELTA_RATIO = 0.1
+LEARNED_WATT_MIN_DELTA_W = 5.0
+LEARNED_WATT_MIN_DELTA_RATIO = 0.10
+
+
+def _is_material_learned_watt_change(current: float, suggested: float) -> bool:
+    required = max(
+        LEARNED_WATT_MIN_DELTA_W,
+        abs(current) * LEARNED_WATT_MIN_DELTA_RATIO,
+    )
+    return abs(suggested - current) > required
 
 
 def _advisor_text(*keys: str, **values: Any) -> str:
@@ -274,21 +281,29 @@ def should_suppress_recommendation(
     now: datetime,
     suggested_value: Any,
     evidence_fingerprint: str,
+    evidence: Mapping[str, Any] | None = None,
 ) -> bool:
-    """Return true when a recent denial still applies to the same suggestion."""
+    """Return true while a user decision remains authoritative."""
     if decision is None:
         return False
-    if decision.status is RecommendationStatus.DENIED:
-        cooldown = DENIAL_COOLDOWN
-    elif decision.status is RecommendationStatus.DISMISSED:
-        cooldown = DISMISSAL_COOLDOWN
-    else:
+    cooldown = {
+        RecommendationStatus.APPLIED: APPLIED_COOLDOWN,
+        RecommendationStatus.DISMISSED: DISMISSAL_COOLDOWN,
+        RecommendationStatus.DENIED: DENIAL_COOLDOWN,
+    }.get(decision.status)
+    if cooldown is None:
         return False
-    if now - decision.decided_at >= cooldown:
+    if now - decision.decided_at < cooldown:
+        return True
+    if not evidence or evidence.get("calculation_basis") != (
+        "completed_operating_cycles"
+    ):
         return False
-    if decision.denied_value != suggested_value:
-        return False
-    return decision.evidence_fingerprint == evidence_fingerprint
+    try:
+        latest_cycle_at = datetime.fromisoformat(str(evidence["latest_cycle_at"]))
+        return latest_cycle_at <= decision.decided_at
+    except (KeyError, TypeError, ValueError):
+        return True
 
 
 def recommendation_evidence_fingerprint(
@@ -337,6 +352,7 @@ def build_settings_recommendations(
             now=inputs.now,
             suggested_value=recommendation.suggested_value,
             evidence_fingerprint=evidence_fingerprint,
+            evidence=recommendation.evidence,
         ):
             continue
         recommendations.append(recommendation)
@@ -550,14 +566,7 @@ def _standby_recommendations(inputs: AdvisorInputs) -> list[SettingRecommendatio
         "standby_threshold_w",
         DEFAULT_STANDBY_THRESHOLD_W,
     )
-    significant_delta = min(
-        STANDBY_THRESHOLD_MAX_SIGNIFICANT_DELTA_W,
-        max(
-            STANDBY_THRESHOLD_MIN_SIGNIFICANT_DELTA_W,
-            current_value * STANDBY_THRESHOLD_SIGNIFICANT_DELTA_RATIO,
-        ),
-    )
-    if abs(suggested_value - current_value) < significant_delta:
+    if not _is_material_learned_watt_change(current_value, suggested_value):
         return []
 
     return [
@@ -639,7 +648,7 @@ def _operating_detection_recommendations(
         OPERATING_OFF_THRESHOLD_W: suggested_off,
     }
 
-    if abs(current_on - suggested_on) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+    if _is_material_learned_watt_change(current_on, suggested_on):
         recommendations.append(
             _make_recommendation(
                 inputs,
@@ -656,7 +665,7 @@ def _operating_detection_recommendations(
             )
         )
 
-    if abs(current_off - suggested_off) >= OPERATING_THRESHOLD_SIGNIFICANT_DELTA_W:
+    if _is_material_learned_watt_change(current_off, suggested_off):
         recommendations.append(
             _make_recommendation(
                 inputs,

@@ -267,7 +267,17 @@ class _SettingsCoordinator:
 
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
-    recommendation = _recommendation()
+    recommendation = _recommendation(
+        recommendation_id="fridge:operating_on_threshold_w:v1",
+        unique_key="fridge:operating_on_threshold_w",
+        setting_key="operating_on_threshold_w",
+        current_value=1515.0,
+        suggested_value=1200.0,
+        apply_payload={
+            "operating_on_threshold_w": 1200.0,
+            "operating_off_threshold_w": 250.0,
+        },
+    )
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
 
@@ -277,22 +287,35 @@ async def test_settings_controller_applies_undoes_and_resets_recommendation() ->
     applied = coordinator.store_data.settings_recommendations[
         recommendation.recommendation_id
     ]
+    applied_decisions = dict(
+        coordinator.store_data.settings_recommendation_decisions
+    )
     undo_result = await controller.async_undo_setting_recommendation(
         recommendation.recommendation_id,
+    )
+    decisions_after_undo = dict(
+        coordinator.store_data.settings_recommendation_decisions
     )
     reset_result = await controller.async_reset_setting_recommendation(
         recommendation.recommendation_id,
     )
 
     assert applied.status is RecommendationStatus.APPLIED
+    assert {
+        key: (decision.status, decision.denied_value)
+        for key, decision in applied_decisions.items()
+    } == {
+        "fridge:operating_on_threshold_w": (RecommendationStatus.APPLIED, 1200.0),
+        "fridge:operating_off_threshold_w": (RecommendationStatus.APPLIED, 250.0),
+    }
     assert undo_result is True
+    assert recommendation.unique_key not in decisions_after_undo
     assert reset_result is True
-    assert coordinator.options[CONF_ADVANCED_SETTINGS]["fridge"] == {
-        "daily_spike_ratio": 0.25
-    }
-    assert coordinator.store_data.energy_usage_settings_by_circuit["fridge"] == {
-        "daily_spike_ratio": 0.25
-    }
+    reset_decision = coordinator.store_data.settings_recommendation_decisions[
+        recommendation.unique_key
+    ]
+    assert reset_decision.status is RecommendationStatus.DISMISSED
+    assert reset_decision.denied_value is None
     assert coordinator.persist_count == 3
     assert coordinator.dirty_count == 3
     assert coordinator.updated == [
