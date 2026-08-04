@@ -553,7 +553,7 @@ When you mark an alert as not helpful, the analyzer records that pattern separat
 
 When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Review decisions follow a stable electrical fingerprint across future reclustering when the direction, value buckets, and split-phase topology still match; substantially different signatures are treated as new review items.
 
-Suggested settings remember apply, deny, and dismiss decisions. Denying a suggestion suppresses the same value for the same evidence during its cooldown. Dismissing hides it until the evidence changes or the recommendation expires.
+Suggested settings remember apply, deny, and dismiss decisions. Applying or dismissing a suggestion suppresses that circuit and setting for 30 days; denying one suppresses it for 90 days. Candidate drift cannot bypass an active cooldown, and completed-cycle suggestions need new qualified cycle evidence after the decision.
 
 | Feature | What it does | Needs |
 |---|---|---|
@@ -943,6 +943,12 @@ Open the separate NILM workspace route from the evidence panel to label signatur
 
 After enough history, the analyzer can suggest advanced settings based on observed evidence. These are tuning recommendations for thresholds and windows, not appliance diagnoses.
 
+Operating and standby thresholds use qualified completed appliance cycles, not
+unclassified raw power readings. The analyzer waits for the appliance profile's
+minimum cycle count across at least seven distinct local days, learns separate
+stable-idle and stable-running boundaries, and only offers a watt change when it
+is more than both 5 W and 10% of the current setting.
+
 For HVAC circuits, suggestions can also propose one thermostat zone at a time,
 an indoor-temperature override, the gas-heat role for a blower, or a learned
 response-change threshold. Thermostat/source suggestions require at least nine
@@ -959,9 +965,9 @@ For each suggestion, you can:
 
 | Action | Meaning |
 |---|---|
-| **Apply Suggestion** | Update the circuit's advanced setting. |
-| **Deny Suggestion** | Suppress the same suggestion for the same evidence. |
-| **Dismiss For Now** | Hide it until the evidence changes or the recommendation expires. |
+| **Apply Suggestion** | Update the circuit's advanced setting and suppress that setting for 30 days. |
+| **Deny Suggestion** | Suppress that setting for 90 days. |
+| **Dismiss For Now** | Suppress that setting for 30 days. |
 
 You can also expose `sensor.<circuit>_settings_suggestions` if you want a dashboard-visible count of pending recommendations.
 
