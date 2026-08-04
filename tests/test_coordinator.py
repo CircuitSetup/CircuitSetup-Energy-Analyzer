@@ -55,6 +55,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
+    CircuitSample,
     EventType,
     PowerFlowMode,
     RetentionMode,
@@ -760,6 +761,76 @@ async def test_relearn_clears_appliance_health_state_and_policy() -> None:
     assert new_short_cycle_policy is not old_short_cycle_policy
     assert coordinator.state.appliance_health_status_by_circuit == {}
     assert coordinator.state.appliance_health_evidence_by_circuit == {}
+
+
+@pytest.mark.asyncio
+async def test_relearn_discards_in_flight_operating_cycle() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    started_at = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    clock = {"now": started_at}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": circuit_id,
+                    "name": circuit_id.title(),
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+                for circuit_id in ("fridge", "freezer")
+            ]
+        },
+        now_fn=lambda: clock["now"],
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator.refresh_ux_state_for_circuit = lambda *_args: None
+    coordinator.async_set_updated_data = lambda _state: None
+    coordinator._async_save_store = AsyncMock()
+    config = coordinator.circuit_registry.config_for_circuit("fridge")
+    assert config is not None
+    context = coordinator.context_builder.build(started_at)
+
+    def process(seconds: int, watts: float) -> None:
+        result = coordinator._event_processor.process(
+            CircuitSample(
+                timestamp=started_at + timedelta(seconds=seconds),
+                circuit_id="fridge",
+                real_power=watts,
+                voltage=120.0,
+            ),
+            config,
+            context,
+        )
+        coordinator.store_data.events.extend(result.events)
+
+    for seconds in range(4):
+        process(seconds, 5.0)
+    process(4, 50.0)
+    process(15, 55.0)
+    for seconds in range(16, 19):
+        process(seconds, 80.0)
+    old_detector = coordinator._detectors["fridge"]
+    other_detector = coordinator._detectors["freezer"]
+
+    clock["now"] = started_at + timedelta(seconds=20)
+    await coordinator.async_relearn_baseline("fridge")
+    process(21, 8.0)
+    process(67, 7.0)
+
+    current_epoch_events = coordinator.processor_runtime.learning_events_since_restart(
+        config,
+        started_at + timedelta(seconds=67),
+    )
+    assert all(event.event_type is not EventType.STOP for event in current_epoch_events)
+    assert coordinator._detectors["fridge"] is not old_detector
+    assert coordinator._detectors["freezer"] is other_detector
 
 
 @pytest.mark.asyncio

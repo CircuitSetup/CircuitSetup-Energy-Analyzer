@@ -804,6 +804,38 @@ def test_malformed_operating_cycle_does_not_satisfy_profile_minimum() -> None:
     assert advisor.build_settings_recommendations(inputs) == []
 
 
+@pytest.mark.parametrize(
+    ("idle_sample_count", "running_sample_count"),
+    ((0, 30), (-1, 30), (2.5, 30), (30, 0), (30, -1), (30, 2.5)),
+)
+def test_operating_cycle_rejects_finite_sample_counts_below_three(
+    idle_sample_count: float,
+    running_sample_count: float,
+) -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor)
+    inputs.feature_history["operating_cycles"][0].update(
+        idle_sample_count=idle_sample_count,
+        running_sample_count=running_sample_count,
+    )
+
+    assert advisor.build_settings_recommendations(inputs) == []
+
+
+def test_operating_cycle_accepts_three_samples_per_boundary() -> None:
+    advisor = _advisor()
+    inputs = _operating_cycle_inputs(advisor)
+    inputs.feature_history["operating_cycles"][0].update(
+        idle_sample_count=3,
+        running_sample_count=3,
+    )
+
+    assert _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "operating_on_threshold_w",
+    ).suggested_value == 55.0
+
+
 def test_operating_cycle_requires_a_learning_date() -> None:
     advisor = _advisor()
     inputs = _operating_cycle_inputs(advisor, cycle_count=19)

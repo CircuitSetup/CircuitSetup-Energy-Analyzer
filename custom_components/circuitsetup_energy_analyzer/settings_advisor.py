@@ -531,14 +531,19 @@ def _operating_cycle_distribution(inputs: AdvisorInputs) -> dict[str, Any] | Non
             running_sample_count = float(item["running_sample_count"])
         except (KeyError, TypeError, ValueError):
             return None
-        if not date or not all(
-            math.isfinite(value)
-            for value in (
-                idle_upper_w,
-                running_lower_w,
-                idle_sample_count,
-                running_sample_count,
+        if (
+            not date
+            or not all(
+                math.isfinite(value)
+                for value in (
+                    idle_upper_w,
+                    running_lower_w,
+                    idle_sample_count,
+                    running_sample_count,
+                )
             )
+            or idle_sample_count < 3
+            or running_sample_count < 3
         ):
             return None
         parsed_cycles.append((timestamp, date, idle_upper_w, running_lower_w))

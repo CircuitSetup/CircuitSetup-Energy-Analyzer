@@ -397,6 +397,41 @@ def test_completed_stop_records_stable_cycle_power_boundaries() -> None:
     assert stop.features[OPERATING_RUNNING_SAMPLE_COUNT] == 3
 
 
+def test_completed_cycles_keep_independent_power_boundaries() -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OPERATING_IDLE_SAMPLE_COUNT,
+        OPERATING_IDLE_UPPER_W,
+        OPERATING_RUNNING_LOWER_W,
+        OPERATING_RUNNING_SAMPLE_COUNT,
+    )
+
+    machine = _machine()
+    for seconds in range(4):
+        machine.process(_sample(seconds, 20.0))
+    machine.process(_sample(4, 50.0))
+    machine.process(_sample(15, 55.0))
+    for seconds, watts in ((16, 80.0), (17, 90.0), (18, 100.0)):
+        machine.process(_sample(seconds, watts))
+    machine.process(_sample(19, 8.0))
+    first_stop = machine.process(_sample(40, 7.0)).events[0]
+
+    for seconds in range(41, 44):
+        machine.process(_sample(seconds, 2.0))
+    machine.process(_sample(44, 50.0))
+    machine.process(_sample(55, 55.0))
+    for seconds, watts in ((56, 40.0), (57, 50.0), (58, 60.0)):
+        machine.process(_sample(seconds, watts))
+    machine.process(_sample(59, 8.0))
+    second_stop = machine.process(_sample(80, 7.0)).events[0]
+
+    assert first_stop.features[OPERATING_IDLE_UPPER_W] == 20.0
+    assert first_stop.features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert second_stop.features[OPERATING_IDLE_UPPER_W] == 2.0
+    assert second_stop.features[OPERATING_RUNNING_LOWER_W] == 40.0
+    assert second_stop.features[OPERATING_IDLE_SAMPLE_COUNT] == 3
+    assert second_stop.features[OPERATING_RUNNING_SAMPLE_COUNT] == 3
+
+
 def test_unavailable_stop_omits_learned_cycle_boundaries() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         OPERATING_IDLE_UPPER_W,

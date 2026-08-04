@@ -711,6 +711,7 @@ class OperatingStateMachine:
         else:
             self._run_idle_upper_w = None
             self._run_idle_sample_count = 0
+        self._stable_off_power_w.clear()
         self._stable_running_power_w.clear()
         self._sag_emitted_for_run = False
 
