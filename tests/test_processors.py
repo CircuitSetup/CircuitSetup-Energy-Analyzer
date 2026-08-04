@@ -8821,6 +8821,96 @@ def test_nilm_runtime_reconciles_overlapping_components_and_conserves_power() ->
     assert second["allocated_power_w"] == 80.0
 
 
+def test_nilm_runtime_attributes_pump_blower_and_combined_states() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        reconcile_component_runtime,
+    )
+
+    start = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = (
+        _reconciliation_assignment("pump", 84.0),
+        _reconciliation_assignment("blower", 319.0),
+    )
+    runtime = _initial_component_runtime(assignments, {}, start)
+    for payload in runtime.values():
+        payload.update({
+            "status": "off", "state_power_w": 0.0, "estimated_power_w": 0.0,
+        })
+
+    runtime, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=84.0,
+        timestamp=start,
+        assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(start, 84.0, 18.0, 86.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=2.0,
+    )
+    assert runtime["pump"]["status"] == "on"
+    assert runtime["blower"]["status"] == "off"
+
+    runtime, reconciliation, _, _ = reconcile_component_runtime(
+        source_power_w=379.0,
+        timestamp=start + timedelta(seconds=60),
+        assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(
+            start + timedelta(seconds=60), 319.0, 120.0, 341.0, 0.0, "on"
+        ),),
+        standby_w=0.0,
+        noise_spread_w=2.0,
+        previous_reconciliation=reconciliation,
+    )
+    assert {item["status"] for item in runtime.values()} == {"on"}
+    assert sum(item["estimated_power_w"] for item in runtime.values()) == pytest.approx(
+        379.0
+    )
+    assert reconciliation["residual_w"] == pytest.approx(0.0)
+
+    runtime, reconciliation, pump_sessions, _ = reconcile_component_runtime(
+        source_power_w=319.0,
+        timestamp=start + timedelta(seconds=120),
+        assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(
+            start + timedelta(seconds=120), -84.0, -18.0, -86.0, 0.0, "off"
+        ),),
+        standby_w=0.0,
+        noise_spread_w=2.0,
+        previous_reconciliation=reconciliation,
+    )
+    assert runtime["pump"]["status"] == "off"
+    assert runtime["blower"]["status"] == "on"
+    assert runtime["blower"]["estimated_power_w"] == pytest.approx(319.0)
+    assert pump_sessions[0]["assignment_id"] == "pump"
+    assert pump_sessions[0]["on_delta_var"] == 18.0
+    assert pump_sessions[0]["off_delta_var"] == -18.0
+
+    runtime, reconciliation, blower_sessions, _ = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=start + timedelta(seconds=180),
+        assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(
+            start + timedelta(seconds=180), -319.0, -120.0, -341.0, 0.0, "off"
+        ),),
+        standby_w=0.0,
+        noise_spread_w=2.0,
+        previous_reconciliation=reconciliation,
+    )
+    assert {item["status"] for item in runtime.values()} == {"off"}
+    assert blower_sessions[0]["assignment_id"] == "blower"
+    assert blower_sessions[0]["on_delta_var"] == 120.0
+    assert blower_sessions[0]["off_delta_var"] == -120.0
+    attributed = sum(
+        item["energy_kwh"] for item in (*pump_sessions, *blower_sessions)
+    )
+    assert attributed == pytest.approx(reconciliation["component_energy_kwh"])
+    assert attributed <= reconciliation["source_energy_kwh"]
+
+
 @pytest.mark.parametrize(
     "previous",
     [
@@ -9609,6 +9699,27 @@ def test_nilm_restart_restores_only_one_unique_bounded_fit() -> None:
     assert runtime["one"]["status"] == "off"
     assert runtime["one"]["session_id"] is None
     assert runtime["one"]["session_start"] is None
+
+
+def test_nilm_restart_restores_unique_state_with_three_active_components() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = [
+        _reconciliation_assignment(name, watts)
+        for name, watts in (("pump", 84.0), ("blower", 319.0), ("heater", 500.0))
+    ]
+    runtime = _initial_component_runtime(assignments, {}, now)
+
+    _restore_unique_component_state(
+        903.0, 0.0, 0.0, assignments, runtime, now
+    )
+
+    assert {item["status"] for item in runtime.values()} == {"on"}
+    assert sum(item["estimated_power_w"] for item in runtime.values()) == 903.0
 
 
 def test_runtime_assignment_model_discards_malformed_values() -> None:

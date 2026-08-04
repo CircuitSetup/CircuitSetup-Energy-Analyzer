@@ -701,54 +701,65 @@ def reconcile_nilm_edge(
         (abs(edge.delta_w - prototype.delta_w) for _, prototype in legal),
         default=abs(edge.delta_w),
     )
-    pairs: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
+    compounds: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
     ordered_transitions = tuple(
         per_assignment[assignment_id] for assignment_id in sorted(per_assignment)
     )
-    for first, second in combinations(ordered_transitions, 2):
-        combined = _nilm_combined_transition(first, second)
-        residual = abs(edge.delta_w - combined.delta_w)
-        if residual > nilm_transition_tolerance_w(combined):
-            continue
-        improvement = (
-            1.0
-            if best_single_residual == 0.0 and residual == 0.0
-            else (best_single_residual - residual) / best_single_residual
-            if best_single_residual
-            else 0.0
-        )
-        score = _nilm_candidate_score(
-            edge,
-            combined,
-            {
-                combined.assignment_id: _nilm_mean_available(
-                    helper_scores, first, second
-                )
-            },
-            {
-                combined.assignment_id: _nilm_mean_available(
-                    duration_state_scores, first, second
-                )
-            },
-            {
-                combined.assignment_id: _nilm_mean_available(
-                    validation_scores, first, second
-                )
-            },
-        )
-        if score >= 0.75 and improvement >= 0.30:
-            pairs.append((score, (first, second)))
-    pairs.sort(reverse=True, key=lambda item: item[0])
-    if pairs and (len(pairs) == 1 or pairs[0][0] - pairs[1][0] >= 0.15):
-        return _nilm_reconciliation(edge, pairs[0][1], reason="compound")
-    if len(per_assignment) > 2 and _nilm_multi_transition_matches(
-        edge, ordered_transitions
+    # ponytail: four simultaneous transitions bound combinatorial work; already-active
+    # components remain unlimited. Raise only if labelled replay needs larger groups.
+    for size in range(2, min(4, len(ordered_transitions)) + 1):
+        sized_compounds: list[
+            tuple[float, tuple[NilmTransitionPrototype, ...]]
+        ] = []
+        for group in combinations(ordered_transitions, size):
+            combined = _nilm_combined_transition(group)
+            residual = abs(edge.delta_w - combined.delta_w)
+            if residual > nilm_transition_tolerance_w(combined):
+                continue
+            improvement = (
+                1.0
+                if best_single_residual == 0.0 and residual == 0.0
+                else (best_single_residual - residual) / best_single_residual
+                if best_single_residual
+                else 0.0
+            )
+            score = _nilm_candidate_score(
+                edge,
+                combined,
+                {
+                    combined.assignment_id: _nilm_mean_available(
+                        helper_scores, group
+                    )
+                },
+                {
+                    combined.assignment_id: _nilm_mean_available(
+                        duration_state_scores, group
+                    )
+                },
+                {
+                    combined.assignment_id: _nilm_mean_available(
+                        validation_scores, group
+                    )
+                },
+            )
+            if score >= 0.75 and improvement >= 0.30:
+                sized_compounds.append((score, group))
+        if sized_compounds:
+            compounds = sized_compounds
+            break
+    compounds.sort(reverse=True, key=lambda item: item[0])
+    if compounds and (
+        len(compounds) == 1 or compounds[0][0] - compounds[1][0] >= 0.15
     ):
-        return _nilm_reconciliation(edge, (), reason="compound_unknown")
+        return _nilm_reconciliation(edge, compounds[0][1], reason="compound")
     return _nilm_reconciliation(
         edge,
         (),
-        reason="ambiguous" if pairs or single_reason == "ambiguous" else single_reason,
+        reason=(
+            "ambiguous"
+            if compounds or single_reason == "ambiguous"
+            else single_reason
+        ),
     )
 
 
@@ -825,41 +836,40 @@ def _nilm_reactive_fit(
 
 
 def _nilm_combined_transition(
-    first: NilmTransitionPrototype, second: NilmTransitionPrototype
+    transitions: Iterable[NilmTransitionPrototype],
 ) -> NilmTransitionPrototype:
+    transitions = tuple(transitions)
     return NilmTransitionPrototype(
-        assignment_id=f"{first.assignment_id}+{second.assignment_id}",
-        direction="on" if first.delta_w + second.delta_w > 0 else "off",
-        from_state_w=first.from_state_w + second.from_state_w,
-        to_state_w=first.to_state_w + second.to_state_w,
-        delta_w=first.delta_w + second.delta_w,
-        spread_w=first.spread_w + second.spread_w,
-        sample_count=min(first.sample_count, second.sample_count),
+        assignment_id="+".join(item.assignment_id for item in transitions),
+        direction="on" if sum(item.delta_w for item in transitions) > 0 else "off",
+        from_state_w=sum(item.from_state_w for item in transitions),
+        to_state_w=sum(item.to_state_w for item in transitions),
+        delta_w=sum(item.delta_w for item in transitions),
+        spread_w=sum(item.spread_w for item in transitions),
+        sample_count=min(item.sample_count for item in transitions),
+        delta_var=(
+            sum(item.delta_var for item in transitions if item.delta_var is not None)
+            if all(item.delta_var is not None for item in transitions)
+            else None
+        ),
+        spread_var=(
+            sum(item.spread_var or 0.0 for item in transitions)
+            if all(item.spread_var is not None for item in transitions)
+            else None
+        ),
     )
 
 
 def _nilm_mean_available(
     scores: Mapping[str, float | None],
-    first: NilmTransitionPrototype,
-    second: NilmTransitionPrototype,
+    transitions: Iterable[NilmTransitionPrototype],
 ) -> float | None:
     values = [
         value
-        for assignment_id in (first.assignment_id, second.assignment_id)
+        for assignment_id in (item.assignment_id for item in transitions)
         if (value := scores.get(assignment_id)) is not None and isfinite(value)
     ]
     return sum(values) / len(values) if values else None
-
-
-def _nilm_multi_transition_matches(
-    edge: NilmEdge, transitions: Iterable[NilmTransitionPrototype]
-) -> bool:
-    transitions = tuple(transitions)
-    return any(
-        abs(edge.delta_w - sum(item.delta_w for item in group))
-        <= max(15.0, 0.20 * abs(edge.delta_w))
-        for group in combinations(transitions, 3)
-    )
 
 
 def _nilm_reconciliation(
@@ -873,7 +883,7 @@ def _nilm_reconciliation(
         nilm_transition_tolerance_w(
             transitions[0]
             if len(transitions) == 1
-            else _nilm_combined_transition(*transitions)
+            else _nilm_combined_transition(transitions)
         )
         if transitions
         else conservation_tolerance_w(edge.delta_w, 0.0)
@@ -888,7 +898,7 @@ def _nilm_reconciliation(
         transitions=transitions if accepted else (),
         residual_w=residual,
         tolerance_w=tolerance,
-        compound=len(transitions) == 2 and accepted,
+        compound=len(transitions) > 1 and accepted,
         consistent=consistent,
         energy_allocation_allowed=accepted and consistent,
         reason=reason,

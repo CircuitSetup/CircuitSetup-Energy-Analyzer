@@ -510,7 +510,7 @@ def test_nilm_compound_is_bounded_to_twenty_recent_models() -> None:
     assert not result.accepted
 
 
-def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> None:
+def test_nilm_three_transition_edge_reconciles_unique_components() -> None:
     models = [
         assignment_model(name, transition(name, watts))
         for name, watts in (("a", 40), ("b", 30), ("c", 30))
@@ -518,8 +518,27 @@ def test_nilm_three_transition_edge_remains_unknown_and_blocks_allocation() -> N
     result = reconcile(
         edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
     )
-    assert not result.accepted and result.reason == "compound_unknown"
-    assert result.consistent is False and result.energy_allocation_allowed is False
+    assert result.accepted and result.reason == "compound"
+    assert {item.assignment_id for item in result.transitions} == {"a", "b", "c"}
+    assert result.compound is True
+    assert result.consistent is True and result.energy_allocation_allowed is True
+
+
+def test_nilm_multi_transition_rejects_equal_decompositions() -> None:
+    models = [
+        assignment_model(name, transition(name, watts))
+        for name, watts in (
+            ("a", 40), ("b", 30), ("c", 30),
+            ("d", 50), ("e", 25), ("f", 25),
+        )
+    ]
+
+    result = reconcile(
+        edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
+    )
+
+    assert result.accepted is False
+    assert result.reason == "ambiguous"
 
 
 def test_nilm_reconciliation_requires_a_known_finite_current_state() -> None:
@@ -621,15 +640,15 @@ def test_nilm_recent_cutoff_and_equal_error_prototypes_are_order_independent() -
     assert [item.delta_w for item in normal.transitions] == [90, 10]
 
 
-def test_nilm_compound_unknown_check_never_enumerates_beyond_triples(
+def test_nilm_compound_search_never_enumerates_beyond_four_transitions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checked_sizes: list[int] = []
 
     def bounded_combinations(iterable, size):
         checked_sizes.append(size)
-        if size > 3:
-            raise AssertionError("compound diagnostics exceeded the three-load bound")
+        if size > 4:
+            raise AssertionError("compound search exceeded the four-load bound")
         return stdlib_combinations(iterable, size)
 
     monkeypatch.setattr(nilm_domain, "combinations", bounded_combinations)
@@ -641,7 +660,7 @@ def test_nilm_compound_unknown_check_never_enumerates_beyond_triples(
         edge(0, 100), models, {model.assignment_id: 0.0 for model in models}
     )
     assert not result.accepted and result.reason == "below_threshold"
-    assert max(checked_sizes) == 3
+    assert max(checked_sizes) == 4
 
 
 def helper_event(seconds: int, event_type: EventType) -> CircuitEvent:
