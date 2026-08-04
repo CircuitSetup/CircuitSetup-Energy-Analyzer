@@ -707,6 +707,21 @@ class NilmController:
             return False
         coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = remaining
         now_dt = coordinator.current_time()
+        now = now_dt.isoformat()
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            )
+        )
+        for assignment in assignments:
+            interval_ids = self._clean_string_list(
+                assignment.get("label_interval_ids")
+            )
+            if interval_id_text in interval_ids:
+                assignment["label_interval_ids"] = [
+                    value for value in interval_ids if value != interval_id_text
+                ]
+                assignment["updated_at"] = now
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
