@@ -1622,6 +1622,7 @@ export class PanelShellMethods {
           } else {
             this._lastActionMessage = this._panelText("messages.no_completed_assignment_interval");
             this._render();
+            void this._loadNilmWorkspaceHistory();
           }
           return;
         }

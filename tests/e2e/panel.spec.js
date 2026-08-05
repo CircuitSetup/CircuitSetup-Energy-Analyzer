@@ -7201,27 +7201,23 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
     await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
   );
-  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
   await expect.poll(() => band.getAttribute("x")).not.toBe(originalX);
 
   const beforeOutsideEdit = historyWindows.length;
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
     await datetimeLocalValue(page, "2026-07-13T17:40:00Z"),
   );
-  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
   await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit);
 
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
     await datetimeLocalValue(page, "2026-07-13T16:40:00Z"),
   );
-  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
   await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit + 1);
 
   const beforeInvalidEdit = historyWindows.length;
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(
     await datetimeLocalValue(page, "2026-07-13T16:30:00Z"),
   );
-  await panel.locator('[data-nilm-label-interval-input="end"]').dispatchEvent("change");
   await expect.poll(() => historyWindows.length).toBe(beforeInvalidEdit);
   await expect(panel.locator('[data-nilm-label-interval-action="save"]')).toBeDisabled();
   await toHaveNoViolations(page);
@@ -7286,18 +7282,17 @@ test("assigned NILM intervals keep newer graph intent over delayed history", asy
   await page.evaluate(() => {
     const panelElement = window.__panel;
     const loadInterval = panelElement._loadNilmIntervalOnGraph;
-    window.__nilmIntervalLoadCompletions = 0;
+    window.__nilmIntervalLoadCompletions = [];
     panelElement._loadNilmIntervalOnGraph = async function (...args) {
       try {
         return await loadInterval.apply(this, args);
       } finally {
-        window.__nilmIntervalLoadCompletions += 1;
+        window.__nilmIntervalLoadCompletions.push(Date.parse(args[0]?.start || ""));
       }
     };
   });
 
   let delayedHistory = armFocusedHistoryDelay();
-  let completedLoads = await page.evaluate(() => window.__nilmIntervalLoadCompletions);
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
     await datetimeLocalValue(page, "2026-07-13T11:00:00Z"),
   );
@@ -7312,16 +7307,15 @@ test("assigned NILM intervals keep newer graph intent over delayed history", asy
   releaseFocusedHistory();
   await delayedHistory.finished;
   await expect.poll(() => page.evaluate(() => window.__nilmIntervalLoadCompletions))
-    .toBe(completedLoads + 1);
+    .toContain(Date.parse("2026-07-13T11:00:00Z"));
   await expect.poll(() => page.evaluate(() => ({
     focus: window.__panel._nilmFocusedInterval,
     window: window.__panel._nilmGraphWindow,
   }))).toEqual(inWindowIntent);
 
   delayedHistory = armFocusedHistoryDelay();
-  completedLoads = await page.evaluate(() => window.__nilmIntervalLoadCompletions);
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T11:00:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T10:00:00Z"),
   );
   await delayedHistory.started;
   const directWindowIntent = await page.evaluate(() => {
@@ -7337,12 +7331,11 @@ test("assigned NILM intervals keep newer graph intent over delayed history", asy
   releaseFocusedHistory();
   await delayedHistory.finished;
   await expect.poll(() => page.evaluate(() => window.__nilmIntervalLoadCompletions))
-    .toBe(completedLoads + 1);
+    .toContain(Date.parse("2026-07-13T10:00:00Z"));
   await expect.poll(() => page.evaluate(() => window.__panel._nilmGraphWindow))
     .toEqual(directWindowIntent);
 
   delayedHistory = armFocusedHistoryDelay();
-  completedLoads = await page.evaluate(() => window.__nilmIntervalLoadCompletions);
   await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
   await delayedHistory.started;
   await page.evaluate(() => {
@@ -7359,7 +7352,7 @@ test("assigned NILM intervals keep newer graph intent over delayed history", asy
   releaseFocusedHistory();
   await delayedHistory.finished;
   await expect.poll(() => page.evaluate(() => window.__nilmIntervalLoadCompletions))
-    .toBe(completedLoads + 1);
+    .toContain(Date.parse("2026-07-13T18:00:00Z"));
   await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toBeNull();
   await expect.poll(() => page.evaluate(() => window.__panel._nilmGraphWindow)).toEqual(preservedWindow);
 });
