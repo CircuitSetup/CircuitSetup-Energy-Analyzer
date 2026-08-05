@@ -1982,6 +1982,10 @@ def test_hvac_nonselected_complete_weather_call_preserves_selected_context_day(
         "started_at": (
             datetime.fromisoformat(str(base["started_at"])) + timedelta(hours=8)
         ).isoformat(),
+        "ended_at": (
+            datetime.fromisoformat(str(base["started_at"]))
+            + timedelta(hours=8, minutes=10)
+        ).isoformat(),
         "complete": False,
         "excluded_from_baseline": True,
         "participant_signature": ["heat_pump", "alternate"],
