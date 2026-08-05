@@ -8218,6 +8218,7 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for expected in (
+        "review recurring loads, assign or identify them",
         "validate completed sessions or link reference sensors, and publish only "
         "when the estimate is trustworthy",
         "The graph shows measured source power; separated appliance power and "
@@ -8225,9 +8226,11 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "unexplained power remains unassigned.",
         "Pure mixed and primary appliance plus mixed loads sources do not "
         "process known loads.",
+        "Known-load masking is applied only to mains sources, as are Known Load Overlays.",
         "they do not become component owners or subtraction meters.",
         "Editing either time or dragging or keyboard-moving a graph boundary "
         "updates the same unsaved interval; Save is the only action that persists it.",
+        "Adjust Interval loads the saved interval into the graph.",
         "focuses its newest trustworthy completed session, then falls back to "
         "its newest saved labeled interval.",
         "An explicitly linked state sensor may still be authoritative for on/off "
