@@ -1377,7 +1377,7 @@ export function createNilmWorkspaceMethods({
         return;
       }
     }
-    const focused = this._focusNilmGraphWindowForSignature(signatureFingerprint);
+    const focused = this._focusNilmGraphWindowForSignature(signatureFingerprint, intentToken);
     this._lastActionMessage = focused
       ? this._panelText("messages.showing_selected_signature")
       : this._panelText("messages.no_paired_sessions");
@@ -1388,7 +1388,7 @@ export function createNilmWorkspaceMethods({
     }
   }
 
-  _focusNilmGraphWindowForSignature(signatureFingerprint) {
+  _focusNilmGraphWindowForSignature(signatureFingerprint, intentToken = null) {
     const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
     if (!targetWindow) {
       return false;
@@ -1397,8 +1397,7 @@ export function createNilmWorkspaceMethods({
       min: targetWindow.start,
       max: targetWindow.end,
     };
-    this._setNilmGraphWindow(targetWindow.start, targetWindow.end, bounds);
-    return true;
+    return this._setNilmGraphWindow(targetWindow.start, targetWindow.end, bounds, intentToken);
   }
 
   _nilmSignatureGraphWindow(signatureFingerprint) {
@@ -1466,7 +1465,7 @@ export function createNilmWorkspaceMethods({
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
       if (historyLoaded === null || !this._isCurrentNilmGraphIntent(intentToken)) return;
-      this._focusNilmGraphWindowForSignature(this._nilmFocusedSignature);
+      this._focusNilmGraphWindowForSignature(this._nilmFocusedSignature, intentToken);
     }
     this._render();
   }
@@ -1866,8 +1865,11 @@ export function createNilmWorkspaceMethods({
     this._panGraphWindow(window, direction, (next) => { this._nilmGraphWindow = next; });
   }
 
-  _setNilmGraphWindow(start, end, bounds) {
+  _setNilmGraphWindow(start, end, bounds, intentToken = null) {
+    const token = intentToken === null ? this._beginNilmGraphIntent() : intentToken;
+    if (!this._isCurrentNilmGraphIntent(token)) return false;
     this._setGraphWindow(start, end, bounds, (next) => { this._nilmGraphWindow = next; });
+    return true;
   }
 
   _snapNilmChartTimeToEdge(time, chart) {
