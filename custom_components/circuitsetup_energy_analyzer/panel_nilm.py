@@ -217,7 +217,7 @@ def nilm_workspace_payload(
         config.circuit_id,
         coordinator=coordinator,
     )
-    assignment_options = _nilm_assignment_options(assignments)
+    assignment_options = _nilm_assignment_options(assignments, config=config)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
     reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
     stored_sessions = _nilm_session_history_for_circuit(
@@ -260,10 +260,7 @@ def nilm_workspace_payload(
         ),
         session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
-    _add_nilm_assignment_options(
-        signatures,
-        _nilm_assignment_options(assignments, config=config),
-    )
+    _add_nilm_assignment_options(signatures, assignment_options)
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
@@ -2325,6 +2322,16 @@ def _nilm_known_load_overlays(
     circuit_id: str,
 ) -> list[dict[str, Any]]:
     circuit_registry = getattr(coordinator, "circuit_registry", None)
+    source_config = (
+        circuit_registry.config_for_circuit(circuit_id)
+        if circuit_registry is not None
+        else None
+    )
+    if (
+        source_config is None
+        or nilm_source_kind(source_config) is not NilmSourceKind.MAINS
+    ):
+        return []
     known_load_ids = {
         str(value)
         for value in _iter_items(
@@ -2384,17 +2391,17 @@ def _nilm_workspace_history_payload(
     solar_overlays: list[dict[str, Any]],
     *,
     hours: Any,
+    start: Any = None,
+    end: Any = None,
     entry_id: str | None = None,
     helper_configs: Iterable[CircuitConfig] = (),
     hass: Any = None,
 ) -> dict[str, Any]:
-    requested_hours = _bounded_float(
+    requested_hours, start_at, end_at, targeted = _nilm_workspace_history_window(
         hours,
-        default=DEFAULT_NILM_WORKSPACE_HISTORY_HOURS,
-        upper=MAX_NILM_WORKSPACE_HISTORY_HOURS,
+        start=start,
+        end=end,
     )
-    end = datetime.now(UTC)
-    start = end - timedelta(hours=requested_hours)
     source_series = _nilm_real_power_series(config, hass=hass)
     entity_series = _nilm_workspace_history_series(
         config,
@@ -2410,18 +2417,21 @@ def _nilm_workspace_history_payload(
     }
     if entry_id:
         history_query_values[ATTR_ENTRY_ID] = entry_id
+    if targeted:
+        history_query_values["start"] = start_at.isoformat()
+        history_query_values["end"] = end_at.isoformat()
     history_query = urlencode(history_query_values)
     recorder_query = urlencode(
         {
             "filter_entity_id": ",".join(entities),
-            "end_time": end.isoformat(),
+            "end_time": end_at.isoformat(),
             "minimal_response": "1",
             "no_attributes": "1",
         }
     )
     payload = {
-        "start": start.isoformat(),
-        "end": end.isoformat(),
+        "start": start_at.isoformat(),
+        "end": end_at.isoformat(),
         "hours": requested_hours,
         "max_hours": MAX_NILM_WORKSPACE_HISTORY_HOURS,
         "entities": entities,
@@ -2432,7 +2442,7 @@ def _nilm_workspace_history_payload(
         "api_path": f"{DOMAIN}/nilm_workspace_history?{history_query}",
         "fetch_path": f"{NILM_WORKSPACE_HISTORY_API_PATH}?{history_query}",
         "recorder_api_path": (
-            f"history/period/{quote(start.isoformat(), safe='')}?{recorder_query}"
+            f"history/period/{quote(start_at.isoformat(), safe='')}?{recorder_query}"
         ),
         "max_points_per_entity": MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
     }
@@ -2441,6 +2451,39 @@ def _nilm_workspace_history_payload(
             "Configure a real-power sensor measured in W, kW, mW, or MW."
         )
     return payload
+
+
+def _nilm_workspace_history_window(
+    hours: Any,
+    *,
+    start: Any = None,
+    end: Any = None,
+) -> tuple[float, datetime, datetime, bool]:
+    """Return an aware, capped target window or the bounded hours fallback."""
+
+    try:
+        start_at = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        end_at = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        if start_at.tzinfo is None or end_at.tzinfo is None:
+            raise ValueError
+        start_at = start_at.astimezone(UTC)
+        end_at = end_at.astimezone(UTC)
+        if end_at <= start_at:
+            raise ValueError
+        maximum_window = timedelta(hours=MAX_NILM_WORKSPACE_HISTORY_HOURS)
+        if end_at - start_at > maximum_window:
+            start_at = end_at - maximum_window
+        requested_hours = (end_at - start_at).total_seconds() / 3600
+    except (TypeError, ValueError, OverflowError):
+        requested_hours = _bounded_float(
+            hours,
+            default=DEFAULT_NILM_WORKSPACE_HISTORY_HOURS,
+            upper=MAX_NILM_WORKSPACE_HISTORY_HOURS,
+        )
+        end_at = datetime.now(UTC)
+        return requested_hours, end_at - timedelta(hours=requested_hours), end_at, False
+
+    return requested_hours, start_at, end_at, True
 
 
 def _nilm_workspace_history_entities(
@@ -2916,7 +2959,7 @@ def _nilm_session_payload_with_actions(
                 "data": data,
                 "requires": [ATTR_LABEL],
             }
-        if assignment_id and (
+        if payload.get("end") and assignment_id and (
             reviewed_session_ids is None
             or (
                 assignment_id in reviewed_session_ids

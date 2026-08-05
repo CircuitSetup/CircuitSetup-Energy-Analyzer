@@ -2652,6 +2652,7 @@ def _with_nilm_session_overlap(
         1
         for other in sessions
         if other is not session
+        and _nilm_sessions_compete(session, other)
         and _nilm_sessions_overlap(session, other, latest_seen=latest_seen)
     )
     if overlap_count == 0:
@@ -2661,6 +2662,12 @@ def _with_nilm_session_overlap(
         overlap_count=overlap_count,
         confidence=round(_clamp(session.confidence * (0.9**overlap_count)), 3),
     )
+
+
+def _nilm_sessions_compete(left: NilmSession, right: NilmSession) -> bool:
+    if left.assignment_id and right.assignment_id:
+        return left.assignment_id == right.assignment_id
+    return left.signature_fingerprint == right.signature_fingerprint
 
 
 def _nilm_sessions_overlap(

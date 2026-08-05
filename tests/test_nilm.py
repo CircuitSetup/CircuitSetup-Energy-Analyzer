@@ -2246,6 +2246,58 @@ def test_global_session_pairing_closes_overlapping_runs() -> None:
     ]
 
 
+def test_global_session_pairing_overlapping_different_assignments_have_no_penalty(
+) -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 450.0),
+            edge(300, 800.0),
+            edge(600, -450.0),
+            edge(900, -800.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "blower-450",
+                "typical_watts": 450.0,
+                "assignment_id": "blower",
+            },
+            {
+                "signature_fingerprint": "condensate-pump-800",
+                "typical_watts": 800.0,
+                "assignment_id": "condensate-pump",
+            },
+        ],
+    )
+
+    assert [(session.assignment_id, session.overlap_count) for session in sessions] == [
+        ("blower", 0),
+        ("condensate-pump", 0),
+    ]
+
+
+def test_global_session_pairing_overlapping_same_assignment_keeps_penalty() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 500.0),
+            edge(300, 500.0),
+            edge(600, -500.0),
+            edge(900, -500.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {
+                "signature_fingerprint": "dryer",
+                "typical_watts": 500.0,
+                "assignment_id": "dryer",
+            }
+        ],
+    )
+
+    assert [session.overlap_count for session in sessions] == [1, 1]
+    assert [session.confidence for session in sessions] == [0.765, 0.9]
+
+
 def test_global_session_pairing_opens_session_beyond_learned_duration() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [edge(0, 500.0), edge(3600, -500.0)],

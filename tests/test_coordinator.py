@@ -3317,6 +3317,17 @@ def test_nilm_controller_filters_known_load_events() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ]
+        },
         options={CONF_KNOWN_LOAD_CIRCUITS: ["fridge"]},
         now_fn=lambda: now,
     )
@@ -12832,6 +12843,91 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
 
     assert await unmatched_percentage_for(["fridge"]) == 0.0
     assert await unmatched_percentage_for(["hvac"]) == 100.0
+
+    async def run_primary_mixed_sequence(
+        known_load_circuits: list[str],
+    ) -> dict[str, Any]:
+        states = FakeStates(100, now)
+        coordinator = EnergyAnalyzerCoordinator(
+            SimpleNamespace(states=states, data={}),
+            entry_data={
+                CONF_ENABLE_EXPERIMENTAL_NILM: True,
+                CONF_KNOWN_LOAD_CIRCUITS: known_load_circuits,
+                CONF_CIRCUITS: [
+                    {
+                        "circuit_id": "hvac_1",
+                        "name": "HVAC 1",
+                        "mode": "mixed",
+                        "appliance_profile": "hvac_blower",
+                        "sensors": [
+                            {
+                                "entity_id": "sensor.mains_power",
+                                "role": "real_power",
+                            }
+                        ],
+                    },
+                    {
+                        "circuit_id": "fridge",
+                        "name": "Fridge",
+                        "mode": "single_phase",
+                        "appliance_profile": "refrigerator",
+                        "sensors": [
+                            {
+                                "entity_id": "sensor.fridge_power",
+                                "role": "real_power",
+                            }
+                        ],
+                    },
+                ],
+            },
+            options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
+            now_fn=lambda: states.time,
+        )
+        for seconds, watts in (
+            (0, 100),
+            (30, 420),
+            (60, 420),
+            (120, 100),
+            (150, 100),
+            (180, 420),
+            (210, 420),
+            (270, 100),
+            (300, 100),
+            (330, 420),
+            (360, 420),
+            (420, 100),
+        ):
+            states.time = now + timedelta(seconds=seconds)
+            states.watts = watts
+            await coordinator.async_process_update()
+        return {
+            "unmatched_edges": [
+                (edge.timestamp.isoformat(), edge.delta_w, edge.direction)
+                for edge in coordinator._nilm_unmatched_edges["hvac_1"]
+            ],
+            "signatures": coordinator.store_data.nilm_signatures.get("hvac_1", []),
+            "sessions": coordinator.store_data.nilm_session_history_by_circuit.get(
+                "hvac_1", []
+            ),
+            "reconciliation": coordinator.state.nilm_reconciliation_by_circuit.get(
+                "hvac_1", {}
+            ),
+            "component_energy": coordinator.state.nilm_component_runtime_by_circuit.get(
+                "hvac_1", {}
+            ),
+        }
+
+    without_known = await run_primary_mixed_sequence([])
+    with_known = await run_primary_mixed_sequence(["fridge"])
+
+    assert without_known["unmatched_edges"]
+    assert without_known["signatures"]
+    assert without_known["signatures"][0]["confidence"] > 0.0
+    assert with_known["unmatched_edges"] == without_known["unmatched_edges"]
+    assert with_known["signatures"] == without_known["signatures"]
+    assert with_known["sessions"] == without_known["sessions"]
+    assert with_known["reconciliation"] == without_known["reconciliation"]
+    assert with_known["component_energy"] == without_known["component_energy"]
 
 
 @pytest.mark.asyncio

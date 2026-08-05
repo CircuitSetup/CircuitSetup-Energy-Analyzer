@@ -491,6 +491,26 @@ export class PanelShellMethods {
           stroke: var(--primary-color, #03a9f4);
           stroke-width: 3;
         }
+        .nilm-boundary-handle {
+          cursor: ew-resize;
+          outline: none;
+        }
+        .nilm-boundary-handle-hit {
+          stroke: transparent;
+          stroke-width: 24;
+        }
+        .nilm-boundary-handle-line {
+          pointer-events: none;
+          stroke: var(--primary-color, #03a9f4);
+          stroke-width: 4;
+        }
+        .nilm-boundary-handle:focus {
+          outline: 2px solid var(--primary-color, #03a9f4);
+          outline-offset: 2px;
+        }
+        .nilm-boundary-handle:focus .nilm-boundary-handle-line {
+          stroke-width: 6;
+        }
         .chart .nilm-session-label {
           fill: var(--primary-text-color, #1f2937);
           font-size: 11px;
@@ -1503,12 +1523,6 @@ export class PanelShellMethods {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
-    const nilmSecondaryDetails = this.shadowRoot.querySelector("[data-nilm-secondary-details]");
-    if (nilmSecondaryDetails) {
-      nilmSecondaryDetails.addEventListener("toggle", () => {
-        this._nilmSecondaryDetailsOpen = nilmSecondaryDetails.open;
-      });
-    }
     this._listen("[data-nilm-sensitivity-action]", () => this._applyNilmSensitivity());
     for (const select of this.shadowRoot.querySelectorAll("[data-nilm-source-picker]")) {
       select.addEventListener("change", () => this._navigate(select.value));
@@ -1595,6 +1609,23 @@ export class PanelShellMethods {
         this._nilmSelectedReviewKey = button.dataset.nilmReviewItem;
         const fingerprint = button.dataset.nilmSignatureFingerprint || "";
         this._nilmSyncHelperSelection(this._nilmWorkspace);
+        const selected = this._nilmSelectedReviewItem(this._nilmWorkspace);
+        if (selected && selected.kind === "assignment") {
+          this._beginNilmGraphIntent();
+          this._nilmFocusedSignature = "";
+          this._nilmFocusedOccurrenceIndex = -1;
+          this._nilmFocusedInterval = null;
+          const interval = this._nilmAssignmentFocusInterval(selected.item);
+          if (interval) {
+            this._lastActionMessage = "";
+            void this._loadNilmIntervalOnGraph(interval, { edit: false });
+          } else {
+            this._lastActionMessage = this._panelText("messages.no_completed_assignment_interval");
+            this._render();
+            void this._loadNilmWorkspaceHistory();
+          }
+          return;
+        }
         if (fingerprint) {
           void this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
         } else {
@@ -1613,7 +1644,13 @@ export class PanelShellMethods {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-label-interval-input]")) {
       const updateDraft = () => this._rememberNilmLabelIntervalDraft(input);
       if (input.dataset.nilmIntervalIndex !== undefined) {
-        input.addEventListener("change", updateDraft);
+        input.addEventListener("input", updateDraft);
+        input.addEventListener("change", () => {
+          updateDraft();
+          void this._syncNilmIntervalFieldToGraph(
+            Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10),
+          );
+        });
       } else {
         input.addEventListener("input", updateDraft);
         input.addEventListener("change", updateDraft);
@@ -1625,11 +1662,12 @@ export class PanelShellMethods {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-open-interval-editor]")) {
       button.addEventListener("click", () => {
-        this._nilmIntervalEditorOpen = true;
-        if (!this._nilmIntervalDraftItems().length) {
-          this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
-        }
-        this._nilmActiveIntervalIndex = 0;
+        this._openNilmIntervalEditor(() => {
+          if (!this._nilmIntervalDraftItems().length) {
+            this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
+          }
+          this._nilmActiveIntervalIndex = 0;
+        });
         this._render();
         requestAnimationFrame(() => {
           const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");
@@ -1659,7 +1697,7 @@ export class PanelShellMethods {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
     }
-    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-reference-input]")) {
+    for (const input of this.shadowRoot.querySelectorAll('[data-nilm-reference-input]:not(ha-entity-picker)')) {
       const remember = () => this._rememberNilmReferenceDraft(input);
       input.addEventListener("input", remember);
       input.addEventListener("change", () => {
@@ -1667,6 +1705,14 @@ export class PanelShellMethods {
         if (input.dataset.nilmReferenceInput === "stateEntityId") this._render();
       });
     }
+    for (const picker of this.shadowRoot.querySelectorAll("ha-entity-picker[data-nilm-reference-input]")) {
+      picker.addEventListener("value-changed", (event) => {
+        picker.value = event.detail.value || "";
+        this._rememberNilmReferenceDraft(picker);
+        if (picker.dataset.nilmReferenceInput === "stateEntityId") this._render();
+      });
+    }
+    this._configureNilmReferencePickers();
     for (const details of this.shadowRoot.querySelectorAll("[data-nilm-reference-details]")) {
       details.addEventListener("toggle", () => {
         const draft = this._nilmReferenceDrafts.get(details.dataset.nilmReferenceKey);
@@ -1681,6 +1727,55 @@ export class PanelShellMethods {
     }
     for (const chart of this.shadowRoot.querySelectorAll("[data-nilm-chart-select]")) {
       chart.addEventListener("pointerdown", (event) => this._startNilmChartSelection(event, chart));
+    }
+    for (const handle of this.shadowRoot.querySelectorAll("[data-nilm-boundary-handle]")) {
+      const chart = handle.closest("[data-nilm-chart-select]");
+      handle.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!chart) return;
+        const update = (moveEvent) => {
+          const currentChart = this.shadowRoot.querySelector("[data-nilm-chart-select]") || chart;
+          const time = this._snapNilmChartTimeToEdge(this._chartEventTime(moveEvent, currentChart), currentChart);
+          this._updateNilmDraftBoundary(
+            Number.parseInt(handle.dataset.nilmDraftIndex || "-1", 10),
+            handle.dataset.nilmBoundaryHandle,
+            time,
+          );
+        };
+        const cleanup = () => {
+          window.removeEventListener("pointermove", update);
+          window.removeEventListener("pointerup", finish);
+          window.removeEventListener("pointercancel", cancel);
+        };
+        const finish = (finishEvent) => {
+          update(finishEvent);
+          cleanup();
+        };
+        const cancel = () => cleanup();
+        if (handle.setPointerCapture && event.pointerId !== undefined) {
+          handle.setPointerCapture(event.pointerId);
+        }
+        window.addEventListener("pointermove", update);
+        window.addEventListener("pointerup", finish, { once: true });
+        window.addEventListener("pointercancel", cancel, { once: true });
+      });
+      handle.addEventListener("keydown", (event) => {
+        const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!direction || !chart) return;
+        event.preventDefault();
+        const index = Number.parseInt(handle.dataset.nilmDraftIndex || "-1", 10);
+        const field = handle.dataset.nilmBoundaryHandle;
+        const interval = this._nilmIntervalDraftItems()[index] || {};
+        const current = Date.parse(interval[field] || "");
+        const samples = [...new Set([...chart.querySelectorAll("[data-chart-point][data-chart-time]")]
+          .map((point) => Number(point.dataset.chartTime))
+          .filter(Number.isFinite))].sort((left, right) => left - right);
+        const next = direction > 0
+          ? samples.find((time) => time > current)
+          : [...samples].reverse().find((time) => time < current);
+        if (Number.isFinite(next)) this._updateNilmDraftBoundary(index, field, next);
+      });
     }
     for (const band of this.shadowRoot.querySelectorAll("[data-nilm-session-start]")) {
       band.addEventListener("click", () => {

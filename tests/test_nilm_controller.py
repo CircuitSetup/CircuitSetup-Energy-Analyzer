@@ -219,22 +219,36 @@ def test_nilm_controller_enables_mixed_sources_only_when_experimental(
     (
         (
             SimpleNamespace(
+                mode=CircuitMode.MAINS_NILM,
+                appliance_profile=ApplianceProfile.MAINS_NILM,
+            ),
+            ["fridge"],
+        ),
+        (
+            SimpleNamespace(
                 mode=CircuitMode.MIXED,
-                appliance_profile=ApplianceProfile.MOTOR_LOAD,
+                appliance_profile=ApplianceProfile.HVAC_BLOWER,
+            ),
+            [],
+        ),
+        (
+            SimpleNamespace(
+                mode=CircuitMode.MIXED,
+                appliance_profile=ApplianceProfile.MIXED,
             ),
             [],
         ),
         (
             SimpleNamespace(
                 mode=CircuitMode.SINGLE_PHASE,
-                appliance_profile=ApplianceProfile.MIXED,
+                appliance_profile=ApplianceProfile.REFRIGERATOR,
             ),
             [],
         ),
-        (None, ["fridge"]),
+        (None, []),
     ),
 )
-def test_nilm_controller_masks_known_loads_only_for_known_nonmixed_sources(
+def test_nilm_controller_masks_known_loads_only_for_mains(
     source_config: SimpleNamespace | None,
     expected_circuit_ids: list[str],
 ) -> None:
@@ -250,7 +264,7 @@ def test_nilm_controller_masks_known_loads_only_for_known_nonmixed_sources(
     assert [
         event.circuit_id
         for event in controller.known_load_events(
-            "mixed", [SimpleNamespace(circuit_id="fridge")]
+            "source", [SimpleNamespace(circuit_id="fridge")]
         )
     ] == expected_circuit_ids
 

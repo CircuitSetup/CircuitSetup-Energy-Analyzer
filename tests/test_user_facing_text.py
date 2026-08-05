@@ -3191,7 +3191,7 @@ def test_focused_nilm_history_request_contracts() -> None:
       const window = { start: Date.parse("2026-06-06T01:30:00Z"),
         end: Date.parse("2026-06-06T02:45:00Z") };
       await panel._loadNilmWorkspaceHistoryForWindow(window);
-      assert.equal(panel._nilmWorkspaceHistorySeries.length, 0);
+      assert.deepEqual(panel._nilmWorkspaceHistorySeries, stale);
       assert.match(panel._nilmWorkspaceHistoryError, /focused history failed/);
       assert.ok(panel.shadowRoot.innerHTML.includes("data-nilm-history-error"));
       assert.equal(typeof listeners.click, "function");
@@ -3813,12 +3813,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const lanes = selected.indexOf('role="tablist"');
       assert.ok(graph >= 0 && graph < editor && editor < lanes);
       const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
-      assert.ok(secondary.includes("data-nilm-secondary-details"));
-      assert.ok(secondary.includes("<details"));
+      assert.ok(secondary.includes("data-nilm-secondary-collections"));
+      assert.ok(secondary.includes("<section"));
       assert.ok(!secondary.includes('class="nilm-interval-form"'));
     }
 
-    name = "test_nilm_secondary_collections_use_one_disclosure";
+    name = "test_nilm_secondary_collections_are_always_visible";
     {
       const panel = makePanel();
       const html = panel._renderNilmSecondaryCollections(makeWorkspace({ sessions: [
@@ -3827,7 +3827,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         { session_id: "unassigned", start: "RAW_SESSION",
           actions: { assign: {} } },
       ] }));
-      assert.equal((html.match(/<details/g) || []).length, 1);
+      assert.equal((html.match(/<details/g) || []).length, 0);
       for (const expected of [
         "Sessions, validation, and technical details",
         "Estimated Appliances",
@@ -3839,7 +3839,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       }
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
-      assert.ok(!html.includes("OWNED_SESSION"));
+      assert.ok(html.includes("OWNED_SESSION"));
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
@@ -3866,6 +3866,8 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const sessions = Array.from({ length: 6 }, (_, index) => ({
         session_id: `session-${index + 1}`,
         assignment_id: "assignment-1",
+        start: "2026-06-24T18:12:00Z",
+        end: "2026-06-24T19:03:00Z",
         actions: { assign: {}, validate: {}, reject: {} },
       }));
       const workspace = makeWorkspace({
@@ -6285,7 +6287,10 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   let html = panel._renderNilmReferenceSensors(item, 0);
   assert.ok(html.includes("Reference sensors"));
   assert.ok(!html.includes('value="sensor.pump_power" selected'));
-  assert.ok(html.includes("Pump power (suggested)"));
+  assert.ok(html.includes("<ha-entity-picker"));
+  assert.ok(html.includes('data-nilm-reference-input="stateEntityId"'));
+  assert.ok(html.includes('data-nilm-reference-input="powerEntityId"'));
+  assert.ok(!html.includes("<option"));
   assert.ok(!html.includes('type="number"'));
 
   panel._nilmReferenceDrafts.set("pump", {
@@ -6298,7 +6303,7 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
     error: "",
   });
   html = panel._renderNilmReferenceSensors(item, 0);
-  assert.ok(html.includes('value="sensor.other_power" selected'));
+  assert.ok(!html.includes('value="sensor.other_power" selected'));
   assert.ok(html.includes('type="number"'));
   assert.ok(html.includes("<details open"));
 
@@ -6566,17 +6571,34 @@ def test_nilm_interval_action_contracts() -> None:
       const start = "2026-06-24T18:12:00Z";
       const end = "2026-06-24T19:03:00Z";
       let renders = 0;
-      const panel = makePanel({ _nilmWorkspace: makeWorkspace({ sessions: [{ start, end }] }) });
+      let requests = 0;
+      const panel = makePanel({
+        _evidenceRequestId: 1,
+        _nilmWorkspace: makeWorkspace({
+          history: {
+            start: "2026-06-24T17:00:00Z", end: "2026-06-24T20:00:00Z",
+            max_hours: 24,
+            api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=3",
+            fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=3",
+          },
+          sessions: [{ start, end }],
+        }),
+      });
+      panel._loadedRouteKey = panel._routeKey();
       panel._render = () => { renders += 1; };
-      panel._selectNilmSessionIntervalByIndex(0);
+      panel.shadowRoot.querySelector = () => null;
+      panel._requestJson = async () => { requests += 1; return []; };
+      await panel._selectNilmSessionIntervalByIndex(0);
       assert.deepEqual(
         [panel._nilmLabelIntervalDraft.intervals[0].start,
           panel._nilmLabelIntervalDraft.intervals[0].end,
-          panel._nilmIntervalEditorOpen, panel._lastActionMessage, renders],
+          panel._nilmIntervalEditorOpen, panel._lastActionMessage],
         [panel._datetimeLocalFromMillis(Date.parse(start)),
           panel._datetimeLocalFromMillis(Date.parse(end)), true,
-          "Loaded NILM session interval.", 1],
+          "Loaded NILM session interval."],
       );
+      assert.equal(requests, 1);
+      assert.ok(renders > 0);
     }
 
     name = "test_nilm_label_interval_form_guides_graph_selection";
@@ -7085,7 +7107,7 @@ def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:
         'class="workspace-section nilm-interval-editor-section section-surface"',
         'class="nilm-review-list section-surface"',
         'class="nilm-review-inspector section-surface"',
-        'class="disclosure section-surface" data-nilm-secondary-details',
+        'class="workspace-section section-surface" data-nilm-secondary-collections',
     ):
         assert marker in asset
     assert (
@@ -7433,7 +7455,12 @@ panel._render = () => {};
 panel._requestJson = async () => [];
 panel._nilmWorkspace = {
   status: "ok",
-  history: {},
+  history: {
+    start: "2026-08-04T00:00:00Z", end: "2026-08-04T04:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=4",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=4",
+  },
   sessions: [
     { session_id: "older", signature_fingerprint: "blower",
       start: "2026-08-04T01:00:00Z", end: "2026-08-04T01:05:00Z",
@@ -8210,6 +8237,27 @@ def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
 
 def test_readme_describes_current_nilm_workspace_flow() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    for expected in (
+        "review recurring loads, assign or identify them",
+        "validate completed sessions or link reference sensors, and publish only "
+        "when the estimate is trustworthy",
+        "The graph shows measured source power; separated appliance power and "
+        "energy are estimates. Open sessions are provisional, and uncertain or "
+        "unexplained power remains unassigned.",
+        "Pure mixed and primary appliance plus mixed loads sources do not "
+        "process known loads.",
+        "Known-load masking is applied only to mains sources, as are Known Load Overlays.",
+        "they do not become component owners or subtraction meters.",
+        "Editing either time or dragging or keyboard-moving a graph boundary "
+        "updates the same unsaved interval; Save is the only action that persists it.",
+        "Adjust Interval loads the saved interval into the graph.",
+        "focuses its newest trustworthy completed session, then falls back to "
+        "its newest saved labeled interval.",
+        "An explicitly linked state sensor may still be authoritative for on/off "
+        "state; measured power remains validation evidence.",
+    ):
+        assert expected in readme_text
 
     for expected in (
         "NILM workspace can also pair compatible on/off edges",
