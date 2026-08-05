@@ -217,7 +217,7 @@ def nilm_workspace_payload(
         config.circuit_id,
         coordinator=coordinator,
     )
-    assignment_options = _nilm_assignment_options(assignments)
+    assignment_options = _nilm_assignment_options(assignments, config=config)
     session_display_labels = _nilm_session_display_labels(signatures, assignments)
     reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
     stored_sessions = _nilm_session_history_for_circuit(
@@ -260,10 +260,7 @@ def nilm_workspace_payload(
         ),
         session_display_labels,
     )[:MAX_NILM_WORKSPACE_SESSIONS]
-    _add_nilm_assignment_options(
-        signatures,
-        _nilm_assignment_options(assignments, config=config),
-    )
+    _add_nilm_assignment_options(signatures, assignment_options)
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
@@ -2325,6 +2322,16 @@ def _nilm_known_load_overlays(
     circuit_id: str,
 ) -> list[dict[str, Any]]:
     circuit_registry = getattr(coordinator, "circuit_registry", None)
+    source_config = (
+        circuit_registry.config_for_circuit(circuit_id)
+        if circuit_registry is not None
+        else None
+    )
+    if (
+        source_config is None
+        or nilm_source_kind(source_config) is not NilmSourceKind.MAINS
+    ):
+        return []
     known_load_ids = {
         str(value)
         for value in _iter_items(
@@ -2916,7 +2923,7 @@ def _nilm_session_payload_with_actions(
                 "data": data,
                 "requires": [ATTR_LABEL],
             }
-        if assignment_id and (
+        if payload.get("end") and assignment_id and (
             reviewed_session_ids is None
             or (
                 assignment_id in reviewed_session_ids

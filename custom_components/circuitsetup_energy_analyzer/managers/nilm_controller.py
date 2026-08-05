@@ -184,9 +184,9 @@ class NilmController:
         nilm_config = self._coordinator.circuit_registry.config_for_circuit(
             nilm_circuit_id
         )
-        if nilm_config is not None and (
-            nilm_config.mode is CircuitMode.MIXED
-            or nilm_config.appliance_profile is ApplianceProfile.MIXED
+        if (
+            nilm_config is None
+            or nilm_source_kind(nilm_config) is not NilmSourceKind.MAINS
         ):
             return
         known_load_circuit_ids = (

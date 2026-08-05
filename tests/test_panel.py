@@ -1837,7 +1837,11 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         ]
     }
     coordinator.circuit_registry = SimpleNamespace(
-        known_load_circuit_ids=frozenset({"pool_pump"})
+        known_load_circuit_ids=frozenset({"pool_pump"}),
+        config_for_circuit={
+            config.circuit_id: config
+            for config in (mains_config, known_config, solar_config)
+        }.get,
     )
     coordinator.state.nilm_unknown_loads_by_circuit = {
         "mains": {
@@ -2538,6 +2542,13 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
     assert [item["entity_id"] for item in reference["power_options"]] == [
         "sensor.pump_power"
     ]
+    assert all(
+        not item["entity_id"].startswith("sensor.")
+        for item in reference["state_options"]
+    )
+    assert {item["entity_id"] for item in reference["power_options"]} == {
+        "sensor.pump_power"
+    }
     assert reference["power_options"][0]["role"] == "real_power"
     assert reference["suggested_power_entity_id"] == "sensor.pump_power"
     assert reference["actions"]["set"]["data"]["entry_id"] == "entry-1"
@@ -3094,6 +3105,102 @@ def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
     )
     assert coordinator.store_data.nilm_appliance_assignments_by_circuit == {}
     assert "assignment_id" not in coordinator.store_data.nilm_signatures["mixed"][0]
+
+
+def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    primary_mixed = CircuitConfig(
+        circuit_id="hvac_1",
+        name="HVAC 1",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.hvac_power", SensorRole.REAL_POWER),),
+    )
+    pure_mixed = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(
+        config=mains,
+        configs=(mains, primary_mixed, pure_mixed, fridge),
+    )
+    coordinator.circuit_registry = SimpleNamespace(
+        known_load_circuit_ids=frozenset({"fridge"}),
+        config_for_circuit={
+            config.circuit_id: config
+            for config in (mains, primary_mixed, pure_mixed, fridge)
+        }.get,
+    )
+    coordinator.store_data.nilm_signatures = {
+        "hvac_1": [{"signature_id": "signature-1"}],
+    }
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "hvac_1": [{"interval_id": "interval-1", "label": "Blower"}],
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "hvac_1": [
+            {
+                "session_id": "session-complete",
+                "mains_circuit_id": "hvac_1",
+                "signature_fingerprint": "signature-1",
+                "start": "2026-06-06T10:00:00+00:00",
+                "end": "2026-06-06T10:30:00+00:00",
+            },
+            {
+                "session_id": "session-open",
+                "mains_circuit_id": "hvac_1",
+                "signature_fingerprint": "signature-1",
+                "assignment_id": "hvac_1-configured-primary",
+                "start": "2026-06-06T11:00:00+00:00",
+                "end": None,
+            },
+        ],
+    }
+
+    mains_payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+    primary_mixed_payload = nilm_workspace_payload(
+        [coordinator], circuit_id="hvac_1"
+    )
+    pure_mixed_payload = nilm_workspace_payload([coordinator], circuit_id="mixed")
+
+    assert mains_payload["known_load_overlays"]
+    assert primary_mixed_payload["known_load_overlays"] == []
+    assert pure_mixed_payload["known_load_overlays"] == []
+
+    primary_value = "hvac_1-configured-primary"
+    for row in (
+        primary_mixed_payload["signatures"][0],
+        primary_mixed_payload["label_intervals"][0],
+        primary_mixed_payload["sessions"][0],
+    ):
+        options = row["actions"]["assign"]["assignment_options"]
+        assert {option["value"] for option in options} >= {primary_value}
+
+    open_session = next(
+        item for item in primary_mixed_payload["sessions"] if not item["end"]
+    )
+    assert "validate" not in open_session.get("actions", {})
+    assert "reject" not in open_session.get("actions", {})
 
 
 def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> None:
