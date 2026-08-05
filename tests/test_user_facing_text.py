@@ -3191,7 +3191,7 @@ def test_focused_nilm_history_request_contracts() -> None:
       const window = { start: Date.parse("2026-06-06T01:30:00Z"),
         end: Date.parse("2026-06-06T02:45:00Z") };
       await panel._loadNilmWorkspaceHistoryForWindow(window);
-      assert.equal(panel._nilmWorkspaceHistorySeries.length, 0);
+      assert.deepEqual(panel._nilmWorkspaceHistorySeries, stale);
       assert.match(panel._nilmWorkspaceHistoryError, /focused history failed/);
       assert.ok(panel.shadowRoot.innerHTML.includes("data-nilm-history-error"));
       assert.equal(typeof listeners.click, "function");

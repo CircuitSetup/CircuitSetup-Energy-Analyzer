@@ -1954,6 +1954,8 @@ async def nilm_workspace_history_payload(
     *,
     circuit_id: str | None = None,
     hours: Any = None,
+    start: Any = None,
+    end: Any = None,
     entry_id: str | None = None,
     helper_circuit_ids: Iterable[str] = (),
 ) -> list[list[dict[str, Any]]]:
@@ -2015,6 +2017,8 @@ async def nilm_workspace_history_payload(
         known_load_overlays,
         solar_overlays,
         hours=hours,
+        start=start,
+        end=end,
         entry_id=str(getattr(coordinator, "entry_id", "") or ""),
         helper_configs=helper_configs,
         hass=hass,

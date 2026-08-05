@@ -1733,21 +1733,31 @@ export class PanelShellMethods {
         event.preventDefault();
         event.stopPropagation();
         if (!chart) return;
-        const finish = (finishEvent) => {
-          handle.removeEventListener("pointercancel", cancel);
-          const time = this._snapNilmChartTimeToEdge(this._chartEventTime(finishEvent, chart), chart);
+        const update = (moveEvent) => {
+          const currentChart = this.shadowRoot.querySelector("[data-nilm-chart-select]") || chart;
+          const time = this._snapNilmChartTimeToEdge(this._chartEventTime(moveEvent, currentChart), currentChart);
           this._updateNilmDraftBoundary(
             Number.parseInt(handle.dataset.nilmDraftIndex || "-1", 10),
             handle.dataset.nilmBoundaryHandle,
             time,
           );
         };
-        const cancel = () => handle.removeEventListener("pointerup", finish);
+        const cleanup = () => {
+          window.removeEventListener("pointermove", update);
+          window.removeEventListener("pointerup", finish);
+          window.removeEventListener("pointercancel", cancel);
+        };
+        const finish = (finishEvent) => {
+          update(finishEvent);
+          cleanup();
+        };
+        const cancel = () => cleanup();
         if (handle.setPointerCapture && event.pointerId !== undefined) {
           handle.setPointerCapture(event.pointerId);
         }
-        handle.addEventListener("pointerup", finish, { once: true });
-        handle.addEventListener("pointercancel", cancel, { once: true });
+        window.addEventListener("pointermove", update);
+        window.addEventListener("pointerup", finish, { once: true });
+        window.addEventListener("pointercancel", cancel, { once: true });
       });
       handle.addEventListener("keydown", (event) => {
         const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;

@@ -483,6 +483,7 @@ export function createNilmWorkspaceMethods({
           this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
           this._nilmActiveIntervalIndex = 0;
           this._nilmIntervalEditorOpen = false;
+          this._nilmIntervalGraphSnapshot = null;
         }
       }
       const refreshed = await this._refreshNilmWorkspaceData(
@@ -500,6 +501,7 @@ export function createNilmWorkspaceMethods({
         this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
         this._nilmActiveIntervalIndex = 0;
         this._nilmIntervalEditorOpen = false;
+        this._nilmIntervalGraphSnapshot = null;
         if (refreshed) {
           const savedAssignment = ((this._nilmWorkspace && this._nilmWorkspace.assignments) || [])
             .find((item) => (
@@ -1190,12 +1192,39 @@ export function createNilmWorkspaceMethods({
 
   _cancelNilmIntervalEditor() {
     this._beginNilmGraphIntent();
+    if (!this._restoreNilmIntervalGraphSnapshot()) {
+      this._nilmFocusedInterval = null;
+    }
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
     this._nilmActiveIntervalIndex = 0;
-    this._nilmFocusedInterval = null;
     this._clearNilmIntervalFeedback();
     this._render();
+  }
+
+  _snapshotNilmIntervalGraph() {
+    const history = this._nilmWorkspace && this._nilmWorkspace.history;
+    this._nilmIntervalGraphSnapshot = {
+      graphWindow: this._nilmGraphWindow ? { ...this._nilmGraphWindow } : null,
+      focusedInterval: this._nilmFocusedInterval ? { ...this._nilmFocusedInterval } : null,
+      history: history ? { ...history } : null,
+      series: (this._nilmWorkspaceHistorySeries || []).map((series) => (
+        Array.isArray(series) ? series.map((point) => ({ ...point })) : series
+      )),
+    };
+  }
+
+  _restoreNilmIntervalGraphSnapshot() {
+    const snapshot = this._nilmIntervalGraphSnapshot;
+    this._nilmIntervalGraphSnapshot = null;
+    if (!snapshot) return false;
+    this._nilmGraphWindow = snapshot.graphWindow ? { ...snapshot.graphWindow } : null;
+    this._nilmFocusedInterval = snapshot.focusedInterval ? { ...snapshot.focusedInterval } : null;
+    if (this._nilmWorkspace && snapshot.history) {
+      this._nilmWorkspace.history = { ...snapshot.history };
+    }
+    this._nilmWorkspaceHistorySeries = snapshot.series;
+    return true;
   }
 
   _selectNilmDraftInterval(index) {
@@ -1269,9 +1298,15 @@ export function createNilmWorkspaceMethods({
     const intentToken = this._beginNilmGraphIntent();
     const padding = Math.max(5 * 60 * 1000, (end - start) * 0.2);
     const targetWindow = { start: start - padding, end: end + padding };
+    if (options.edit && !this._nilmIntervalEditorOpen) this._snapshotNilmIntervalGraph();
     if (options.edit) this._setNilmIntervalDraft(interval, options.assignment);
+    const history = this._nilmWorkspace && this._nilmWorkspace.history;
+    if (!history || !history.api_path) {
+      if (options.edit) this._render();
+      return false;
+    }
     const loaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
-    if (loaded === null || !this._isCurrentNilmGraphIntent(intentToken)) return false;
+    if (loaded !== true || !this._isCurrentNilmGraphIntent(intentToken)) return false;
     this._nilmGraphWindow = targetWindow;
     this._nilmFocusedInterval = { start, end };
     this._render();
@@ -1529,7 +1564,6 @@ export function createNilmWorkspaceMethods({
       if (!isCurrent()) {
         return null;
       }
-      this._nilmWorkspaceHistorySeries = [];
       this._nilmWorkspaceHistoryError = this._panelTextFormat("errors.load_nilm_workspace_history", { message: error.message });
       this._nilmWorkspaceHistoryFailedRequest = request;
       return false;
@@ -1710,10 +1744,10 @@ export function createNilmWorkspaceMethods({
       <p class="muted">${this._escape(this._panelText("nilm_workspace.reference_description"))}</p>
       <div class="grid">
         <label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_state"))}</span>
-          <ha-entity-picker data-nilm-reference-input="stateEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}"></ha-entity-picker>
+          <ha-entity-picker role="group" aria-label="${this._escape(this._panelText("nilm_workspace.reference_state"))}" data-nilm-reference-input="stateEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}"></ha-entity-picker>
         </label>
         <label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_power"))}</span>
-          <ha-entity-picker data-nilm-reference-input="powerEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}"></ha-entity-picker>
+          <ha-entity-picker role="group" aria-label="${this._escape(this._panelText("nilm_workspace.reference_power"))}" data-nilm-reference-input="powerEntityId" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}"></ha-entity-picker>
         </label>
         ${!draft.stateEntityId ? `<label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_threshold"))}</span><input type="number" min="0" step="0.1" data-nilm-reference-input="thresholdW" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.thresholdW)}"></label>` : ""}
         <label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_range_start"))}</span><input type="datetime-local" data-nilm-reference-input="start" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.start)}"></label>
@@ -2196,13 +2230,13 @@ export function createNilmWorkspaceMethods({
         </div>
       `, this._panelText("nilm_workspace.estimated_appliances_description"))}
         ${this._renderNilmValidation(workspace.validation)}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
+        ${workspace.source && workspace.source.source_kind === "mains" ? this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.circuit_id)}</span>
           <strong>${this._escape(item.name || item.circuit_id)}</strong>
           <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
         </div>
-      `, this._panelText("nilm_workspace.known_load_overlays_description"))}
+      `, this._panelText("nilm_workspace.known_load_overlays_description")) : ""}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.solar_net_overlays"), workspace.solar_overlays, this._panelText("nilm_workspace.solar_net_overlays_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.circuit_id)}</span>
@@ -2495,14 +2529,14 @@ export function createNilmWorkspaceMethods({
   _renderNilmSessionValidationCard(session, index) {
     const actions = session && session.actions ? session.actions : {};
     const label = session.display_label || session.display_name || session.appliance_id || session.assignment_id || this._panelText("common.appliance");
+    const isOpen = !session.end;
     const confidence = session.confidence !== undefined
       ? `<p class="muted">${this._escape(this._panelTextFormat("appliance_detail.confidence_value", { confidence: this._formatConfidence(session.confidence) }))}</p>`
       : "";
     const lowConfidence = this._isLowNilmConfidence(session.confidence)
-      ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.low_confidence"))}</p>`
+      ? `<p class="muted">${this._escape(this._nilmLowConfidenceExplanation(session))}</p>`
       : "";
     const duration = this._nilmSessionDuration(session);
-    const isOpen = !session.end;
     const validationActions = isOpen ? "" : `<div class="actions">
       ${actions.validate ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="validate" ${this._busyAction === `nilm_sessions_${index}_validate` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.correct"))}</button>` : ""}
       ${actions.reject ? `<button type="button" class="secondary" data-nilm-session-index="${index}" data-nilm-session-action="reject" ${this._busyAction === `nilm_sessions_${index}_reject` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.wrong_appliance_sentence"))}</button>` : ""}
@@ -2513,7 +2547,7 @@ export function createNilmWorkspaceMethods({
         <strong>${this._escape(this._panelTextFormat("nilm_workspace.predicted", { label }))}</strong>
         <span class="muted" data-nilm-session-range>${this._escape(this._formatNilmSessionRange(session))}</span>
         <p class="muted">${this._escape(isOpen
-          ? this._panelText("nilm_workspace.in_progress")
+          ? this._panelTextFormat("nilm_workspace.provisional_confidence", { confidence: this._formatConfidence(session.confidence) })
           : this._panelTextFormat("nilm_workspace.estimated_by_nilm", { duration: duration ? `, ${duration}` : "" }))}</p>
         ${isOpen ? "" : confidence}
         ${isOpen ? "" : lowConfidence}
@@ -2521,6 +2555,22 @@ export function createNilmWorkspaceMethods({
         ${validationActions}
       </div>
     `;
+  }
+
+  _nilmLowConfidenceExplanation(session) {
+    if (session && session.ambiguous) {
+      return this._panelText("nilm_workspace.low_confidence_ambiguous");
+    }
+    if (Number(session && session.alternate_match_count) > 0) {
+      return this._panelText("nilm_workspace.low_confidence_alternate_matches");
+    }
+    if (Number(session && session.overlap_count) > 0) {
+      return this._panelText("nilm_workspace.low_confidence_overlap");
+    }
+    if (session && (session.known_load_masked || session.known_load_confidence != null)) {
+      return this._panelText("nilm_workspace.low_confidence_known_load");
+    }
+    return this._panelText("nilm_workspace.low_confidence");
   }
 
   _nilmSessionDuration(session) {

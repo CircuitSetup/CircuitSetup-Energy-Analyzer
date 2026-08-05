@@ -210,6 +210,8 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
             panel._loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
+            start=request.query.get("start"),
+            end=request.query.get("end"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
             helper_circuit_ids=(
                 request.query.getall("helper_circuit_id", [])

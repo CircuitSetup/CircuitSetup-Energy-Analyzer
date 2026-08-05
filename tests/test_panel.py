@@ -3964,6 +3964,38 @@ async def test_nilm_workspace_history_view_forwards_repeated_helper_ids(
 
 
 @pytest.mark.asyncio
+async def test_nilm_workspace_history_view_forwards_target_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    captured = None
+
+    async def history_payload(_hass, _coordinators, **kwargs):
+        nonlocal captured
+        captured = kwargs
+        return []
+
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: SimpleNamespace()},
+        query={
+            "circuit_id": "mains",
+            "hours": "6",
+            "start": "2026-07-13T17:55:00Z",
+            "end": "2026-07-13T18:35:00Z",
+        },
+    )
+    monkeypatch.setattr(panel, "nilm_workspace_history_payload", history_payload)
+    monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    await panel.NilmWorkspaceHistoryView().get(request)
+
+    assert captured["start"] == "2026-07-13T17:55:00Z"
+    assert captured["end"] == "2026-07-13T18:35:00Z"
+
+
+@pytest.mark.asyncio
 async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -6466,6 +6498,110 @@ async def test_nilm_workspace_history_rows_include_role_and_unit_metadata(
 
     assert rows[0][0]["effective_role"] == "real_power"
     assert rows[0][0]["source_unit"] == "kW"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_uses_valid_bounded_target_window(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    requested_windows = []
+
+    async def history_rows(_hass, start, end, _entity_ids):
+        requested_windows.append((start, end))
+        return []
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    await panel.nilm_workspace_history_payload(
+        SimpleNamespace(),
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+        start="2026-07-12T00:00:00Z",
+        end="2026-07-14T00:00:00Z",
+    )
+
+    assert requested_windows == [
+        ("2026-07-13T00:00:00+00:00", "2026-07-14T00:00:00+00:00")
+    ]
+
+
+def test_nilm_workspace_history_payload_exposes_target_window_query() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_history_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+    )
+
+    history = _nilm_workspace_history_payload(
+        config,
+        [],
+        [],
+        hours=6,
+        start="2026-07-13T17:55:00Z",
+        end="2026-07-13T18:35:00Z",
+    )
+
+    assert history["start"] == "2026-07-13T17:55:00+00:00"
+    assert history["end"] == "2026-07-13T18:35:00+00:00"
+    assert "start=2026-07-13T17%3A55%3A00%2B00%3A00" in history["api_path"]
+    assert "end=2026-07-13T18%3A35%3A00%2B00%3A00" in history["api_path"]
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_history_invalid_target_uses_hours_fallback(
+    monkeypatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    coordinator.entry_id = "entry-1"
+    requested_windows = []
+
+    async def history_rows(_hass, start, end, _entity_ids):
+        requested_windows.append(
+            (datetime.fromisoformat(start), datetime.fromisoformat(end))
+        )
+        return []
+
+    monkeypatch.setattr(panel, "_async_history_rows", history_rows)
+
+    await panel.nilm_workspace_history_payload(
+        SimpleNamespace(),
+        [coordinator],
+        circuit_id="mixed",
+        entry_id="entry-1",
+        hours="3",
+        start="not-a-date",
+        end="2026-07-14T00:00:00Z",
+    )
+
+    start, end = requested_windows[0]
+    assert end - start == timedelta(hours=3)
 
 
 @pytest.mark.asyncio
