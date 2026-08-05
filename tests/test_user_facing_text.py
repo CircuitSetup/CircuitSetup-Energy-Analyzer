@@ -8218,6 +8218,16 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for expected in (
+        "Review recurring loads",
+        "Known-load masking is applied only to mains sources",
+        "pure mixed",
+        "primary appliance plus mixed loads",
+        "reference sensors",
+        "measured source power",
+    ):
+        assert expected.lower() in readme_text.lower()
+
+    for expected in (
         "NILM workspace can also pair compatible on/off edges",
         "Review NILM Assignments",
         "Mains & NILM",
