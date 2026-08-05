@@ -729,7 +729,10 @@ def compact_completed_core_days(
             and not episode.excluded_from_baseline
         ):
             by_day[(_comparison_key(episode), day)].append(episode)
-        else:
+        elif not _meets_minimum(
+            episode.outdoor_temperature_minutes,
+            episode.active_minutes,
+        ):
             excluded_dates.update(
                 day + timedelta(days=offset)
                 for offset in range(max(0, (end_day - day).days) + 1)

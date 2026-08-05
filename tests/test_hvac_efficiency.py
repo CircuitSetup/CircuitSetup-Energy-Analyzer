@@ -949,7 +949,7 @@ def test_compaction_rotates_weather_outage_out_of_reference_window() -> None:
     assert evaluation.status == "ready"
 
 
-def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
+def test_incomplete_same_mode_call_does_not_erase_qualifying_core_day() -> None:
     calls = [
         replace(
             _core_day_episode(
@@ -973,6 +973,42 @@ def test_incomplete_same_mode_call_disqualifies_core_day() -> None:
 
     compacted = compact_completed_core_days(
         [*calls, incomplete],
+        time_zone="UTC",
+        current_date=(START + timedelta(days=1)).date(),
+        retention_days=45,
+    )
+
+    assert len(compacted) == 1
+    assert compacted[0].episode_kind == "core_day"
+    assert compacted[0].active_minutes == 40.0
+
+
+def test_incomplete_weather_marker_still_disqualifies_core_day() -> None:
+    calls = [
+        replace(
+            _core_day_episode(
+                0,
+                outdoor_temperature_f=90.0,
+                runtime_minutes=10.0,
+                episode_kind="thermostat_call",
+            ),
+            started_at=START + timedelta(hours=hour),
+            ended_at=START + timedelta(hours=hour, minutes=10),
+        )
+        for hour in (0, 2, 4, 6)
+    ]
+    missing_weather = replace(
+        calls[-1],
+        started_at=START + timedelta(hours=8),
+        ended_at=START + timedelta(hours=8, minutes=10),
+        complete=False,
+        excluded_from_baseline=True,
+        outdoor_temperature_f=None,
+        outdoor_temperature_minutes=0.0,
+    )
+
+    compacted = compact_completed_core_days(
+        [*calls, missing_weather],
         time_zone="UTC",
         current_date=(START + timedelta(days=1)).date(),
         retention_days=45,
@@ -1007,7 +1043,7 @@ def test_compaction_bounds_multiple_equipment_contexts_per_stream() -> None:
     }
 
 
-def test_cross_midnight_call_disqualifies_every_touched_date() -> None:
+def test_cross_midnight_call_does_not_erase_qualifying_core_day() -> None:
     ending_day_calls = [
         replace(
             _core_day_episode(
@@ -1037,4 +1073,6 @@ def test_cross_midnight_call_disqualifies_every_touched_date() -> None:
         retention_days=45,
     )
 
-    assert compacted == []
+    assert len(compacted) == 1
+    assert compacted[0].episode_kind == "core_day"
+    assert compacted[0].active_minutes == 40.0
