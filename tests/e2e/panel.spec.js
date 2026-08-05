@@ -7434,8 +7434,8 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
     const payload = structuredClone(apiPayload(url.pathname));
     payload.history = {
       ...payload.history,
-      start: "2026-07-13T12:00:00Z",
-      end: "2026-07-13T18:00:00Z",
+      start: "2026-07-14T14:00:00Z",
+      end: "2026-07-14T20:00:00Z",
       hours: 6,
       max_hours: 24,
       entities: ["sensor.mains_power"],

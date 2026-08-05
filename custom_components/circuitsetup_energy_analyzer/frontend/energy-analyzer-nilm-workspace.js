@@ -1610,10 +1610,9 @@ export function createNilmWorkspaceMethods({
 
   _nilmWorkspaceFocusedHistoryRequest(history, window) {
     const historyEnd = Date.parse(history.end || "");
-    const end = Math.max(
-      Number.isFinite(historyEnd) ? historyEnd : Date.now(),
-      window.end,
-    );
+    const end = Number.isFinite(window.end)
+      ? window.end
+      : Number.isFinite(historyEnd) ? historyEnd : Date.now();
     const maxHours = Number(history.max_hours);
     const neededHours = Math.max(
       1,

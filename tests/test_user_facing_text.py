@@ -3198,7 +3198,7 @@ def test_focused_nilm_history_request_contracts() -> None:
       const failed = panel._nilmWorkspaceHistoryFailedRequest;
       assert.deepEqual(
         [failed.hours, failed.window.start, failed.window.end],
-        [3, window.start, window.end],
+        [2, window.start, window.end],
       );
       await listeners.click();
       assert.equal(requests.length, 2);
@@ -3206,7 +3206,7 @@ def test_focused_nilm_history_request_contracts() -> None:
         [requests[0].apiPath, requests[0].fetchPath],
         [requests[1].apiPath, requests[1].fetchPath],
       );
-      assert.match(requests[1].apiPath, /hours=3/);
+      assert.match(requests[1].apiPath, /hours=2/);
       assert.deepEqual(
         [panel._nilmWorkspaceHistorySeries, panel._nilmWorkspaceHistoryError,
           panel._nilmWorkspaceHistoryFailedRequest, panel._nilmWorkspaceError,
@@ -7427,7 +7427,7 @@ if (missesSession) {
   const graphWindow = JSON.stringify(panel._nilmGraphWindow);
   throw new Error(`expected graph window to include session: ${graphWindow}`);
 }
-if (!requests[0] || !/hours=3/.test(requests[0].apiPath)) {
+if (!requests[0] || !/hours=1/.test(requests[0].apiPath)) {
   const requestsJson = JSON.stringify(requests);
   throw new Error(`expected Show on Graph to reload history: ${requestsJson}`);
 }
