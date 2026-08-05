@@ -179,6 +179,33 @@ def test_notification_id_for_alert_uses_nilm_notification_key() -> None:
     assert notification_id_for_alert(first) != notification_id_for_alert(second)
 
 
+def test_nilm_finished_alert_links_to_its_response_view() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_evidence_path,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 8, 5, 12, 30, tzinfo=UTC),
+        circuit_id="hvac_2",
+        severity=Severity.INFO,
+        message="Condensate Pump 2: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        features={
+            "assignment_id": "assignment-condensate-pump-2",
+            "entry_id": "entry-1",
+            "mains_circuit_id": "hvac_2",
+            "notification_key": "assignment-condensate-pump-2:session-1",
+        },
+    )
+
+    path = alert_evidence_path(alert)
+
+    assert "alert_id=" in path
+    assert "assignment_id=assignment-condensate-pump-2" in path
+    assert "nilm_workspace=" not in path
+    assert "appliance_detail=" not in path
+
+
 def test_alert_notification_message_ends_with_one_evidence_link() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_evidence_path,

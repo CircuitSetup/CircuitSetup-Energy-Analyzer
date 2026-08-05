@@ -1289,6 +1289,7 @@ def _payload_for_alert(
                 config=config,
                 alert_id=detail["alert_id"],
                 circuit_id=alert.circuit_id,
+                alert=alert,
             ),
             "setting_recommendations": _setting_recommendations_for_circuit(
                 coordinator,
@@ -1343,34 +1344,54 @@ def _actions_for_context(
     config: CircuitConfig | None,
     alert_id: Any,
     circuit_id: str | None,
+    alert: AlertEvidence | None = None,
 ) -> dict[str, dict[str, Any]]:
     actions: dict[str, dict[str, Any]] = {}
     if isinstance(alert_id, str) and alert_id:
         alert_data = {ATTR_ALERT_ID: alert_id}
-        actions.update(
-            {
-                "acknowledge": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_ACKNOWLEDGE_ALERT,
-                    "data": alert_data,
-                },
-                "mark_expected": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_MARK_ALERT_EXPECTED,
-                    "data": alert_data,
-                },
-                "mark_confirmed": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_MARK_ALERT_CONFIRMED,
-                    "data": alert_data,
-                },
-                "mark_unhelpful": {
-                    "domain": DOMAIN,
-                    "service": SERVICE_MARK_ALERT_UNHELPFUL,
-                    "data": alert_data,
-                },
-            }
-        )
+        actions["acknowledge"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_ACKNOWLEDGE_ALERT,
+            "data": alert_data,
+        }
+        if (
+            alert is not None
+            and _canonical_feature_for_alert(alert) == "nilm_appliance_finished"
+        ):
+            actions.update(
+                {
+                    "mark_nilm_appliance_correct": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_MARK_NILM_APPLIANCE_CORRECT,
+                        "data": alert_data,
+                    },
+                    "mark_nilm_appliance_wrong": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_MARK_NILM_APPLIANCE_WRONG,
+                        "data": alert_data,
+                    },
+                }
+            )
+        else:
+            actions.update(
+                {
+                    "mark_expected": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_MARK_ALERT_EXPECTED,
+                        "data": alert_data,
+                    },
+                    "mark_confirmed": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_MARK_ALERT_CONFIRMED,
+                        "data": alert_data,
+                    },
+                    "mark_unhelpful": {
+                        "domain": DOMAIN,
+                        "service": SERVICE_MARK_ALERT_UNHELPFUL,
+                        "data": alert_data,
+                    },
+                }
+            )
 
     if circuit_id:
         circuit_data = {ATTR_CIRCUIT_ID: circuit_id}

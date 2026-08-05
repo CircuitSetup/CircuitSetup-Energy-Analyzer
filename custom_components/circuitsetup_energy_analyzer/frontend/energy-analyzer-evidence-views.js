@@ -104,6 +104,8 @@ export function createEvidenceViewMethods({
       mark_expected: "messages.marked_expected",
       mark_confirmed: "messages.marked_confirmed",
       mark_unhelpful: "messages.marked_unhelpful",
+      mark_nilm_appliance_correct: "messages.confirmed_estimated_run",
+      mark_nilm_appliance_wrong: "messages.rejected_estimated_run",
       pause_alerts: "messages.alert_pause_updated",
       relearn_baseline: "messages.baseline_relearn_requested",
       mark_circuit_mixed: "messages.circuit_marked_mixed",
@@ -185,22 +187,29 @@ export function createEvidenceViewMethods({
 
   _renderAlertResponse() {
     const actions = (this._payload && this._payload.actions) || {};
-    const choices = [
+    const choices = actions.mark_nilm_appliance_correct
+      ? [
+        ["acknowledge", "mdi:check", "actions.labels.dismiss", "actions.helpers.dismiss"],
+        ["mark_nilm_appliance_correct", "mdi:check-decagram", "actions.labels.confirm_estimated_run", "actions.helpers.confirm_estimated_run"],
+        ["mark_nilm_appliance_wrong", "mdi:close-circle-outline", "actions.labels.not_this_appliance", "actions.helpers.not_this_appliance"],
+      ]
+      : [
       ["acknowledge", "mdi:check", "actions.labels.dismiss", "actions.helpers.dismiss"],
       ["mark_expected", "mdi:check-decagram", "actions.labels.mark_expected", "actions.helpers.mark_expected"],
       ["mark_confirmed", "mdi:alert-circle-check-outline", "actions.labels.confirm_issue", "actions.helpers.mark_confirmed"],
       ["mark_unhelpful", "mdi:message-alert-outline", "actions.labels.not_helpful", "actions.helpers.mark_unhelpful"],
-    ].filter(([key]) => actions[key]);
-    if (!choices.length) {
+      ];
+    const availableChoices = choices.filter(([key]) => actions[key]);
+    if (!availableChoices.length) {
       return "";
     }
-    const busy = choices.some(([key]) => this._busyAction === key);
+    const busy = availableChoices.some(([key]) => this._busyAction === key);
     return `<section class="evidence-section response-section section-surface">
       <fieldset class="decision-group">
         <legend>${this._escape(this._panelText("actions.groups.respond_title"))}</legend>
         <p class="muted">${this._escape(this._panelText("actions.groups.respond_description"))}</p>
         <div class="decision-tiles">
-          ${choices.map(([key, icon, label, helper]) => `<label class="decision-tile"><input type="radio" name="alert_decision" value="${key}" data-alert-decision ${this._alertDecision === key ? "checked" : ""} ${busy ? "disabled" : ""}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(this._panelText(label))}</strong><small>${this._escape(this._panelText(helper))}</small></span></label>`).join("")}
+          ${availableChoices.map(([key, icon, label, helper]) => `<label class="decision-tile"><input type="radio" name="alert_decision" value="${key}" data-alert-decision ${this._alertDecision === key ? "checked" : ""} ${busy ? "disabled" : ""}><ha-icon icon="${icon}"></ha-icon><span><strong>${this._escape(this._panelText(label))}</strong><small>${this._escape(this._panelText(helper))}</small></span></label>`).join("")}
         </div>
       </fieldset>
       <button type="button" id="apply_alert_decision" ${this._alertDecision && !busy ? "" : "disabled"}>${this._escape(this._panelText("actions.labels.apply"))}</button>

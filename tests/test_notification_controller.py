@@ -25,6 +25,41 @@ from custom_components.circuitsetup_energy_analyzer.notifications import (
 )
 
 
+def test_nilm_finished_notifications_respect_the_default_opt_out() -> None:
+    """Do not turn on routine NILM completion notifications implicitly."""
+    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
+        current_time=lambda: now,
+        store_data=SimpleNamespace(
+            appliance_notification_preferences={},
+            notification_delivery_state={},
+            settings_recommendation_notification_episode_key=(),
+        ),
+    )
+    controller = notification_controller.NotificationController(coordinator)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="hvac_2",
+        severity=Severity.INFO,
+        message="Condensate Pump 2: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        features={
+            "source_type": "nilm_estimate",
+            "appliance_key": "nilm:condensate-pump-2",
+            "notification_type": "finished",
+            "confidence": 1.0,
+        },
+    )
+
+    decision, appliance_key, category = controller._delivery_decision(alert)
+
+    assert decision.action == "suppress"
+    assert decision.reason == "category_disabled"
+    assert appliance_key == "nilm:condensate-pump-2"
+    assert category == "finished_running"
+
+
 @pytest.mark.asyncio
 async def test_dismiss_circuit_alerts_prunes_delivery_queues(monkeypatch) -> None:
     now = datetime(2026, 7, 31, tzinfo=UTC)

@@ -2783,6 +2783,28 @@ def test_alert_decision_render_contracts() -> None:
         assert.ok(!html.includes(`id="${duplicate}"`));
       }
     }
+    name = "test_nilm_finished_alert_uses_completion_decisions_and_overrides_workspace_route";
+    {
+      const panel = makePanel({
+        _payload: {
+          actions: {
+            acknowledge: {},
+            mark_nilm_appliance_correct: {},
+            mark_nilm_appliance_wrong: {},
+          },
+        },
+      });
+      const html = panel._renderAlertResponse();
+      for (const expected of [
+        'value="acknowledge"',
+        'value="mark_nilm_appliance_correct"',
+        'value="mark_nilm_appliance_wrong"',
+      ]) assert.ok(html.includes(expected), expected);
+      assert.ok(!html.includes('value="mark_expected"'));
+      context.window.location.search = "?alert_id=alert-1&nilm_workspace=1&appliance_detail=1";
+      assert.equal(panel._routeRequestsApplianceDetail(), false);
+      assert.equal(panel._routeRequestsNilmWorkspace(), false);
+    }
     name = "test_alert_decision_radio_enables_apply_and_feedback_receives_focus";
     {
       const listeners = {};
