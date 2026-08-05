@@ -6415,7 +6415,10 @@ test("NILM assignment links authoritative state and separate power history", asy
     composed: true,
     detail: { value: "switch.pump" },
   })));
-  await powerPicker.evaluate((el) => el.dispatchEvent(new CustomEvent("value-changed", {
+  const renderedPowerPicker = details.locator('ha-entity-picker[data-nilm-reference-input="powerEntityId"]');
+  await expect.poll(() => renderedPowerPicker.evaluate((el) => el.includeEntities)).toEqual(["sensor.pump_power"]);
+  await expect.poll(() => renderedPowerPicker.evaluate((el) => el.value)).toBe("");
+  await renderedPowerPicker.evaluate((el) => el.dispatchEvent(new CustomEvent("value-changed", {
     bubbles: true,
     composed: true,
     detail: { value: "sensor.pump_power" },
