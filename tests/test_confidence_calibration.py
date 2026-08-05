@@ -831,10 +831,11 @@ def test_overlapping_unknown_load_fixture_reconstructs_nilm_sessions() -> None:
     result = replay_fixture_processors(fixture)
     metrics = assert_fixture_expectations(fixture, result)
     sessions = result.store_data.nilm_session_history_by_circuit["mains"]
-    overlapping_sessions = [
+    simultaneous_sessions = [
         session
         for session in sessions
-        if session.get("end") is not None and session.get("overlap_count") == 1
+        if session.get("end") is not None
+        and round(float(session["median_power_w"]) / 50.0) * 50 in {450, 800}
     ]
 
     assert len(result.nilm_signatures) >= 4
@@ -846,10 +847,11 @@ def test_overlapping_unknown_load_fixture_reconstructs_nilm_sessions() -> None:
         450,
         800,
     }
-    assert {
-        round(float(session["median_power_w"]) / 50.0) * 50
-        for session in overlapping_sessions
-    } >= {450, 800}
+    assert {session["signature_fingerprint"] for session in simultaneous_sessions} == {
+        "direction=on|watts=400-500|var=unknown|va=400-500|pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown",
+        "direction=on|watts=800-900|var=unknown|va=800-900|pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown",
+    }
+    assert {session["overlap_count"] for session in simultaneous_sessions} == {0}
     assert result.alerts == []
     assert metrics.false_positive_alerts == 0
 
