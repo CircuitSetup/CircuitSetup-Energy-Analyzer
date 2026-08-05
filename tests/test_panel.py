@@ -6604,6 +6604,32 @@ async def test_nilm_workspace_history_invalid_target_uses_hours_fallback(
     assert end - start == timedelta(hours=3)
 
 
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ("0001-01-01T00:00:00+14:00", "0001-01-02T00:00:00+14:00"),
+        ("9999-12-30T23:59:59-14:00", "9999-12-31T23:59:59-14:00"),
+    ],
+)
+def test_nilm_workspace_history_extreme_offset_uses_hours_fallback(
+    start: str,
+    end: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_history_window,
+    )
+
+    hours, start_at, end_at, targeted = _nilm_workspace_history_window(
+        "3",
+        start=start,
+        end=end,
+    )
+
+    assert targeted is False
+    assert hours == 3
+    assert end_at - start_at == timedelta(hours=3)
+
+
 @pytest.mark.asyncio
 async def test_nilm_workspace_history_uses_live_real_power_unit(
     monkeypatch,

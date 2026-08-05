@@ -1662,6 +1662,7 @@ export class PanelShellMethods {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-open-interval-editor]")) {
       button.addEventListener("click", () => {
+        if (!this._nilmIntervalEditorOpen) this._snapshotNilmIntervalGraph();
         this._nilmIntervalEditorOpen = true;
         if (!this._nilmIntervalDraftItems().length) {
           this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();

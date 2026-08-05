@@ -2464,9 +2464,17 @@ def _nilm_workspace_history_window(
     try:
         start_at = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
         end_at = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-        if start_at.tzinfo is None or end_at.tzinfo is None or end_at <= start_at:
+        if start_at.tzinfo is None or end_at.tzinfo is None:
             raise ValueError
-    except (TypeError, ValueError):
+        start_at = start_at.astimezone(UTC)
+        end_at = end_at.astimezone(UTC)
+        if end_at <= start_at:
+            raise ValueError
+        maximum_window = timedelta(hours=MAX_NILM_WORKSPACE_HISTORY_HOURS)
+        if end_at - start_at > maximum_window:
+            start_at = end_at - maximum_window
+        requested_hours = (end_at - start_at).total_seconds() / 3600
+    except (TypeError, ValueError, OverflowError):
         requested_hours = _bounded_float(
             hours,
             default=DEFAULT_NILM_WORKSPACE_HISTORY_HOURS,
@@ -2475,12 +2483,6 @@ def _nilm_workspace_history_window(
         end_at = datetime.now(UTC)
         return requested_hours, end_at - timedelta(hours=requested_hours), end_at, False
 
-    end_at = end_at.astimezone(UTC)
-    start_at = start_at.astimezone(UTC)
-    maximum_window = timedelta(hours=MAX_NILM_WORKSPACE_HISTORY_HOURS)
-    if end_at - start_at > maximum_window:
-        start_at = end_at - maximum_window
-    requested_hours = (end_at - start_at).total_seconds() / 3600
     return requested_hours, start_at, end_at, True
 
 

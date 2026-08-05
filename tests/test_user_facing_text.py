@@ -6571,18 +6571,34 @@ def test_nilm_interval_action_contracts() -> None:
       const start = "2026-06-24T18:12:00Z";
       const end = "2026-06-24T19:03:00Z";
       let renders = 0;
-      const panel = makePanel({ _nilmWorkspace: makeWorkspace({ sessions: [{ start, end }] }) });
+      let requests = 0;
+      const panel = makePanel({
+        _evidenceRequestId: 1,
+        _nilmWorkspace: makeWorkspace({
+          history: {
+            start: "2026-06-24T17:00:00Z", end: "2026-06-24T20:00:00Z",
+            max_hours: 24,
+            api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=3",
+            fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=3",
+          },
+          sessions: [{ start, end }],
+        }),
+      });
+      panel._loadedRouteKey = panel._routeKey();
       panel._render = () => { renders += 1; };
       panel.shadowRoot.querySelector = () => null;
+      panel._requestJson = async () => { requests += 1; return []; };
       await panel._selectNilmSessionIntervalByIndex(0);
       assert.deepEqual(
         [panel._nilmLabelIntervalDraft.intervals[0].start,
           panel._nilmLabelIntervalDraft.intervals[0].end,
-          panel._nilmIntervalEditorOpen, panel._lastActionMessage, renders],
+          panel._nilmIntervalEditorOpen, panel._lastActionMessage],
         [panel._datetimeLocalFromMillis(Date.parse(start)),
           panel._datetimeLocalFromMillis(Date.parse(end)), true,
-          "Loaded NILM session interval.", 1],
+          "Loaded NILM session interval."],
       );
+      assert.equal(requests, 1);
+      assert.ok(renders > 0);
     }
 
     name = "test_nilm_label_interval_form_guides_graph_selection";
@@ -7439,7 +7455,12 @@ panel._render = () => {};
 panel._requestJson = async () => [];
 panel._nilmWorkspace = {
   status: "ok",
-  history: {},
+  history: {
+    start: "2026-08-04T00:00:00Z", end: "2026-08-04T04:00:00Z",
+    max_hours: 24,
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=4",
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=4",
+  },
   sessions: [
     { session_id: "older", signature_fingerprint: "blower",
       start: "2026-08-04T01:00:00Z", end: "2026-08-04T01:05:00Z",
