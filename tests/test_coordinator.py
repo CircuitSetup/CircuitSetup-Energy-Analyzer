@@ -12883,7 +12883,20 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
             options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
             now_fn=lambda: states.time,
         )
-        for seconds, watts in ((0, 100), (30, 420), (60, 420), (120, 100)):
+        for seconds, watts in (
+            (0, 100),
+            (30, 420),
+            (60, 420),
+            (120, 100),
+            (150, 100),
+            (180, 420),
+            (210, 420),
+            (270, 100),
+            (300, 100),
+            (330, 420),
+            (360, 420),
+            (420, 100),
+        ):
             states.time = now + timedelta(seconds=seconds)
             states.watts = watts
             await coordinator.async_process_update()
@@ -12892,6 +12905,7 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
                 (edge.timestamp.isoformat(), edge.delta_w, edge.direction)
                 for edge in coordinator._nilm_unmatched_edges["hvac_1"]
             ],
+            "signatures": coordinator.store_data.nilm_signatures.get("hvac_1", []),
             "sessions": coordinator.store_data.nilm_session_history_by_circuit.get(
                 "hvac_1", []
             ),
@@ -12906,7 +12920,11 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
     without_known = await run_primary_mixed_sequence([])
     with_known = await run_primary_mixed_sequence(["fridge"])
 
+    assert without_known["unmatched_edges"]
+    assert without_known["signatures"]
+    assert without_known["signatures"][0]["confidence"] > 0.0
     assert with_known["unmatched_edges"] == without_known["unmatched_edges"]
+    assert with_known["signatures"] == without_known["signatures"]
     assert with_known["sessions"] == without_known["sessions"]
     assert with_known["reconciliation"] == without_known["reconciliation"]
     assert with_known["component_energy"] == without_known["component_energy"]
