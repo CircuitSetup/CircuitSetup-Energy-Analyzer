@@ -1503,12 +1503,6 @@ export class PanelShellMethods {
     this._listen("[data-retry-nilm-workspace]", () => (
       this._loadNilmWorkspace(this._evidenceRequestId, this._loadedRouteKey || this._routeKey())
     ));
-    const nilmSecondaryDetails = this.shadowRoot.querySelector("[data-nilm-secondary-details]");
-    if (nilmSecondaryDetails) {
-      nilmSecondaryDetails.addEventListener("toggle", () => {
-        this._nilmSecondaryDetailsOpen = nilmSecondaryDetails.open;
-      });
-    }
     this._listen("[data-nilm-sensitivity-action]", () => this._applyNilmSensitivity());
     for (const select of this.shadowRoot.querySelectorAll("[data-nilm-source-picker]")) {
       select.addEventListener("change", () => this._navigate(select.value));
@@ -1659,7 +1653,7 @@ export class PanelShellMethods {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
     }
-    for (const input of this.shadowRoot.querySelectorAll("[data-nilm-reference-input]")) {
+    for (const input of this.shadowRoot.querySelectorAll('[data-nilm-reference-input]:not(ha-entity-picker)')) {
       const remember = () => this._rememberNilmReferenceDraft(input);
       input.addEventListener("input", remember);
       input.addEventListener("change", () => {
@@ -1667,6 +1661,14 @@ export class PanelShellMethods {
         if (input.dataset.nilmReferenceInput === "stateEntityId") this._render();
       });
     }
+    for (const picker of this.shadowRoot.querySelectorAll("ha-entity-picker[data-nilm-reference-input]")) {
+      picker.addEventListener("value-changed", (event) => {
+        picker.value = event.detail.value || "";
+        this._rememberNilmReferenceDraft(picker);
+        if (picker.dataset.nilmReferenceInput === "stateEntityId") this._render();
+      });
+    }
+    this._configureNilmReferencePickers();
     for (const details of this.shadowRoot.querySelectorAll("[data-nilm-reference-details]")) {
       details.addEventListener("toggle", () => {
         const draft = this._nilmReferenceDrafts.get(details.dataset.nilmReferenceKey);

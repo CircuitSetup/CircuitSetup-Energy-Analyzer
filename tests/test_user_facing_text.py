@@ -3813,12 +3813,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const lanes = selected.indexOf('role="tablist"');
       assert.ok(graph >= 0 && graph < editor && editor < lanes);
       const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
-      assert.ok(secondary.includes("data-nilm-secondary-details"));
-      assert.ok(secondary.includes("<details"));
+      assert.ok(secondary.includes("data-nilm-secondary-collections"));
+      assert.ok(secondary.includes("<section"));
       assert.ok(!secondary.includes('class="nilm-interval-form"'));
     }
 
-    name = "test_nilm_secondary_collections_use_one_disclosure";
+    name = "test_nilm_secondary_collections_are_always_visible";
     {
       const panel = makePanel();
       const html = panel._renderNilmSecondaryCollections(makeWorkspace({ sessions: [
@@ -3827,7 +3827,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         { session_id: "unassigned", start: "RAW_SESSION",
           actions: { assign: {} } },
       ] }));
-      assert.equal((html.match(/<details/g) || []).length, 1);
+      assert.equal((html.match(/<details/g) || []).length, 0);
       for (const expected of [
         "Sessions, validation, and technical details",
         "Estimated Appliances",
@@ -3839,7 +3839,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       }
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
-      assert.ok(!html.includes("OWNED_SESSION"));
+      assert.ok(html.includes("OWNED_SESSION"));
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
@@ -3866,6 +3866,8 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const sessions = Array.from({ length: 6 }, (_, index) => ({
         session_id: `session-${index + 1}`,
         assignment_id: "assignment-1",
+        start: "2026-06-24T18:12:00Z",
+        end: "2026-06-24T19:03:00Z",
         actions: { assign: {}, validate: {}, reject: {} },
       }));
       const workspace = makeWorkspace({
@@ -6285,7 +6287,10 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   let html = panel._renderNilmReferenceSensors(item, 0);
   assert.ok(html.includes("Reference sensors"));
   assert.ok(!html.includes('value="sensor.pump_power" selected'));
-  assert.ok(html.includes("Pump power (suggested)"));
+  assert.ok(html.includes("<ha-entity-picker"));
+  assert.ok(html.includes('data-nilm-reference-input="stateEntityId"'));
+  assert.ok(html.includes('data-nilm-reference-input="powerEntityId"'));
+  assert.ok(!html.includes("<option"));
   assert.ok(!html.includes('type="number"'));
 
   panel._nilmReferenceDrafts.set("pump", {
@@ -6298,7 +6303,7 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
     error: "",
   });
   html = panel._renderNilmReferenceSensors(item, 0);
-  assert.ok(html.includes('value="sensor.other_power" selected'));
+  assert.ok(!html.includes('value="sensor.other_power" selected'));
   assert.ok(html.includes('type="number"'));
   assert.ok(html.includes("<details open"));
 
@@ -7085,7 +7090,7 @@ def test_alert_and_nilm_sections_share_home_assistant_card_surfaces() -> None:
         'class="workspace-section nilm-interval-editor-section section-surface"',
         'class="nilm-review-list section-surface"',
         'class="nilm-review-inspector section-surface"',
-        'class="disclosure section-surface" data-nilm-secondary-details',
+        'class="workspace-section section-surface" data-nilm-secondary-collections',
     ):
         assert marker in asset
     assert (

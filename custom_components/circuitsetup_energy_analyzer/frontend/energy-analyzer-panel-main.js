@@ -210,7 +210,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmFocusedOccurrenceIndex = -1;
     this._nilmActiveLane = "needs_review";
     this._nilmSelectedReviewKey = "";
-    this._nilmSecondaryDetailsOpen = false;
     this._nilmGraphWindow = null;
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
@@ -300,7 +299,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._historyLoading = false;
       this._nilmActiveLane = "needs_review";
       this._nilmSelectedReviewKey = "";
-      this._nilmSecondaryDetailsOpen = false;
     }
     this._loadedRouteKey = routeKey;
     this._loading = true;

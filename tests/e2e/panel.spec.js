@@ -6401,8 +6401,25 @@ test("NILM assignment links authoritative state and separate power history", asy
   await panel.locator('[data-nilm-lane="assigned"]').click();
   const details = panel.locator("[data-nilm-reference-details]");
   await details.locator("summary").click();
-  await details.locator('[data-nilm-reference-input="stateEntityId"]').selectOption("switch.pump");
-  await details.locator('[data-nilm-reference-input="powerEntityId"]').selectOption("sensor.pump_power");
+  const statePicker = details.locator('ha-entity-picker[data-nilm-reference-input="stateEntityId"]');
+  const powerPicker = details.locator('ha-entity-picker[data-nilm-reference-input="powerEntityId"]');
+  await expect.poll(() => statePicker.evaluate((el) => el.includeEntities)).toEqual(["switch.pump"]);
+  await expect.poll(() => powerPicker.evaluate((el) => el.includeEntities)).toEqual(["sensor.pump_power"]);
+  const stateBox = await statePicker.boundingBox();
+  const powerBox = await powerPicker.boundingBox();
+  const startBox = await details.locator('[data-nilm-reference-input="start"]').boundingBox();
+  expect(powerBox.y).toBeGreaterThan(stateBox.y);
+  expect(startBox.y).toBeGreaterThan(powerBox.y);
+  await statePicker.evaluate((el) => el.dispatchEvent(new CustomEvent("value-changed", {
+    bubbles: true,
+    composed: true,
+    detail: { value: "switch.pump" },
+  })));
+  await powerPicker.evaluate((el) => el.dispatchEvent(new CustomEvent("value-changed", {
+    bubbles: true,
+    composed: true,
+    detail: { value: "sensor.pump_power" },
+  })));
   await details.locator('[data-nilm-reference-input="start"]').fill("2026-07-13T18:00");
   await details.locator('[data-nilm-reference-input="end"]').fill("2026-07-13T18:45");
   await details.locator('[data-nilm-reference-action="link_import"]').click();
@@ -7015,18 +7032,42 @@ test("alert responses and setting preview actions call their services", async ({
   ]);
 });
 
-test("NILM review supports decisions, validation, and interval labeling", async ({ page, isMobile }) => {
-  test.skip(isMobile, "Mobile route and keyboard coverage runs separately.");
-  await mockPanelApi(page);
+test("NILM review supports decisions, validation, and interval labeling", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.sessions.push({
+      session_id: "nilm-session-open",
+      assignment_id: "dishwasher",
+      display_label: "Dishwasher",
+      start: "2026-07-13T19:00:00Z",
+      end: null,
+      confidence: 0.82,
+      median_power_w: 900,
+      estimated_energy_kwh: null,
+    });
+    await route.fulfill({ json: payload });
+    return true;
+  });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await expect(panel.getByText("Suggested Settings", { exact: true })).toHaveCount(0);
+  await expect(panel.getByText("Applied Suggested Settings", { exact: true })).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-secondary-details]")).toHaveCount(0);
+  await expect(panel.getByRole("heading", { name: "Session Validation" })).toBeVisible();
+  await expect(panel.locator('[data-nilm-session-action="validate"]')).toBeVisible();
+  const card = panel.locator("[data-nilm-session-validation-card]").first();
+  await expect(card.locator("strong")).toContainText("Predicted");
+  await expect(card.locator("[data-nilm-session-range]")).toBeVisible();
+  const openCard = panel.locator('[data-nilm-session-validation-card][data-nilm-open="true"]');
+  await expect(openCard).toContainText("In progress");
+  await expect(openCard.locator("[data-nilm-session-action]")).toHaveCount(0);
+  await expect(openCard.locator("[data-nilm-session-interval-index]")).toHaveCount(0);
 
   await panel.locator('[data-nilm-decision][value="mark_expected"]').check();
   await panel.locator("[data-nilm-apply-decision]").click();
 
-  const secondary = panel.locator("[data-nilm-secondary-details]");
-  await secondary.locator("summary").click();
   await panel.locator('[data-nilm-session-action="validate"]').click();
-  await expect(secondary).toHaveJSProperty("open", true);
 
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();
@@ -7047,6 +7088,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     "set_circuit_sensitivity",
     "label_nilm_interval",
   ]);
+  await toHaveNoViolations(page);
 });
 
 test("assigned NILM intervals can be inspected and removed", async ({ page }) => {
@@ -7084,16 +7126,11 @@ test("NILM workspace explains lifecycle and model evidence on narrow layouts", a
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
   const evidence = panel.locator("[data-nilm-model-evidence]");
 
-  await expect(evidence).toContainText("Observed → Suggested → Assigned → Validated → Published");
-  await expect(evidence).toContainText("Source power is measured; component power and energy are estimated");
-  await expect(evidence).toContainText("Ambiguous edges remain unknown");
-  await expect(evidence).toContainText("Helper conflicts require review and are not resolved automatically");
   await expect(evidence).toContainText(
-    "Simultaneous transitions are separated only when one bounded component combination fits uniquely",
+    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
   );
-  await expect(evidence).toContainText("Source unavailable means estimates unavailable");
-  await expect(evidence).toContainText("suspended");
   await expect(evidence).toBeInViewport();
+  await toHaveNoViolations(page);
 });
 
 test("failed NILM request can be retried", async ({ page }) => {
