@@ -295,11 +295,11 @@
             "description": "The analyzer normally chooses these values from the appliance type. Change them only when the Running state does not match the appliance.",
             "data": {
               "reset_operating_detection_settings_to_defaults": "Reset Operating Detection To Defaults",
-              "operating_on_threshold_w": "Turn-On Power",
-              "operating_on_dwell_seconds": "Turn-On Confirmation Time",
-              "operating_off_threshold_w": "Turn-Off Power",
-              "operating_off_dwell_seconds": "Turn-Off Confirmation Time",
-              "operating_merge_gap_seconds": "Merge Short Interruptions"
+              "operating_on_threshold_w": "Turn-On Power (W)",
+              "operating_on_dwell_seconds": "Turn-On Confirmation Time (seconds)",
+              "operating_off_threshold_w": "Turn-Off Power (W)",
+              "operating_off_dwell_seconds": "Turn-Off Confirmation Time (seconds)",
+              "operating_merge_gap_seconds": "Merge Short Interruptions (seconds)"
             },
             "data_description": {
               "reset_operating_detection_settings_to_defaults": "Turn this on when saving to remove custom operating-detection thresholds, confirmation times, and short-gap merging for this circuit.",
