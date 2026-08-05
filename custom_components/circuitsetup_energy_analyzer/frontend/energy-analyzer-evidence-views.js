@@ -667,7 +667,14 @@ export function createEvidenceViewMethods({
       const visibleLabel = bandWidth >= 56 ? this._truncateNilmGraphLabel(label, Math.floor((bandWidth - 10) / 7)) : "";
       const title = this._panelTextFormat("chart.session_title", { label });
       const labelText = visibleLabel ? `<text class="nilm-session-label" x="${(left + 6).toFixed(1)}" y="${(padTop + 17).toFixed(1)}" data-nilm-session-label="${this._escape(label)}">${this._escape(visibleLabel)}</text>` : "";
-      return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${selectedAttr}${kindAttr}${draftAttr}${labelIntervalAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}</g>`;
+      const handles = session.band_kind === "draft" && session.selected
+        ? ["start", "end"].map((boundary) => {
+          const handleX = boundary === "start" ? left : right;
+          const value = boundary === "start" ? start : end;
+          return `<g class="nilm-boundary-handle" tabindex="0" role="slider" aria-orientation="horizontal" aria-label="${this._escape(this._panelText(`nilm_workspace.${boundary}_boundary`))}" aria-valuemin="${minTime}" aria-valuemax="${maxTime}" aria-valuenow="${value}" aria-valuetext="${this._escape(this._formatDateTime(new Date(value)))}" data-nilm-boundary-handle="${boundary}" data-nilm-draft-index="${session.draft_index}"><line class="nilm-boundary-handle-hit" x1="${handleX.toFixed(1)}" x2="${handleX.toFixed(1)}" y1="${padTop}" y2="${height - padBottom}"></line><line class="nilm-boundary-handle-line" x1="${handleX.toFixed(1)}" x2="${handleX.toFixed(1)}" y1="${padTop}" y2="${height - padBottom}"></line></g>`;
+        }).join("")
+        : "";
+      return `<g data-nilm-session-label="${this._escape(label)}"><rect class="nilm-session-band" x="${left.toFixed(1)}" y="${padTop}" width="${bandWidth.toFixed(1)}" height="${height - padTop - padBottom}" data-nilm-session-start="${this._escape(session.start || "")}" data-nilm-session-end="${this._escape(session.end || "")}"${confidenceAttr}${lowConfidenceAttr}${selectedAttr}${kindAttr}${draftAttr}${labelIntervalAttr}${confidenceStyle}><title>${this._escape(title)}${confidenceLabel}</title></rect>${labelText}${handles}</g>`;
     }).join("");
     const contextBands = (Array.isArray(alert.context_bands) ? alert.context_bands : []).map((band) => {
       const start = chartTime(band?.start);
@@ -692,6 +699,9 @@ export function createEvidenceViewMethods({
     const selectAttrs = alert.nilm_select_interval
       ? ` tabindex="0" data-nilm-chart-select="1"${edgeTimesAttr}`
       : "";
+    const chartRole = sessionItems.some(({ session }) => session.band_kind === "draft" && session.selected)
+      ? "group"
+      : "img";
     let ariaLabel = this._panelTextFormat("chart.accessible_summary", {
       series_count: series.length,
       point_count: allPoints.length,
@@ -713,7 +723,7 @@ export function createEvidenceViewMethods({
       <div class="chart-frame" data-chart-frame>
         ${this._historyLink(historyEntities, new Date(minTime).toISOString(), new Date(maxTime).toISOString(), true)}
         ${zoomWindow && !this._hideChartResetControl ? `<ha-icon-button data-chart-reset="${this._escape(zoomKey)}" aria-label="${this._escape(this._panelText("chart.reset_zoom"))}" title="${this._escape(this._panelText("chart.reset_zoom"))}" style="align-items:center;cursor:pointer;display:inline-flex;height:40px;justify-content:center;position:absolute;right:48px;top:8px;width:40px;z-index:1"><ha-icon icon="mdi:restore"></ha-icon></ha-icon-button>` : ""}
-        <svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
+        <svg class="chart" viewBox="0 0 ${width} ${height}" role="${chartRole}" aria-label="${this._escape(ariaLabel)}"${rightAxis ? ` data-chart-right-axis="${this._escape(alert.right_y_axis_label)}"` : ""}${chartAttrs}${selectAttrs}>
           <line class="axis" x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}"></line>
           <line class="axis" x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}"></line>
           ${rightAxis ? `<line class="axis" x1="${width - padRight}" y1="${padTop}" x2="${width - padRight}" y2="${height - padBottom}"></line>` : ""}

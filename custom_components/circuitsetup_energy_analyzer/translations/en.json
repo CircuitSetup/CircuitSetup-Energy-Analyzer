@@ -1497,6 +1497,7 @@
         "showing_all_nilm_sessions": "Showing all NILM graph sessions.",
         "showing_selected_signature": "Showing graph sessions for selected signature.",
         "no_paired_sessions": "No paired sessions matched this signature yet.",
+        "no_completed_assignment_interval": "No completed interval is available for this assignment yet.",
         "updated_nilm_graph_window": "Updated NILM graph window.",
         "weekly_digest_settings_saved": "Weekly digest settings saved."
       },
@@ -1929,6 +1930,8 @@
         "editing_interval": "Editing interval {number}",
         "start": "Start",
         "end": "End",
+        "start_boundary": "Start boundary",
+        "end_boundary": "End boundary",
         "label": "Label",
         "label_interval": "Label appliance interval",
         "interval_energy_preview": "Estimated energy {energy} kWh over {duration} minutes from {source}.",

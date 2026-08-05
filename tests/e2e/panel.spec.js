@@ -177,6 +177,13 @@ async function toHaveNoViolations(page) {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
+async function datetimeLocalValue(page, isoValue) {
+  return page.evaluate((value) => {
+    const date = new Date(value);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  }, isoValue);
+}
+
 test("HVAC associations render ready and learning thermostat gauges", async ({ page }) => {
   await mockPanelApi(page);
   const card = await openDashboardCard(
@@ -5857,6 +5864,9 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T15:55:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T16:00:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T16:30:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T16:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T17:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:20:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
       ]] });
@@ -5864,6 +5874,18 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
     }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
+    payload.assignments[0].signature_fingerprints = ["signature-1", "signature-2"];
+    payload.sessions.push({
+      session_id: "nilm-session-ambiguous",
+      signature_fingerprint: "signature-2",
+      assignment_id: "dishwasher",
+      display_label: "Dishwasher",
+      start: "2026-07-13T19:00:00Z",
+      end: "2026-07-13T19:30:00Z",
+      ambiguous: true,
+    });
+    payload.label_intervals[0].start = "2026-07-13T17:00:00Z";
+    payload.label_intervals[0].end = "2026-07-13T17:20:00Z";
     payload.history = {
       ...payload.history,
       entities: ["sensor.mains_power"],
@@ -5892,7 +5914,33 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await expect(panel.locator(".nilm-edge-marker")).toHaveCount(0);
   await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
-  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+  await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"]')).toHaveAttribute(
+    "data-nilm-session-start",
+    "2026-07-13T18:00:00Z",
+  );
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.__panel._nilmWorkspace.sessions = window.__panel._nilmWorkspace.sessions.map((session) => ({
+      ...session,
+      ambiguous: true,
+    }));
+    window.__panel._render();
+  });
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"]')).toHaveAttribute(
+    "data-nilm-session-start",
+    "2026-07-13T17:00:00Z",
+  );
+
+  const graphWindow = await page.evaluate(() => ({ ...window.__panel._nilmGraphWindow }));
+  await page.evaluate(() => {
+    window.__panel._nilmWorkspace.label_intervals = [];
+    window.__panel._render();
+  });
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await expect(panel.getByText("No completed interval is available for this assignment yet.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmGraphWindow)).toEqual(graphWindow);
 });
 
 test("NILM workspace renders kW history as watts", async ({ page }) => {
@@ -7096,10 +7144,36 @@ test("NILM review supports decisions, validation, and interval labeling", async 
 
 test("assigned NILM intervals can be inspected and removed", async ({ page }) => {
   let workspaceLoads = 0;
+  const historyWindows = [];
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      historyWindows.push({
+        start: url.searchParams.get("start"),
+        end: url.searchParams.get("end"),
+      });
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:30:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "950", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T19:00:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     workspaceLoads += 1;
     const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      start: "2026-07-13T12:00:00Z",
+      end: "2026-07-13T18:00:00Z",
+      hours: 6,
+      max_hours: 24,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=6",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=6",
+    };
     if (workspaceLoads > 1) {
       payload.label_intervals = [];
       payload.assignments[0].label_interval_ids = [];
@@ -7112,8 +7186,38 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await panel.locator('[data-nilm-lane="assigned"]').click();
   const savedInterval = panel.locator("[data-nilm-assigned-intervals] .metric");
   await expect(savedInterval).toContainText("Labeled interval");
+  const initialHistoryRequests = historyWindows.length;
   await savedInterval.locator('[data-nilm-label-interval-action="adjust"]').click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await expect.poll(() => historyWindows.length).toBe(initialHistoryRequests + 1);
+  const adjustedWindow = historyWindows.at(-1);
+  expect(Date.parse(adjustedWindow.start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
+  expect(Date.parse(adjustedWindow.end)).toBeGreaterThanOrEqual(Date.parse("2026-07-13T18:50:00Z"));
+  const band = panel.locator('.nilm-session-band[data-nilm-band-kind="draft"]');
+  await expect(band).toHaveCount(1);
+  await expect(band).toHaveAttribute("data-nilm-selected", "true");
+
+  const originalX = await band.getAttribute("x");
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
+  await expect.poll(() => band.getAttribute("x")).not.toBe(originalX);
+
+  const beforeOutsideEdit = historyWindows.length;
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T17:40:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
+  await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit + 1);
+
+  const beforeInvalidEdit = historyWindows.length;
+  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T17:30:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="end"]').dispatchEvent("change");
+  await expect.poll(() => historyWindows.length).toBe(beforeInvalidEdit);
+  await expect(panel.locator('[data-nilm-label-interval-action="save"]')).toBeDisabled();
   await toHaveNoViolations(page);
 
   await panel.locator('[data-nilm-interval-editor] [data-nilm-label-interval-action="delete"]').click();
@@ -7121,6 +7225,65 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await expect(panel.locator("[data-nilm-assigned-intervals]")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1)?.service))
     .toBe("delete_nilm_label_interval");
+});
+
+test("NILM interval boundary handles support keyboard and pointer editing", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "930", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "920", last_changed: "2026-07-13T18:40:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:50:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      max_hours: 24,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
+
+  const startHandle = panel.locator('[data-nilm-boundary-handle="start"]');
+  const endHandle = panel.locator('[data-nilm-boundary-handle="end"]');
+  await expect(startHandle).toHaveAttribute("role", "slider");
+  await expect(startHandle).toHaveAttribute("tabindex", "0");
+  await expect(endHandle).toHaveAttribute("role", "slider");
+  await startHandle.focus();
+  await startHandle.press("ArrowRight");
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(
+    await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
+  );
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
+
+  const oldEnd = await panel.locator('[data-nilm-label-interval-input="end"]').inputValue();
+  const endBox = await endHandle.boundingBox();
+  expect(endBox).not.toBeNull();
+  await page.mouse.move(endBox.x + endBox.width / 2, endBox.y + endBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(endBox.x - 24, endBox.y + endBox.height / 2);
+  await page.mouse.up();
+  await expect(panel.locator('[data-nilm-label-interval-input="end"]')).not.toHaveValue(oldEnd);
+  const values = await panel.locator('[data-nilm-label-interval-input="start"], [data-nilm-label-interval-input="end"]').evaluateAll(
+    (inputs) => inputs.map((input) => input.value),
+  );
+  expect(Date.parse(values[1])).toBeGreaterThan(Date.parse(values[0]));
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
+  await panel.locator('[data-nilm-boundary-handle="end"]').focus();
+  await toHaveNoViolations(page);
 });
 
 test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {

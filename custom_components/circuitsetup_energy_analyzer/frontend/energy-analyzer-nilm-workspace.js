@@ -395,22 +395,10 @@ export function createNilmWorkspaceMethods({
         item.assignment_id === interval.assignment_id
         || (item.label_interval_ids || []).includes(interval.interval_id)
       ));
-      this._nilmLabelIntervalDraft = {
-        label: String(interval.label || interval.appliance_id || ""),
-        appliance_id: String(interval.appliance_id || ""),
-        appliance_profile: String((assignment && assignment.appliance_profile) || ""),
-        assignment_id: String(interval.assignment_id || assignment && assignment.assignment_id || ""),
-        intervals: [{
-          interval_id: String(interval.interval_id || ""),
-          start: this._datetimeLocalFromMillis(Date.parse(interval.start || "")),
-          end: this._datetimeLocalFromMillis(Date.parse(interval.end || "")),
-          observed_transition_w: interval.observed_transition_w ?? "",
-        }],
-      };
-      this._nilmActiveIntervalIndex = 0;
-      this._nilmIntervalEditorOpen = true;
-      this._lastActionMessage = this._panelText("messages.loaded_interval_adjustment");
-      this._render();
+      if (await this._loadNilmIntervalOnGraph(interval, { edit: true, assignment })) {
+        this._lastActionMessage = this._panelText("messages.loaded_interval_adjustment");
+        this._render();
+      }
       return;
     }
     const requests = [];
@@ -1188,6 +1176,7 @@ export function createNilmWorkspaceMethods({
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
     this._nilmActiveIntervalIndex = 0;
+    this._nilmFocusedInterval = null;
     this._clearNilmIntervalFeedback();
     this._render();
   }
@@ -1209,7 +1198,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _selectNilmSessionInterval(band) {
-    this._loadNilmSessionInterval({
+    return this._loadNilmSessionInterval({
       start: band && band.dataset.nilmSessionStart,
       end: band && band.dataset.nilmSessionEnd,
     });
@@ -1219,33 +1208,94 @@ export function createNilmWorkspaceMethods({
     const sessions = Array.isArray(this._nilmWorkspace && this._nilmWorkspace.sessions)
       ? this._nilmWorkspace.sessions
       : [];
-    this._loadNilmSessionInterval(sessions[index]);
+    return this._loadNilmSessionInterval(sessions[index]);
   }
 
-  _loadNilmSessionInterval(session) {
+  async _loadNilmSessionInterval(session) {
     const start = Date.parse(session && session.start || "");
     const end = Date.parse(session && session.end || "");
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-      return;
-    }
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
     const assignment = ((this._nilmWorkspace && this._nilmWorkspace.assignments) || [])
       .find((item) => item.assignment_id === session.assignment_id);
+    this._lastActionMessage = this._panelText("messages.loaded_nilm_session_interval");
+    return this._loadNilmIntervalOnGraph(session, { edit: true, assignment });
+  }
+
+  _setNilmIntervalDraft(interval, assignment = null) {
+    const start = Date.parse(interval && interval.start || "");
+    const end = Date.parse(interval && interval.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return false;
+    }
     this._nilmLabelIntervalDraft = {
       ...this._nilmLabelIntervalDraft,
-      label: session.display_label || assignment && assignment.display_name || this._nilmLabelIntervalDraft.label || "",
-      appliance_id: session.appliance_id || assignment && assignment.appliance_id || this._nilmLabelIntervalDraft.appliance_id || "",
+      label: interval.display_label || interval.label || assignment && assignment.display_name || this._nilmLabelIntervalDraft.label || "",
+      appliance_id: interval.appliance_id || assignment && assignment.appliance_id || this._nilmLabelIntervalDraft.appliance_id || "",
       appliance_profile: assignment && assignment.appliance_profile || this._nilmLabelIntervalDraft.appliance_profile || "",
-      assignment_id: session.assignment_id || "",
+      assignment_id: interval.assignment_id || assignment && assignment.assignment_id || "",
       intervals: [{
         start: this._datetimeLocalFromMillis(start),
         end: this._datetimeLocalFromMillis(end),
-        interval_id: "",
+        interval_id: interval.interval_id || "",
       }],
     };
     this._nilmActiveIntervalIndex = 0;
     this._nilmIntervalEditorOpen = true;
-    this._lastActionMessage = this._panelText("messages.loaded_nilm_session_interval");
+    return true;
+  }
+
+  async _loadNilmIntervalOnGraph(interval, options = {}) {
+    const start = Date.parse(interval && interval.start || "");
+    const end = Date.parse(interval && interval.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+    const padding = Math.max(5 * 60 * 1000, (end - start) * 0.2);
+    const targetWindow = { start: start - padding, end: end + padding };
+    if (options.edit) this._setNilmIntervalDraft(interval, options.assignment);
+    const loaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
+    if (loaded === null) return false;
+    this._nilmGraphWindow = targetWindow;
+    this._nilmFocusedInterval = { start, end };
     this._render();
+    if (options.scroll !== false) {
+      requestAnimationFrame(() => {
+        const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");
+        if (chart) chart.scrollIntoView({ block: "nearest" });
+      });
+    }
+    return true;
+  }
+
+  async _syncNilmIntervalFieldToGraph(index) {
+    const interval = this._nilmIntervalDraftItems()[index];
+    const start = Date.parse(interval && interval.start || "");
+    const end = Date.parse(interval && interval.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      this._render();
+      return;
+    }
+    const window = this._nilmGraphWindow;
+    if (!window || start < window.start || end > window.end) {
+      await this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: false });
+    } else {
+      this._nilmFocusedInterval = { start, end };
+      this._render();
+    }
+  }
+
+  _updateNilmDraftBoundary(index, field, millis) {
+    const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
+    const other = Date.parse(intervals[index] && intervals[index][field === "start" ? "end" : "start"] || "");
+    if (!Number.isFinite(millis) || !Number.isFinite(other)) return false;
+    if ((field === "start" && millis >= other) || (field === "end" && millis <= other)) return false;
+    intervals[index][field] = this._datetimeLocalFromMillis(millis);
+    this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
+    this._nilmActiveIntervalIndex = index;
+    this._nilmFocusedInterval = {
+      start: Date.parse(intervals[index].start),
+      end: Date.parse(intervals[index].end),
+    };
+    this._render();
+    return true;
   }
 
   _selectNilmEdgeTime(marker) {
@@ -1274,6 +1324,7 @@ export function createNilmWorkspaceMethods({
     if (canToggle && this._nilmFocusedSignature === signatureFingerprint) {
       this._nilmFocusedSignature = "";
       this._nilmFocusedOccurrenceIndex = -1;
+      this._nilmFocusedInterval = null;
       this._nilmGraphWindow = null;
       this._lastActionMessage = this._panelText("messages.showing_all_nilm_sessions");
       if (shouldScroll) {
@@ -1284,6 +1335,7 @@ export function createNilmWorkspaceMethods({
       return;
     }
     this._nilmFocusedSignature = signatureFingerprint;
+    this._nilmFocusedInterval = null;
     this._nilmFocusedOccurrenceIndex = Math.max(
       0,
       this._nilmSignatureSessions(signatureFingerprint).length - 1,
@@ -1482,20 +1534,26 @@ export function createNilmWorkspaceMethods({
       apiPath: this._nilmWorkspaceHistoryPathWithHours(
         history.api_path,
         hours,
+        start,
+        end,
       ),
       fetchPath: this._nilmWorkspaceHistoryPathWithHours(
         history.fetch_path || `/api/${history.api_path}`,
         hours,
+        start,
+        end,
       ),
     };
   }
 
-  _nilmWorkspaceHistoryPathWithHours(path, hours) {
+  _nilmWorkspaceHistoryPathWithHours(path, hours, start = null, end = null) {
     const url = new URL(
       path.startsWith("/") ? path : `/${path}`,
       window.location.origin,
     );
     url.searchParams.set("hours", String(hours));
+    if (Number.isFinite(start)) url.searchParams.set("start", new Date(start).toISOString());
+    if (Number.isFinite(end)) url.searchParams.set("end", new Date(end).toISOString());
     const nextPath = `${url.pathname}${url.search}`;
     return this._nilmHistoryPathWithHelpers(
       path.startsWith("/") ? nextPath : nextPath.replace(/^\//, ""),
@@ -2049,7 +2107,7 @@ export function createNilmWorkspaceMethods({
         : [{ ...item, band_kind: "label", label_interval_index: index }]
     ));
     const draftBands = this._nilmIntervalEditorOpen ? draftIntervals.flatMap((item, index) => (
-      item.start && item.end
+      item.start && item.end && Date.parse(item.end) > Date.parse(item.start)
         ? [{
           ...item,
           band_kind: "draft",
@@ -2059,7 +2117,32 @@ export function createNilmWorkspaceMethods({
         }]
         : []
     )) : [];
-    return [...(sessions || []), ...labelBands, ...draftBands];
+    const focused = this._nilmFocusedInterval;
+    const sessionBands = focused && !(sessions || []).length
+      ? workspace.sessions || []
+      : sessions || [];
+    const focusedBands = [...sessionBands, ...labelBands].map((item) => ({
+      ...item,
+      selected: focused
+        ? Date.parse(item.start || "") === focused.start
+          && Date.parse(item.end || "") === focused.end
+        : Boolean(item.selected),
+    }));
+    return [...focusedBands, ...draftBands];
+  }
+
+  _nilmAssignmentFocusInterval(assignment) {
+    const fingerprints = new Set(assignment.signature_fingerprints || []);
+    const session = [...(this._nilmWorkspace.sessions || [])]
+      .filter((item) => item.end && !item.ambiguous && (
+        item.assignment_id === assignment.assignment_id
+        || fingerprints.has(item.signature_fingerprint)
+      ))
+      .sort((left, right) => Date.parse(right.end) - Date.parse(left.end))[0];
+    if (session) return session;
+    return [...(this._nilmWorkspace.label_intervals || [])]
+      .filter((item) => item.assignment_id === assignment.assignment_id)
+      .sort((left, right) => Date.parse(right.end) - Date.parse(left.end))[0] || null;
   }
 
   _renderNilmSecondaryCollections(workspace) {
@@ -2259,6 +2342,7 @@ export function createNilmWorkspaceMethods({
     this._nilmSelectedReviewKey = "";
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
+    this._nilmFocusedInterval = null;
     this._render();
   }
 
@@ -2489,7 +2573,12 @@ export function createNilmWorkspaceMethods({
     const profileOptions = action && Array.isArray(action.profile_options)
       ? action.profile_options
       : [];
-    const saveBusy = this._busyAction === "nilm_label_interval_save" ? "disabled" : "";
+    const invalidInterval = !intervals.length || intervals.some((interval) => {
+      const start = Date.parse(interval.start || "");
+      const end = Date.parse(interval.end || "");
+      return !Number.isFinite(start) || !Number.isFinite(end) || end <= start;
+    });
+    const saveBusy = this._busyAction === "nilm_label_interval_save" || invalidInterval ? "disabled" : "";
     const intervalPreview = this._nilmLabelIntervalEnergyPreview();
     const savedIntervals = Array.isArray(workspace && workspace.label_intervals)
       ? workspace.label_intervals

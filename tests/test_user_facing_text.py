@@ -6573,7 +6573,8 @@ def test_nilm_interval_action_contracts() -> None:
       let renders = 0;
       const panel = makePanel({ _nilmWorkspace: makeWorkspace({ sessions: [{ start, end }] }) });
       panel._render = () => { renders += 1; };
-      panel._selectNilmSessionIntervalByIndex(0);
+      panel.shadowRoot.querySelector = () => null;
+      await panel._selectNilmSessionIntervalByIndex(0);
       assert.deepEqual(
         [panel._nilmLabelIntervalDraft.intervals[0].start,
           panel._nilmLabelIntervalDraft.intervals[0].end,
