@@ -9477,7 +9477,8 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert finished_alert.value_metric == "nilm_appliance_confidence"
     assert finished_alert.observed_value == pytest.approx(0.82)
     assert finished_alert.baseline_value == pytest.approx(0.8)
-    assert "Estimated from aggregate circuit power by NILM" in finished_alert.message
+    assert "a detected estimated run ended" in finished_alert.message
+    assert "completed on/off run" in finished_alert.message
     assert "Confidence: 82%" in finished_alert.message
     assert finished_alert.features["source_type"] == "nilm_estimate"
     assert finished_alert.features["estimated"] is True
@@ -9570,7 +9571,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
 
 
 @pytest.mark.asyncio
-async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
+async def test_opted_in_nilm_finished_notification_uses_existing_alert_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import (
@@ -9590,6 +9591,9 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
         store_data=FeatureStoreData(
+            appliance_notification_preferences={
+                "nilm:assignment-dishwasher": {"finished_running": True},
+            },
             nilm_signatures={
                 "mains": [
                     {
@@ -9652,10 +9656,8 @@ async def test_nilm_virtual_finished_notification_uses_existing_alert_flow(
     assert sent_notifications
     assert active_alerts == sent_notifications
     assert sent_notifications[0].feature == "nilm_appliance_finished"
-    assert (
-        "Estimated from aggregate circuit power by NILM"
-        in sent_notifications[0].message
-    )
+    assert "a detected estimated run ended" in sent_notifications[0].message
+    assert "completed on/off run" in sent_notifications[0].message
     assert coordinator.store_data.alerts[-1] == sent_notifications[0]
 
     active_alerts = await notify_virtual(now)

@@ -781,12 +781,6 @@ class NotificationController:
             else {}
         )
         source_type = str(features.get("source_type") or "direct_meter")
-        if (
-            not raw
-            and category == "finished_running"
-            and source_type == "nilm_estimate"
-        ):
-            raw = {"finished_running": True}
         preferences = preferences_from_dict(raw, appliance_key=appliance_key)
         now = self._local_time(self._current_time(alert.timestamp))
         cooldowns = self._delivery_state().get("cooldowns", {})

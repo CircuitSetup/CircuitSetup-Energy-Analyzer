@@ -574,6 +574,9 @@ export function createApplianceViewMethods({
 
   _routeRequestsApplianceDetail(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
+    if (routeUrl.searchParams.has("alert_id")) {
+      return false;
+    }
     if (routeUrl.searchParams.get(APPLIANCE_DETAIL_QUERY_PARAM) === "1") {
       return true;
     }
