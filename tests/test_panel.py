@@ -455,7 +455,46 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260804-8"
+    assert PANEL_MODULE_VERSION == "20260805-1"
+
+
+def test_nilm_finished_alert_exposes_completion_decisions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 8, 5, 12, 30, tzinfo=UTC),
+        circuit_id="hvac_2",
+        severity=Severity.INFO,
+        message="Condensate Pump 2: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        observed_value=1.0,
+        baseline_value=0.8,
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-condensate-pump-2",
+            "notification_key": "assignment-condensate-pump-2:session-1",
+        },
+    )
+
+    payload = alert_evidence_payload(
+        [_coordinator(alert, config=_config("hvac_2"))],
+        alert_id=notification_id_for_alert(alert),
+    )
+
+    assert set(payload["actions"]) >= {
+        "acknowledge",
+        "mark_nilm_appliance_correct",
+        "mark_nilm_appliance_wrong",
+    }
+    assert "mark_expected" not in payload["actions"]
+    assert payload["actions"]["mark_nilm_appliance_correct"]["service"] == (
+        "mark_nilm_appliance_correct"
+    )
+    assert payload["actions"]["mark_nilm_appliance_wrong"]["service"] == (
+        "mark_nilm_appliance_wrong"
+    )
 
 
 def test_alert_evidence_payload_hides_alerts_while_circuit_is_learning() -> None:

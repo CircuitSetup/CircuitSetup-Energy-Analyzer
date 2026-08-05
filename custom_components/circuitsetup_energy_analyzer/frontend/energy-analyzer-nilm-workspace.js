@@ -763,6 +763,9 @@ export function createNilmWorkspaceMethods({
 
   _routeRequestsNilmWorkspace(routeKey = this._routeKey()) {
     const routeUrl = new URL(routeKey, window.location.origin);
+    if (routeUrl.searchParams.has("alert_id")) {
+      return false;
+    }
     return routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1"
       || routeUrl.pathname.endsWith("/nilm");
   }

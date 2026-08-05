@@ -1489,6 +1489,8 @@
         "saved_interval_label": "Saved interval label: {label}.",
         "nilm_interval_action_refresh_failed": "The action completed: {message} The NILM workspace could not refresh. Retry the workspace refresh.",
         "nilm_primary_confirmed": "Configured primary assignment updated.",
+        "confirmed_estimated_run": "Confirmed the estimated run and cleared this notification.",
+        "rejected_estimated_run": "Marked this run as the wrong appliance and cleared this notification.",
         "deleted_interval_label": "Deleted interval label.",
         "loaded_nilm_session_interval": "Loaded NILM session interval.",
         "loaded_nilm_edge_time": "Loaded NILM edge time.",
@@ -1513,6 +1515,7 @@
           "assign_appliance": "Assign Appliance",
           "cancel": "Cancel",
           "confirm_appliance": "Confirm Appliance",
+          "confirm_estimated_run": "Confirm Estimated Run",
           "confirm_issue": "Confirm Issue",
           "correct": "Correct",
           "create_ha_device": "Create HA Device",
@@ -1525,6 +1528,7 @@
           "mark_expected": "Mark Expected",
           "merge": "Merge",
           "not_helpful": "Not Helpful",
+          "not_this_appliance": "Not This Appliance",
           "open_advanced_circuit_settings": "Open Advanced Circuit Settings",
           "open_appliance_detail": "Open Appliance Detail",
           "open_load_separation": "Open Load Separation",
@@ -1560,9 +1564,11 @@
         },
         "helpers": {
           "dismiss": "Clear this alert for now without teaching the analyzer.",
+          "confirm_estimated_run": "Confirm this completed estimated run, improve the assignment, and clear this notification.",
           "mark_confirmed": "Confirm this is a real issue. For HVAC efficiency alerts, exclude these abnormal episodes from future baselines.",
           "mark_expected": "Teach the analyzer this behavior is expected so similar alerts are less likely.",
-          "mark_unhelpful": "Tell the analyzer this alert was inaccurate or not useful. This does not mark the behavior as normal."
+          "mark_unhelpful": "Tell the analyzer this alert was inaccurate or not useful. This does not mark the behavior as normal.",
+          "not_this_appliance": "Mark this completed run as the wrong appliance, return the assignment to review, and clear this notification."
         }
       },
       "appliance_detail": {

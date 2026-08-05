@@ -273,11 +273,7 @@ def nilm_virtual_finished_alert(
         timestamp=now,
         circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
         severity=Severity.INFO,
-        message=_nilm_alert_message(
-            state,
-            "appears finished",
-            confidence=confidence,
-        ),
+        message=_nilm_finished_message(state, confidence=confidence),
         feature="nilm_appliance_finished",
         value_metric="nilm_appliance_confidence",
         observed_value=confidence,
@@ -924,6 +920,16 @@ def _nilm_alert_message(
     return (
         f"{getattr(state, 'display_name', 'NILM appliance')} {phrase}. "
         "Estimated from aggregate circuit power by NILM. "
+        f"Confidence: {round(confidence * 100)}%."
+    )
+
+
+def _nilm_finished_message(state: Any, *, confidence: float) -> str:
+    """Describe the completed estimated on/off run in a user-facing alert."""
+    return (
+        f"{getattr(state, 'display_name', 'NILM appliance')}: "
+        "a detected estimated run ended. NILM matched a completed on/off run "
+        "from aggregate circuit power. "
         f"Confidence: {round(confidence * 100)}%."
     )
 

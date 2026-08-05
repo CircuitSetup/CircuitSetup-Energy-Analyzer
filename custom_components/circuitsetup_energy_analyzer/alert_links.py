@@ -108,14 +108,11 @@ def alert_evidence_path(
         "feature": feature,
     }
     if assignment_id:
-        values.update(
-            {
-                "assignment_id": assignment_id,
-                "nilm_workspace": "1",
-            }
-        )
-        if feature not in _NILM_WORKSPACE_FEATURES:
-            values["appliance_detail"] = "1"
+        values["assignment_id"] = assignment_id
+        if feature != "nilm_appliance_finished":
+            values["nilm_workspace"] = "1"
+            if feature not in _NILM_WORKSPACE_FEATURES:
+                values["appliance_detail"] = "1"
     if entry_id:
         values["entry_id"] = entry_id
     params = urlencode(values)
