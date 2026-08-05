@@ -905,7 +905,7 @@ Detection and energy accounting require real power in `W` (or a compatible scale
 
 In Load Separation, review recurring loads, assign or identify them, validate completed sessions or link reference sensors, and publish only when the estimate is trustworthy. The graph shows measured source power; separated appliance power and energy are estimates. Open sessions are provisional, and uncertain or unexplained power remains unassigned.
 
-Known-load masking is applied only to mains sources, as are Known Load Overlays. Pure mixed and primary appliance plus mixed loads sources do not process known loads. Their explicitly linked helper circuits and reference sensors remain evidence: they can validate timing or measured watts, but they do not become component owners or subtraction meters.
+Known-load masking is applied only to mains sources, as are Known Load Overlays. Pure mixed and primary appliance plus mixed loads sources do not process known loads. Their explicitly linked helper circuits and reference sensors remain evidence: they can validate timing or measured watts, but they do not become component owners or subtraction meters. An explicitly linked state sensor may still be authoritative for on/off state; measured power remains validation evidence.
 
 Adjust Interval loads the saved interval into the graph. Editing either time or dragging or keyboard-moving a graph boundary updates the same unsaved interval; Save is the only action that persists it. Selecting an estimated appliance focuses its newest trustworthy completed session, then falls back to its newest saved labeled interval.
 
