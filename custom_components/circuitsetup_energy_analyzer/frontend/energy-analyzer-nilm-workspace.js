@@ -858,6 +858,7 @@ export function createNilmWorkspaceMethods({
     }
     this._nilmActiveLane = lane[0];
     this._nilmSelectedReviewKey = `assignment:${assignmentId}`;
+    this._beginNilmGraphIntent();
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
     return this._nilmSelectedReviewKey;
@@ -865,6 +866,17 @@ export function createNilmWorkspaceMethods({
 
   _invalidateNilmFocusedHistoryRequests() {
     this._nilmFocusedHistoryToken += 1;
+  }
+
+  _beginNilmGraphIntent() {
+    this._nilmGraphIntentToken = (this._nilmGraphIntentToken || 0) + 1;
+    this._invalidateNilmFocusedHistoryRequests();
+    this._nilmWorkspaceHistoryLoading = false;
+    return this._nilmGraphIntentToken;
+  }
+
+  _isCurrentNilmGraphIntent(token) {
+    return token === this._nilmGraphIntentToken;
   }
 
   _invalidateNilmHelperHistoryRequests() {
@@ -886,6 +898,7 @@ export function createNilmWorkspaceMethods({
       ["nilmIdentifyMode", "[data-nilm-identify-mode]", "nilmDecisionKey"],
       ["nilmLane", "[data-nilm-lane]", "nilmLane"],
       ["nilmReviewItem", "[data-nilm-review-item]", "nilmReviewItem"],
+      ["nilmBoundaryHandle", "[data-nilm-boundary-handle]", "nilmBoundaryHandle"],
     ];
     const control = controls.find(([flag]) => Object.prototype.hasOwnProperty.call(dataset, flag));
     return control ? {
@@ -1069,6 +1082,7 @@ export function createNilmWorkspaceMethods({
     const field = input.dataset.nilmLabelIntervalInput;
     const index = Number.parseInt(input.dataset.nilmIntervalIndex || "-1", 10);
     if (index >= 0 && ["start", "end", "observed_transition_w"].includes(field)) {
+      if (field === "start" || field === "end") this._beginNilmGraphIntent();
       const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
       intervals[index] = { ...(intervals[index] || {}), [field]: input.value };
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
@@ -1136,6 +1150,7 @@ export function createNilmWorkspaceMethods({
       if (end <= start) {
         return;
       }
+      this._beginNilmGraphIntent();
       const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
       let index = Math.max(0, Math.min(this._nilmActiveIntervalIndex, intervals.length - 1));
       if (!intervals.length || (intervals[index] && (intervals[index].start || intervals[index].end))) {
@@ -1163,6 +1178,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _removeNilmDraftInterval(index) {
+    this._beginNilmGraphIntent();
     const intervals = this._nilmIntervalDraftItems().filter((_item, itemIndex) => itemIndex !== index);
     this._nilmLabelIntervalDraft = {
       ...this._nilmLabelIntervalDraft,
@@ -1173,6 +1189,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _cancelNilmIntervalEditor() {
+    this._beginNilmGraphIntent();
     this._nilmIntervalEditorOpen = false;
     this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
     this._nilmActiveIntervalIndex = 0;
@@ -1185,6 +1202,7 @@ export function createNilmWorkspaceMethods({
     if (!Number.isInteger(index) || index < 0 || index >= this._nilmIntervalDraftItems().length) {
       return;
     }
+    this._beginNilmGraphIntent();
     this._nilmActiveIntervalIndex = index;
     for (const row of this.shadowRoot.querySelectorAll("[data-nilm-interval-row]")) {
       row.dataset.nilmActive = String(Number(row.dataset.nilmIntervalRow) === index);
@@ -1248,16 +1266,18 @@ export function createNilmWorkspaceMethods({
     const start = Date.parse(interval && interval.start || "");
     const end = Date.parse(interval && interval.end || "");
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+    const intentToken = this._beginNilmGraphIntent();
     const padding = Math.max(5 * 60 * 1000, (end - start) * 0.2);
     const targetWindow = { start: start - padding, end: end + padding };
     if (options.edit) this._setNilmIntervalDraft(interval, options.assignment);
     const loaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
-    if (loaded === null) return false;
+    if (loaded === null || !this._isCurrentNilmGraphIntent(intentToken)) return false;
     this._nilmGraphWindow = targetWindow;
     this._nilmFocusedInterval = { start, end };
     this._render();
     if (options.scroll !== false) {
       requestAnimationFrame(() => {
+        if (!this._isCurrentNilmGraphIntent(intentToken)) return;
         const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");
         if (chart) chart.scrollIntoView({ block: "nearest" });
       });
@@ -1266,6 +1286,7 @@ export function createNilmWorkspaceMethods({
   }
 
   async _syncNilmIntervalFieldToGraph(index) {
+    this._beginNilmGraphIntent();
     const interval = this._nilmIntervalDraftItems()[index];
     const start = Date.parse(interval && interval.start || "");
     const end = Date.parse(interval && interval.end || "");
@@ -1273,8 +1294,14 @@ export function createNilmWorkspaceMethods({
       this._render();
       return;
     }
-    const window = this._nilmGraphWindow;
-    if (!window || start < window.start || end > window.end) {
+    const history = this._nilmWorkspace && this._nilmWorkspace.history;
+    const loadedStart = Date.parse(history && history.start || "");
+    const loadedEnd = Date.parse(history && history.end || "");
+    const historyContainsInterval = Number.isFinite(loadedStart)
+      && Number.isFinite(loadedEnd)
+      && start >= loadedStart
+      && end <= loadedEnd;
+    if (!historyContainsInterval) {
       await this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: false });
     } else {
       this._nilmFocusedInterval = { start, end };
@@ -1287,6 +1314,7 @@ export function createNilmWorkspaceMethods({
     const other = Date.parse(intervals[index] && intervals[index][field === "start" ? "end" : "start"] || "");
     if (!Number.isFinite(millis) || !Number.isFinite(other)) return false;
     if ((field === "start" && millis >= other) || (field === "end" && millis <= other)) return false;
+    this._beginNilmGraphIntent();
     intervals[index][field] = this._datetimeLocalFromMillis(millis);
     this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
     this._nilmActiveIntervalIndex = index;
@@ -1306,6 +1334,7 @@ export function createNilmWorkspaceMethods({
     const field = String(marker.dataset.nilmEdgeDirection || "").toLowerCase() === "off"
       ? "end"
       : "start";
+    this._beginNilmGraphIntent();
     const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
     const index = Math.max(0, Math.min(this._nilmActiveIntervalIndex, intervals.length - 1));
     intervals[index] = {
@@ -1319,6 +1348,7 @@ export function createNilmWorkspaceMethods({
   }
 
   async _focusNilmSignatureOnGraph(signatureFingerprint, options = {}) {
+    const intentToken = this._beginNilmGraphIntent();
     const shouldScroll = options.scroll !== false;
     const canToggle = options.toggle !== false;
     if (canToggle && this._nilmFocusedSignature === signatureFingerprint) {
@@ -1343,7 +1373,7 @@ export function createNilmWorkspaceMethods({
     const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
-      if (historyLoaded === null) {
+      if (historyLoaded === null || !this._isCurrentNilmGraphIntent(intentToken)) {
         return;
       }
     }
@@ -1430,11 +1460,12 @@ export function createNilmWorkspaceMethods({
     const current = Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1));
     const next = Math.max(0, Math.min(current + Number(step || 0), sessions.length - 1));
     if (next === current) return;
+    const intentToken = this._beginNilmGraphIntent();
     this._nilmFocusedOccurrenceIndex = next;
     const targetWindow = this._nilmSignatureGraphWindow(this._nilmFocusedSignature);
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
-      if (historyLoaded === null) return;
+      if (historyLoaded === null || !this._isCurrentNilmGraphIntent(intentToken)) return;
       this._focusNilmGraphWindowForSignature(this._nilmFocusedSignature);
     }
     this._render();
@@ -1822,12 +1853,14 @@ export function createNilmWorkspaceMethods({
   }
 
   _zoomNilmGraph(factor) {
+    this._beginNilmGraphIntent();
     const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
     this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
     this._zoomGraphWindow(window, factor, (next) => { this._nilmGraphWindow = next; });
   }
 
   _panNilmGraph(direction) {
+    this._beginNilmGraphIntent();
     const window = this._nilmWorkspaceGraphWindow(this._nilmWorkspace);
     this._lastActionMessage = this._panelText("messages.updated_nilm_graph_window");
     this._panGraphWindow(window, direction, (next) => { this._nilmGraphWindow = next; });
@@ -2338,6 +2371,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _activateNilmLane(laneKey) {
+    this._beginNilmGraphIntent();
     this._nilmActiveLane = laneKey || "needs_review";
     this._nilmSelectedReviewKey = "";
     this._nilmFocusedSignature = "";

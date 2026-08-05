@@ -7209,11 +7209,17 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
     await datetimeLocalValue(page, "2026-07-13T17:40:00Z"),
   );
   await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
+  await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit);
+
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T16:40:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
   await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit + 1);
 
   const beforeInvalidEdit = historyWindows.length;
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T17:30:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T16:30:00Z"),
   );
   await panel.locator('[data-nilm-label-interval-input="end"]').dispatchEvent("change");
   await expect.poll(() => historyWindows.length).toBe(beforeInvalidEdit);
@@ -7227,6 +7233,98 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
     .toBe("delete_nilm_label_interval");
 });
 
+test("assigned NILM intervals keep newer graph intent over delayed history", async ({ page }) => {
+  let delayNextFocusedHistory = false;
+  let releaseFocusedHistory = null;
+  let markFocusedHistoryStarted = null;
+  let markFocusedHistoryFinished = null;
+  const armFocusedHistoryDelay = () => {
+    delayNextFocusedHistory = true;
+    return {
+      started: new Promise((resolve) => { markFocusedHistoryStarted = resolve; }),
+      finished: new Promise((resolve) => { markFocusedHistoryFinished = resolve; }),
+    };
+  };
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      let delayed = false;
+      if (delayNextFocusedHistory && url.searchParams.has("start")) {
+        delayed = true;
+        delayNextFocusedHistory = false;
+        markFocusedHistoryStarted();
+        await new Promise((resolve) => { releaseFocusedHistory = resolve; });
+      }
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T16:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "950", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      if (delayed) markFocusedHistoryFinished();
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      start: "2026-07-13T12:00:00Z",
+      end: "2026-07-13T19:00:00Z",
+      hours: 7,
+      max_hours: 24,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=7",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=7",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+
+  let delayedHistory = armFocusedHistoryDelay();
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T11:00:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
+  await delayedHistory.started;
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="start"]').dispatchEvent("change");
+  const inWindowIntent = await page.evaluate(() => ({
+    focus: { ...window.__panel._nilmFocusedInterval },
+    window: { ...window.__panel._nilmGraphWindow },
+  }));
+  releaseFocusedHistory();
+  await delayedHistory.finished;
+  await expect.poll(() => page.evaluate(() => ({
+    focus: window.__panel._nilmFocusedInterval,
+    window: window.__panel._nilmGraphWindow,
+  }))).toEqual(inWindowIntent);
+
+  delayedHistory = armFocusedHistoryDelay();
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await delayedHistory.started;
+  await page.evaluate(() => {
+    window.__panel._nilmWorkspace.sessions = window.__panel._nilmWorkspace.sessions.map((session) => ({
+      ...session,
+      ambiguous: true,
+    }));
+    window.__panel._nilmWorkspace.label_intervals = [];
+    window.__panel._render();
+  });
+  const preservedWindow = await page.evaluate(() => ({ ...window.__panel._nilmGraphWindow }));
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await expect(panel.getByText("No completed interval is available for this assignment yet.")).toBeVisible();
+  releaseFocusedHistory();
+  await delayedHistory.finished;
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmGraphWindow)).toEqual(preservedWindow);
+});
+
 test("NILM interval boundary handles support keyboard and pointer editing", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
@@ -7234,6 +7332,7 @@ test("NILM interval boundary handles support keyboard and pointer editing", asyn
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:55:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "930", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "925", last_changed: "2026-07-13T18:10:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "920", last_changed: "2026-07-13T18:40:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:50:00Z", effective_role: "real_power", source_unit: "W" },
@@ -7264,8 +7363,14 @@ test("NILM interval boundary handles support keyboard and pointer editing", asyn
   await expect(endHandle).toHaveAttribute("role", "slider");
   await startHandle.focus();
   await startHandle.press("ArrowRight");
+  await expect(startHandle).toBeFocused();
   await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(
     await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
+  );
+  await startHandle.press("ArrowRight");
+  await expect(startHandle).toBeFocused();
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(
+    await datetimeLocalValue(page, "2026-07-13T18:10:00Z"),
   );
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
 

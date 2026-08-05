@@ -1611,6 +1611,7 @@ export class PanelShellMethods {
         this._nilmSyncHelperSelection(this._nilmWorkspace);
         const selected = this._nilmSelectedReviewItem(this._nilmWorkspace);
         if (selected && selected.kind === "assignment") {
+          this._beginNilmGraphIntent();
           this._nilmFocusedSignature = "";
           this._nilmFocusedOccurrenceIndex = -1;
           this._nilmFocusedInterval = null;
