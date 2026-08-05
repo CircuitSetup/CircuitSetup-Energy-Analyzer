@@ -1662,12 +1662,12 @@ export class PanelShellMethods {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-open-interval-editor]")) {
       button.addEventListener("click", () => {
-        if (!this._nilmIntervalEditorOpen) this._snapshotNilmIntervalGraph();
-        this._nilmIntervalEditorOpen = true;
-        if (!this._nilmIntervalDraftItems().length) {
-          this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
-        }
-        this._nilmActiveIntervalIndex = 0;
+        this._openNilmIntervalEditor(() => {
+          if (!this._nilmIntervalDraftItems().length) {
+            this._nilmLabelIntervalDraft = this._emptyNilmLabelIntervalDraft();
+          }
+          this._nilmActiveIntervalIndex = 0;
+        });
         this._render();
         requestAnimationFrame(() => {
           const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");

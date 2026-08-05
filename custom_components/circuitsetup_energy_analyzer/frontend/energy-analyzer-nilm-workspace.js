@@ -1164,9 +1164,10 @@ export function createNilmWorkspaceMethods({
         start: this._datetimeLocalFromMillis(start),
         end: this._datetimeLocalFromMillis(end),
       };
-      this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
-      this._nilmActiveIntervalIndex = index;
-      this._nilmIntervalEditorOpen = true;
+      this._openNilmIntervalEditor(() => {
+        this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
+        this._nilmActiveIntervalIndex = index;
+      });
       this._render();
     };
     const cancel = () => {
@@ -1202,10 +1203,18 @@ export function createNilmWorkspaceMethods({
     this._render();
   }
 
+  _openNilmIntervalEditor(updateDraft = null) {
+    if (!this._nilmIntervalEditorOpen) this._snapshotNilmIntervalGraph();
+    if (typeof updateDraft === "function") updateDraft();
+    this._nilmIntervalEditorOpen = true;
+  }
+
   _snapshotNilmIntervalGraph() {
     const history = this._nilmWorkspace && this._nilmWorkspace.history;
     this._nilmIntervalGraphSnapshot = {
       graphWindow: this._nilmGraphWindow ? { ...this._nilmGraphWindow } : null,
+      focusedSignature: this._nilmFocusedSignature,
+      focusedOccurrenceIndex: this._nilmFocusedOccurrenceIndex,
       focusedInterval: this._nilmFocusedInterval ? { ...this._nilmFocusedInterval } : null,
       history: history ? { ...history } : null,
       series: (this._nilmWorkspaceHistorySeries || []).map((series) => (
@@ -1226,6 +1235,8 @@ export function createNilmWorkspaceMethods({
     this._nilmIntervalGraphSnapshot = null;
     if (!snapshot) return false;
     this._nilmGraphWindow = snapshot.graphWindow ? { ...snapshot.graphWindow } : null;
+    this._nilmFocusedSignature = snapshot.focusedSignature;
+    this._nilmFocusedOccurrenceIndex = snapshot.focusedOccurrenceIndex;
     this._nilmFocusedInterval = snapshot.focusedInterval ? { ...snapshot.focusedInterval } : null;
     if (this._nilmWorkspace && snapshot.history) {
       this._nilmWorkspace.history = { ...snapshot.history };
@@ -1286,20 +1297,21 @@ export function createNilmWorkspaceMethods({
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return false;
     }
-    this._nilmLabelIntervalDraft = {
-      ...this._nilmLabelIntervalDraft,
-      label: interval.display_label || interval.label || assignment && assignment.display_name || this._nilmLabelIntervalDraft.label || "",
-      appliance_id: interval.appliance_id || assignment && assignment.appliance_id || this._nilmLabelIntervalDraft.appliance_id || "",
-      appliance_profile: assignment && assignment.appliance_profile || this._nilmLabelIntervalDraft.appliance_profile || "",
-      assignment_id: interval.assignment_id || assignment && assignment.assignment_id || "",
-      intervals: [{
-        start: this._datetimeLocalFromMillis(start),
-        end: this._datetimeLocalFromMillis(end),
-        interval_id: interval.interval_id || "",
-      }],
-    };
-    this._nilmActiveIntervalIndex = 0;
-    this._nilmIntervalEditorOpen = true;
+    this._openNilmIntervalEditor(() => {
+      this._nilmLabelIntervalDraft = {
+        ...this._nilmLabelIntervalDraft,
+        label: interval.display_label || interval.label || assignment && assignment.display_name || this._nilmLabelIntervalDraft.label || "",
+        appliance_id: interval.appliance_id || assignment && assignment.appliance_id || this._nilmLabelIntervalDraft.appliance_id || "",
+        appliance_profile: assignment && assignment.appliance_profile || this._nilmLabelIntervalDraft.appliance_profile || "",
+        assignment_id: interval.assignment_id || assignment && assignment.assignment_id || "",
+        intervals: [{
+          start: this._datetimeLocalFromMillis(start),
+          end: this._datetimeLocalFromMillis(end),
+          interval_id: interval.interval_id || "",
+        }],
+      };
+      this._nilmActiveIntervalIndex = 0;
+    });
     return true;
   }
 
@@ -1310,7 +1322,6 @@ export function createNilmWorkspaceMethods({
     const intentToken = this._beginNilmGraphIntent();
     const padding = Math.max(5 * 60 * 1000, (end - start) * 0.2);
     const targetWindow = { start: start - padding, end: end + padding };
-    if (options.edit && !this._nilmIntervalEditorOpen) this._snapshotNilmIntervalGraph();
     if (options.edit) this._setNilmIntervalDraft(interval, options.assignment);
     const history = this._nilmWorkspace && this._nilmWorkspace.history;
     if (!history || !history.api_path) {
@@ -1388,8 +1399,9 @@ export function createNilmWorkspaceMethods({
       ...(intervals[index] || { start: "", end: "", interval_id: "" }),
       [field]: this._datetimeLocalFromMillis(time),
     };
-    this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
-    this._nilmIntervalEditorOpen = true;
+    this._openNilmIntervalEditor(() => {
+      this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
+    });
     this._lastActionMessage = this._panelText("messages.loaded_nilm_edge_time");
     this._render();
   }
@@ -1411,31 +1423,21 @@ export function createNilmWorkspaceMethods({
       }
       return;
     }
-    const previousFocus = {
-      signature: this._nilmFocusedSignature,
-      occurrenceIndex: this._nilmFocusedOccurrenceIndex,
-      interval: this._nilmFocusedInterval ? { ...this._nilmFocusedInterval } : null,
-    };
-    this._nilmFocusedSignature = signatureFingerprint;
-    this._nilmFocusedInterval = null;
-    this._nilmFocusedOccurrenceIndex = Math.max(
+    const occurrenceIndex = Math.max(
       0,
       this._nilmSignatureSessions(signatureFingerprint).length - 1,
     );
-    const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint);
+    const targetWindow = this._nilmSignatureGraphWindow(signatureFingerprint, occurrenceIndex);
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
       const isCurrent = this._isCurrentNilmGraphIntent(intentToken);
       if (historyLoaded !== true || !isCurrent) {
-        if (historyLoaded === false && isCurrent) {
-          this._nilmFocusedSignature = previousFocus.signature;
-          this._nilmFocusedOccurrenceIndex = previousFocus.occurrenceIndex;
-          this._nilmFocusedInterval = previousFocus.interval;
-          this._render();
-        }
         return;
       }
     }
+    this._nilmFocusedSignature = signatureFingerprint;
+    this._nilmFocusedInterval = null;
+    this._nilmFocusedOccurrenceIndex = occurrenceIndex;
     const focused = this._focusNilmGraphWindowForSignature(signatureFingerprint, intentToken);
     this._lastActionMessage = focused
       ? this._panelText("messages.showing_selected_signature")
@@ -1459,11 +1461,13 @@ export function createNilmWorkspaceMethods({
     return this._setNilmGraphWindow(targetWindow.start, targetWindow.end, bounds, intentToken);
   }
 
-  _nilmSignatureGraphWindow(signatureFingerprint) {
+  _nilmSignatureGraphWindow(signatureFingerprint, occurrenceIndex = null) {
     const sessions = this._nilmSignatureSessions(signatureFingerprint);
-    const index = signatureFingerprint === this._nilmFocusedSignature
-      ? Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1))
-      : sessions.length - 1;
+    const index = Number.isInteger(occurrenceIndex)
+      ? Math.max(0, Math.min(occurrenceIndex, sessions.length - 1))
+      : signatureFingerprint === this._nilmFocusedSignature
+        ? Math.max(0, Math.min(this._nilmFocusedOccurrenceIndex, sessions.length - 1))
+        : sessions.length - 1;
     const occurrence = sessions[index];
     const start = Date.parse(occurrence && occurrence.start || "");
     const end = Date.parse(occurrence && occurrence.end || "");
@@ -1519,20 +1523,17 @@ export function createNilmWorkspaceMethods({
     const next = Math.max(0, Math.min(current + Number(step || 0), sessions.length - 1));
     if (next === current) return;
     const intentToken = this._beginNilmGraphIntent();
-    const previousOccurrenceIndex = this._nilmFocusedOccurrenceIndex;
-    this._nilmFocusedOccurrenceIndex = next;
-    const targetWindow = this._nilmSignatureGraphWindow(this._nilmFocusedSignature);
+    const targetWindow = this._nilmSignatureGraphWindow(this._nilmFocusedSignature, next);
     if (targetWindow) {
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
       const isCurrent = this._isCurrentNilmGraphIntent(intentToken);
       if (historyLoaded !== true || !isCurrent) {
-        if (historyLoaded === false && isCurrent) {
-          this._nilmFocusedOccurrenceIndex = previousOccurrenceIndex;
-          this._render();
-        }
         return;
       }
+      this._nilmFocusedOccurrenceIndex = next;
       this._focusNilmGraphWindowForSignature(this._nilmFocusedSignature, intentToken);
+    } else {
+      this._nilmFocusedOccurrenceIndex = next;
     }
     this._render();
   }
