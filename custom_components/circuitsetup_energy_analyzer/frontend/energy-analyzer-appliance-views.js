@@ -89,6 +89,10 @@ export function createApplianceViewMethods({
     if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
       return;
     }
+    const loadId = (this._applianceDetailHistoryLoadId || 0) + 1;
+    this._applianceDetailHistoryLoadId = loadId;
+    const isCurrentLoad = () => this._isCurrentRequest(requestId, routeKey)
+      && this._applianceDetailHistoryLoadId === loadId;
     const historyEnd = Number.isFinite(Number(end)) ? Number(end) : Date.now();
     const start = historyEnd - requestedHours * 60 * 60 * 1000;
     this._applianceDetailHistoryHours = requestedHours;
@@ -122,7 +126,7 @@ export function createApplianceViewMethods({
     const fetchPath = `/api/${apiPath}`;
     try {
       const historyRows = await this._requestJson(apiPath, fetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrentLoad()) {
         return;
       }
       this._applianceDetailHistorySeries = Array.isArray(historyRows) ? historyRows : [];
@@ -133,12 +137,12 @@ export function createApplianceViewMethods({
       );
       this._applianceDetailHistoryParsed = true;
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrentLoad()) {
         return;
       }
       this._applianceDetailHistoryError = this._panelTextFormat("errors.load_appliance_history", { path: fetchPath, message: error.message });
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrentLoad()) {
         this._applianceDetailHistoryLoading = false;
         this._render();
       }
@@ -146,6 +150,10 @@ export function createApplianceViewMethods({
   }
 
   async _loadSumpDriverHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey, end = Date.now()) {
+    const loadId = (this._sumpDriverHistoryLoadId || 0) + 1;
+    this._sumpDriverHistoryLoadId = loadId;
+    const isCurrentLoad = () => this._isCurrentRequest(requestId, routeKey)
+      && this._sumpDriverHistoryLoadId === loadId;
     const context = this._applianceDetail?.detail?.sump_driver_context;
     if (!context) {
       this._sumpDriverAnalysis = null;
@@ -193,7 +201,7 @@ export function createApplianceViewMethods({
     const fetchPath = `/api/${paths[0]}`;
     try {
       const responses = await Promise.all(paths.map((apiPath) => this._requestJson(apiPath, `/api/${apiPath}`)));
-      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      if (!isCurrentLoad()) return;
       this._sumpDriverAnalysis = this._analyzeSumpDriverHistory(
         responses.flatMap((rows) => Array.isArray(rows) ? rows : []),
         context,
@@ -201,13 +209,13 @@ export function createApplianceViewMethods({
         historyEnd,
       );
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      if (!isCurrentLoad()) return;
       this._sumpDriverHistoryError = this._panelTextFormat(
         "errors.load_appliance_history",
         { path: fetchPath, message: error.message },
       );
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrentLoad()) {
         this._sumpDriverHistoryLoading = false;
         this._render();
       }
