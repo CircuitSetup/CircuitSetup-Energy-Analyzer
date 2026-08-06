@@ -7176,15 +7176,19 @@ test("Appliance Detail preserves detailed history and adjacent periods", async (
   const historyStart = (url) => decodeURIComponent(url.pathname.split("/").at(-1));
   const originalStart = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.min).toISOString());
   const originalEnd = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.max).toISOString());
+  const historyRequestsBeforePaging = historyRequests.length;
   const panEarlier = panel.locator('[data-appliance-history-graph-pan="-0.5"]');
   const panLater = panel.locator('[data-appliance-history-graph-pan="0.5"]');
   await expect(panEarlier).toBeEnabled();
+  await expect(panLater).toBeDisabled();
   await panEarlier.click();
   await expect.poll(() => historyRequests.length).toBeGreaterThan(1);
   expect(historyRequests.at(-1).searchParams.get("end_time")).toBe(originalStart);
   await expect(panLater).toBeEnabled();
   await panLater.click();
   await expect.poll(() => historyRequests.at(-1).searchParams.get("end_time")).toBe(originalEnd);
+  await expect(panLater).toBeDisabled();
+  expect(historyRequests).toHaveLength(historyRequestsBeforePaging + 2);
 
   const requestsBeforeSevenDays = historyRequests.length;
   await panel.locator('[data-appliance-history-period="168"]').click();

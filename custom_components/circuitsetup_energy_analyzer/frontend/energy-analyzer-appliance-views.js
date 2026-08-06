@@ -66,6 +66,9 @@ export function createApplianceViewMethods({
       ? Number(hours)
       : Number(context?.default_hours) || undefined;
     const historyEnd = Number.isFinite(Number(end)) ? Number(end) : Date.now();
+    if (arguments.length < 4 || !Number.isFinite(Number(end))) {
+      this._applianceDetailHistoryCurrentEnd = historyEnd;
+    }
     await Promise.all([
       this._loadApplianceDetailHistory(requestedHours, requestId, routeKey, historyEnd),
       this._loadSumpDriverHistory(requestedHours, requestId, routeKey, historyEnd),
@@ -1702,8 +1705,14 @@ export function createApplianceViewMethods({
     if (direction < 0 && window.start <= window.min) {
       return this._loadApplianceDetailHistories(hours, this._evidenceRequestId, this._loadedRouteKey || this._routeKey(), window.min);
     }
-    if (direction > 0 && window.end >= window.max && window.max < Date.now()) {
-      return this._loadApplianceDetailHistories(hours, this._evidenceRequestId, this._loadedRouteKey || this._routeKey(), Math.min(Date.now(), window.max + fullSpan));
+    const currentEnd = Number(this._applianceDetailHistoryCurrentEnd);
+    if (direction > 0 && window.end >= window.max && window.max < currentEnd) {
+      return this._loadApplianceDetailHistories(
+        hours,
+        this._evidenceRequestId,
+        this._loadedRouteKey || this._routeKey(),
+        Math.min(currentEnd, window.max + fullSpan),
+      );
     }
     this._panGraphWindow(window, direction, (next) => { this._applianceDetailHistoryWindow = next; });
     return undefined;
@@ -1723,7 +1732,8 @@ export function createApplianceViewMethods({
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
       canLoadMore,
       [24, 168].includes(Number(this._applianceDetailHistoryHours)),
-      [24, 168].includes(Number(this._applianceDetailHistoryHours)) && window.max < Date.now(),
+      [24, 168].includes(Number(this._applianceDetailHistoryHours))
+        && window.max < this._applianceDetailHistoryCurrentEnd,
     );
   }
 
