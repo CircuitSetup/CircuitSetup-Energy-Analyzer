@@ -546,7 +546,7 @@ export function createNilmWorkspaceMethods({
     }
   }
 
-  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {
+  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey, { confirmed = false } = {}) {
     if (collectionKey === "assignments" && actionKey === "save") {
       await this._saveNilmAssignmentChanges(index);
       return;
@@ -560,6 +560,10 @@ export function createNilmWorkspaceMethods({
     }
     const action = item && item.actions && item.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`)) {
+      return;
+    }
+    if (collectionKey === "assignments" && actionKey === "delete_permanently" && !confirmed) {
+      this._requestNilmWorkspaceActionConfirmation(collectionKey, index, actionKey);
       return;
     }
     const data = Object.assign({}, action.data || {});

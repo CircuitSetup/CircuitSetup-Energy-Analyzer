@@ -195,6 +195,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._alertDecision = "";
     this._inlineFeedback = { scope: "", kind: "", message: "" };
     this._pendingConfirmationAction = "";
+    this._pendingNilmWorkspaceAction = null;
     this._loadedRouteKey = "";
     this._evidenceRequestId = 0;
     this._nilmWorkspaceMutationId = 0;
@@ -432,15 +433,31 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._render();
   }
 
+  _requestNilmWorkspaceActionConfirmation(collectionKey, index, actionKey) {
+    this._pendingNilmWorkspaceAction = { collectionKey, index, actionKey };
+    this._requestActionConfirmation("nilm_delete_permanently");
+  }
+
   _cancelActionConfirmation() {
     this._pendingConfirmationAction = "";
+    this._pendingNilmWorkspaceAction = null;
     this._render();
   }
 
   _confirmPendingAction() {
     const actionKey = this._pendingConfirmationAction;
+    const nilmWorkspaceAction = this._pendingNilmWorkspaceAction;
     this._pendingConfirmationAction = "";
+    this._pendingNilmWorkspaceAction = null;
     this._render();
+    if (nilmWorkspaceAction) {
+      return this._callNilmWorkspaceItemAction(
+        nilmWorkspaceAction.collectionKey,
+        nilmWorkspaceAction.index,
+        nilmWorkspaceAction.actionKey,
+        { confirmed: true },
+      );
+    }
     if (actionKey) {
       return this._callAction(actionKey);
     }
@@ -451,6 +468,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     const confirmationKeys = {
       relearn_baseline: ["confirmations.relearn_title", "confirmations.relearn_message", "confirmations.confirm_relearn"],
       mark_circuit_mixed: ["confirmations.mixed_title", "confirmations.mixed_message", "confirmations.confirm_mixed"],
+      nilm_delete_permanently: ["confirmations.nilm_delete_assignment_title", "confirmations.nilm_delete_assignment_message", "confirmations.nilm_confirm_delete_assignment"],
     };
     const keys = confirmationKeys[this._pendingConfirmationAction];
     if (!keys) {

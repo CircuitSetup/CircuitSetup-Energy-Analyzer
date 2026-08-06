@@ -1398,6 +1398,9 @@
         "relearn_message": "This clears the stored baseline and related learned alert state, then it will restart learning for this circuit.",
         "mixed_title": "Mark Circuit as Mixed",
         "mixed_message": "This will keep aggregate history, stop direct-appliance classifications and alerts, and reload the integration.",
+        "nilm_delete_assignment_title": "Delete NILM Assignment?",
+        "nilm_delete_assignment_message": "Only this assignment and its generated Home Assistant entities are deleted; its evidence remains unassigned for review.",
+        "nilm_confirm_delete_assignment": "Delete Assignment",
         "cancel": "Cancel",
         "confirm_relearn": "Relearn",
         "confirm_mixed": "Mark as Mixed"

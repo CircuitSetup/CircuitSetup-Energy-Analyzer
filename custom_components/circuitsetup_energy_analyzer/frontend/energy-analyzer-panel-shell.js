@@ -1660,6 +1660,11 @@ export class PanelShellMethods {
         if (index >= 0) this._selectNilmDraftInterval(index);
       });
     }
+    for (const select of this.shadowRoot.querySelectorAll('[data-nilm-existing-assignment="label_interval"]')) {
+      const updateDraft = () => this._rememberNilmLabelIntervalDraft(select);
+      select.addEventListener("input", updateDraft);
+      select.addEventListener("change", updateDraft);
+    }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-open-interval-editor]")) {
       button.addEventListener("click", () => {
         this._openNilmIntervalEditor(() => {

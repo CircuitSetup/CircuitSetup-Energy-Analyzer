@@ -7515,6 +7515,96 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   });
 });
 
+test("NILM interval editor saves the selected existing appliance", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.actions.label_interval = {
+      ...payload.actions.label_interval,
+      service: "save_nilm_interval_changes",
+      assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await panel.locator('[data-nilm-existing-assignment="label_interval"]').selectOption("dishwasher");
+  await expect(panel.locator('[data-nilm-label-interval-input="label"]')).toHaveValue("Dishwasher");
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T20:00:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T20:45:00Z"),
+  );
+  await panel.locator('[data-nilm-label-interval-action="save"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "save_nilm_interval_changes",
+    data: {
+      assignment_id: "dishwasher",
+      intervals: [{ start: "2026-07-13T20:00:00.000Z", end: "2026-07-13T20:45:00.000Z" }],
+      removed_interval_ids: [],
+    },
+  });
+});
+
+test("NILM permanent deletion requires confirmation before removing an assignment", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.assignments.push({
+      assignment_id: "retired-dishwasher",
+      appliance_id: "dishwasher",
+      display_name: "Retired Dishwasher",
+      appliance_profile: "dishwasher",
+      state: "retired",
+      lifecycle_state: "retired",
+      actions: {
+        delete_permanently: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "delete_nilm_appliance_assignment",
+          data: { circuit_id: "mains", assignment_id: "retired-dishwasher" },
+        },
+      },
+    });
+    payload.lanes.hidden.assignment_ids = ["retired-dishwasher"];
+    payload.lane_counts.hidden = 1;
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-lane="hidden"]').click();
+  const remove = panel.locator('[data-nilm-assignment-action="delete_permanently"]');
+  await remove.click();
+  const dialog = panel.locator("ha-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Only this assignment and its generated Home Assistant entities are deleted");
+  await expect(dialog).toContainText("evidence remains unassigned");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
+
+  await panel.locator("#cancel_action_confirmation").click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
+
+  await remove.click();
+  await panel.locator("#confirm_action").click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "delete_nilm_appliance_assignment",
+    data: { circuit_id: "mains", assignment_id: "retired-dishwasher" },
+  });
+});
+
 test("assigned NILM intervals keep newer graph intent over delayed history", async ({ page }) => {
   let delayNextFocusedHistory = false;
   let releaseFocusedHistory = null;

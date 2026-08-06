@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260806-1"
+    assert PANEL_MODULE_VERSION == "20260806-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -719,7 +719,7 @@ def test_panel_nilm_item_actions_refresh_sessions_without_browser_reload() -> No
     ).read_text(encoding="utf-8")
 
     body = panel_script.split(
-        "  async _callNilmWorkspaceItemAction(collectionKey, index, actionKey) {",
+        "  async _callNilmWorkspaceItemAction(",
         1,
     )[1].split("\n  async _saveNilmAssignmentChanges", 1)[0]
     context_line = "const actionContext = this._nilmWorkspaceActionContext();"
