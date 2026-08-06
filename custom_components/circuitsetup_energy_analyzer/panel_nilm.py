@@ -62,7 +62,6 @@ from .services import (
     ATTR_HELPER_CIRCUIT_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
-    ATTR_MAINS_ENTITY_ID,
     ATTR_PRESET,
     ATTR_REFERENCE_POWER_ENTITY_ID,
     ATTR_RELATIONSHIP,
@@ -78,10 +77,10 @@ from .services import (
     SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE,
     SERVICE_CHANGE_NILM_APPLIANCE_PROFILE,
     SERVICE_CONFIRM_NILM_CONFIGURED_PRIMARY,
+    SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
-    SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
@@ -93,6 +92,7 @@ from .services import (
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_SAVE_NILM_INTERVAL_CHANGES,
     SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_SET_NILM_REFERENCE_LINK,
@@ -274,7 +274,7 @@ def nilm_workspace_payload(
         all_sessions,
         assignments,
     )
-    lanes = _nilm_workspace_lanes(signatures, assignments, label_intervals)
+    lanes = _nilm_workspace_lanes(signatures, assignments, label_intervals, sessions)
     configured_primary = _nilm_configured_primary_payload(
         config,
         signatures,
@@ -312,7 +312,12 @@ def nilm_workspace_payload(
         "lane_counts": {
             key: sum(
                 len(value[item_key])
-                for item_key in ("assignment_ids", "signature_ids", "interval_ids")
+                for item_key in (
+                    "assignment_ids",
+                    "signature_ids",
+                    "interval_ids",
+                    "session_ids",
+                )
             )
             for key, value in lanes.items()
         },
@@ -1011,16 +1016,11 @@ def _nilm_label_interval_payload(
 
 
 def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
-    data = {ATTR_CIRCUIT_ID: config.circuit_id}
-    entity_ids = _sensor_entity_ids(config)
-    if entity_ids:
-        data[ATTR_MAINS_ENTITY_ID] = entity_ids[0]
     return {
         "domain": DOMAIN,
-        "service": SERVICE_LABEL_NILM_INTERVAL,
-        "data": data,
-        "requires": [ATTR_START, ATTR_END, ATTR_LABEL, ATTR_APPLIANCE_PROFILE],
-        "profile_options": _nilm_appliance_profile_options(),
+        "service": SERVICE_SAVE_NILM_INTERVAL_CHANGES,
+        "data": {ATTR_CIRCUIT_ID: config.circuit_id},
+        "requires": [ATTR_LABEL, "intervals"],
     }
 
 
@@ -1607,6 +1607,27 @@ def _nilm_assignment_payload(
         **({"reason": publication_reason} if publication_reason else {}),
     }
     if state != "retired":
+        manual_interval_id = next(
+            (
+                str(interval.get(ATTR_INTERVAL_ID) or "").strip()
+                for interval in label_intervals
+                if str(interval.get(ATTR_INTERVAL_ID) or "").strip() in interval_ids
+                and str(interval.get("source") or "").strip().lower() == "manual"
+            ),
+            "",
+        )
+        if state == "needs_validation" and manual_interval_id:
+            actions["accept"] = {
+                "domain": DOMAIN,
+                "service": SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE,
+                "data": {
+                    **action_data,
+                    ATTR_INTERVAL_ID: manual_interval_id,
+                    ATTR_LABEL: str(
+                        payload.get("display_name") or payload.get("appliance_id") or ""
+                    ).strip(),
+                },
+            }
         actions["rename"] = {
             "domain": DOMAIN,
             "service": SERVICE_RENAME_NILM_APPLIANCE,
@@ -1695,6 +1716,12 @@ def _nilm_assignment_payload(
         actions["restore"] = {
             "domain": DOMAIN,
             "service": SERVICE_RESTORE_NILM_ITEM,
+            "data": dict(action_data),
+        }
+    if state == "retired":
+        actions["delete_permanently"] = {
+            "domain": DOMAIN,
+            "service": SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT,
             "data": dict(action_data),
         }
     if actions:
@@ -1899,6 +1926,7 @@ def _nilm_workspace_lanes(
     signatures: list[dict[str, Any]],
     assignments: list[dict[str, Any]],
     label_intervals: Iterable[Mapping[str, Any]] = (),
+    sessions: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, dict[str, Any]]:
     lanes = {
         "needs_review": _nilm_lane("Needs Review"),
@@ -1970,6 +1998,16 @@ def _nilm_workspace_lanes(
             and not str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip()
         ):
             lanes["needs_review"]["interval_ids"].append(interval_id)
+    for session in sessions:
+        session_id = str(session.get(ATTR_SESSION_ID) or "").strip()
+        actions = session.get("actions")
+        if (
+            session_id
+            and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            and isinstance(actions, Mapping)
+            and isinstance(actions.get("assign"), Mapping)
+        ):
+            lanes["needs_review"]["session_ids"].append(session_id)
     return lanes
 
 
@@ -1979,6 +2017,7 @@ def _nilm_lane(label: str) -> dict[str, Any]:
         "assignment_ids": [],
         "signature_ids": [],
         "interval_ids": [],
+        "session_ids": [],
     }
 
 

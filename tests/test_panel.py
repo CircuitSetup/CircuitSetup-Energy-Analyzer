@@ -2010,18 +2010,9 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["virtual_appliances"][0]["active_session_id"] is None
     label_action = payload["actions"]["label_interval"]
     assert label_action["domain"] == DOMAIN
-    assert label_action["service"] == "label_nilm_interval"
-    assert label_action["data"] == {
-        "circuit_id": "mains",
-        "mains_entity_id": "sensor.mains_power",
-    }
-    assert label_action["requires"] == [
-        "start",
-        "end",
-        "label",
-        "appliance_profile",
-    ]
-    assert {"value": "washer", "label": "Washer"} in label_action["profile_options"]
+    assert label_action["service"] == "save_nilm_interval_changes"
+    assert label_action["data"] == {"circuit_id": "mains"}
+    assert label_action["requires"] == ["label", "intervals"]
     assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"
@@ -2692,6 +2683,117 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
+
+
+def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        [],
+        [],
+        sessions=[
+            {"session_id": "open", "actions": {"assign": {}}},
+            {
+                "session_id": "closed",
+                "end": "2026-08-06T12:00:00+00:00",
+                "actions": {"assign": {}},
+            },
+            {
+                "session_id": "ambiguous",
+                "ambiguous": True,
+                "actions": {"assign": {}},
+            },
+            {
+                "session_id": "assigned",
+                "assignment_id": "assignment-1",
+                "actions": {"assign": {}},
+            },
+            {"session_id": "raw"},
+        ],
+    )
+
+    assert lanes["needs_review"]["session_ids"] == ["open", "closed", "ambiguous"]
+    assert sum(
+        len(lanes["needs_review"][key])
+        for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
+    ) == 3
+
+
+def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_assignment_options,
+        _nilm_assignment_payload,
+    )
+
+    active = {
+        "assignment_id": "assignment-washer",
+        "display_name": "Washer",
+        "appliance_id": "washer",
+        "appliance_profile": "washer",
+        "lifecycle_state": "needs_validation",
+        "label_interval_ids": ["interval-manual"],
+    }
+    retired = {
+        "assignment_id": "assignment-retired",
+        "display_name": "Old Washer",
+        "lifecycle_state": "retired",
+    }
+    intervals = [
+        {
+            "interval_id": "interval-manual",
+            "assignment_id": "assignment-washer",
+            "label": "Washer",
+            "source": "manual",
+        }
+    ]
+
+    active_payload = _nilm_assignment_payload(
+        "mains", active, [active, retired], label_intervals=intervals
+    )
+    retired_payload = _nilm_assignment_payload("mains", retired, [active, retired])
+
+    assert active_payload["actions"]["accept"] == {
+        "domain": DOMAIN,
+        "service": "assign_interval_to_appliance",
+        "data": {
+            "circuit_id": "mains",
+            "interval_id": "interval-manual",
+            "assignment_id": "assignment-washer",
+            "label": "Washer",
+        },
+    }
+    assert retired_payload["actions"]["delete_permanently"] == {
+        "domain": DOMAIN,
+        "service": "delete_nilm_appliance_assignment",
+        "data": {"circuit_id": "mains", "assignment_id": "assignment-retired"},
+    }
+    assert _nilm_assignment_options([active, retired]) == [
+        {"value": "assignment-washer", "label": "Washer"}
+    ]
+
+
+def test_nilm_workspace_payload_exposes_transactional_interval_save_action() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    payload = nilm_workspace_payload([_coordinator(config=config, configs=(config,))])
+
+    assert payload["actions"]["label_interval"] == {
+        "domain": DOMAIN,
+        "service": "save_nilm_interval_changes",
+        "data": {"circuit_id": "mains"},
+        "requires": ["label", "intervals"],
+    }
 
 
 def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit() -> (
