@@ -7109,6 +7109,137 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await toHaveNoViolations(page);
 });
 
+test("Appliance Detail preserves detailed history and adjacent periods", async ({ page, isMobile }) => {
+  const historyRequests = [];
+  const historyRows = Array.from({ length: 2000 }, (_, index) => ({
+    entity_id: "sensor.kitchen_power",
+    state: String(index),
+    last_changed: new Date(Date.now() - (2000 - index) * 60_000).toISOString(),
+  }));
+  let applianceDetailRequests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/appliance_detail")) {
+      applianceDetailRequests += 1;
+      const payload = apiPayload(url.pathname);
+      await route.fulfill({ json: {
+        ...payload,
+        daily_totals: Array.from({ length: 30 }, (_, index) => ({
+          date: `2026-07-${String(index + 1).padStart(2, "0")}`,
+          energy_kwh: index + 1,
+          cost: (index + 1) / 10,
+        })),
+        history: {
+          ...payload.history,
+          entities: ["sensor.kitchen_power"],
+          entity_series: [{ entity_id: "sensor.kitchen_power", unit: "W" }],
+        },
+      } });
+      return true;
+    }
+    if (url.pathname.includes("/history/period")) {
+      if (url.searchParams.get("filter_entity_id") === "sensor.kitchen_power") historyRequests.push(url);
+      await route.fulfill({ json: [historyRows] });
+      return true;
+    }
+    return false;
+  });
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._applianceDetailChartSeries[0].points.length
+  ))).toBe(2000);
+
+  const dailyCost = panel.locator("[data-appliance-daily-cost]");
+  await expect(dailyCost.locator('[data-appliance-daily-period="7"]')).toBeVisible();
+  await expect(dailyCost.locator('[data-appliance-daily-period="30"]')).toBeVisible();
+  const apiCallsBeforeDailyPeriod = await page.evaluate(() => window.__apiCalls.length);
+  await dailyCost.locator('[data-appliance-daily-period="7"]').click();
+  await expect(dailyCost.locator('[data-appliance-daily-period="7"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(dailyCost.locator('[data-appliance-daily-period="30"]')).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => page.evaluate(() => window.__panel._applianceDetailDailyPeriodDays)).toBe(7);
+  await expect.poll(() => page.evaluate(() => new Set([...window.__panel.shadowRoot.querySelectorAll("[data-appliance-daily-cost] [data-chart-point]")].map((point) => point.dataset.chartTime)).size)).toBe(7);
+  await expect(dailyCost.locator('[data-chart-value="24"]')).toHaveCount(1);
+  await expect(dailyCost.locator('[data-chart-value="1"]')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__apiCalls.length)).toBe(apiCallsBeforeDailyPeriod);
+  expect(applianceDetailRequests).toBe(1);
+  const alignment = await panel.evaluate((host) => {
+    const graph = host.shadowRoot.querySelector("[data-appliance-detail-history] svg.chart").getBoundingClientRect();
+    const controls = host.shadowRoot.querySelector("[data-appliance-history-graph]").getBoundingClientRect();
+    const range = host.shadowRoot.querySelector("[data-appliance-history-graph-window]").getBoundingClientRect();
+    return { graphLeft: graph.left, controlsLeft: controls.left, rangeLeft: range.left };
+  });
+  expect(alignment.controlsLeft).toBeCloseTo(alignment.graphLeft, 0);
+  expect(alignment.rangeLeft).toBeCloseTo(alignment.graphLeft, 0);
+  const horizontalOverflow = await panel.evaluate((host) => host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth);
+  expect(horizontalOverflow).toBe(false);
+  if (isMobile) expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+
+  const historyStart = (url) => decodeURIComponent(url.pathname.split("/").at(-1));
+  const originalStart = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.min).toISOString());
+  const originalEnd = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.max).toISOString());
+  const historyRequestsBeforePaging = historyRequests.length;
+  const panEarlier = panel.locator('[data-appliance-history-graph-pan="-0.5"]');
+  const panLater = panel.locator('[data-appliance-history-graph-pan="0.5"]');
+  await expect(panEarlier).toBeEnabled();
+  await expect(panLater).toBeDisabled();
+  await panEarlier.click();
+  await expect.poll(() => historyRequests.length).toBeGreaterThan(1);
+  expect(historyRequests.at(-1).searchParams.get("end_time")).toBe(originalStart);
+  await expect(panLater).toBeEnabled();
+  await panLater.click();
+  await expect.poll(() => historyRequests.at(-1).searchParams.get("end_time")).toBe(originalEnd);
+  await expect(panLater).toBeDisabled();
+  expect(historyRequests).toHaveLength(historyRequestsBeforePaging + 2);
+
+  const requestsBeforeSevenDays = historyRequests.length;
+  await panel.locator('[data-appliance-history-period="168"]').click();
+  await expect.poll(() => historyRequests.length).toBeGreaterThan(requestsBeforeSevenDays);
+  const sevenDayStart = historyStart(historyRequests.at(-1));
+  await panEarlier.click();
+  await expect.poll(() => historyRequests.at(-1).searchParams.get("end_time")).toBe(sevenDayStart);
+  await expect(dailyCost.locator('[data-appliance-daily-period="30"]')).toBeVisible();
+});
+
+test("Appliance Detail ignores an older history response", async ({ page }) => {
+  const pendingHistoryResponses = [];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/appliance_detail")) {
+      const payload = apiPayload(url.pathname);
+      await route.fulfill({ json: {
+        ...payload,
+        history: {
+          ...payload.history,
+          entities: ["sensor.kitchen_power"],
+          entity_series: [{ entity_id: "sensor.kitchen_power", unit: "W" }],
+        },
+      } });
+      return true;
+    }
+    if (url.pathname.includes("/history/period") && url.searchParams.get("filter_entity_id") === "sensor.kitchen_power") {
+      const responseValue = pendingHistoryResponses.length + 1;
+      await new Promise((resolve) => pendingHistoryResponses.push(() => resolve(route.fulfill({ json: [[{
+        entity_id: "sensor.kitchen_power",
+        state: String(responseValue),
+        last_changed: new Date().toISOString(),
+      }]] }))));
+      return true;
+    }
+    return false;
+  });
+  await page.goto(`${HARNESS}?appliance_detail=1&circuit_id=kitchen`);
+  await page.waitForFunction(() => window.__panelReady === true && window.__panel._applianceDetail);
+  await expect.poll(() => pendingHistoryResponses.length).toBe(1);
+  await page.evaluate(() => {
+    void window.__panel._loadApplianceDetailHistory(168, window.__panel._evidenceRequestId, window.__panel._loadedRouteKey);
+  });
+  await expect.poll(() => pendingHistoryResponses.length).toBe(2);
+  await pendingHistoryResponses[1]();
+  await expect.poll(() => page.evaluate(() => window.__panel._applianceDetailHistoryHours)).toBe(168);
+  const currentBounds = await page.evaluate(() => window.__panel._applianceDetailHistoryBounds);
+  await pendingHistoryResponses[0]();
+  await expect.poll(() => page.evaluate(() => window.__panel._applianceDetailHistoryBounds)).toEqual(currentBounds);
+  await expect.poll(() => page.evaluate(() => window.__panel._applianceDetailChartSeries[0].points[0].value)).toBe(2);
+});
+
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_detail")) return false;

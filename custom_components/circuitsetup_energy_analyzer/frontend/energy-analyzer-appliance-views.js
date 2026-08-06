@@ -11,6 +11,7 @@ export function createApplianceViewMethods({
   SETUP_HEALTH_QUERY_PARAM,
   PANEL_URL_PATH,
 }) {
+  const APPLIANCE_DETAIL_MAX_CHART_POINTS_PER_SERIES = 2160;
   return class ApplianceViewMethods {
   async _loadApplianceDetail(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
     if (!this._routeRequestsApplianceDetail(routeKey)) {
@@ -59,18 +60,22 @@ export function createApplianceViewMethods({
     }
   }
 
-  async _loadApplianceDetailHistories(hours, requestId, routeKey) {
+  async _loadApplianceDetailHistories(hours, requestId, routeKey, end = Date.now()) {
     const context = this._applianceDetail?.detail?.sump_driver_context;
     const requestedHours = Number.isFinite(Number(hours))
       ? Number(hours)
       : Number(context?.default_hours) || undefined;
+    const historyEnd = Number.isFinite(Number(end)) ? Number(end) : Date.now();
+    if (arguments.length < 4 || !Number.isFinite(Number(end))) {
+      this._applianceDetailHistoryCurrentEnd = historyEnd;
+    }
     await Promise.all([
-      this._loadApplianceDetailHistory(requestedHours, requestId, routeKey),
-      this._loadSumpDriverHistory(requestedHours, requestId, routeKey),
+      this._loadApplianceDetailHistory(requestedHours, requestId, routeKey, historyEnd),
+      this._loadSumpDriverHistory(requestedHours, requestId, routeKey, historyEnd),
     ]);
   }
 
-  async _loadApplianceDetailHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+  async _loadApplianceDetailHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey, end = Date.now()) {
     const history = this._applianceDetail && this._applianceDetail.history;
     const entities = Array.isArray(history && history.entities) ? history.entities.filter(Boolean) : [];
     const embeddedSeries = Array.isArray(history && history.embedded_series) ? history.embedded_series : [];
@@ -87,10 +92,14 @@ export function createApplianceViewMethods({
     if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
       return;
     }
-    const end = Date.now();
-    const start = end - requestedHours * 60 * 60 * 1000;
+    const loadId = (this._applianceDetailHistoryLoadId || 0) + 1;
+    this._applianceDetailHistoryLoadId = loadId;
+    const isCurrentLoad = () => this._isCurrentRequest(requestId, routeKey)
+      && this._applianceDetailHistoryLoadId === loadId;
+    const historyEnd = Number.isFinite(Number(end)) ? Number(end) : Date.now();
+    const start = historyEnd - requestedHours * 60 * 60 * 1000;
     this._applianceDetailHistoryHours = requestedHours;
-    this._applianceDetailHistoryBounds = { min: start, max: end };
+    this._applianceDetailHistoryBounds = { min: start, max: historyEnd };
     this._applianceDetailHistoryWindow = null;
     this._applianceDetailHistoryLoading = true;
     this._applianceDetailHistoryError = "";
@@ -104,6 +113,7 @@ export function createApplianceViewMethods({
       this._applianceDetailChartSeries = this._chartSeries(
         embeddedSeries,
         history.entity_series,
+        APPLIANCE_DETAIL_MAX_CHART_POINTS_PER_SERIES,
       );
       this._applianceDetailHistoryParsed = true;
       this._applianceDetailHistoryLoading = false;
@@ -114,34 +124,39 @@ export function createApplianceViewMethods({
     const apiPath = this._historyApiPathForEntities(
       entities,
       new Date(start).toISOString(),
-      new Date(end).toISOString(),
+      new Date(historyEnd).toISOString(),
     );
     const fetchPath = `/api/${apiPath}`;
     try {
       const historyRows = await this._requestJson(apiPath, fetchPath);
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrentLoad()) {
         return;
       }
       this._applianceDetailHistorySeries = Array.isArray(historyRows) ? historyRows : [];
       this._applianceDetailChartSeries = this._chartSeries(
         this._applianceDetailHistorySeries,
         history.entity_series,
+        APPLIANCE_DETAIL_MAX_CHART_POINTS_PER_SERIES,
       );
       this._applianceDetailHistoryParsed = true;
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) {
+      if (!isCurrentLoad()) {
         return;
       }
       this._applianceDetailHistoryError = this._panelTextFormat("errors.load_appliance_history", { path: fetchPath, message: error.message });
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrentLoad()) {
         this._applianceDetailHistoryLoading = false;
         this._render();
       }
     }
   }
 
-  async _loadSumpDriverHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+  async _loadSumpDriverHistory(hours, requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey, end = Date.now()) {
+    const loadId = (this._sumpDriverHistoryLoadId || 0) + 1;
+    this._sumpDriverHistoryLoadId = loadId;
+    const isCurrentLoad = () => this._isCurrentRequest(requestId, routeKey)
+      && this._sumpDriverHistoryLoadId === loadId;
     const context = this._applianceDetail?.detail?.sump_driver_context;
     if (!context) {
       this._sumpDriverAnalysis = null;
@@ -161,8 +176,8 @@ export function createApplianceViewMethods({
       this._sumpDriverAnalysis = null;
       return;
     }
-    const end = Date.now();
-    const start = end - requestedHours * 60 * 60 * 1000;
+    const historyEnd = Number.isFinite(Number(end)) ? Number(end) : Date.now();
+    const start = historyEnd - requestedHours * 60 * 60 * 1000;
     const historyStart = start - Math.max(Number(context.rain_response_window_minutes) || 0, 0) * 60_000;
     this._sumpDriverHistoryLoading = true;
     this._sumpDriverHistoryError = "";
@@ -177,33 +192,33 @@ export function createApplianceViewMethods({
       ...(stateEntities.length ? [this._historyApiPathForEntities(
         stateEntities,
         new Date(historyStart).toISOString(),
-        new Date(end).toISOString(),
+        new Date(historyEnd).toISOString(),
       )] : []),
       ...(attributeEntities.length ? [this._historyApiPathForEntities(
         attributeEntities,
         new Date(historyStart).toISOString(),
-        new Date(end).toISOString(),
+        new Date(historyEnd).toISOString(),
         { includeAttributes: true, significantChangesOnly: false },
       )] : []),
     ];
     const fetchPath = `/api/${paths[0]}`;
     try {
       const responses = await Promise.all(paths.map((apiPath) => this._requestJson(apiPath, `/api/${apiPath}`)));
-      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      if (!isCurrentLoad()) return;
       this._sumpDriverAnalysis = this._analyzeSumpDriverHistory(
         responses.flatMap((rows) => Array.isArray(rows) ? rows : []),
         context,
         start,
-        end,
+        historyEnd,
       );
     } catch (error) {
-      if (!this._isCurrentRequest(requestId, routeKey)) return;
+      if (!isCurrentLoad()) return;
       this._sumpDriverHistoryError = this._panelTextFormat(
         "errors.load_appliance_history",
         { path: fetchPath, message: error.message },
       );
     } finally {
-      if (this._isCurrentRequest(requestId, routeKey)) {
+      if (isCurrentLoad()) {
         this._sumpDriverHistoryLoading = false;
         this._render();
       }
@@ -1365,7 +1380,8 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceDailyCost(payload, detail) {
-    const rows = Array.isArray(payload.daily_totals) ? payload.daily_totals : [];
+    const selectedDays = this._applianceDetailDailyPeriodDays || 30;
+    const rows = (Array.isArray(payload.daily_totals) ? payload.daily_totals : []).slice(-selectedDays);
     const dailyDateTimestamp = (value) => {
       const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
       if (!match) return Number.NaN;
@@ -1398,7 +1414,12 @@ export function createApplianceViewMethods({
       ...(energy.length && cost.length ? { right_y_axis_label: currency } : {}),
     }) : "";
     return `<section class="panel" data-appliance-daily-cost>
-      <h2>${this._escape(this._panelText("appliance_detail.daily_cost_and_energy"))}</h2>
+      <div class="appliance-graph-heading">
+        <h2>${this._escape(this._panelText("appliance_detail.daily_cost_and_energy"))}</h2>
+        <div class="appliance-period-controls" role="group" aria-label="${this._escape(this._panelText("appliance_detail.time_period"))}">
+          ${[7, 30].map((days) => `<button type="button" class="secondary appliance-period-button" data-appliance-daily-period="${days}" aria-pressed="${days === selectedDays}">${this._escape(this._panelText(days === 7 ? "appliance_detail.history_7_days" : "appliance_detail.history_30_days"))}</button>`).join("")}
+        </div>
+      </div>
       ${charts || `<p class="muted">${this._escape(this._panelText("appliance_detail.no_completed_days"))}</p>`}
       <div class="summary appliance-daily-metrics">
         ${this._metric(this._panelText("appliance_detail.kwh_today"), this._formatKwh(detail.daily_energy_kwh), "mdi:calendar-today")}
@@ -1418,7 +1439,7 @@ export function createApplianceViewMethods({
     const window = this._applianceDetailHistoryGraphWindow();
     const parsedSeries = this._applianceDetailHistoryParsed
       ? this._applianceDetailChartSeries
-      : this._chartSeries(this._applianceDetailHistorySeries, history.entity_series);
+      : this._chartSeries(this._applianceDetailHistorySeries, history.entity_series, APPLIANCE_DETAIL_MAX_CHART_POINTS_PER_SERIES);
     const series = window ? this._visibleParsedChartSeries(parsedSeries, window) : [];
     const groupedSeries = this._applianceDetailHistoryChartGroups(series);
     const powerFactorIndex = groupedSeries.findIndex(({ unit }) => unit === "PF");
@@ -1654,6 +1675,7 @@ export function createApplianceViewMethods({
       periods[nextIndex],
       this._evidenceRequestId,
       this._loadedRouteKey || this._routeKey(),
+      window.max,
     );
   }
 
@@ -1673,11 +1695,27 @@ export function createApplianceViewMethods({
   }
 
   _panApplianceHistoryGraph(direction) {
-    this._panGraphWindow(
-      this._applianceDetailHistoryGraphWindow(),
-      direction,
-      (next) => { this._applianceDetailHistoryWindow = next; },
-    );
+    const window = this._applianceDetailHistoryGraphWindow();
+    const hours = Number(this._applianceDetailHistoryHours);
+    const fullSpan = hours * 60 * 60 * 1000;
+    if (!window || !Number.isFinite(hours) || ![24, 168].includes(hours) || window.end - window.start < fullSpan) {
+      this._panGraphWindow(window, direction, (next) => { this._applianceDetailHistoryWindow = next; });
+      return undefined;
+    }
+    if (direction < 0 && window.start <= window.min) {
+      return this._loadApplianceDetailHistories(hours, this._evidenceRequestId, this._loadedRouteKey || this._routeKey(), window.min);
+    }
+    const currentEnd = Number(this._applianceDetailHistoryCurrentEnd);
+    if (direction > 0 && window.end >= window.max && window.max < currentEnd) {
+      return this._loadApplianceDetailHistories(
+        hours,
+        this._evidenceRequestId,
+        this._loadedRouteKey || this._routeKey(),
+        Math.min(currentEnd, window.max + fullSpan),
+      );
+    }
+    this._panGraphWindow(window, direction, (next) => { this._applianceDetailHistoryWindow = next; });
+    return undefined;
   }
 
   _renderApplianceHistoryGraphControls(window) {
@@ -1693,6 +1731,9 @@ export function createApplianceViewMethods({
       "data-appliance-history-graph",
       this._panelTextFormat("appliance_detail.history_window", { start: this._formatDateTime(new Date(window.start)), end: this._formatDateTime(new Date(window.end)) }),
       canLoadMore,
+      [24, 168].includes(Number(this._applianceDetailHistoryHours)),
+      [24, 168].includes(Number(this._applianceDetailHistoryHours))
+        && window.max < this._applianceDetailHistoryCurrentEnd,
     );
   }
 
