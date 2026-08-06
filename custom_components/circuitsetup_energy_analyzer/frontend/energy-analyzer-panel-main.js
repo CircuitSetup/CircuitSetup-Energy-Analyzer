@@ -163,6 +163,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._applianceDetailChartSeries = [];
     this._applianceDetailHistoryParsed = false;
     this._applianceDetailHistoryHours = 0;
+    this._applianceDetailHistoryCurrentEnd = Number.NaN;
+    this._applianceDetailDailyPeriodDays = 30;
     this._applianceDetailHistoryBounds = null;
     this._applianceDetailHistoryWindow = null;
     this._sumpDriverAnalysis = null;
@@ -314,6 +316,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._applianceDetail = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailHistoryHours = 0;
+    this._applianceDetailHistoryCurrentEnd = Number.NaN;
+    this._applianceDetailDailyPeriodDays = 30;
     this._applianceDetailHistoryBounds = null;
     this._applianceDetailHistoryWindow = null;
     this._sumpDriverAnalysis = null;

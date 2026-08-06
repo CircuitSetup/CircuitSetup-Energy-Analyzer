@@ -1260,7 +1260,7 @@ Start with these on dashboards.
 
 Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
 
-The appliance detail view graphs daily energy and cost for up to 30 completed days. Each cost point uses the analyzer-recorded daily cost when complete, then the effective main-analyzer rate when a flat or Opower-derived rate can price that day's energy. With Time-of-Use and no valid Opower-derived rate, days without complete recorded costs remain unavailable because a daily energy total cannot reconstruct each tariff period.
+The appliance detail Daily Cost and Energy graph defaults to 30 completed days and can show the latest 7 days, with up to 30 completed days available. Each cost point uses the analyzer-recorded daily cost when complete, then the effective main-analyzer rate when a flat or Opower-derived rate can price that day's energy. With Time-of-Use and no valid Opower-derived rate, days without complete recorded costs remain unavailable because a daily energy total cannot reconstruct each tariff period.
 
 ### Running Vs Observations Vs Alerts
 

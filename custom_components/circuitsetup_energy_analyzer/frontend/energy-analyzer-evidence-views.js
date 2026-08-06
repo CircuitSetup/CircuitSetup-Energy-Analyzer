@@ -902,7 +902,7 @@ export function createEvidenceViewMethods({
     }
   }
 
-  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false) {
+  _renderHistoryGraphControls(window, prefix, containerAttribute, windowText, canLoadMore = false, canLoadPrevious = false, canLoadNext = false) {
     if (!window) {
       return "";
     }
@@ -911,8 +911,8 @@ export function createEvidenceViewMethods({
     const minSpan = 15 * 60 * 1000;
     const zoomInDisabled = span <= minSpan ? "disabled" : "";
     const zoomOutDisabled = span >= fullSpan && !canLoadMore ? "disabled" : "";
-    const panEarlierDisabled = window.start <= window.min ? "disabled" : "";
-    const panLaterDisabled = window.end >= window.max ? "disabled" : "";
+    const panEarlierDisabled = window.start <= window.min && !canLoadPrevious ? "disabled" : "";
+    const panLaterDisabled = window.end >= window.max && !canLoadNext ? "disabled" : "";
     const zoomInLabel = this._panelText("actions.labels.zoom_in");
     const zoomOutLabel = this._panelText("actions.labels.zoom_out");
     const panEarlierLabel = this._panelText("actions.labels.pan_earlier");
