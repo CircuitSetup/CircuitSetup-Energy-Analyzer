@@ -19,8 +19,10 @@ from .models import CircuitEvent, CircuitSample, EventType, SensorRole
 def build_nilm_assignment_model(
     assignment: Mapping[str, Any],
     sessions: Iterable[Mapping[str, Any]],
+    *,
+    label_intervals: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Build one assignment's transition model from reviewed complete sessions."""
+    """Build one assignment's transition model from reviewed real-power evidence."""
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     confirmed = {
         str(value or "").strip()
@@ -48,6 +50,24 @@ def build_nilm_assignment_model(
             and off_delta < 0
         ):
             eligible.append((session, on_delta, off_delta))
+    assigned_interval_ids = {
+        str(value or "").strip()
+        for value in assignment.get("label_interval_ids", ())
+        if str(value or "").strip()
+    }
+    for interval in label_intervals:
+        interval_id = str(interval.get("interval_id") or "").strip()
+        owner = str(interval.get("assignment_id") or "").strip()
+        observed_transition_w = _model_number(interval.get("observed_transition_w"))
+        if (
+            interval_id in assigned_interval_ids
+            and (not owner or owner == assignment_id)
+            and observed_transition_w is not None
+            and observed_transition_w > 0
+        ):
+            eligible.append(
+                (interval, observed_transition_w, -observed_transition_w)
+            )
     eligible.sort(
         key=lambda item: str(item[0].get("end") or item[0].get("start") or ""),
         reverse=True,

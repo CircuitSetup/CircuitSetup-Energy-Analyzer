@@ -14,6 +14,7 @@ from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .entity import _entity_registry_for_hass
 from .managers.nilm_controller import (
     configured_primary_assignment_id,
+    nilm_assignment_is_active,
     nilm_assignment_publication_reason,
 )
 from .managers.source_samples import normalized_leg
@@ -1092,10 +1093,7 @@ def _nilm_assignment_options(
     )
     for assignment in assignments:
         assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
-        if (
-            not assignment_id
-            or str(assignment.get("lifecycle_state") or "").lower() == "retired"
-        ):
+        if not assignment_id or not nilm_assignment_is_active(assignment):
             continue
         label = str(
             assignment.get("display_name")

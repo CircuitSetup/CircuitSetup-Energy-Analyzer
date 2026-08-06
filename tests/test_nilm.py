@@ -73,6 +73,74 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assert nilm_assignment_model_is_compound_eligible(model) is True
 
 
+def test_assignment_model_uses_one_assigned_label_interval() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "observed_transition_w": 84.0,
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 84.0]
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [
+        84.0,
+        -84.0,
+    ]
+    assert model["transition_prototypes"][0]["sample_count"] == 1
+    assert "delta_var" not in model["transition_prototypes"][0]
+    assert model["model_confidence"] == 0.3
+
+
+def test_assignment_model_label_intervals_change_the_representative_median() -> None:
+    assignment = {
+        "assignment_id": "pump",
+        "confirmed_session_ids": ["session-1"],
+        "label_interval_ids": ["interval-1", "interval-2"],
+    }
+    sessions = [
+        {
+            "session_id": "session-1",
+            "assignment_id": "pump",
+            "end": "2026-06-01T10:00:00+00:00",
+            "on_delta_w": 60.0,
+            "off_delta_w": -60.0,
+            "confidence": 0.9,
+        }
+    ]
+    intervals = [
+        {
+            "interval_id": "interval-1",
+            "assignment_id": "pump",
+            "end": "2026-06-02T10:00:00+00:00",
+            "observed_transition_w": 90.0,
+            "confidence": 0.8,
+        },
+        {
+            "interval_id": "interval-2",
+            "assignment_id": "pump",
+            "end": "2026-06-03T10:00:00+00:00",
+            "observed_transition_w": 120.0,
+            "confidence": 1.0,
+        },
+    ]
+
+    sessions_only = build_nilm_assignment_model(assignment, sessions)
+    combined = build_nilm_assignment_model(
+        assignment, sessions, label_intervals=intervals
+    )
+
+    assert sessions_only["power_states_w"] == [0.0, 60.0]
+    assert combined["power_states_w"] == [0.0, 90.0]
+    assert combined["transition_prototypes"][0]["sample_count"] == 3
+    assert combined["model_confidence"] == 0.9
+
+
 def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:
     assignment = {
         "assignment_id": "blower",

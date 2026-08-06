@@ -2780,6 +2780,11 @@ def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> 
         "display_name": "Old Washer",
         "lifecycle_state": "retired",
     }
+    ignored = {
+        "assignment_id": "assignment-ignored",
+        "display_name": "Ignored Washer",
+        "lifecycle_state": "ignored",
+    }
     intervals = [
         {
             "interval_id": "interval-manual",
@@ -2823,7 +2828,7 @@ def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> 
         "service": "delete_nilm_appliance_assignment",
         "data": {"circuit_id": "mains", "assignment_id": "assignment-retired"},
     }
-    assert _nilm_assignment_options([active, retired]) == [
+    assert _nilm_assignment_options([active, ignored, retired]) == [
         {"value": "assignment-washer", "label": "Washer"}
     ]
 

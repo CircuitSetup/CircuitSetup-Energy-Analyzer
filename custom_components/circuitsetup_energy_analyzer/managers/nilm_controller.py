@@ -33,6 +33,14 @@ def configured_primary_assignment_id(circuit_id: str) -> str:
     return f"{circuit_id}-configured-primary"
 
 
+def nilm_assignment_is_active(assignment: Mapping[str, Any]) -> bool:
+    """Return whether an assignment can receive reviewed evidence."""
+    return str(assignment.get("lifecycle_state") or "").strip().lower() not in {
+        "ignored",
+        "retired",
+    }
+
+
 def nilm_assignment_publication_reason(
     assignment: Mapping[str, Any],
 ) -> str | None:
@@ -116,6 +124,7 @@ class NilmController:
         self._assignment_appliance_id = _nilm_assignment_appliance_id
         self._assignment_id = _nilm_assignment_id
         self._assignment_max_items = assignment_max_items
+        self._review_transaction_lock = asyncio.Lock()
         self._sample_processor: Any | None = None
         self._topology_processor: Any | None = None
         self._total_events_by_circuit: Any | None = None
@@ -324,9 +333,18 @@ class NilmController:
             history = coordinator.store_data.nilm_session_history_by_circuit.get(
                 circuit_id, ()
             )
+            label_intervals = (
+                coordinator.store_data.nilm_label_intervals_by_circuit.get(
+                    circuit_id, ()
+                )
+            )
             for assignment in assignments:
                 normalized = normalize_nilm_assignment_model(assignment)
-                model = build_nilm_assignment_model(assignment, history)
+                model = build_nilm_assignment_model(
+                    assignment,
+                    history,
+                    label_intervals=label_intervals,
+                )
                 if (
                     model["transition_prototypes"]
                     and (
@@ -356,6 +374,9 @@ class NilmController:
             build_nilm_assignment_model(
                 assignment,
                 self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                    circuit_id, ()
+                ),
+                label_intervals=self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
                     circuit_id, ()
                 ),
             )
@@ -740,6 +761,28 @@ class NilmController:
         appliance_profile: str | None = None,
     ) -> dict[str, Any]:
         """Atomically save a NILM assignment's interval membership."""
+        async with self._review_transaction_lock:
+            return await self._async_save_nilm_interval_changes(
+                circuit_id,
+                label=label,
+                intervals=intervals,
+                removed_interval_ids=removed_interval_ids,
+                assignment_id=assignment_id,
+                appliance_id=appliance_id,
+                appliance_profile=appliance_profile,
+            )
+
+    async def _async_save_nilm_interval_changes(
+        self,
+        circuit_id: str,
+        *,
+        label: str,
+        intervals: Iterable[Mapping[str, Any]],
+        removed_interval_ids: Iterable[str] = (),
+        assignment_id: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+    ) -> dict[str, Any]:
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
@@ -750,11 +793,19 @@ class NilmController:
         coordinator = self._coordinator
         store_data = coordinator.store_data
         assignment_id_text = str(assignment_id or "").strip()
+        if removed_ids and not assignment_id_text:
+            raise ValueError("assignment_id is required when removing intervals.")
         existing_assignment = (
             self.assignment_for_id(circuit_id, assignment_id_text)
             if assignment_id_text
             else None
         )
+        if existing_assignment is not None and not nilm_assignment_is_active(
+            existing_assignment
+        ):
+            raise ValueError(
+                "NILM intervals can only be saved to an active assignment."
+            )
         appliance_id_text = str(
             appliance_id
             or (existing_assignment or {}).get("appliance_id")
@@ -767,6 +818,24 @@ class NilmController:
             )
             if isinstance(interval, Mapping)
         }
+        if removed_ids:
+            owned_ids = set(
+                self._clean_string_list(existing_assignment.get("label_interval_ids"))
+            )
+            stale_removed_ids = sorted(
+                interval_id
+                for interval_id in removed_ids
+                if interval_id not in owned_ids
+                or str(
+                    existing_by_id.get(interval_id, {}).get("assignment_id") or ""
+                ).strip()
+                != assignment_id_text
+            )
+            if stale_removed_ids:
+                raise ValueError(
+                    "Removed interval no longer belongs to the submitted assignment: "
+                    + ", ".join(stale_removed_ids)
+                )
         now_dt = coordinator.current_time()
         now = now_dt.isoformat()
         payloads: list[dict[str, Any]] = []
@@ -843,6 +912,21 @@ class NilmController:
                 elif key in draft or key in existing:
                     payload[key] = value
             payloads.append(payload)
+
+        stored_interval_count = len(
+            store_data.nilm_label_intervals_by_circuit.get(circuit_id, ())
+        )
+        added_interval_count = sum(
+            payload["interval_id"] not in existing_by_id for payload in payloads
+        )
+        if (
+            stored_interval_count + added_interval_count
+            > self._label_interval_max_items
+        ):
+            raise ValueError(
+                f"A circuit can retain at most {self._label_interval_max_items} "
+                "NILM label intervals."
+            )
 
         snapshots = {
             name: deepcopy(getattr(store_data, name))
@@ -922,6 +1006,16 @@ class NilmController:
         assignment_id: str,
     ) -> bool:
         """Permanently delete a retired NILM assignment, preserving evidence."""
+        async with self._review_transaction_lock:
+            return await self._async_delete_nilm_appliance_assignment(
+                circuit_id, assignment_id
+            )
+
+    async def _async_delete_nilm_appliance_assignment(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> bool:
         assignment = self.assignment_for_id(circuit_id, assignment_id)
         if str(assignment.get("lifecycle_state") or "").lower() != "retired":
             raise ValueError("Only retired NILM assignments can be deleted.")

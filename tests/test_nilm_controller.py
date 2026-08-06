@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -512,6 +513,180 @@ async def test_save_nilm_interval_changes_updates_membership_once() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lifecycle_state", ("ignored", "retired"))
+async def test_save_nilm_interval_changes_rejects_hidden_assignment(
+    lifecycle_state: str,
+) -> None:
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "lifecycle_state": lifecycle_state,
+        "label_interval_ids": [],
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]}
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=AsyncMock()
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    before = deepcopy(coordinator.store_data)
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    with pytest.raises(ValueError, match="active"):
+        await controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Pump",
+            assignment_id="assignment-pump",
+            intervals=[],
+        )
+
+    assert coordinator.store_data == before
+
+
+@pytest.mark.asyncio
+async def test_save_nilm_interval_changes_rejects_stale_removed_owner() -> None:
+    old_owner = {
+        "assignment_id": "assignment-old",
+        "lifecycle_state": "assigned",
+        "label_interval_ids": [],
+    }
+    new_owner = {
+        "assignment_id": "assignment-new",
+        "lifecycle_state": "assigned",
+        "label_interval_ids": ["interval-moved"],
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [old_owner, new_owner]
+            },
+            nilm_label_intervals_by_circuit={
+                "mixed": [
+                    {
+                        "interval_id": "interval-moved",
+                        "assignment_id": "assignment-new",
+                    }
+                ]
+            },
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=AsyncMock()
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    before = deepcopy(coordinator.store_data)
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    with pytest.raises(ValueError, match="no longer belongs"):
+        await controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Old owner",
+            assignment_id="assignment-old",
+            intervals=[],
+            removed_interval_ids=["interval-moved"],
+        )
+
+    assert coordinator.store_data == before
+
+
+@pytest.mark.asyncio
+async def test_save_nilm_interval_changes_rejects_removal_without_assignment() -> None:
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=AsyncMock()
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    with pytest.raises(ValueError, match="assignment_id"):
+        await controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Pump",
+            intervals=[],
+            removed_interval_ids=["interval-1"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_save_nilm_interval_changes_enforces_interval_limit_atomically() -> None:
+    saves = AsyncMock()
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "lifecycle_state": "assigned",
+        "label_interval_ids": ["interval-1"],
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_label_intervals_by_circuit={
+                "mixed": [
+                    {
+                        "interval_id": "interval-1",
+                        "assignment_id": "assignment-pump",
+                    }
+                ]
+            },
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=saves
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=2, assignment_max_items=10
+    )
+    draft = {
+        "interval_id": "interval-2",
+        "start": "2026-06-02T11:00:00+00:00",
+        "end": "2026-06-02T11:05:00+00:00",
+    }
+
+    await controller.async_save_nilm_interval_changes(
+        "mixed",
+        label="Pump",
+        assignment_id="assignment-pump",
+        intervals=[draft],
+    )
+    at_limit = deepcopy(coordinator.store_data)
+
+    with pytest.raises(ValueError, match="at most 2"):
+        await controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Pump",
+            assignment_id="assignment-pump",
+            intervals=[
+                {
+                    **draft,
+                    "interval_id": "interval-3",
+                    "start": "2026-06-02T12:00:00+00:00",
+                    "end": "2026-06-02T12:05:00+00:00",
+                }
+            ],
+        )
+
+    assert coordinator.store_data == at_limit
+    assert saves.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_save_nilm_interval_changes_validates_before_mutation() -> None:
     coordinator = SimpleNamespace(
         current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
@@ -740,6 +915,83 @@ async def test_delete_nilm_assignment_restores_collections_after_save_failure() 
 
     assert coordinator.store_data == before
     assert save.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_nilm_transactions_serialize_failed_save_before_delete() -> None:
+    first_save_started = asyncio.Event()
+    release_first_save = asyncio.Event()
+    save_calls = 0
+
+    async def save(_now: datetime) -> None:
+        nonlocal save_calls
+        save_calls += 1
+        if save_calls == 1:
+            first_save_started.set()
+            await release_first_save.wait()
+            raise RuntimeError("save failed")
+
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "lifecycle_state": "assigned",
+                        "label_interval_ids": [],
+                    },
+                    {
+                        "assignment_id": "assignment-retired",
+                        "lifecycle_state": "retired",
+                    },
+                ]
+            }
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=save
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    save_task = asyncio.create_task(
+        controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Pump",
+            assignment_id="assignment-pump",
+            intervals=[
+                {
+                    "interval_id": "new",
+                    "start": "2026-06-02T11:00:00+00:00",
+                    "end": "2026-06-02T11:05:00+00:00",
+                }
+            ],
+        )
+    )
+    await first_save_started.wait()
+    delete_task = asyncio.create_task(
+        controller.async_delete_nilm_appliance_assignment(
+            "mixed", "assignment-retired"
+        )
+    )
+    await asyncio.sleep(0)
+    release_first_save.set()
+
+    with pytest.raises(RuntimeError, match="save failed"):
+        await save_task
+    assert await delete_task is True
+    assert [
+        item["assignment_id"]
+        for item in coordinator.store_data.nilm_appliance_assignments_by_circuit[
+            "mixed"
+        ]
+    ] == ["assignment-pump"]
+    assert (
+        coordinator.store_data.nilm_label_intervals_by_circuit.get("mixed", []) == []
+    )
 
 
 @pytest.mark.asyncio
