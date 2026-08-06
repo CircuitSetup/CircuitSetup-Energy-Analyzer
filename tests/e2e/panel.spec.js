@@ -7109,6 +7109,75 @@ test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile 
   await toHaveNoViolations(page);
 });
 
+test("Appliance Detail preserves detailed history and adjacent periods", async ({ page, isMobile }) => {
+  const historyRequests = [];
+  const historyRows = Array.from({ length: 2000 }, (_, index) => ({
+    entity_id: "sensor.kitchen_power",
+    state: String(index),
+    last_changed: new Date(Date.now() - (2000 - index) * 60_000).toISOString(),
+  }));
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/appliance_detail")) {
+      const payload = apiPayload(url.pathname);
+      await route.fulfill({ json: {
+        ...payload,
+        history: {
+          ...payload.history,
+          entities: ["sensor.kitchen_power"],
+          entity_series: [{ entity_id: "sensor.kitchen_power", unit: "W" }],
+        },
+      } });
+      return true;
+    }
+    if (url.pathname.includes("/history/period")) {
+      if (url.searchParams.get("filter_entity_id") === "sensor.kitchen_power") historyRequests.push(url);
+      await route.fulfill({ json: [historyRows] });
+      return true;
+    }
+    return false;
+  });
+  const panel = await openPanel(page, "?appliance_detail=1&circuit_id=kitchen");
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._applianceDetailChartSeries[0].points.length
+  ))).toBe(2000);
+
+  const dailyCost = panel.locator("[data-appliance-daily-cost]");
+  await expect(dailyCost.locator('[data-appliance-daily-period="7"]')).toBeVisible();
+  await expect(dailyCost.locator('[data-appliance-daily-period="30"]')).toBeVisible();
+  const alignment = await panel.evaluate((host) => {
+    const graph = host.shadowRoot.querySelector("[data-appliance-detail-history] svg.chart").getBoundingClientRect();
+    const controls = host.shadowRoot.querySelector("[data-appliance-history-graph]").getBoundingClientRect();
+    const range = host.shadowRoot.querySelector("[data-appliance-history-graph-window]").getBoundingClientRect();
+    return { graphLeft: graph.left, controlsLeft: controls.left, rangeLeft: range.left };
+  });
+  expect(alignment.controlsLeft).toBeCloseTo(alignment.graphLeft, 0);
+  expect(alignment.rangeLeft).toBeCloseTo(alignment.graphLeft, 0);
+  const horizontalOverflow = await panel.evaluate((host) => host.shadowRoot.scrollWidth > host.shadowRoot.clientWidth);
+  expect(horizontalOverflow).toBe(false);
+  if (isMobile) expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
+
+  const historyStart = (url) => decodeURIComponent(url.pathname.split("/").at(-1));
+  const originalStart = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.min).toISOString());
+  const originalEnd = await page.evaluate(() => new Date(window.__panel._applianceDetailHistoryBounds.max).toISOString());
+  const panEarlier = panel.locator('[data-appliance-history-graph-pan="-0.5"]');
+  const panLater = panel.locator('[data-appliance-history-graph-pan="0.5"]');
+  await expect(panEarlier).toBeEnabled();
+  await panEarlier.click();
+  await expect.poll(() => historyRequests.length).toBeGreaterThan(1);
+  expect(historyRequests.at(-1).searchParams.get("end_time")).toBe(originalStart);
+  await expect(panLater).toBeEnabled();
+  await panLater.click();
+  await expect.poll(() => historyRequests.at(-1).searchParams.get("end_time")).toBe(originalEnd);
+
+  const requestsBeforeSevenDays = historyRequests.length;
+  await panel.locator('[data-appliance-history-period="168"]').click();
+  await expect.poll(() => historyRequests.length).toBeGreaterThan(requestsBeforeSevenDays);
+  const sevenDayStart = historyStart(historyRequests.at(-1));
+  await panEarlier.click();
+  await expect.poll(() => historyRequests.at(-1).searchParams.get("end_time")).toBe(sevenDayStart);
+  await expect(dailyCost.locator('[data-appliance-daily-period="30"]')).toBeVisible();
+});
+
 test("Appliance Detail omits a cost axis without an effective rate", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/appliance_detail")) return false;

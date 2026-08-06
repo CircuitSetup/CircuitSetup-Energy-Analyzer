@@ -809,12 +809,17 @@ export class PanelShellMethods {
         .appliance-comparison-as-of {
           font-size: var(--ha-font-size-s, 12px);
         }
-        .appliance-graph-heading,
         .appliance-section-heading {
           align-items: center;
           display: flex;
           gap: 12px;
           justify-content: space-between;
+        }
+        .appliance-graph-heading {
+          align-items: flex-start;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
         }
         .appliance-graph-toolbar,
         .appliance-period-controls {
@@ -826,6 +831,10 @@ export class PanelShellMethods {
         .appliance-graph-toolbar [data-appliance-history-graph] {
           display: grid;
           gap: 4px;
+        }
+        .appliance-graph-toolbar {
+          align-items: flex-start;
+          flex-direction: column;
         }
         .appliance-period-button {
           background: var(--secondary-background-color, #f4f6f8);
@@ -1493,6 +1502,7 @@ export class PanelShellMethods {
         this._applianceDetailHistoryHours,
         this._evidenceRequestId,
         this._loadedRouteKey || this._routeKey(),
+        this._applianceDetailHistoryBounds?.max,
       )
     ));
     this._listen("[data-retry-sump-driver-history]", () => (
@@ -1500,6 +1510,7 @@ export class PanelShellMethods {
         this._applianceDetailHistoryHours,
         this._evidenceRequestId,
         this._loadedRouteKey || this._routeKey(),
+        this._applianceDetailHistoryBounds?.max,
       )
     ));
     for (const button of this.shadowRoot.querySelectorAll("[data-appliance-history-period]")) {
@@ -1509,6 +1520,12 @@ export class PanelShellMethods {
           this._evidenceRequestId,
           this._loadedRouteKey || this._routeKey(),
         );
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-appliance-daily-period]")) {
+      button.addEventListener("click", () => {
+        this._applianceDetailDailyPeriodDays = Number(button.dataset.applianceDailyPeriod);
+        this._render();
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-sump-driver-layer]")) {
