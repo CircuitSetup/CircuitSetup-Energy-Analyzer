@@ -7399,6 +7399,9 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
   await panel.locator('[data-nilm-label-interval-input="start"]').fill("2026-07-13T18:00");
   await panel.locator('[data-nilm-label-interval-input="end"]').fill("2026-07-13T18:45");
+  await page.evaluate(() => {
+    window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
+  });
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
@@ -7406,8 +7409,11 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     "validate_nilm_session",
     "validate_nilm_assignment_history",
     "set_circuit_sensitivity",
-    "label_nilm_interval",
+    "save_nilm_interval_changes",
   ]);
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    data: { intervals: [{ start: "2026-07-13T22:00:00.000Z", end: "2026-07-13T22:45:00.000Z" }], removed_interval_ids: [] },
+  });
   await toHaveNoViolations(page);
 });
 
@@ -7491,11 +7497,22 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await expect(panel.locator('[data-nilm-label-interval-action="save"]')).toBeDisabled();
   await toHaveNoViolations(page);
 
-  await panel.locator('[data-nilm-interval-editor] [data-nilm-label-interval-action="delete"]').click();
+  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T18:45:00Z"),
+  );
+  await page.evaluate(() => {
+    window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
+  });
+  const callsBeforeRemoval = await page.evaluate(() => window.__serviceCalls.length);
+  await panel.locator('[data-nilm-interval-editor] [data-nilm-remove-interval="0"]').click();
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(callsBeforeRemoval);
+  await panel.locator('[data-nilm-label-interval-action="save"]').click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
   await expect(panel.locator("[data-nilm-assigned-intervals]")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1)?.service))
-    .toBe("delete_nilm_label_interval");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "save_nilm_interval_changes",
+    data: { intervals: [], removed_interval_ids: ["interval-1"] },
+  });
 });
 
 test("assigned NILM intervals keep newer graph intent over delayed history", async ({ page }) => {

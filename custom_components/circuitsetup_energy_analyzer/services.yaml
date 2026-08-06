@@ -41,7 +41,7 @@ save_nilm_interval_changes:
 
 delete_nilm_appliance_assignment:
   name: Delete retired NILM appliance assignment
-  description: "Advanced/script action: permanently delete a retired NILM assignment while preserving its evidence for review."
+  description: "Advanced/script action: permanently delete a retired NILM assignment while preserving its evidence for review. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
       name: Circuit ID

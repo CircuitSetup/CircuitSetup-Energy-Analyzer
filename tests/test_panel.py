@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260805-3"
+    assert PANEL_MODULE_VERSION == "20260806-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2010,18 +2010,16 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     assert payload["virtual_appliances"][0]["active_session_id"] is None
     label_action = payload["actions"]["label_interval"]
     assert label_action["domain"] == DOMAIN
-    assert label_action["service"] == "label_nilm_interval"
+    assert label_action["service"] == "save_nilm_interval_changes"
     assert label_action["data"] == {
         "circuit_id": "mains",
         "mains_entity_id": "sensor.mains_power",
     }
-    assert label_action["requires"] == [
-        "start",
-        "end",
-        "label",
-        "appliance_profile",
-    ]
+    assert label_action["requires"] == ["label", "intervals"]
     assert {"value": "washer", "label": "Washer"} in label_action["profile_options"]
+    assert label_action["assignment_options"] == [
+        {"value": "assignment-dishwasher", "label": "Dishwasher"}
+    ]
     assert "sensor_label_interval" not in payload["actions"]
     assert payload["edges"][0]["direction"] == "on"
     assert payload["sessions"][0]["display_label"] == "Dishwasher"

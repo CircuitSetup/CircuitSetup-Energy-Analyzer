@@ -414,6 +414,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "keep_assignment_for_masking": "Keep Assignment For Masking",
     "keep_published_estimate": "Keep Published Estimate",
     "interval_id": "Interval ID",
+    "intervals": "Intervals",
     "assignment_id": "Assignment ID",
     "appliance_id": "Appliance ID",
     "appliance_profile": "Appliance Profile",
@@ -439,6 +440,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "reference_threshold_w": "Reference Threshold W",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
+    "removed_interval_ids": "Removed interval IDs",
     "signature_id": "Signature ID",
     "source_assignment_id": "Source Assignment ID",
     "source_signature_id": "Source Signature ID",
@@ -6384,8 +6386,123 @@ html = panel._renderNilmReviewInspector({
     actions: { delete: makeAction("delete_nilm_label_interval") },
   },
 });
-assert.ok(html.includes('data-nilm-label-interval-action="delete"'));
-assert.ok(html.includes("Remove Interval"));
+assert.ok(!html.includes('data-nilm-label-interval-action="delete"'));
+assert.ok(html.includes("Complete Interval"));
+"""
+    )
+
+
+def test_nilm_review_editor_stages_changes_until_one_save() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const saved = {
+  interval_id: "saved-interval",
+  assignment_id: "assignment-washer",
+  label: "Washer",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+  actions: { delete: makeAction("delete_nilm_label_interval") },
+};
+const session = {
+  session_id: "session-review",
+  display_label: "Uncertain Washer",
+  confidence: 0.67,
+  ambiguous: true,
+  median_power_w: 440,
+  actions: { assign: makeAction("assign_session_to_appliance", { requires: ["label"] }) },
+};
+const active = {
+  assignment_id: "assignment-washer",
+  display_name: "Washer",
+  lifecycle_state: "needs_validation",
+  actions: { accept: makeAction("assign_interval_to_appliance") },
+};
+const removed = {
+  assignment_id: "assignment-retired",
+  display_name: "Old Washer",
+  lifecycle_state: "retired",
+  actions: { delete_permanently: makeAction("delete_nilm_appliance_assignment") },
+};
+const workspace = makeWorkspace({
+  actions: { label_interval: {
+    ...makeAction("save_nilm_interval_changes"),
+    assignment_options: [{ value: "assignment-washer", label: "Washer" }],
+  } },
+  label_intervals: [saved],
+  sessions: [session],
+  assignments: [active, removed],
+});
+workspace.lanes.needs_review.session_ids = ["session-review"];
+workspace.lanes.needs_review.assignment_ids = ["assignment-washer"];
+workspace.lanes.hidden.assignment_ids = ["assignment-retired"];
+const calls = [];
+const panel = makePanel({
+  _nilmWorkspace: workspace,
+  _nilmIntervalEditorOpen: false,
+  _nilmLabelIntervalDraft: {
+    label: "Washer", appliance_id: "washer", appliance_profile: "washer",
+    assignment_id: "assignment-washer", intervals: [{ ...saved }],
+  },
+});
+panel._render = () => {};
+panel._restoreNilmIntervalScroll = () => {};
+panel._refreshNilmWorkspaceData = async () => true;
+panel._hass = { callService: async (domain, service, data) => calls.push({ domain, service, data }) };
+panel.shadowRoot.querySelector = (selector) => selector === "#nilm_session_label_0"
+  ? { value: "Washer" }
+  : selector === '[data-nilm-existing-assignment="label_interval"]'
+    ? { value: "assignment-washer", selectedOptions: [{ textContent: "Washer" }] }
+  : null;
+
+const reviewItems = panel._nilmLaneItems(workspace);
+assert.equal(reviewItems.map((item) => item.kind).join(","), "assignment,session");
+const sessionItem = reviewItems.find((item) => item.kind === "session");
+assert.equal(panel._nilmReviewKey(sessionItem), "session:session-review");
+const sessionHtml = panel._renderNilmReviewInspector(sessionItem);
+assert.ok(sessionHtml.includes("Confidence 67%"), sessionHtml);
+assert.ok(sessionHtml.includes("Ambiguous"), sessionHtml);
+assert.ok(sessionHtml.includes('data-nilm-session-action="assign"'), sessionHtml);
+await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");
+assert.equal(calls[0].service, "assign_session_to_appliance");
+
+const assignmentEditor = panel._renderNilmLabelIntervalEditor(workspace);
+assert.ok(assignmentEditor.includes('data-nilm-existing-assignment="label_interval"'));
+panel._rememberNilmLabelIntervalDraft({ dataset: { nilmExistingAssignment: "label_interval" } });
+assert.equal(panel._nilmLabelIntervalDraft.assignment_id, "assignment-washer");
+assert.equal(panel._nilmLabelIntervalDraft.label, "Washer");
+
+const activeHtml = panel._renderNilmAssignmentActions(active, 0);
+const removedHtml = panel._renderNilmAssignmentActions(removed, 1);
+assert.ok(activeHtml.includes('data-nilm-assignment-action="accept"'));
+assert.ok(!activeHtml.includes("delete_permanently"));
+assert.ok(removedHtml.includes('data-nilm-assignment-action="delete_permanently"'));
+
+panel._openNilmIntervalEditor();
+panel._removeNilmDraftInterval(0);
+assert.equal(calls.length, 1, "staging a saved removal must not call a service");
+assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), '["saved-interval"]');
+assert.equal(panel._nilmIntervalDraftItems().length, 0);
+panel._cancelNilmIntervalEditor();
+assert.equal(calls.length, 1, "Cancel must not call a service");
+assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), "[]");
+assert.equal(panel._nilmIntervalDraftItems()[0].interval_id, "saved-interval");
+
+panel._openNilmIntervalEditor();
+panel._removeNilmDraftInterval(0);
+const editorHtml = panel._renderNilmLabelIntervalEditor(workspace);
+assert.ok(editorHtml.includes(">Save Changes<"), editorHtml);
+assert.ok(editorHtml.includes("One representative interval is enough"), editorHtml);
+assert.ok(editorHtml.includes("Additional representative runs improve"), editorHtml);
+await panel._callNilmLabelIntervalAction(-1, "save");
+assert.equal(calls.length, 2);
+assert.equal(calls[1].service, "save_nilm_interval_changes");
+assert.equal(JSON.stringify(calls[1].data.intervals), "[]");
+assert.equal(JSON.stringify(calls[1].data.removed_interval_ids), '["saved-interval"]');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
 """
     )
 
@@ -6498,22 +6615,16 @@ let html = panel._renderNilmReviewInspector({
 });
 assert.ok(html.includes("Labeled interval"), html);
 assert.ok(html.includes('data-nilm-label-interval-action="adjust"'), html);
-assert.ok(html.includes('data-nilm-label-interval-action="delete"'), html);
+assert.ok(!html.includes('data-nilm-label-interval-action="delete"'), html);
 
 await panel._callNilmLabelIntervalAction(0, "adjust");
 html = panel._renderNilmLabelIntervalEditor(workspace);
-assert.ok(html.includes('data-nilm-label-interval-action="delete"'), html);
-assert.ok(!html.includes('data-nilm-remove-interval="0"'), html);
+assert.ok(!html.includes('data-nilm-label-interval-action="delete"'), html);
+assert.ok(html.includes('data-nilm-remove-interval="0"'), html);
 
-panel._refreshNilmWorkspaceData = async () => {
-  panel._nilmWorkspace = makeWorkspace({ assignments: [assignment] });
-  return true;
-};
-await panel._callNilmLabelIntervalAction(0, "delete");
-assert.equal(calls.length, 1);
-assert.equal(calls[0].service, "delete_nilm_label_interval");
-assert.equal(panel._nilmIntervalEditorOpen, false);
-assert.deepEqual(panel._nilmLabelIntervalDraft, panel._emptyNilmLabelIntervalDraft());
+panel._removeNilmDraftInterval(0);
+assert.equal(calls.length, 0);
+assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), '["saved-interval"]');
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -6612,7 +6723,7 @@ def test_nilm_interval_action_contracts() -> None:
         "Label appliance interval", "Select one full appliance run per interval",
         "start just before its power-on step",
         "avoid intervals where they also turn on or off",
-        "Appliance Type", "Dishwasher", "Save Interval",
+        "Appliance Type", "Dishwasher", "Save Changes",
       ]) assert.ok(html.includes(expected), expected);
       assert.ok(!html.includes('data-nilm-label-interval-input="observed_transition_w"'));
     }

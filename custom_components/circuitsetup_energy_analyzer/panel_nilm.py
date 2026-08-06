@@ -61,6 +61,7 @@ from .services import (
     ATTR_GROUND_TRUTH_ENTITY_ID,
     ATTR_HELPER_CIRCUIT_ID,
     ATTR_INTERVAL_ID,
+    ATTR_INTERVALS,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
     ATTR_PRESET,
@@ -82,7 +83,6 @@ from .services import (
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
-    SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
@@ -94,6 +94,7 @@ from .services import (
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
+    SERVICE_SAVE_NILM_INTERVAL_CHANGES,
     SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_SET_NILM_REFERENCE_LINK,
@@ -324,7 +325,9 @@ def nilm_workspace_payload(
         },
         "selection_guidance": _nilm_selection_guidance(),
         "actions": {
-            "label_interval": _nilm_label_interval_action(config),
+            "label_interval": _nilm_label_interval_action(
+                config, assignment_options
+            ),
         },
         "edges": [_nilm_edge_payload(edge) for edge in recent_edges],
         "edge_count": len(edges),
@@ -1016,17 +1019,21 @@ def _nilm_label_interval_payload(
     return payload
 
 
-def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
+def _nilm_label_interval_action(
+    config: CircuitConfig,
+    assignment_options: list[dict[str, str]],
+) -> dict[str, Any]:
     data = {ATTR_CIRCUIT_ID: config.circuit_id}
     entity_ids = _sensor_entity_ids(config)
     if entity_ids:
         data[ATTR_MAINS_ENTITY_ID] = entity_ids[0]
     return {
         "domain": DOMAIN,
-        "service": SERVICE_LABEL_NILM_INTERVAL,
+        "service": SERVICE_SAVE_NILM_INTERVAL_CHANGES,
         "data": data,
-        "requires": [ATTR_START, ATTR_END, ATTR_LABEL, ATTR_APPLIANCE_PROFILE],
+        "requires": [ATTR_LABEL, ATTR_INTERVALS],
         "profile_options": _nilm_appliance_profile_options(),
+        "assignment_options": assignment_options,
     }
 
 
