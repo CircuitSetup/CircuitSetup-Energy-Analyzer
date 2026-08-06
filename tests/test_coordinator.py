@@ -2884,6 +2884,8 @@ def test_nilm_controller_exposes_label_and_assignment_actions() -> None:
     assert callable(coordinator.nilm_controller.async_assign_nilm_signature)
     assert callable(coordinator.nilm_controller.async_assign_nilm_session)
     assert callable(coordinator.nilm_controller.async_assign_nilm_interval)
+    assert callable(coordinator.nilm_controller.async_save_nilm_interval_changes)
+    assert callable(coordinator.nilm_controller.async_delete_nilm_appliance_assignment)
 
 
 def test_nilm_controller_exposes_session_validation_actions() -> None:

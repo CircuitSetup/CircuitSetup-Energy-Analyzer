@@ -3632,6 +3632,100 @@ async def test_nilm_assignment_edit_services_dispatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_interval_change_services_validate_and_dispatch() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_INTERVAL_CHANGES_SERVICE_SCHEMA,
+        SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT,
+        SERVICE_SAVE_NILM_INTERVAL_CHANGES,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+            self.circuit_configs = [SimpleNamespace(circuit_id="mains")]
+            self.store_data = FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [{"assignment_id": "assignment-dishwasher"}]
+                }
+            )
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        def async_set_updated_data(self, _data: object) -> None:
+            return None
+
+        async def async_save_nilm_interval_changes(
+            self, circuit_id: str, **kwargs: object
+        ) -> None:
+            self.calls.append(("save", (circuit_id, kwargs)))
+
+        async def async_delete_nilm_appliance_assignment(
+            self, circuit_id: str, assignment_id: str
+        ) -> None:
+            self.calls.append(("delete", (circuit_id, assignment_id)))
+
+    payload = {
+        "circuit_id": "mains",
+        "assignment_id": "assignment-dishwasher",
+        "label": "Dishwasher",
+        "intervals": [
+            {
+                "interval_id": "label-1",
+                "start": "2026-06-02T12:00:00+00:00",
+                "end": "2026-06-02T12:30:00+00:00",
+            }
+        ],
+        "removed_interval_ids": ["label-old"],
+    }
+    assert NILM_INTERVAL_CHANGES_SERVICE_SCHEMA(payload) == payload
+    with pytest.raises(ValueError):
+        NILM_INTERVAL_CHANGES_SERVICE_SCHEMA({**payload, "intervals": [{}] * 51})
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+    await async_setup_services(hass)
+    await hass.services.registered[(DOMAIN, SERVICE_SAVE_NILM_INTERVAL_CHANGES)](
+        SimpleNamespace(data=payload)
+    )
+    await hass.services.registered[(DOMAIN, SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT)](
+        SimpleNamespace(
+            data={"circuit_id": "mains", "assignment_id": "assignment-dishwasher"}
+        )
+    )
+
+    assert coordinator.calls == [
+        (
+            "save",
+            (
+                "mains",
+                {
+                    "label": "Dishwasher",
+                    "intervals": payload["intervals"],
+                    "removed_interval_ids": ["label-old"],
+                    "assignment_id": "assignment-dishwasher",
+                    "appliance_id": None,
+                    "appliance_profile": None,
+                },
+            ),
+        ),
+        ("delete", ("mains", "assignment-dishwasher")),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_nilm_assignment_merge_service_dispatch() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_MERGE_NILM_ASSIGNMENTS,

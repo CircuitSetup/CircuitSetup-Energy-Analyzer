@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import math
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from datetime import UTC, datetime
 from statistics import median
 from typing import Any
@@ -725,6 +726,225 @@ class NilmController:
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
+        return True
+
+    async def async_save_nilm_interval_changes(
+        self,
+        circuit_id: str,
+        *,
+        label: str,
+        intervals: Iterable[Mapping[str, Any]],
+        removed_interval_ids: Iterable[str] = (),
+        assignment_id: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically save a NILM assignment's interval membership."""
+        label_text = str(label or "").strip()
+        if not label_text:
+            raise ValueError("Missing label.")
+        drafts = list(intervals)
+        if not all(isinstance(draft, Mapping) for draft in drafts):
+            raise ValueError("Each NILM interval must be a mapping.")
+        removed_ids = set(self._clean_string_list(removed_interval_ids))
+        coordinator = self._coordinator
+        store_data = coordinator.store_data
+        assignment_id_text = str(assignment_id or "").strip()
+        existing_assignment = (
+            self.assignment_for_id(circuit_id, assignment_id_text)
+            if assignment_id_text
+            else None
+        )
+        appliance_id_text = str(
+            appliance_id
+            or (existing_assignment or {}).get("appliance_id")
+            or label_text
+        ).strip()
+        existing_by_id = {
+            str(interval.get("interval_id") or "").strip(): interval
+            for interval in store_data.nilm_label_intervals_by_circuit.get(
+                circuit_id, ()
+            )
+            if isinstance(interval, Mapping)
+        }
+        now_dt = coordinator.current_time()
+        now = now_dt.isoformat()
+        payloads: list[dict[str, Any]] = []
+        interval_ids: set[str] = set()
+        for draft in drafts:
+            start_dt = self._label_interval_datetime(draft.get("start"), "start")
+            end_dt = self._label_interval_datetime(draft.get("end"), "end")
+            if end_dt <= start_dt:
+                raise ValueError("NILM label interval end must be after start.")
+            draft_label = str(draft.get("label") or label_text).strip()
+            if not draft_label:
+                raise ValueError("Missing label.")
+            start = start_dt.isoformat()
+            end = end_dt.isoformat()
+            interval_id = str(draft.get("interval_id") or "").strip() or (
+                self._label_interval_id(circuit_id, start, end, draft_label)
+            )
+            if interval_id in interval_ids:
+                raise ValueError(f"Duplicate interval_id '{interval_id}'.")
+            interval_ids.add(interval_id)
+            existing = existing_by_id.get(interval_id, {})
+            payload = {
+                "interval_id": interval_id,
+                "mains_circuit_id": circuit_id,
+                "appliance_id": str(
+                    draft.get("appliance_id") or appliance_id_text
+                ).strip(),
+                "label": draft_label,
+                "start": start,
+                "end": end,
+                "source": str(draft.get("source") or "manual").strip() or "manual",
+                "confidence": max(min(float(draft.get("confidence", 1.0)), 1.0), 0.0),
+                "created_at": str(existing.get("created_at") or now),
+                "updated_at": now,
+            }
+            for key in (
+                "mains_entity_id",
+                "ground_truth_entity_id",
+                "validation_start",
+                "validation_end",
+                "observed_transition_w",
+                "median_power_w",
+                "measured_energy_kwh",
+            ):
+                if key in draft:
+                    payload[key] = draft[key]
+                elif key in existing:
+                    payload[key] = existing[key]
+            payloads.append(payload)
+
+        snapshots = {
+            name: deepcopy(getattr(store_data, name))
+            for name in (
+                "nilm_appliance_assignments_by_circuit",
+                "nilm_label_intervals_by_circuit",
+                "nilm_signatures",
+                "nilm_session_history_by_circuit",
+            )
+        }
+        try:
+            assignment = (
+                existing_assignment
+                if existing_assignment is not None
+                else self.upsert_assignment(
+                    circuit_id,
+                    label=label_text,
+                    appliance_id=appliance_id_text,
+                    appliance_profile=appliance_profile,
+                    lifecycle_state="needs_validation",
+                )
+            )
+            assignment_id_text = str(assignment["assignment_id"])
+            selected_ids = interval_ids | removed_ids
+            for candidate in store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            ):
+                candidate["label_interval_ids"] = [
+                    value
+                    for value in self._clean_string_list(
+                        candidate.get("label_interval_ids")
+                    )
+                    if value not in selected_ids
+                ]
+            assignment["label_interval_ids"] = self._clean_string_list(
+                assignment.get("label_interval_ids")
+            ) + [interval["interval_id"] for interval in payloads]
+            assignment["updated_at"] = now
+            updated_by_id = {payload["interval_id"]: payload for payload in payloads}
+            stored_intervals = []
+            for interval in store_data.nilm_label_intervals_by_circuit.get(
+                circuit_id, ()
+            ):
+                interval_id = str(interval.get("interval_id") or "").strip()
+                if interval_id in updated_by_id:
+                    stored_intervals.append(updated_by_id.pop(interval_id))
+                else:
+                    preserved = dict(interval)
+                    if interval_id in removed_ids:
+                        preserved.pop("assignment_id", None)
+                    stored_intervals.append(preserved)
+            stored_intervals.extend(updated_by_id.values())
+            for interval in stored_intervals:
+                if interval["interval_id"] in interval_ids:
+                    interval["assignment_id"] = assignment_id_text
+            store_data.nilm_label_intervals_by_circuit[circuit_id] = stored_intervals
+            self._update_assignment_duration_bounds(circuit_id, assignment)
+            self._rebuild_assignment_model(circuit_id, assignment)
+            coordinator.store_persistence.mark_dirty()
+            coordinator.async_set_updated_data(coordinator.state)
+            await coordinator.store_persistence.async_save_if_dirty(now_dt)
+        except Exception:
+            for name, snapshot in snapshots.items():
+                setattr(store_data, name, snapshot)
+            coordinator.store_persistence.mark_dirty()
+            coordinator.async_set_updated_data(coordinator.state)
+            try:
+                await coordinator.store_persistence.async_save_if_dirty(now_dt)
+            except Exception:
+                pass
+            raise
+        return dict(assignment)
+
+    async def async_delete_nilm_appliance_assignment(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> bool:
+        """Permanently delete a retired NILM assignment, preserving evidence."""
+        assignment = self.assignment_for_id(circuit_id, assignment_id)
+        if str(assignment.get("lifecycle_state") or "").lower() != "retired":
+            raise ValueError("Only retired NILM assignments can be deleted.")
+        coordinator = self._coordinator
+        store_data = coordinator.store_data
+        snapshots = {
+            name: deepcopy(getattr(store_data, name))
+            for name in (
+                "nilm_appliance_assignments_by_circuit",
+                "nilm_label_intervals_by_circuit",
+                "nilm_signatures",
+                "nilm_session_history_by_circuit",
+            )
+        }
+        assignment_id_text = str(assignment_id).strip()
+        try:
+            store_data.nilm_appliance_assignments_by_circuit[circuit_id] = [
+                candidate
+                for candidate in store_data.nilm_appliance_assignments_by_circuit.get(
+                    circuit_id, ()
+                )
+                if candidate.get("assignment_id") != assignment_id_text
+            ]
+            for collection in (
+                store_data.nilm_label_intervals_by_circuit.get(circuit_id, ()),
+                store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+            ):
+                for evidence in collection:
+                    if evidence.get("assignment_id") == assignment_id_text:
+                        evidence.pop("assignment_id", None)
+            for signature in store_data.nilm_signatures.get(circuit_id, ()):
+                if signature.get("assignment_id") == assignment_id_text:
+                    signature.pop("assignment_id", None)
+                    signature["review_state"] = "new"
+            await self.async_save_assignment_change()
+            if (
+                await self._async_wait_for_assignment_entities(
+                    assignment_id_text, False
+                )
+                is True
+            ):
+                raise ValueError(
+                    f"Deleting assignment '{assignment_id_text}' did not remove "
+                    "Home Assistant entities."
+                )
+        except Exception:
+            for name, snapshot in snapshots.items():
+                setattr(store_data, name, snapshot)
+            await self.async_save_assignment_change()
+            raise
         return True
 
     async def async_assign_nilm_signature(

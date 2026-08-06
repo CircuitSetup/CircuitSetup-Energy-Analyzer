@@ -1298,6 +1298,28 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             interval_id,
         )
 
+    async def async_save_nilm_interval_changes(
+        self: Self,
+        circuit_id: str,
+        *,
+        label: str,
+        intervals: Iterable[Mapping[str, Any]],
+        removed_interval_ids: Iterable[str] = (),
+        assignment_id: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically save NILM interval membership for one appliance."""
+        return await self.nilm_controller.async_save_nilm_interval_changes(
+            circuit_id,
+            label=label,
+            intervals=intervals,
+            removed_interval_ids=removed_interval_ids,
+            assignment_id=assignment_id,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+        )
+
     async def async_assign_nilm_signature(
         self: Self,
         circuit_id: str,
@@ -1571,6 +1593,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         """Retire a NILM assignment and stop publishing entities."""
         return await self.nilm_controller.async_retire_nilm_appliance_assignment(
+            circuit_id,
+            assignment_id,
+        )
+
+    async def async_delete_nilm_appliance_assignment(
+        self: Self,
+        circuit_id: str,
+        assignment_id: str,
+    ) -> bool:
+        """Permanently delete one retired NILM appliance assignment."""
+        return await self.nilm_controller.async_delete_nilm_appliance_assignment(
             circuit_id,
             assignment_id,
         )

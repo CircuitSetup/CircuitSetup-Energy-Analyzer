@@ -1,3 +1,67 @@
+save_nilm_interval_changes:
+  name: Save NILM interval changes
+  description: "Advanced/script action: atomically save a NILM appliance's interval membership. The normal user path is the NILM workspace panel."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier.
+      required: false
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional analyzer config entry to target when circuit IDs are duplicated.
+      required: false
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Existing appliance assignment to update.
+      required: false
+      selector:
+        text:
+    label:
+      name: Label
+      description: Friendly appliance name for saved intervals.
+      required: true
+      selector:
+        text:
+    intervals:
+      name: Intervals
+      description: Bounded list of interval mappings with start and end timestamps.
+      required: true
+      selector:
+        object:
+    removed_interval_ids:
+      name: Removed interval IDs
+      description: Bounded list of saved interval IDs to unassign without deleting evidence.
+      required: false
+      selector:
+        object:
+
+delete_nilm_appliance_assignment:
+  name: Delete retired NILM appliance assignment
+  description: "Advanced/script action: permanently delete a retired NILM assignment while preserving its evidence for review."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured mains NILM circuit identifier.
+      required: false
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional analyzer config entry to target when circuit IDs are duplicated.
+      required: false
+      selector:
+        text:
+    assignment_id:
+      name: Assignment ID
+      description: Retired appliance assignment identifier to delete.
+      required: true
+      selector:
+        text:
+
 mark_circuit_mixed:
   name: Mark circuit mixed
   description: "Advanced/script action: confirm that a circuit supplies multiple appliances and remove direct-appliance state. The normal user path is the evidence panel's This circuit powers other loads action."
@@ -311,6 +375,7 @@ delete_nilm_label_interval:
       example: mains
       selector:
         text:
+
     entity_id:
       name: Analyzer Entity
       description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.

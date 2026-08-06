@@ -10,7 +10,7 @@ from statistics import median
 from typing import Any
 
 from . import notifications
-from .const import DOMAIN
+from .const import DOMAIN, NILM_INTERVAL_CHANGES_MAX_ITEMS
 from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .models import SensorRole
 from .ux import SENSITIVITY_VALUES
@@ -39,6 +39,8 @@ SERVICE_LABEL_NILM_SIGNATURE = "label_nilm_signature"
 SERVICE_IGNORE_NILM_SIGNATURE = "ignore_nilm_signature"
 SERVICE_LABEL_NILM_INTERVAL = "label_nilm_interval"
 SERVICE_DELETE_NILM_LABEL_INTERVAL = "delete_nilm_label_interval"
+SERVICE_SAVE_NILM_INTERVAL_CHANGES = "save_nilm_interval_changes"
+SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT = "delete_nilm_appliance_assignment"
 SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS = "generate_nilm_sensor_label_intervals"
 SERVICE_ASSIGN_SIGNATURE_TO_APPLIANCE = "assign_signature_to_appliance"
 SERVICE_ASSIGN_SESSION_TO_APPLIANCE = "assign_session_to_appliance"
@@ -98,6 +100,8 @@ ATTR_ALERT_ID = "alert_id"
 ATTR_SIGNATURE_ID = "signature_id"
 ATTR_SIGNATURE_FINGERPRINT = "signature_fingerprint"
 ATTR_INTERVAL_ID = "interval_id"
+ATTR_INTERVALS = "intervals"
+ATTR_REMOVED_INTERVAL_IDS = "removed_interval_ids"
 ATTR_SESSION_ID = "session_id"
 ATTR_ASSIGNMENT_ID = "assignment_id"
 ATTR_LABEL = "label"
@@ -369,6 +373,33 @@ NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_INTERVAL_ID,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
 )
+
+
+def _nilm_interval_changes_schema(
+    data: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    values = dict(data or {})
+    for field in (ATTR_LABEL, ATTR_INTERVALS):
+        if field not in values:
+            raise ValueError(f"Missing required field: {field}")
+    intervals = values[ATTR_INTERVALS]
+    removed = values.get(ATTR_REMOVED_INTERVAL_IDS, [])
+    if (
+        not isinstance(intervals, list)
+        or len(intervals) > NILM_INTERVAL_CHANGES_MAX_ITEMS
+        or not all(isinstance(interval, Mapping) for interval in intervals)
+    ):
+        raise ValueError("intervals must be a bounded list of mappings")
+    if (
+        not isinstance(removed, list)
+        or len(removed) > NILM_INTERVAL_CHANGES_MAX_ITEMS
+        or not all(isinstance(interval_id, str) for interval_id in removed)
+    ):
+        raise ValueError("removed_interval_ids must be a bounded list of strings")
+    return values
+
+
+NILM_INTERVAL_CHANGES_SERVICE_SCHEMA = _nilm_interval_changes_schema
 NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA = _schema(
     required=(ATTR_LABEL, ATTR_START, ATTR_END, ATTR_GROUND_TRUTH_ENTITY_ID),
     optional=(
@@ -591,6 +622,8 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_IGNORE_NILM_SIGNATURE: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_LABEL_NILM_INTERVAL: NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
     SERVICE_DELETE_NILM_LABEL_INTERVAL: NILM_DELETE_LABEL_INTERVAL_SERVICE_SCHEMA,
+    SERVICE_SAVE_NILM_INTERVAL_CHANGES: NILM_INTERVAL_CHANGES_SERVICE_SCHEMA,
+    SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT: NILM_ASSIGNMENT_ACTION_SERVICE_SCHEMA,
     SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS: (
         NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA
     ),
@@ -925,6 +958,24 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
         return
 
+    if service == SERVICE_SAVE_NILM_INTERVAL_CHANGES:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_save_nilm_interval_changes",
+                circuit_id,
+                label=data.get(ATTR_LABEL),
+                intervals=data.get(ATTR_INTERVALS, []),
+                removed_interval_ids=data.get(ATTR_REMOVED_INTERVAL_IDS, []),
+                assignment_id=data.get(ATTR_ASSIGNMENT_ID),
+                appliance_id=data.get(ATTR_APPLIANCE_ID),
+                appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
+            )
+        return
+
     if service == SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS:
         circuit_id = _service_circuit_id(hass, data)
         start_dt = _service_datetime(data.get(ATTR_START), ATTR_START)
@@ -1245,6 +1296,19 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             await _call_if_present(
                 coordinator,
                 "async_retire_nilm_appliance_assignment",
+                circuit_id,
+                data.get(ATTR_ASSIGNMENT_ID),
+            )
+        return
+
+    if service == SERVICE_DELETE_NILM_APPLIANCE_ASSIGNMENT:
+        circuit_id = _service_circuit_id(hass, data)
+        for coordinator in _target_nilm_coordinators(
+            hass, circuit_id, data.get(ATTR_ENTRY_ID)
+        ):
+            await _call_if_present(
+                coordinator,
+                "async_delete_nilm_appliance_assignment",
                 circuit_id,
                 data.get(ATTR_ASSIGNMENT_ID),
             )
