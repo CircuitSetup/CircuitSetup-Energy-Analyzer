@@ -62,6 +62,7 @@ from .services import (
     ATTR_HELPER_CIRCUIT_ID,
     ATTR_INTERVAL_ID,
     ATTR_LABEL,
+    ATTR_MAINS_ENTITY_ID,
     ATTR_PRESET,
     ATTR_REFERENCE_POWER_ENTITY_ID,
     ATTR_RELATIONSHIP,
@@ -81,6 +82,7 @@ from .services import (
     SERVICE_DELETE_NILM_LABEL_INTERVAL,
     SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
+    SERVICE_LABEL_NILM_INTERVAL,
     SERVICE_LABEL_NILM_SIGNATURE,
     SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
@@ -92,7 +94,6 @@ from .services import (
     SERVICE_RENAME_NILM_APPLIANCE,
     SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
-    SERVICE_SAVE_NILM_INTERVAL_CHANGES,
     SERVICE_SET_CIRCUIT_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_SET_NILM_REFERENCE_LINK,
@@ -1016,11 +1017,16 @@ def _nilm_label_interval_payload(
 
 
 def _nilm_label_interval_action(config: CircuitConfig) -> dict[str, Any]:
+    data = {ATTR_CIRCUIT_ID: config.circuit_id}
+    entity_ids = _sensor_entity_ids(config)
+    if entity_ids:
+        data[ATTR_MAINS_ENTITY_ID] = entity_ids[0]
     return {
         "domain": DOMAIN,
-        "service": SERVICE_SAVE_NILM_INTERVAL_CHANGES,
-        "data": {ATTR_CIRCUIT_ID: config.circuit_id},
-        "requires": [ATTR_LABEL, "intervals"],
+        "service": SERVICE_LABEL_NILM_INTERVAL,
+        "data": data,
+        "requires": [ATTR_START, ATTR_END, ATTR_LABEL, ATTR_APPLIANCE_PROFILE],
+        "profile_options": _nilm_appliance_profile_options(),
     }
 
 
@@ -1612,6 +1618,8 @@ def _nilm_assignment_payload(
                 str(interval.get(ATTR_INTERVAL_ID) or "").strip()
                 for interval in label_intervals
                 if str(interval.get(ATTR_INTERVAL_ID) or "").strip() in interval_ids
+                and str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip()
+                == assignment_id
                 and str(interval.get("source") or "").strip().lower() == "manual"
             ),
             "",
@@ -1928,6 +1936,7 @@ def _nilm_workspace_lanes(
     label_intervals: Iterable[Mapping[str, Any]] = (),
     sessions: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, dict[str, Any]]:
+    sessions = tuple(sessions)
     lanes = {
         "needs_review": _nilm_lane("Needs Review"),
         "assigned": _nilm_lane("Assigned"),
@@ -1936,6 +1945,14 @@ def _nilm_workspace_lanes(
         "hidden": _nilm_lane("Removed"),
     }
     assigned_signature_ids = _nilm_assigned_signature_ids(assignments)
+    reviewed_session_fingerprints = {
+        str(session.get(ATTR_SIGNATURE_FINGERPRINT) or "").strip()
+        for session in sessions
+        if str(session.get(ATTR_SESSION_ID) or "").strip()
+        and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        and isinstance(session.get("actions"), Mapping)
+        and isinstance(session["actions"].get("assign"), Mapping)
+    }
     for signature in signatures:
         signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
         if not signature_id:
@@ -1950,6 +1967,8 @@ def _nilm_workspace_lanes(
             lanes["hidden"]["signature_ids"].append(signature_id)
         elif (
             complete_component
+            and _nilm_signature_session_fingerprint(signature)
+            not in reviewed_session_fingerprints
             and not str(signature.get("matched_assignment_id") or "").strip()
             and _nilm_signature_identifiers(signature).isdisjoint(
                 assigned_signature_ids,
