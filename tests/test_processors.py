@@ -1935,7 +1935,8 @@ def test_hvac_active_cross_midnight_call_disqualifies_closed_date() -> None:
     assert context.store_data.hvac_response_history_by_stream[stream_id] == []
 
 
-def test_hvac_nonselected_call_disqualifies_selected_context_day() -> None:
+def test_hvac_nonselected_complete_weather_call_preserves_selected_context_day(
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.processors import (
         HvacEfficiencyProcessor,
     )
@@ -1981,6 +1982,10 @@ def test_hvac_nonselected_call_disqualifies_selected_context_day() -> None:
         "started_at": (
             datetime.fromisoformat(str(base["started_at"])) + timedelta(hours=8)
         ).isoformat(),
+        "ended_at": (
+            datetime.fromisoformat(str(base["started_at"]))
+            + timedelta(hours=8, minutes=10)
+        ).isoformat(),
         "complete": False,
         "excluded_from_baseline": True,
         "participant_signature": ["heat_pump", "alternate"],
@@ -1992,7 +1997,11 @@ def test_hvac_nonselected_call_disqualifies_selected_context_day() -> None:
 
     HvacEfficiencyProcessor().process([(heat_pump, SimpleNamespace())], context)
 
-    assert context.store_data.hvac_response_history_by_stream[stream_id] == []
+    compacted = context.store_data.hvac_response_history_by_stream[stream_id]
+
+    assert len(compacted) == 1
+    assert compacted[0]["episode_kind"] == "core_day"
+    assert compacted[0]["active_minutes"] == 40.0
 
 
 def test_hvac_mixed_mode_markers_survive_until_local_day_closes() -> None:
