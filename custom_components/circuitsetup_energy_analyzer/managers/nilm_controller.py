@@ -788,6 +788,15 @@ class NilmController:
                 raise ValueError(f"Duplicate interval_id '{interval_id}'.")
             interval_ids.add(interval_id)
             existing = existing_by_id.get(interval_id, {})
+            confidence = draft.get("confidence", 1.0)
+            if isinstance(confidence, bool):
+                raise ValueError("Invalid confidence.")
+            try:
+                confidence_value = float(confidence)
+            except (TypeError, ValueError) as err:
+                raise ValueError("Invalid confidence.") from err
+            if not math.isfinite(confidence_value) or confidence_value < 0.0:
+                raise ValueError("Invalid confidence.")
             payload = {
                 "interval_id": interval_id,
                 "mains_circuit_id": circuit_id,
@@ -798,7 +807,7 @@ class NilmController:
                 "start": start,
                 "end": end,
                 "source": str(draft.get("source") or "manual").strip() or "manual",
-                "confidence": max(min(float(draft.get("confidence", 1.0)), 1.0), 0.0),
+                "confidence": min(confidence_value, 1.0),
                 "created_at": str(existing.get("created_at") or now),
                 "updated_at": now,
             }
@@ -811,10 +820,28 @@ class NilmController:
                 "median_power_w",
                 "measured_energy_kwh",
             ):
-                if key in draft:
-                    payload[key] = draft[key]
-                elif key in existing:
-                    payload[key] = existing[key]
+                value = draft.get(key, existing.get(key))
+                if value is None:
+                    continue
+                if key == "observed_transition_w":
+                    if isinstance(value, bool):
+                        raise ValueError("Invalid observed transition watts.")
+                    try:
+                        parsed = float(value)
+                    except (TypeError, ValueError) as err:
+                        raise ValueError("Invalid observed transition watts.") from err
+                    if not math.isfinite(parsed) or parsed < 0.0:
+                        raise ValueError("Invalid observed transition watts.")
+                    payload[key] = parsed
+                elif key in {"median_power_w", "measured_energy_kwh"}:
+                    if isinstance(value, bool):
+                        raise ValueError(f"Invalid {key}.")
+                    parsed = self._float_or_none(value)
+                    if parsed is None or not math.isfinite(parsed) or parsed < 0.0:
+                        raise ValueError(f"Invalid {key}.")
+                    payload[key] = parsed
+                elif key in draft or key in existing:
+                    payload[key] = value
             payloads.append(payload)
 
         snapshots = {
@@ -865,7 +892,7 @@ class NilmController:
                 else:
                     preserved = dict(interval)
                     if interval_id in removed_ids:
-                        preserved.pop("assignment_id", None)
+                        preserved["assignment_id"] = None
                     stored_intervals.append(preserved)
             stored_intervals.extend(updated_by_id.values())
             for interval in stored_intervals:
@@ -2729,14 +2756,13 @@ def _nilm_assignment_interval_matches(
     assignment: Mapping[str, Any],
 ) -> bool:
     interval_id = str(interval.get("interval_id") or "").strip()
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    if "assignment_id" in interval:
+        return bool(assignment_id) and (
+            str(interval.get("assignment_id") or "").strip() == assignment_id
+        )
     if interval_id and interval_id in _clean_string_list(
         assignment.get("label_interval_ids")
-    ):
-        return True
-    assignment_id = str(assignment.get("assignment_id") or "").strip()
-    if (
-        assignment_id
-        and str(interval.get("assignment_id") or "").strip() == assignment_id
     ):
         return True
     interval_appliance = (
