@@ -419,8 +419,8 @@ export function createNilmWorkspaceMethods({
       }
       const savedIntervals = [];
       for (const interval of draftIntervals) {
-        const start = this._datetimeLocalToIso(interval.start);
-        const end = this._datetimeLocalToIso(interval.end);
+        const start = this._datetimeLocalToIso(interval.start, interval.start_millis);
+        const end = this._datetimeLocalToIso(interval.end, interval.end_millis);
         if (!start || !end || Date.parse(end) <= Date.parse(start)) {
           this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
           return;
@@ -442,6 +442,11 @@ export function createNilmWorkspaceMethods({
         if (intervalId) saved.interval_id = intervalId;
         savedIntervals.push(saved);
       }
+      const hasNewIntervals = savedIntervals.some(
+        (interval) => !String(interval.interval_id || "").trim(),
+      );
+      const creatingAssignment = !String(draft.assignment_id || "").trim();
+
       data = {
         ...action && action.data || {},
         label,
@@ -449,12 +454,39 @@ export function createNilmWorkspaceMethods({
         removed_interval_ids: removedIntervalIds,
         appliance_id: String(draft.appliance_id || label).trim(),
       };
-      if (applianceProfile) data.appliance_profile = applianceProfile;
-      if (draft.assignment_id) data.assignment_id = draft.assignment_id;
+
+      // Prevent action.data from supplying a profile while an existing
+      // assignment or saved interval is being edited.
+      delete data.appliance_profile;
+
+      if (draft.assignment_id) {
+        data.assignment_id = draft.assignment_id;
+      }
+
       if (action.service === "save_nilm_interval_changes") {
+        // The combined service receives appliance_profile only when this
+        // request creates a new assignment with at least one new interval.
+        if (applianceProfile && hasNewIntervals && creatingAssignment) {
+          data.appliance_profile = applianceProfile;
+        }
+
         requests.push(data);
       } else {
-        savedIntervals.forEach((interval) => requests.push({ ...data, ...interval }));
+        // Legacy services receive one request per interval. Include the
+        // profile only on requests that create a new interval/assignment.
+        savedIntervals.forEach((interval) => {
+          const requestData = { ...data, ...interval };
+
+          if (
+            applianceProfile
+            && !String(interval.interval_id || "").trim()
+            && creatingAssignment
+          ) {
+            requestData.appliance_profile = applianceProfile;
+          }
+
+          requests.push(requestData);
+        });
       }
     } else if (actionKey === "delete") {
       const interval = intervals && intervals[index];
@@ -1088,7 +1120,13 @@ export function createNilmWorkspaceMethods({
       return draft.intervals;
     }
     return draft.start || draft.end || draft.interval_id
-      ? [{ start: draft.start || "", end: draft.end || "", interval_id: draft.interval_id || "" }]
+      ? [{
+        start: draft.start || "",
+        end: draft.end || "",
+        interval_id: draft.interval_id || "",
+        start_millis: draft.start_millis ?? null,
+        end_millis: draft.end_millis ?? null,
+      }]
       : [];
   }
 
@@ -1118,7 +1156,9 @@ export function createNilmWorkspaceMethods({
     if (index >= 0 && ["start", "end", "observed_transition_w"].includes(field)) {
       if (field === "start" || field === "end") this._beginNilmGraphIntent();
       const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
-      intervals[index] = { ...(intervals[index] || {}), [field]: input.value };
+      const nextInterval = { ...(intervals[index] || {}), [field]: input.value };
+      if (field === "start" || field === "end") nextInterval[`${field}_millis`] = null;
+      intervals[index] = nextInterval;
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
       this._nilmActiveIntervalIndex = index;
       this._render();
@@ -1195,6 +1235,8 @@ export function createNilmWorkspaceMethods({
         ...intervals[index],
         start: this._datetimeLocalFromMillis(start),
         end: this._datetimeLocalFromMillis(end),
+        start_millis: start,
+        end_millis: end,
       };
       this._openNilmIntervalEditor(() => {
         this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
@@ -1358,6 +1400,8 @@ export function createNilmWorkspaceMethods({
           start: this._datetimeLocalFromMillis(start),
           end: this._datetimeLocalFromMillis(end),
           interval_id: interval.interval_id || "",
+          start_millis: start,
+          end_millis: end,
         }],
       };
       this._nilmActiveIntervalIndex = 0;
@@ -1396,8 +1440,14 @@ export function createNilmWorkspaceMethods({
   async _syncNilmIntervalFieldToGraph(index) {
     this._beginNilmGraphIntent();
     const interval = this._nilmIntervalDraftItems()[index];
-    const start = Date.parse(interval && interval.start || "");
-    const end = Date.parse(interval && interval.end || "");
+    const start = this._datetimeLocalToMillis(
+      interval && interval.start,
+      interval && interval.start_millis,
+    );
+    const end = this._datetimeLocalToMillis(
+      interval && interval.end,
+      interval && interval.end_millis,
+    );
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       this._render();
       return;
@@ -1410,7 +1460,11 @@ export function createNilmWorkspaceMethods({
       && start >= loadedStart
       && end <= loadedEnd;
     if (!historyContainsInterval) {
-      await this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: false });
+      await this._loadNilmIntervalOnGraph({
+        ...(interval || {}),
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+      }, { edit: false, scroll: false });
     } else {
       this._nilmFocusedInterval = { start, end };
       this._render();
@@ -1419,17 +1473,22 @@ export function createNilmWorkspaceMethods({
 
   _updateNilmDraftBoundary(index, field, millis) {
     const intervals = this._nilmIntervalDraftItems().map((item) => ({ ...item }));
-    const other = Date.parse(intervals[index] && intervals[index][field === "start" ? "end" : "start"] || "");
+    const interval = intervals[index];
+    const otherField = field === "start" ? "end" : "start";
+    const other = this._datetimeLocalToMillis(
+      interval && interval[otherField],
+      interval && interval[`${otherField}_millis`],
+    );
     if (!Number.isFinite(millis) || !Number.isFinite(other)) return false;
     if ((field === "start" && millis >= other) || (field === "end" && millis <= other)) return false;
     this._beginNilmGraphIntent();
-    intervals[index][field] = this._datetimeLocalFromMillis(millis);
+    interval[field] = this._datetimeLocalFromMillis(millis);
+    interval[`${field}_millis`] = millis;
     this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
     this._nilmActiveIntervalIndex = index;
-    this._nilmFocusedInterval = {
-      start: Date.parse(intervals[index].start),
-      end: Date.parse(intervals[index].end),
-    };
+    this._nilmFocusedInterval = field === "start"
+      ? { start: millis, end: other }
+      : { start: other, end: millis };
     this._render();
     return true;
   }
@@ -1448,6 +1507,7 @@ export function createNilmWorkspaceMethods({
     intervals[index] = {
       ...(intervals[index] || { start: "", end: "", interval_id: "" }),
       [field]: this._datetimeLocalFromMillis(time),
+      [`${field}_millis`]: time,
     };
     this._openNilmIntervalEditor(() => {
       this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
@@ -1809,6 +1869,8 @@ export function createNilmWorkspaceMethods({
       thresholdW: String(reference.threshold_w ?? 0),
       start: this._datetimeLocalFromMillis(window.start),
       end: this._datetimeLocalFromMillis(window.end),
+      startMillis: Number.isFinite(window.start) ? window.start : null,
+      endMillis: Number.isFinite(window.end) ? window.end : null,
       open: false,
       error: "",
     };
@@ -1850,7 +1912,10 @@ export function createNilmWorkspaceMethods({
   _rememberNilmReferenceDraft(input) {
     const key = input.dataset.nilmReferenceKey;
     const draft = this._nilmReferenceDrafts.get(key) || {};
-    this._nilmReferenceDrafts.set(key, { ...draft, [input.dataset.nilmReferenceInput]: input.value, open: true, error: "" });
+    const field = input.dataset.nilmReferenceInput;
+    const nextDraft = { ...draft, [field]: input.value, open: true, error: "" };
+    if (field === "start" || field === "end") nextDraft[`${field}Millis`] = null;
+    this._nilmReferenceDrafts.set(key, nextDraft);
   }
 
   _configureNilmReferencePickers() {
@@ -1880,8 +1945,8 @@ export function createNilmWorkspaceMethods({
     const stateEntityId = String(actionKey === "refresh" ? reference.state_entity_id || "" : draft.stateEntityId || "").trim();
     const powerEntityId = String(actionKey === "refresh" ? reference.power_entity_id || "" : draft.powerEntityId || "").trim();
     const thresholdW = Number(actionKey === "refresh" ? reference.threshold_w || 0 : draft.thresholdW || 0);
-    const start = this._datetimeLocalToIso(draft.start);
-    const end = this._datetimeLocalToIso(draft.end);
+    const start = this._datetimeLocalToIso(draft.start, draft.startMillis);
+    const end = this._datetimeLocalToIso(draft.end, draft.endMillis);
     if (actionKey !== "remove" && (!stateEntityId && !powerEntityId)) {
       draft.error = this._panelText("errors.nilm_reference_required");
       this._render();
@@ -2257,17 +2322,21 @@ export function createNilmWorkspaceMethods({
         ? []
         : [{ ...item, band_kind: "label", label_interval_index: index }]
     ));
-    const draftBands = this._nilmIntervalEditorOpen ? draftIntervals.flatMap((item, index) => (
-      item.start && item.end && Date.parse(item.end) > Date.parse(item.start)
+    const draftBands = this._nilmIntervalEditorOpen ? draftIntervals.flatMap((item, index) => {
+      const start = this._datetimeLocalToMillis(item.start, item.start_millis);
+      const end = this._datetimeLocalToMillis(item.end, item.end_millis);
+      return Number.isFinite(start) && Number.isFinite(end) && end > start
         ? [{
           ...item,
+          start: new Date(start).toISOString(),
+          end: new Date(end).toISOString(),
           band_kind: "draft",
           draft_index: index,
           display_label: draft.label,
           selected: index === this._nilmActiveIntervalIndex,
         }]
-        : []
-    )) : [];
+        : [];
+    }) : [];
     const focused = this._nilmFocusedInterval;
     const sessionBands = focused && !(sessions || []).length
       ? workspace.sessions || []
@@ -2758,8 +2827,8 @@ export function createNilmWorkspaceMethods({
       ? action.profile_options
       : [];
     const invalidInterval = intervals.some((interval) => {
-      const start = Date.parse(interval.start || "");
-      const end = Date.parse(interval.end || "");
+      const start = this._datetimeLocalToMillis(interval.start, interval.start_millis);
+      const end = this._datetimeLocalToMillis(interval.end, interval.end_millis);
       return !Number.isFinite(start) || !Number.isFinite(end) || end <= start;
     });
     const saveBusy = this._busyAction === "nilm_label_interval_save" || invalidInterval ? "disabled" : "";
@@ -2815,8 +2884,8 @@ export function createNilmWorkspaceMethods({
 
   _nilmLabelIntervalPowerPreview(interval = null) {
     const selected = interval || this._nilmIntervalDraftItems()[this._nilmActiveIntervalIndex] || {};
-    const start = new Date(selected.start || "").getTime();
-    const end = new Date(selected.end || "").getTime();
+    const start = this._datetimeLocalToMillis(selected.start, selected.start_millis);
+    const end = this._datetimeLocalToMillis(selected.end, selected.end_millis);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
     const powerSeries = this._nilmLabelIntervalPowerSeries();
     const points = powerSeries && Array.isArray(powerSeries.points)
@@ -2858,8 +2927,8 @@ export function createNilmWorkspaceMethods({
 
   _nilmLabelIntervalEnergyPreview() {
     const interval = this._nilmIntervalDraftItems()[this._nilmActiveIntervalIndex] || {};
-    const start = new Date(interval.start || "").getTime();
-    const end = new Date(interval.end || "").getTime();
+    const start = this._datetimeLocalToMillis(interval.start, interval.start_millis);
+    const end = this._datetimeLocalToMillis(interval.end, interval.end_millis);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
       return null;
     }

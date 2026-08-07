@@ -6546,7 +6546,8 @@ panel._hass = { callService: async (domain, service, data) => {
 await panel._callNilmLabelIntervalAction(0, "adjust");
 assert.equal(panel._nilmLabelIntervalDraft.intervals[0].interval_id, "saved-interval");
 renders = 0;
-const changedStart = panel._datetimeLocalFromMillis(Date.parse("2026-08-04T08:02:00Z"));
+const changedStartIso = "2026-08-04T08:02:00.000Z";
+const changedStart = panel._datetimeLocalFromMillis(Date.parse(changedStartIso));
 panel._rememberNilmLabelIntervalDraft({
   dataset: { nilmLabelIntervalInput: "start", nilmIntervalIndex: "0" },
   value: changedStart,
@@ -6555,7 +6556,7 @@ assert.equal(renders, 1);
 const bands = panel._nilmGraphBands(workspace, []);
 assert.equal(bands.length, 1);
 assert.equal(bands[0].band_kind, "draft");
-assert.equal(bands[0].start, changedStart);
+assert.equal(bands[0].start, changedStartIso);
 assert.equal(panel._nilmLabelIntervalPowerPreview(), 84);
 const previewHtml = panel._renderNilmLabelIntervalEditor(workspace);
 assert.ok(previewHtml.includes("Estimated load 84 W"), previewHtml);
@@ -6564,7 +6565,7 @@ assert.ok(!previewHtml.includes("Unknown W"), previewHtml);
 await panel._callNilmLabelIntervalAction(-1, "save");
 assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
 assert.equal(calls[0].data.interval_id, "saved-interval");
-assert.equal(calls[0].data.start, "2026-08-04T08:02:00.000Z");
+assert.equal(calls[0].data.start, changedStartIso);
 assert.equal(calls[0].data.observed_transition_w, 84);
 assert.ok(!("appliance_profile" in calls[0].data));
 assert.equal(panel._nilmIntervalEditorOpen, false);
