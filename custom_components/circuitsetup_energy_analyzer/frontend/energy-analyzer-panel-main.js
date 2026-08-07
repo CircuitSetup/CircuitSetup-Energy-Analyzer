@@ -64,6 +64,8 @@ export const PANEL_METHOD_DEPENDENCIES = {
 };
 
 const DATETIME_LOCAL_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+const ABSOLUTE_DATETIME_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
 const DATETIME_LOCAL_FORMATTERS = new Map();
 
 function datetimeLocalPartsToUtcMillis(parts) {
@@ -182,8 +184,21 @@ function browserLocalMillis(parts, preferredMillis = Number.NaN) {
 }
 
 function datetimeLocalToMillis(value, timeZone, preferredMillis = Number.NaN) {
-  const parts = parseDatetimeLocal(value);
-  if (!parts) return Number.NaN;
+  const raw = String(value || "").trim();
+  const parts = parseDatetimeLocal(raw);
+
+  if (!parts) {
+    // Backend timestamps already identify an absolute instant. Do not
+    // reinterpret them in either the browser or Home Assistant timezone.
+    if (!ABSOLUTE_DATETIME_PATTERN.test(raw)) {
+      return Number.NaN;
+    }
+
+    const absoluteMillis = Date.parse(raw);
+    return Number.isFinite(absoluteMillis)
+      ? absoluteMillis
+      : Number.NaN;
+  }
   const preferred = preferredMillis === null || preferredMillis === undefined || preferredMillis === ""
     ? Number.NaN
     : Number(preferredMillis);
