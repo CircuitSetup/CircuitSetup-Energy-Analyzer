@@ -15,6 +15,7 @@ export default defineConfig({
   outputDir: haBaseUrl ? "test-results/browser/ha" : "test-results/browser/static",
   use: {
     baseURL: haBaseUrl || "http://127.0.0.1:4173",
+    timezoneId: "UTC",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

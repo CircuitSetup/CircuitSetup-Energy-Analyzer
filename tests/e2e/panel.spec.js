@@ -7528,8 +7528,14 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveCount(0);
   await panel.locator('[data-nilm-label-interval-input="label"]').fill("Dishwasher");
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
-  await panel.locator('[data-nilm-label-interval-input="start"]').fill("2026-07-13T18:00");
-  await panel.locator('[data-nilm-label-interval-input="end"]').fill("2026-07-13T18:45");
+  const intervalStart = "2026-07-13T18:00:00.000Z";
+  const intervalEnd = "2026-07-13T18:45:00.000Z";
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, intervalStart),
+  );
+  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
+    await datetimeLocalValue(page, intervalEnd),
+  );
   await page.evaluate(() => {
     window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
   });
@@ -7543,7 +7549,10 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     "save_nilm_interval_changes",
   ]);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
-    data: { intervals: [{ start: "2026-07-13T22:00:00.000Z", end: "2026-07-13T22:45:00.000Z" }], removed_interval_ids: [] },
+    data: {
+      intervals: [{ start: intervalStart, end: intervalEnd }],
+      removed_interval_ids: [],
+    },
   });
   await toHaveNoViolations(page);
 });
