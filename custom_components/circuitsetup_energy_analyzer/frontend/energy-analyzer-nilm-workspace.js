@@ -442,6 +442,11 @@ export function createNilmWorkspaceMethods({
         if (intervalId) saved.interval_id = intervalId;
         savedIntervals.push(saved);
       }
+      const hasNewIntervals = savedIntervals.some(
+        (interval) => !String(interval.interval_id || "").trim(),
+      );
+      const creatingAssignment = !String(draft.assignment_id || "").trim();
+
       data = {
         ...action && action.data || {},
         label,
@@ -449,12 +454,39 @@ export function createNilmWorkspaceMethods({
         removed_interval_ids: removedIntervalIds,
         appliance_id: String(draft.appliance_id || label).trim(),
       };
-      if (applianceProfile) data.appliance_profile = applianceProfile;
-      if (draft.assignment_id) data.assignment_id = draft.assignment_id;
+
+      // Prevent action.data from supplying a profile while an existing
+      // assignment or saved interval is being edited.
+      delete data.appliance_profile;
+
+      if (draft.assignment_id) {
+        data.assignment_id = draft.assignment_id;
+      }
+
       if (action.service === "save_nilm_interval_changes") {
+        // The combined service receives appliance_profile only when this
+        // request creates a new assignment with at least one new interval.
+        if (applianceProfile && hasNewIntervals && creatingAssignment) {
+          data.appliance_profile = applianceProfile;
+        }
+
         requests.push(data);
       } else {
-        savedIntervals.forEach((interval) => requests.push({ ...data, ...interval }));
+        // Legacy services receive one request per interval. Include the
+        // profile only on requests that create a new interval/assignment.
+        savedIntervals.forEach((interval) => {
+          const requestData = { ...data, ...interval };
+
+          if (
+            applianceProfile
+            && !String(interval.interval_id || "").trim()
+            && creatingAssignment
+          ) {
+            requestData.appliance_profile = applianceProfile;
+          }
+
+          requests.push(requestData);
+        });
       }
     } else if (actionKey === "delete") {
       const interval = intervals && intervals[index];
