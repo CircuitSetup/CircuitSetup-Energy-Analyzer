@@ -63,6 +63,167 @@ export const PANEL_METHOD_DEPENDENCIES = {
   CHART_COLORS,
 };
 
+const DATETIME_LOCAL_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+const DATETIME_LOCAL_FORMATTERS = new Map();
+
+function datetimeLocalPartsToUtcMillis(parts) {
+  const date = new Date(0);
+  date.setUTCFullYear(parts.year, parts.month - 1, parts.day);
+  date.setUTCHours(parts.hour, parts.minute, parts.second, parts.millisecond);
+  return date.getTime();
+}
+
+function parseDatetimeLocal(value) {
+  const raw = String(value || "").trim();
+  const match = DATETIME_LOCAL_PATTERN.exec(raw);
+  if (!match) return null;
+  const parts = {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: Number(match[4]),
+    minute: Number(match[5]),
+    second: Number(match[6] || 0),
+    millisecond: Number(String(match[7] || "0").padEnd(3, "0")),
+    hasSecond: match[6] !== undefined,
+    hasMillisecond: match[7] !== undefined,
+  };
+  const date = new Date(datetimeLocalPartsToUtcMillis(parts));
+  return date.getUTCFullYear() === parts.year
+    && date.getUTCMonth() + 1 === parts.month
+    && date.getUTCDate() === parts.day
+    && date.getUTCHours() === parts.hour
+    && date.getUTCMinutes() === parts.minute
+    && date.getUTCSeconds() === parts.second
+    && date.getUTCMilliseconds() === parts.millisecond
+    ? parts
+    : null;
+}
+
+function datetimeLocalFormatter(timeZone) {
+  const key = String(timeZone || "");
+  if (!DATETIME_LOCAL_FORMATTERS.has(key)) {
+    DATETIME_LOCAL_FORMATTERS.set(key, new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+      timeZone: key,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }));
+  }
+  return DATETIME_LOCAL_FORMATTERS.get(key);
+}
+
+function zonedDateTimeParts(value, timeZone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new RangeError("Invalid date");
+  const formatted = Object.fromEntries(
+    datetimeLocalFormatter(timeZone).formatToParts(date).map((part) => [part.type, part.value]),
+  );
+  return {
+    year: Number(formatted.year),
+    month: Number(formatted.month),
+    day: Number(formatted.day),
+    hour: Number(formatted.hour) === 24 ? 0 : Number(formatted.hour),
+    minute: Number(formatted.minute),
+    second: Number(formatted.second),
+    millisecond: date.getUTCMilliseconds(),
+  };
+}
+
+function browserDateTimeParts(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new RangeError("Invalid date");
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hour: date.getHours(),
+    minute: date.getMinutes(),
+    second: date.getSeconds(),
+    millisecond: date.getMilliseconds(),
+  };
+}
+
+function datetimeLocalPartsMatch(left, right) {
+  return left.year === right.year
+    && left.month === right.month
+    && left.day === right.day
+    && left.hour === right.hour
+    && left.minute === right.minute
+    && left.second === right.second
+    && left.millisecond === right.millisecond;
+}
+
+function datetimeLocalPreferredMatch(displayed, requested) {
+  return displayed.year === requested.year
+    && displayed.month === requested.month
+    && displayed.day === requested.day
+    && displayed.hour === requested.hour
+    && displayed.minute === requested.minute
+    && (!requested.hasSecond || displayed.second === requested.second)
+    && (!requested.hasMillisecond || displayed.millisecond === requested.millisecond);
+}
+
+function browserLocalMillis(parts, preferredMillis = Number.NaN) {
+  if (Number.isFinite(preferredMillis)
+      && datetimeLocalPreferredMatch(browserDateTimeParts(preferredMillis), parts)) {
+    return preferredMillis;
+  }
+  const date = new Date(0);
+  date.setFullYear(parts.year, parts.month - 1, parts.day);
+  date.setHours(parts.hour, parts.minute, parts.second, parts.millisecond);
+  return datetimeLocalPartsMatch(browserDateTimeParts(date), parts)
+    ? date.getTime()
+    : Number.NaN;
+}
+
+function datetimeLocalToMillis(value, timeZone, preferredMillis = Number.NaN) {
+  const parts = parseDatetimeLocal(value);
+  if (!parts) return Number.NaN;
+  const preferred = preferredMillis === null || preferredMillis === undefined || preferredMillis === ""
+    ? Number.NaN
+    : Number(preferredMillis);
+  try {
+    // datetime-local has no UTC offset. Preserve an original instant when its
+    // visible fields still match; otherwise choose the earlier DST-fold match.
+    if (Number.isFinite(preferred)
+        && datetimeLocalPreferredMatch(zonedDateTimeParts(preferred, timeZone), parts)) {
+      return preferred;
+    }
+    const wallTime = datetimeLocalPartsToUtcMillis(parts);
+    const offsets = new Set();
+    for (const hours of [-48, -36, -24, -12, 0, 12, 24, 36, 48]) {
+      const sample = wallTime + hours * 60 * 60 * 1000;
+      const sampleParts = zonedDateTimeParts(sample, timeZone);
+      offsets.add(datetimeLocalPartsToUtcMillis(sampleParts) - sample);
+    }
+    const candidates = [...offsets]
+      .map((offset) => wallTime - offset)
+      .filter((candidate) => datetimeLocalPartsMatch(zonedDateTimeParts(candidate, timeZone), parts))
+      .sort((left, right) => left - right);
+    return candidates[0] ?? Number.NaN;
+  } catch (_error) {
+    // Preserve the previous browser-local behavior when Home Assistant does
+    // not provide a usable IANA time zone, while still rejecting invalid gaps.
+    return browserLocalMillis(parts, preferred);
+  }
+}
+
+function datetimeLocalFromMillis(value, timeZone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (number) => String(number).padStart(2, "0");
+  try {
+    const parts = zonedDateTimeParts(date, timeZone);
+    return `${String(parts.year).padStart(4, "0")}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+  } catch (_error) {
+    return `${String(date.getFullYear()).padStart(4, "0")}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+}
 function installRouteChangeDispatcher() {
   if (window[ROUTE_CHANGE_INSTALL_KEY]) {
     return;
@@ -1036,25 +1197,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     return value;
   }
 
-  _datetimeLocalToIso(value) {
-    const raw = String(value || "").trim();
-    if (!raw) {
-      return "";
-    }
-    const date = new Date(raw);
-    if (Number.isNaN(date.getTime())) {
-      return "";
-    }
-    return date.toISOString();
+  _datetimeLocalToMillis(value, preferredMillis = Number.NaN) {
+    return datetimeLocalToMillis(value, this._timeZone(), preferredMillis);
+  }
+  _datetimeLocalToIso(value, preferredMillis = Number.NaN) {
+    const millis = this._datetimeLocalToMillis(value, preferredMillis);
+    return Number.isFinite(millis) ? new Date(millis).toISOString() : "";
   }
 
   _datetimeLocalFromMillis(value) {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return "";
-    }
-    const local = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
-    return local.toISOString().slice(0, 16);
+    return datetimeLocalFromMillis(value, this._timeZone());
   }
 
   _formatDateTime(value) {

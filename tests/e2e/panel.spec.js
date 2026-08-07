@@ -177,13 +177,72 @@ async function toHaveNoViolations(page) {
   expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
 }
 
-async function datetimeLocalValue(page, isoValue) {
-  return page.evaluate((value) => {
+async function datetimeLocalValue(page, isoValue, timeZone = "") {
+  return page.evaluate(({ value, zone }) => {
     const date = new Date(value);
-    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-  }, isoValue);
+    if (!zone) {
+      return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    }
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US-u-ca-gregory-nu-latn", {
+        timeZone: zone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(date).map((part) => [part.type, part.value]),
+    );
+    const hour = Number(parts.hour) === 24 ? "00" : parts.hour;
+    return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}`;
+  }, { value: isoValue, zone: timeZone });
 }
 
+test("datetime-local conversion follows the Home Assistant timezone and preserves DST folds", async ({ page }) => {
+  await mockPanelApi(page);
+  await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  const values = await page.evaluate(() => {
+    const panel = window.__panel;
+    panel._hass.config.time_zone = "America/New_York";
+    const foldStart = Date.parse("2026-11-01T06:30:42.123Z");
+    const foldEnd = Date.parse("2026-11-01T07:00:17.456Z");
+    panel._setNilmIntervalDraft({
+      start: new Date(foldStart).toISOString(),
+      end: new Date(foldEnd).toISOString(),
+    });
+    const foldDraft = panel._nilmIntervalDraftItems()[0];
+    const result = {
+      summerLocal: panel._datetimeLocalFromMillis(Date.parse("2026-07-13T18:00:00.000Z")),
+      summerIso: panel._datetimeLocalToIso("2026-07-13T14:00"),
+      winterIso: panel._datetimeLocalToIso("2026-01-13T13:00"),
+      skippedTime: panel._datetimeLocalToIso("2026-03-08T02:30"),
+      repeatedDefault: panel._datetimeLocalToIso("2026-11-01T01:30"),
+      repeatedPreserved: panel._datetimeLocalToIso("2026-11-01T01:30", foldStart),
+      invalidDate: panel._datetimeLocalToIso("2026-02-30T10:00"),
+      preservedDraftStart: panel._datetimeLocalToIso(foldDraft.start, foldDraft.start_millis),
+      preservedDraftEnd: panel._datetimeLocalToIso(foldDraft.end, foldDraft.end_millis),
+    };
+    panel._hass.config.time_zone = "Asia/Kathmandu";
+    result.kathmanduIso = panel._datetimeLocalToIso("2026-07-13T23:45");
+    panel._hass.config.time_zone = "Invalid/Zone";
+    result.invalidZoneFallback = panel._datetimeLocalToIso("2026-07-13T18:00");
+    return result;
+  });
+  expect(values).toEqual({
+    summerLocal: "2026-07-13T14:00",
+    summerIso: "2026-07-13T18:00:00.000Z",
+    winterIso: "2026-01-13T18:00:00.000Z",
+    skippedTime: "",
+    repeatedDefault: "2026-11-01T05:30:00.000Z",
+    repeatedPreserved: "2026-11-01T06:30:42.123Z",
+    invalidDate: "",
+    preservedDraftStart: "2026-11-01T06:30:42.123Z",
+    preservedDraftEnd: "2026-11-01T07:00:17.456Z",
+    kathmanduIso: "2026-07-13T18:00:00.000Z",
+    invalidZoneFallback: "2026-07-13T18:00:00.000Z",
+  });
+});
 test("HVAC associations render ready and learning thermostat gauges", async ({ page }) => {
   await mockPanelApi(page);
   const card = await openDashboardCard(
@@ -6062,7 +6121,13 @@ test("NILM focused history failures preserve signature occurrence and interval s
     .toBe("Existing action message");
   await expect.poll(() => page.evaluate(() => window.__panel._nilmIntervalEditorOpen)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__panel._nilmLabelIntervalDraft.intervals[0]))
-    .toEqual({ start: await datetimeLocalValue(page, "2026-07-13T16:00:00Z"), end: await datetimeLocalValue(page, "2026-07-13T16:30:00Z"), interval_id: "" });
+    .toMatchObject({
+      start: await datetimeLocalValue(page, "2026-07-13T16:00:00Z"),
+      end: await datetimeLocalValue(page, "2026-07-13T16:30:00Z"),
+      interval_id: "",
+      start_millis: Date.parse("2026-07-13T16:00:00Z"),
+      end_millis: Date.parse("2026-07-13T16:30:00Z"),
+    });
 });
 
 test("NILM stale and null history completions do not leave optimistic focus", async ({ page }) => {
@@ -6682,6 +6747,12 @@ test("NILM assignment links authoritative state and separate power history", asy
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  const homeAssistantTimeZone = "America/New_York";
+  const referenceStart = "2026-07-13T18:00:00.000Z";
+  const referenceEnd = "2026-07-13T18:45:00.000Z";
+  await page.evaluate((timeZone) => {
+    window.__panel._hass.config.time_zone = timeZone;
+  }, homeAssistantTimeZone);
   await panel.locator('[data-nilm-lane="assigned"]').click();
   const details = panel.locator("[data-nilm-reference-details]");
   await details.locator("summary").click();
@@ -6711,8 +6782,12 @@ test("NILM assignment links authoritative state and separate power history", asy
     composed: true,
     detail: { value: "sensor.pump_power" },
   })));
-  await details.locator('[data-nilm-reference-input="start"]').fill("2026-07-13T18:00");
-  await details.locator('[data-nilm-reference-input="end"]').fill("2026-07-13T18:45");
+  await details.locator('[data-nilm-reference-input="start"]').fill(
+    await datetimeLocalValue(page, referenceStart, homeAssistantTimeZone),
+  );
+  await details.locator('[data-nilm-reference-input="end"]').fill(
+    await datetimeLocalValue(page, referenceEnd, homeAssistantTimeZone),
+  );
   await details.locator('[data-nilm-reference-action="link_import"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service).slice(-2))).toEqual([
@@ -6723,6 +6798,8 @@ test("NILM assignment links authoritative state and separate power history", asy
   expect(calls[0].data).toMatchObject({
     ground_truth_entity_id: "switch.pump",
     reference_power_entity_id: "sensor.pump_power",
+    start: referenceStart,
+    end: referenceEnd,
   });
   expect(calls[1].data).toMatchObject({
     reference_state_entity_id: "switch.pump",
@@ -7497,6 +7574,10 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
 
+  const homeAssistantTimeZone = "America/New_York";
+  await page.evaluate((timeZone) => {
+    window.__panel._hass.config.time_zone = timeZone;
+  }, homeAssistantTimeZone);
   await expect(panel.getByText("Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.getByText("Applied Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.locator("[data-nilm-secondary-details]")).toHaveCount(0);
@@ -7530,12 +7611,12 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
   const intervalStart = "2026-07-13T18:00:00.000Z";
   const intervalEnd = "2026-07-13T18:45:00.000Z";
-  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, intervalStart),
-  );
-  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
-    await datetimeLocalValue(page, intervalEnd),
-  );
+  const localIntervalStart = await datetimeLocalValue(page, intervalStart, homeAssistantTimeZone);
+  const localIntervalEnd = await datetimeLocalValue(page, intervalEnd, homeAssistantTimeZone);
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(localIntervalStart);
+  await expect(panel.locator('[data-nilm-label-interval-input="end"]')).toHaveValue(localIntervalEnd);
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(localIntervalStart);
+  await panel.locator('[data-nilm-label-interval-input="end"]').fill(localIntervalEnd);
   await page.evaluate(() => {
     window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
   });
@@ -7598,12 +7679,22 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
 
+  const homeAssistantTimeZone = "America/New_York";
+  await page.evaluate((timeZone) => {
+    window.__panel._hass.config.time_zone = timeZone;
+  }, homeAssistantTimeZone);
   await panel.locator('[data-nilm-lane="assigned"]').click();
   const savedInterval = panel.locator("[data-nilm-assigned-intervals] .metric");
   await expect(savedInterval).toContainText("Labeled interval");
   const initialHistoryRequests = historyWindows.length;
   await savedInterval.locator('[data-nilm-label-interval-action="adjust"]').click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(
+    await datetimeLocalValue(page, "2026-07-13T18:00:00Z", homeAssistantTimeZone),
+  );
+  await expect(panel.locator('[data-nilm-label-interval-input="end"]')).toHaveValue(
+    await datetimeLocalValue(page, "2026-07-13T18:45:00Z", homeAssistantTimeZone),
+  );
   await expect.poll(() => historyWindows.length).toBe(initialHistoryRequests + 1);
   const adjustedWindow = historyWindows.at(-1);
   expect(Date.parse(adjustedWindow.start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
@@ -7614,31 +7705,33 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
 
   const originalX = await band.getAttribute("x");
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T18:05:00Z", homeAssistantTimeZone),
   );
   await expect.poll(() => band.getAttribute("x")).not.toBe(originalX);
 
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval.start))
+    .toBe(Date.parse("2026-07-13T18:05:00Z"));
   const beforeOutsideEdit = historyWindows.length;
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T17:40:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T17:40:00Z", homeAssistantTimeZone),
   );
   await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit);
 
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T16:40:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T16:40:00Z", homeAssistantTimeZone),
   );
   await expect.poll(() => historyWindows.length).toBe(beforeOutsideEdit + 1);
 
   const beforeInvalidEdit = historyWindows.length;
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T16:30:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T16:30:00Z", homeAssistantTimeZone),
   );
   await expect.poll(() => historyWindows.length).toBe(beforeInvalidEdit);
   await expect(panel.locator('[data-nilm-label-interval-action="save"]')).toBeDisabled();
   await toHaveNoViolations(page);
 
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T18:45:00Z"),
+    await datetimeLocalValue(page, "2026-07-13T18:45:00Z", homeAssistantTimeZone),
   );
   await page.evaluate(() => {
     window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
