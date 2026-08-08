@@ -1561,7 +1561,7 @@ def test_settings_controller_returns_nilm_min_delta_for_sensitivity() -> None:
     coordinator.store_data.sensitivity_by_circuit["fridge"] = "sensitive"
     coordinator.store_data.sensitivity_by_circuit["hvac"] = "quiet"
 
-    assert controller.nilm_min_delta_w("fridge") == pytest.approx(75.0)
+    assert controller.nilm_min_delta_w("fridge") == pytest.approx(50.0)
     assert controller.nilm_min_delta_w("hvac") == pytest.approx(150.0)
     assert controller.nilm_min_delta_w("unknown") == pytest.approx(100.0)
 

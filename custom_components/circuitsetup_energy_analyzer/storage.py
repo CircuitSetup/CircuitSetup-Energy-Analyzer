@@ -67,6 +67,9 @@ class FeatureStoreData:
     nilm_unknown_loads_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    nilm_unmatched_edges_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
     nilm_session_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -327,6 +330,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_unknown_loads_by_circuit": _dict_of_dicts(
             data.nilm_unknown_loads_by_circuit
         ),
+        "nilm_unmatched_edges_by_circuit": _dict_of_list_dicts_including_empty(
+            data.nilm_unmatched_edges_by_circuit
+        ),
         "nilm_session_history_by_circuit": _dict_of_list_dicts(
             data.nilm_session_history_by_circuit
         ),
@@ -471,6 +477,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         nilm_signatures=_dict_of_list_dicts(raw.get("nilm_signatures", {})),
         nilm_unknown_loads_by_circuit=_dict_of_dicts(
             raw.get("nilm_unknown_loads_by_circuit", {})
+        ),
+        nilm_unmatched_edges_by_circuit=_dict_of_list_dicts_including_empty(
+            raw.get("nilm_unmatched_edges_by_circuit", {})
         ),
         nilm_session_history_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_session_history_by_circuit", {})
@@ -726,6 +735,7 @@ def prune_events(
         alerts=data.alerts,
         nilm_signatures=data.nilm_signatures,
         nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,
+        nilm_unmatched_edges_by_circuit=data.nilm_unmatched_edges_by_circuit,
         nilm_session_history_by_circuit=data.nilm_session_history_by_circuit,
         nilm_label_intervals_by_circuit=data.nilm_label_intervals_by_circuit,
         nilm_appliance_assignments_by_circuit=(
@@ -905,6 +915,20 @@ def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
         items = [dict(item) for item in value if isinstance(item, Mapping)]
         if items:
             sanitized[str(key)] = items
+    return sanitized
+
+
+def _dict_of_list_dicts_including_empty(
+    values: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """Sanitize list payloads while preserving a stored empty-list marker."""
+    sanitized: dict[str, list[dict[str, Any]]] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, list):
+            continue
+        sanitized[str(key)] = [
+            dict(item) for item in value if isinstance(item, Mapping)
+        ]
     return sanitized
 
 

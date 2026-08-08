@@ -2426,6 +2426,19 @@ def _nilm_solar_overlays(
     coordinator: Any,
     circuit_id: str,
 ) -> list[dict[str, Any]]:
+    source_config = next(
+        (
+            config
+            for config in getattr(coordinator, "circuit_configs", ()) or ()
+            if isinstance(config, CircuitConfig) and config.circuit_id == circuit_id
+        ),
+        None,
+    )
+    if (
+        source_config is None
+        or nilm_source_kind(source_config) is not NilmSourceKind.MAINS
+    ):
+        return []
     overlays: list[dict[str, Any]] = []
     for config in getattr(coordinator, "circuit_configs", ()) or ():
         if (

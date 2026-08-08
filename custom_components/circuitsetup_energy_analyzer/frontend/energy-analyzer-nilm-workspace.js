@@ -2388,13 +2388,13 @@ export function createNilmWorkspaceMethods({
           <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
         </div>
       `, this._panelText("nilm_workspace.known_load_overlays_description")) : ""}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.solar_net_overlays"), workspace.solar_overlays, this._panelText("nilm_workspace.solar_net_overlays_empty"), (item) => `
+        ${workspace.source && workspace.source.source_kind === "mains" ? this._renderNilmWorkspaceList(this._panelText("nilm_workspace.solar_net_overlays"), workspace.solar_overlays, this._panelText("nilm_workspace.solar_net_overlays_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.circuit_id)}</span>
           <strong>${this._escape(item.name || item.circuit_id)}</strong>
           <p class="muted">${this._escape(this._overlayEntitySummary(item))}</p>
         </div>
-      `, this._panelText("nilm_workspace.solar_net_overlays_description"))}
+      `, this._panelText("nilm_workspace.solar_net_overlays_description")) : ""}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.sessions_title"), unassignedSessions, this._panelText("nilm_workspace.sessions_empty"), (item, index) => `
         <div class="metric">
           <span>${this._escape(item.start || "")}</span>
