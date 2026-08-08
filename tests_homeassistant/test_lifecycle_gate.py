@@ -744,9 +744,12 @@ async def test_config_entry_setup_registers_published_nilm_device(
     state = hass.states.get(registry_entry.entity_id)
     assert state is not None
     assert state.state == "unavailable"
-    assert dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
-    ) is not None
+    device_registry = dr.async_get(hass)
+    device_identifier = (DOMAIN, f"{entry_id}_nilm_assignment-washer")
+    assert any(
+        device_identifier in item.identifiers
+        for item in dr.async_entries_for_config_entry(device_registry, entry_id)
+    )
 
     coordinator = hass.data[DOMAIN][entry_id]
     expected_unique_ids = {
@@ -790,9 +793,10 @@ async def test_config_entry_setup_registers_published_nilm_device(
         item.unique_id.startswith(f"{entry_id}_nilm_assignment-washer_")
         for item in er.async_entries_for_config_entry(entity_registry, entry_id)
     )
-    assert dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
-    ) is None
+    assert not any(
+        device_identifier in item.identifiers
+        for item in dr.async_entries_for_config_entry(device_registry, entry_id)
+    )
 
     reloaded_coordinator = hass.data[DOMAIN][entry_id]
     published = await reloaded_coordinator.async_publish_nilm_appliance_assignment(
@@ -806,9 +810,10 @@ async def test_config_entry_setup_registers_published_nilm_device(
         == f"{entry_id}_nilm_assignment-washer_estimated_power"
         for item in er.async_entries_for_config_entry(entity_registry, entry_id)
     )
-    assert dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{entry_id}_nilm_assignment-washer")},
-    ) is not None
+    assert any(
+        device_identifier in item.identifiers
+        for item in dr.async_entries_for_config_entry(device_registry, entry_id)
+    )
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
