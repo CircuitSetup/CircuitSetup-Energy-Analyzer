@@ -654,11 +654,20 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!keys) {
       return "";
     }
+    const primaryButtonAttributes = this._pendingConfirmationAction === "nilm_delete_permanently"
+      ? 'variant="danger" appearance="filled"'
+      : 'variant="brand" appearance="filled"';
     return `
-      <ha-dialog open heading="${this._escape(this._panelText(keys[0]))}">
+      <ha-dialog id="action_confirmation_dialog" open heading="${this._escape(this._panelText(keys[0]))}">
         <p>${this._escape(this._panelText(keys[1]))}</p>
-        <mwc-button slot="secondaryAction" id="cancel_action_confirmation">${this._escape(this._panelText("confirmations.cancel"))}</mwc-button>
-        <mwc-button slot="primaryAction" id="confirm_action">${this._escape(this._panelText(keys[2]))}</mwc-button>
+        <ha-dialog-footer>
+          <ha-button slot="secondaryAction" id="cancel_action_confirmation" appearance="plain">
+            ${this._escape(this._panelText("confirmations.cancel"))}
+          </ha-button>
+          <ha-button slot="primaryAction" id="confirm_action" ${primaryButtonAttributes}>
+            ${this._escape(this._panelText(keys[2]))}
+          </ha-button>
+        </ha-dialog-footer>
       </ha-dialog>
     `;
   }

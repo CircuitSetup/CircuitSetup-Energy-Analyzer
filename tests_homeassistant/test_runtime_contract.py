@@ -168,11 +168,10 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
         entity_registry.async_get_entity_id("sensor", DOMAIN, stale_entity.unique_id)
         is None
     )
-    updated_stale_device = device_registry.async_get_device(
-        identifiers={(DOMAIN, "runtime-entry_obsolete")},
+    assert not any(
+        (DOMAIN, "runtime-entry_obsolete") in item.identifiers
+        for item in dr.async_entries_for_config_entry(device_registry, entry.entry_id)
     )
-    if updated_stale_device is not None:
-        assert entry.entry_id not in updated_stale_device.config_entries
     assert stale_device.id
 
 
