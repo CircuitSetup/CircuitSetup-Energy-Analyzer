@@ -1575,7 +1575,10 @@ export class PanelShellMethods {
     const confirmationDialog = this.shadowRoot.querySelector("#action_confirmation_dialog");
     if (confirmationDialog) {
       confirmationDialog.addEventListener("closed", () => {
-        if (this._pendingConfirmationAction) {
+        if (
+          this._pendingConfirmationAction
+          && this.shadowRoot.querySelector("#action_confirmation_dialog") === confirmationDialog
+        ) {
           this._cancelActionConfirmation();
         }
       }, { once: true });
