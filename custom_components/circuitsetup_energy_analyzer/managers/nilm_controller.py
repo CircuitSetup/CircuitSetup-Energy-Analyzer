@@ -1038,33 +1038,79 @@ class NilmController:
         coordinator = self._coordinator
         store_data = coordinator.store_data
         assignment_id_text = str(assignment_id).strip()
-        if (
-            await self._async_wait_for_assignment_entities(assignment_id_text, False)
-            is True
-        ):
+        entity_state = await self._async_wait_for_assignment_entities(
+            assignment_id_text, False
+        )
+        if entity_state is True:
             raise ValueError(
                 f"Deleting assignment '{assignment_id_text}' requires its Home "
                 "Assistant entities to be removed first."
             )
-        store_data.nilm_appliance_assignments_by_circuit[circuit_id] = [
-            candidate
-            for candidate in store_data.nilm_appliance_assignments_by_circuit.get(
-                circuit_id, ()
+        if entity_state is not False:
+            raise ValueError(
+                f"Deleting assignment '{assignment_id_text}' could not confirm "
+                "that its Home Assistant entities are absent."
             )
+        assignments = store_data.nilm_appliance_assignments_by_circuit.get(
+            circuit_id, []
+        )
+        removed_assignments = [
+            (index, candidate)
+            for index, candidate in enumerate(assignments)
+            if candidate.get("assignment_id") == assignment_id_text
+        ]
+        assignments[:] = [
+            candidate
+            for candidate in assignments
             if candidate.get("assignment_id") != assignment_id_text
         ]
+        unassigned_evidence: list[dict[str, Any]] = []
         for collection in (
             store_data.nilm_label_intervals_by_circuit.get(circuit_id, ()),
             store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
         ):
             for evidence in collection:
                 if evidence.get("assignment_id") == assignment_id_text:
+                    unassigned_evidence.append(evidence)
                     evidence.pop("assignment_id", None)
+        signature_states: list[tuple[dict[str, Any], bool, Any]] = []
         for signature in store_data.nilm_signatures.get(circuit_id, ()):
             if signature.get("assignment_id") == assignment_id_text:
+                signature_states.append(
+                    (
+                        signature,
+                        "review_state" in signature,
+                        signature.get("review_state"),
+                    )
+                )
                 signature.pop("assignment_id", None)
                 signature["review_state"] = "new"
-        await self.async_save_assignment_change()
+        coordinator.store_persistence.mark_dirty()
+        coordinator.async_set_updated_data(coordinator.state)
+        try:
+            await coordinator.store_persistence.async_save_if_dirty(
+                coordinator.current_time()
+            )
+        except Exception:
+            for index, candidate in removed_assignments:
+                assignments.insert(index, candidate)
+            for evidence in unassigned_evidence:
+                evidence["assignment_id"] = assignment_id_text
+            for signature, had_review_state, review_state in signature_states:
+                signature["assignment_id"] = assignment_id_text
+                if had_review_state:
+                    signature["review_state"] = review_state
+                else:
+                    signature.pop("review_state", None)
+            coordinator.async_set_updated_data(coordinator.state)
+            raise
+        reload_entry = getattr(
+            getattr(coordinator, "config_entry_controller", None),
+            "async_reload",
+            None,
+        )
+        if callable(reload_entry):
+            await reload_entry()
         return True
 
     async def async_assign_nilm_signature(

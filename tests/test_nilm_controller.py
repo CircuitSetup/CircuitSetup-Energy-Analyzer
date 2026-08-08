@@ -1010,8 +1010,15 @@ async def test_save_nilm_interval_changes_restores_collections_after_save_failur
 
 
 @pytest.mark.asyncio
-async def test_delete_nilm_assignment_does_not_rollback_after_save_failure() -> None:
-    save = AsyncMock(side_effect=RuntimeError("delete failed"))
+async def test_delete_assignment_restores_state_after_save_failure() -> None:
+    saved_states: list[FeatureStoreData] = []
+
+    async def save(_now: datetime) -> None:
+        saved_states.append(deepcopy(coordinator.store_data))
+        if len(saved_states) == 1:
+            raise RuntimeError("delete failed")
+
+    reload = AsyncMock()
     coordinator = SimpleNamespace(
         current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
         store_data=FeatureStoreData(
@@ -1029,19 +1036,26 @@ async def test_delete_nilm_assignment_does_not_rollback_after_save_failure() -> 
         ),
         async_set_updated_data=lambda _state: None,
         state=SimpleNamespace(),
+        config_entry_controller=SimpleNamespace(async_reload=reload),
     )
+    before = deepcopy(coordinator.store_data)
     controller = NilmController(
         coordinator, label_interval_max_items=10, assignment_max_items=10
     )
+    controller._async_wait_for_assignment_entities = AsyncMock(return_value=False)
 
     with pytest.raises(RuntimeError, match="delete failed"):
         await controller.async_delete_nilm_appliance_assignment("mixed", "retired")
 
-    assert coordinator.store_data.nilm_appliance_assignments_by_circuit["mixed"] == []
-    assert coordinator.store_data.nilm_label_intervals_by_circuit["mixed"] == [{}]
-    assert coordinator.store_data.nilm_signatures["mixed"] == [{"review_state": "new"}]
-    assert coordinator.store_data.nilm_session_history_by_circuit["mixed"] == [{}]
-    assert save.await_count == 1
+    assert coordinator.store_data == before
+    assert len(saved_states) == 1
+    assert reload.await_count == 0
+
+    await controller.async_save_assignment_change()
+
+    assert len(saved_states) == 2
+    assert saved_states[1] == before
+    assert reload.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1098,7 @@ async def test_nilm_transactions_serialize_failed_save_before_delete() -> None:
     controller = NilmController(
         coordinator, label_interval_max_items=10, assignment_max_items=10
     )
+    controller._async_wait_for_assignment_entities = AsyncMock(return_value=False)
     save_task = asyncio.create_task(
         controller.async_save_nilm_interval_changes(
             "mixed",
@@ -1164,6 +1179,7 @@ async def test_delete_retired_nilm_assignment_preserves_evidence() -> None:
     controller = NilmController(
         coordinator, label_interval_max_items=10, assignment_max_items=10
     )
+    controller._async_wait_for_assignment_entities = AsyncMock(return_value=False)
 
     assert (
         await controller.async_delete_nilm_appliance_assignment(
@@ -1217,6 +1233,41 @@ async def test_delete_retired_nilm_assignment_preflights_entities_before_mutatio
     controller._async_wait_for_assignment_entities = AsyncMock(return_value=True)
 
     with pytest.raises(ValueError, match="Home Assistant entities"):
+        await controller.async_delete_nilm_appliance_assignment("mixed", "retired")
+
+    assert coordinator.store_data == before
+    assert saves.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_nilm_assignment_rejects_unknown_entity_state_before_mutation(
+) -> None:
+    saves = AsyncMock()
+    coordinator = SimpleNamespace(
+        current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {"assignment_id": "retired", "lifecycle_state": "retired"}
+                ]
+            },
+            nilm_label_intervals_by_circuit={"mixed": [{"assignment_id": "retired"}]},
+            nilm_signatures={"mixed": [{"assignment_id": "retired"}]},
+            nilm_session_history_by_circuit={"mixed": [{"assignment_id": "retired"}]},
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=saves
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    before = deepcopy(coordinator.store_data)
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    controller._async_wait_for_assignment_entities = AsyncMock(return_value=None)
+
+    with pytest.raises(ValueError, match="could not confirm"):
         await controller.async_delete_nilm_appliance_assignment("mixed", "retired")
 
     assert coordinator.store_data == before
