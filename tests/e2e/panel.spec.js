@@ -7820,14 +7820,20 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
   await panel.locator('[data-nilm-lane="hidden"]').click();
   const remove = panel.locator('[data-nilm-assignment-action="delete_permanently"]');
   await remove.click();
-  const dialog = panel.locator("ha-dialog");
+  const dialog = panel.locator("#action_confirmation_dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator("ha-dialog-footer")).toBeVisible();
+  await expect(dialog.locator("ha-button#cancel_action_confirmation")).toBeVisible();
+  await expect(dialog.locator("ha-button#confirm_action")).toBeVisible();
+  await expect(dialog.locator("#confirm_action")).toHaveAttribute("variant", "danger");
   await expect(dialog).toContainText("Only this assignment and its generated Home Assistant entities are deleted");
   await expect(dialog).toContainText("evidence remains unassigned");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
 
-  await panel.locator("#cancel_action_confirmation").click();
+  await dialog.dispatchEvent("closed");
   await expect(dialog).toHaveCount(0);
+  await panel.locator('[data-nilm-lane="hidden"]').click();
+  await expect(panel.locator("#action_confirmation_dialog")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
 
   await remove.click();
