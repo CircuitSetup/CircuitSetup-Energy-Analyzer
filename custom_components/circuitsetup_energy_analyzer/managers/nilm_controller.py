@@ -1064,20 +1064,29 @@ class NilmController:
             for candidate in assignments
             if candidate.get("assignment_id") != assignment_id_text
         ]
-        unassigned_evidence: list[dict[str, Any]] = []
-        for collection in (
-            store_data.nilm_label_intervals_by_circuit.get(circuit_id, ()),
-            store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+        unassigned_evidence: list[tuple[str, str, str, dict[str, Any]]] = []
+        for collection_name, record_id_key in (
+            ("nilm_label_intervals_by_circuit", "interval_id"),
+            ("nilm_session_history_by_circuit", "session_id"),
         ):
+            collection = getattr(store_data, collection_name).get(circuit_id, ())
             for evidence in collection:
                 if evidence.get("assignment_id") == assignment_id_text:
-                    unassigned_evidence.append(evidence)
+                    unassigned_evidence.append(
+                        (
+                            collection_name,
+                            record_id_key,
+                            str(evidence.get(record_id_key) or "").strip(),
+                            evidence,
+                        )
+                    )
                     evidence.pop("assignment_id", None)
-        signature_states: list[tuple[dict[str, Any], bool, Any]] = []
+        signature_states: list[tuple[str, dict[str, Any], bool, Any]] = []
         for signature in store_data.nilm_signatures.get(circuit_id, ()):
             if signature.get("assignment_id") == assignment_id_text:
                 signature_states.append(
                     (
+                        str(signature.get("signature_id") or "").strip(),
                         signature,
                         "review_state" in signature,
                         signature.get("review_state"),
@@ -1094,9 +1103,33 @@ class NilmController:
         except Exception:
             for index, candidate in removed_assignments:
                 assignments.insert(index, candidate)
-            for evidence in unassigned_evidence:
+            for collection_name, record_id_key, record_id, original in (
+                unassigned_evidence
+            ):
+                collection = getattr(store_data, collection_name).get(circuit_id, ())
+                evidence = next(
+                    (
+                        candidate
+                        for candidate in collection
+                        if record_id
+                        and str(candidate.get(record_id_key) or "").strip() == record_id
+                    ),
+                    original,
+                )
                 evidence["assignment_id"] = assignment_id_text
-            for signature, had_review_state, review_state in signature_states:
+            for signature_id, original, had_review_state, review_state in (
+                signature_states
+            ):
+                signature = next(
+                    (
+                        candidate
+                        for candidate in store_data.nilm_signatures.get(circuit_id, ())
+                        if signature_id
+                        and str(candidate.get("signature_id") or "").strip()
+                        == signature_id
+                    ),
+                    original,
+                )
                 signature["assignment_id"] = assignment_id_text
                 if had_review_state:
                     signature["review_state"] = review_state

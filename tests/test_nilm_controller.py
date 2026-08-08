@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,6 +15,9 @@ from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller imp
     NilmController,
     configured_primary_assignment_id,
     nilm_assignment_publication_reason,
+)
+from custom_components.circuitsetup_energy_analyzer.managers.store_persistence import (
+    StorePersistenceManager,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
@@ -1055,6 +1058,114 @@ async def test_delete_assignment_restores_state_after_save_failure() -> None:
 
     assert len(saved_states) == 2
     assert saved_states[1] == before
+    assert reload.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_assignment_rollback_survives_retention_copy() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    saved_states: list[FeatureStoreData] = []
+
+    class FailingOnceStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            assert self.data is not None
+            saved_states.append(deepcopy(self.data))
+            if len(saved_states) == 1:
+                raise RuntimeError("delete failed")
+
+    reload = AsyncMock()
+    store = FailingOnceStore()
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {"assignment_id": "retired", "lifecycle_state": "retired"}
+                ]
+            },
+            nilm_label_intervals_by_circuit={
+                "mixed": [{"interval_id": "interval-1", "assignment_id": "retired"}]
+            },
+            nilm_signatures={
+                "mixed": [
+                    {
+                        "signature_id": "signature-1",
+                        "assignment_id": "retired",
+                        "review_state": "assigned",
+                        "last_seen": now.isoformat(),
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mixed": [
+                    {
+                        "session_id": "session-1",
+                        "assignment_id": "retired",
+                        "end": now.isoformat(),
+                    }
+                ]
+            },
+        ),
+        _store=store,
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+        config_entry_controller=SimpleNamespace(async_reload=reload),
+    )
+    coordinator.store_persistence = StorePersistenceManager(
+        coordinator,
+        retention_mode_for_circuit=lambda _circuit_id: object(),
+        ha_time_zone=lambda: "UTC",
+        weather_context_history_max_samples=10,
+        water_context_history_max_samples=10,
+        alert_history_max_age=timedelta(days=180),
+        alert_history_max_items=100,
+        alert_feedback_max_age=timedelta(days=365),
+        alert_feedback_max_items=100,
+        nilm_signatures_max_items=10,
+        nilm_unknown_loads_max_items=10,
+        nilm_session_history_max_age=timedelta(days=45),
+        nilm_session_history_max_items=10,
+        recommendation_history_max_age=timedelta(days=180),
+        recommendation_history_max_items=100,
+        recommendation_decisions_max_age=timedelta(days=180),
+        recommendation_decisions_max_items=100,
+    )
+    before = deepcopy(coordinator.store_data)
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    controller._async_wait_for_assignment_entities = AsyncMock(return_value=False)
+
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await controller.async_delete_nilm_appliance_assignment("mixed", "retired")
+
+    assert coordinator.store_data == before
+    assert reload.await_count == 0
+
+    await controller.async_save_assignment_change()
+
+    assert saved_states == [
+        FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": []},
+            nilm_label_intervals_by_circuit={"mixed": [{"interval_id": "interval-1"}]},
+            nilm_signatures={
+                "mixed": [
+                    {
+                        "signature_id": "signature-1",
+                        "review_state": "new",
+                        "last_seen": now.isoformat(),
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mixed": [{"session_id": "session-1", "end": now.isoformat()}]
+            },
+        ),
+        before,
+    ]
+    assert coordinator.store_persistence.dirty is False
     assert reload.await_count == 1
 
 
