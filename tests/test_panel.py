@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260808-1"
+    assert PANEL_MODULE_VERSION == "20260808-4"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -3279,15 +3279,22 @@ def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
         mode=CircuitMode.SINGLE_PHASE,
         sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
     )
+    solar = CircuitConfig(
+        circuit_id="solar",
+        name="Solar",
+        appliance_profile=ApplianceProfile.SOLAR_INVERTER,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.solar_power", SensorRole.REAL_POWER),),
+    )
     coordinator = _coordinator(
         config=mains,
-        configs=(mains, primary_mixed, pure_mixed, fridge),
+        configs=(mains, primary_mixed, pure_mixed, fridge, solar),
     )
     coordinator.circuit_registry = SimpleNamespace(
         known_load_circuit_ids=frozenset({"fridge"}),
         config_for_circuit={
             config.circuit_id: config
-            for config in (mains, primary_mixed, pure_mixed, fridge)
+            for config in (mains, primary_mixed, pure_mixed, fridge, solar)
         }.get,
     )
     coordinator.store_data.nilm_signatures = {
@@ -3325,6 +3332,9 @@ def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
     assert mains_payload["known_load_overlays"]
     assert primary_mixed_payload["known_load_overlays"] == []
     assert pure_mixed_payload["known_load_overlays"] == []
+    assert mains_payload["solar_overlays"]
+    assert primary_mixed_payload["solar_overlays"] == []
+    assert pure_mixed_payload["solar_overlays"] == []
 
     primary_value = "hvac_1-configured-primary"
     for row in (

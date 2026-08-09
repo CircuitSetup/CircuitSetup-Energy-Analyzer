@@ -5444,8 +5444,9 @@ for (const expected of [
   "<ha-dialog",
   "Relearn Baseline",
   "restart learning",
-  '<mwc-button slot="secondaryAction" id="cancel_action_confirmation">',
-  '<mwc-button slot="primaryAction" id="confirm_action">',
+  "<ha-dialog-footer>",
+  '<ha-button slot="secondaryAction" id="cancel_action_confirmation" appearance="plain">',
+  '<ha-button slot="primaryAction" id="confirm_action" variant="brand" appearance="filled">',
 ]) {
   if (!html.includes(expected)) {
     throw new Error(`missing ${expected}: ${html}`);

@@ -6494,6 +6494,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
       : { circuit_id: "hvac_2", name: "HVAC 2" };
     payload.source = { ...payload.source, source_kind: pureMixed ? "mixed" : "primary_mixed" };
     payload.known_load_overlays = [{ circuit_id: "fridge", name: "Fridge", entity_ids: ["sensor.fridge_power"] }];
+    payload.solar_overlays = [{ circuit_id: "solar", name: "Solar", entity_ids: ["sensor.solar_power"] }];
     if (!pureMixed) {
       payload.configured_primary = {
         assignment_id: "hvac_2-configured-primary",
@@ -6526,6 +6527,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2");
   const primary = panel.locator("[data-nilm-configured-primary]");
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
+  await expect(panel.getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
   await expect(primary).toContainText("HVAC Blower");
   await expect(primary).toContainText("Blower signature");
   await expect(primary).toContainText("900 W · 14 matched cycles · follows AC2 calls");
@@ -6542,6 +6544,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await page.waitForFunction(() => window.__panelReady === true);
   await expect(page.locator("circuitsetup-energy-analyzer-panel [data-nilm-configured-primary]")).toHaveCount(0);
   await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
+  await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
 });
 
 test("NILM workspace lets the configured primary assignment be approved from Needs Review", async ({ page }) => {
@@ -8147,14 +8150,20 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
   await panel.locator('[data-nilm-lane="hidden"]').click();
   const remove = panel.locator('[data-nilm-assignment-action="delete_permanently"]');
   await remove.click();
-  const dialog = panel.locator("ha-dialog");
+  const dialog = panel.locator("#action_confirmation_dialog");
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator("ha-dialog-footer")).toBeVisible();
+  await expect(dialog.locator("ha-button#cancel_action_confirmation")).toBeVisible();
+  await expect(dialog.locator("ha-button#confirm_action")).toBeVisible();
+  await expect(dialog.locator("#confirm_action")).toHaveAttribute("variant", "danger");
   await expect(dialog).toContainText("Only this assignment and its generated Home Assistant entities are deleted");
   await expect(dialog).toContainText("evidence remains unassigned");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
 
-  await panel.locator("#cancel_action_confirmation").click();
+  await dialog.dispatchEvent("closed");
   await expect(dialog).toHaveCount(0);
+  await panel.locator('[data-nilm-lane="hidden"]').click();
+  await expect(panel.locator("#action_confirmation_dialog")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(0);
 
   await remove.click();

@@ -815,7 +815,7 @@ class SettingsController:
         """Return the NILM edge detector minimum delta for one circuit."""
         policy_name = self._alert_policy_name_for_circuit(circuit_id)
         if policy_name == "high":
-            return 75.0
+            return 50.0
         if policy_name == "low":
             return 150.0
         return 100.0

@@ -1572,6 +1572,17 @@ export class PanelShellMethods {
     this._listen("#mark_circuit_mixed", () => this._requestActionConfirmation("mark_circuit_mixed"));
     this._listen("#cancel_action_confirmation", () => this._cancelActionConfirmation());
     this._listen("#confirm_action", () => this._confirmPendingAction());
+    const confirmationDialog = this.shadowRoot.querySelector("#action_confirmation_dialog");
+    if (confirmationDialog) {
+      confirmationDialog.addEventListener("closed", () => {
+        if (
+          this._pendingConfirmationAction
+          && this.shadowRoot.querySelector("#action_confirmation_dialog") === confirmationDialog
+        ) {
+          this._cancelActionConfirmation();
+        }
+      }, { once: true });
+    }
     this._listen("#open_appliance_detail", () => this._callAction("open_appliance_detail"));
     this._listen("#open_load_separation", () => this._callAction("open_load_separation"));
     this._listen("#open_advanced_circuit_settings", () => this._callAction("open_advanced_circuit_settings"));

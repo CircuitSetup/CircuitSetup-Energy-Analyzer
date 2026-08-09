@@ -89,6 +89,7 @@ class NilmSampleProcessor:
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
+        self._hydrated_unmatched_edge_circuits: set[str] = set()
 
     def process(
         self,
@@ -158,11 +159,25 @@ class NilmSampleProcessor:
                 and item.get("keep_assignment_for_masking") is False
             )
         }
+        stored_unmatched_edges = context.store_data.nilm_unmatched_edges_by_circuit
+        persisted_edge_payloads = stored_unmatched_edges.get(circuit_id)
+        has_persisted_edges = isinstance(persisted_edge_payloads, list)
+        if circuit_id not in self._hydrated_unmatched_edge_circuits:
+            if has_persisted_edges:
+                self.unmatched_edges_by_circuit[circuit_id] = _nilm_edges_from_storage(
+                    persisted_edge_payloads,
+                    max_items=self._unmatched_edges_max_items,
+                )
+            self._hydrated_unmatched_edge_circuits.add(circuit_id)
         existing_unmatched = list(self.unmatched_edges_by_circuit[circuit_id])
-        recovered_edges = _recover_unassigned_session_edges(
-            context.store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
-            since=sample.timestamp - timedelta(days=7),
-            excluded_assignment_ids=hidden_assignment_ids,
+        recovered_edges = (
+            []
+            if has_persisted_edges
+            else _recover_unassigned_session_edges(
+                context.store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+                since=sample.timestamp - timedelta(days=7),
+                excluded_assignment_ids=hidden_assignment_ids,
+            )
         )
         candidate_edges = list(
             dict.fromkeys((*existing_unmatched, *recovered_edges, *edges))
@@ -294,6 +309,14 @@ class NilmSampleProcessor:
         if edges:
             self.total_events_by_circuit[circuit_id] += len(edges)
         self.unmatched_edges_by_circuit[circuit_id] = next_unmatched
+        persisted_next_unmatched = [
+            payload
+            for edge in next_unmatched
+            if (payload := _nilm_edge_to_storage(edge)) is not None
+        ]
+        if persisted_next_unmatched != persisted_edge_payloads:
+            stored_unmatched_edges[circuit_id] = persisted_next_unmatched
+            store_dirty = True
 
         for match in matched_edges:
             alerts.extend(
@@ -1726,6 +1749,70 @@ def _newest_nilm_edges(edges: Iterable[NilmEdge], max_items: int) -> list[NilmEd
     if max_items <= 0:
         return []
     return sorted(edges, key=lambda edge: edge.timestamp)[-max_items:]
+
+
+def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
+    """Serialize full unmatched-edge evidence for durable NILM recovery."""
+    if not isinstance(edge.timestamp, datetime):
+        return None
+    delta_w = _finite_float(edge.delta_w)
+    direction = str(edge.direction or "").strip().casefold()
+    if delta_w is None or delta_w == 0.0 or direction not in {"on", "off"}:
+        return None
+    timestamp = edge.timestamp
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return {
+        "timestamp": timestamp.isoformat(),
+        "delta_w": delta_w,
+        "delta_var": _finite_float(edge.delta_var),
+        "delta_va": _finite_float(edge.delta_va),
+        "delta_pf": _finite_float(edge.delta_pf),
+        "direction": direction,
+        "leg_a_delta_w": _finite_float(edge.leg_a_delta_w),
+        "leg_b_delta_w": _finite_float(edge.leg_b_delta_w),
+        "leg_balance_ratio": _finite_float(edge.leg_balance_ratio),
+        "dominant_leg": str(edge.dominant_leg or "unknown"),
+        "split_phase_type": str(edge.split_phase_type or "unknown"),
+    }
+
+
+def _nilm_edges_from_storage(
+    values: Iterable[Any],
+    *,
+    max_items: int,
+) -> list[NilmEdge]:
+    """Restore valid raw unmatched-edge evidence from the feature store."""
+    edges: list[NilmEdge] = []
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        timestamp = _runtime_datetime(value.get("timestamp"))
+        delta_w = _finite_float(value.get("delta_w"))
+        direction = str(value.get("direction") or "").strip().casefold()
+        if (
+            timestamp is None
+            or delta_w is None
+            or delta_w == 0.0
+            or direction not in {"on", "off"}
+        ):
+            continue
+        edges.append(
+            NilmEdge(
+                timestamp=timestamp,
+                delta_w=delta_w,
+                delta_var=_finite_float(value.get("delta_var")),
+                delta_va=_finite_float(value.get("delta_va")),
+                delta_pf=_finite_float(value.get("delta_pf")),
+                direction=direction,
+                leg_a_delta_w=_finite_float(value.get("leg_a_delta_w")),
+                leg_b_delta_w=_finite_float(value.get("leg_b_delta_w")),
+                leg_balance_ratio=_finite_float(value.get("leg_balance_ratio")),
+                dominant_leg=str(value.get("dominant_leg") or "unknown"),
+                split_phase_type=str(value.get("split_phase_type") or "unknown"),
+            )
+        )
+    return _newest_nilm_edges(dict.fromkeys(edges), max_items)
 
 
 def _confirmed_placeholder_owner(

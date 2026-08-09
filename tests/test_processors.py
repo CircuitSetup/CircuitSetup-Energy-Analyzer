@@ -8724,6 +8724,10 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert isinstance(processor.detectors["mains"], NilmEdgeDetector)
     assert processor.total_events_by_circuit["mains"] == 5
     assert len(processor.unmatched_edges_by_circuit["mains"]) == 5
+    assert [
+        payload["delta_w"]
+        for payload in store_data.nilm_unmatched_edges_by_circuit["mains"]
+    ] == [edge.delta_w for edge in processor.unmatched_edges_by_circuit["mains"]]
     assert topology_alerts == []
     assert len(store_data.nilm_signatures["mains"]) == 1
 
@@ -8806,6 +8810,111 @@ def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
     assert [edge.timestamp for edge in retained_edges] == [
         now + timedelta(seconds=index * 30) for index in (4, 5, 6)
     ]
+
+
+def test_nilm_processor_restores_raw_edges_before_legacy_sessions() -> (
+    None
+):
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    raw_edge = NilmEdge(
+        timestamp=now - timedelta(seconds=30),
+        delta_w=250.0,
+        delta_var=110.0,
+        delta_va=275.0,
+        delta_pf=-0.08,
+        direction="on",
+        leg_a_delta_w=245.0,
+        leg_b_delta_w=5.0,
+        leg_balance_ratio=0.02,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+    )
+    store_data = FeatureStoreData(
+        nilm_unmatched_edges_by_circuit={
+            "mains": [
+                {
+                    "timestamp": raw_edge.timestamp.isoformat(),
+                    "delta_w": raw_edge.delta_w,
+                    "delta_var": raw_edge.delta_var,
+                    "delta_va": raw_edge.delta_va,
+                    "delta_pf": raw_edge.delta_pf,
+                    "direction": raw_edge.direction,
+                    "leg_a_delta_w": raw_edge.leg_a_delta_w,
+                    "leg_b_delta_w": raw_edge.leg_b_delta_w,
+                    "leg_balance_ratio": raw_edge.leg_balance_ratio,
+                    "dominant_leg": raw_edge.dominant_leg,
+                    "split_phase_type": raw_edge.split_phase_type,
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "signature_fingerprint": "unassigned",
+                    "start": raw_edge.timestamp.isoformat(),
+                    "on_delta_w": raw_edge.delta_w,
+                }
+            ]
+        },
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+
+    processor.process(
+        NormalizedCircuitSample(
+            timestamp=now,
+            circuit_id="mains",
+            real_power=100.0,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        ),
+        config,
+        context,
+        events=(),
+    )
+
+    assert processor.unmatched_edges_by_circuit["mains"] == [raw_edge]
 
 
 def test_nilm_session_history_replaces_open_session_when_off_edge_arrives() -> None:
