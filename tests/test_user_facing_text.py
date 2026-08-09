@@ -3796,7 +3796,7 @@ def test_panel_command_targets_and_focus_styles_are_explicit() -> None:
 def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     _run_panel_node_script(
         """
-(() => {
+(async () => {
   let name = "";
   try {
     name = "test_nilm_interval_editor_is_progressively_disclosed";
@@ -3823,6 +3823,73 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(secondary.includes("data-nilm-secondary-collections"));
       assert.ok(secondary.includes("<section"));
       assert.ok(!secondary.includes('class="nilm-interval-form"'));
+    }
+
+    name = "test_nilm_saved_interval_focus_and_edit_are_separate";
+    {
+      const interval = {
+        interval_id: "interval-1",
+        assignment_id: "assignment-1",
+        display_label: "Dishwasher",
+        start: "2026-06-24T18:10:00Z",
+        end: "2026-06-24T18:30:00Z",
+      };
+      const panel = makePanel({
+        _nilmWorkspace: makeWorkspace({
+          history: {
+            api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains",
+            start: "2026-06-24T18:00:00Z",
+            end: "2026-06-24T19:00:00Z",
+          },
+          assignments: [{
+            assignment_id: "assignment-1",
+            display_name: "Dishwasher",
+            appliance_id: "dishwasher",
+            appliance_profile: "dishwasher",
+          }],
+          label_intervals: [interval],
+        }),
+      });
+      panel._nilmWorkspaceHistorySeries = [[
+        { entity_id: "sensor.mains_power", state: "100", effective_role: "real_power",
+          source_unit: "W", last_changed: "2026-06-24T18:00:00Z" },
+        { entity_id: "sensor.mains_power", state: "900", effective_role: "real_power",
+          source_unit: "W", last_changed: "2026-06-24T19:00:00Z" },
+      ]];
+      panel._render = () => {};
+      panel.shadowRoot = {
+        querySelector() { return null; },
+        querySelectorAll() { return []; },
+      };
+      panel._loadNilmWorkspaceHistoryForWindow = async () => true;
+
+      await panel._callNilmLabelIntervalAction(0, "adjust");
+
+      assert.equal(panel._nilmIntervalEditorOpen, false);
+      assert.equal(panel._nilmFocusedInterval.start, Date.parse(interval.start));
+      assert.equal(panel._nilmFocusedInterval.end, Date.parse(interval.end));
+      panel._visibleNilmWorkspaceSeries = () => [{
+        entity_id: "sensor.mains_power",
+        name: "Mains power",
+        unit: "W",
+        points: [
+          { time: Date.parse(interval.start), value: 100 },
+          { time: Date.parse(interval.end), value: 900 },
+        ],
+      }];
+      const selected = panel._renderNilmWorkspaceBody();
+      assert.ok(selected.includes("data-nilm-edit-focused-interval"));
+      assert.ok(selected.includes("Edit appliance interval"));
+      assert.ok(!selected.includes("data-nilm-open-interval-editor"));
+
+      assert.equal(panel._editNilmFocusedInterval(), true);
+      assert.equal(panel._nilmIntervalEditorOpen, true);
+
+      const emptyGraph = makePanel({ _nilmWorkspace: makeWorkspace() })
+        ._renderNilmWorkspaceBody();
+      assert.ok(emptyGraph.includes("data-nilm-open-interval-editor"));
+      assert.ok(emptyGraph.includes("Label appliance interval"));
+      assert.ok(!emptyGraph.includes("data-nilm-edit-focused-interval"));
     }
 
     name = "test_nilm_secondary_collections_are_always_visible";
@@ -3994,6 +4061,25 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         "Estimated by NILM", "Low confidence", "Confidence 70%",
         'data-nilm-session-confidence="0.70"', 'data-nilm-low-confidence="true"',
       ]) assert.ok(html.includes(expected), expected);
+    }
+
+    name = "test_nilm_review_card_labels_interval_average_power";
+    {
+      const panel = makePanel();
+      const averageHtml = panel._renderNilmReviewCard({
+        kind: "assignment",
+        item: { assignment_id: "assignment-hvac", display_name: "HVAC", typical_power_w: 400, typical_power_source: "interval_average" },
+        index: 0,
+      }, [], false);
+      assert.ok(averageHtml.includes("Average power: 400 W"));
+
+      const normalHtml = panel._renderNilmReviewCard({
+        kind: "assignment",
+        item: { assignment_id: "assignment-pump", display_name: "Pump", typical_power_w: 400 },
+        index: 1,
+      }, [], false);
+      assert.ok(normalHtml.includes("400 W"));
+      assert.ok(!normalHtml.includes("Average power"));
     }
   } catch (error) {
     console.error(name, error);
@@ -6389,7 +6475,7 @@ html = panel._renderNilmReviewInspector({
   },
 });
 assert.ok(!html.includes('data-nilm-label-interval-action="delete"'));
-assert.ok(html.includes("Complete Interval"));
+assert.ok(html.includes("Show on graph"));
 """
     )
 
@@ -6521,6 +6607,11 @@ const interval = {
   end: "2026-08-04T08:10:00Z",
 };
 const workspace = makeWorkspace({
+  history: {
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains",
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+  },
   label_intervals: [interval],
   actions: { label_interval: makeAction("label_nilm_interval") },
 });
@@ -6541,11 +6632,14 @@ panel._render = () => { renders += 1; };
 panel._refreshNilmWorkspaceData = async () => true;
 panel._restoreNilmIntervalScroll = () => {};
 panel.shadowRoot.querySelector = () => null;
+panel._loadNilmWorkspaceHistoryForWindow = async () => true;
 panel._hass = { callService: async (domain, service, data) => {
   calls.push({ domain, service, data });
 } };
 
 await panel._callNilmLabelIntervalAction(0, "adjust");
+assert.equal(panel._nilmIntervalEditorOpen, false);
+assert.equal(panel._editNilmFocusedInterval(), true);
 assert.equal(panel._nilmLabelIntervalDraft.intervals[0].interval_id, "saved-interval");
 renders = 0;
 const changedStartIso = "2026-08-04T08:02:00.000Z";
@@ -6599,6 +6693,11 @@ const assignment = {
   actions: {},
 };
 const workspace = makeWorkspace({
+  history: {
+    api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains",
+    start: "2026-08-04T08:00:00Z",
+    end: "2026-08-04T08:10:00Z",
+  },
   assignments: [assignment],
   label_intervals: [interval],
 });
@@ -6607,6 +6706,7 @@ const panel = makePanel({ _nilmWorkspace: workspace });
 panel._render = () => {};
 panel._restoreNilmIntervalScroll = () => {};
 panel.shadowRoot.querySelector = () => null;
+panel._loadNilmWorkspaceHistoryForWindow = async () => true;
 panel._hass = { callService: async (domain, service, data) => {
   calls.push({ domain, service, data });
 } };
@@ -6621,6 +6721,8 @@ assert.ok(html.includes('data-nilm-label-interval-action="adjust"'), html);
 assert.ok(!html.includes('data-nilm-label-interval-action="delete"'), html);
 
 await panel._callNilmLabelIntervalAction(0, "adjust");
+assert.equal(panel._nilmIntervalEditorOpen, false);
+assert.equal(panel._editNilmFocusedInterval(), true);
 html = panel._renderNilmLabelIntervalEditor(workspace);
 assert.ok(!html.includes('data-nilm-label-interval-action="delete"'), html);
 assert.ok(html.includes('data-nilm-remove-interval="0"'), html);

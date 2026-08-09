@@ -6284,9 +6284,7 @@ test("NILM workspace renders kW history as watts", async ({ page }) => {
   await expect(points.first()).toHaveAttribute("data-chart-value", "800");
   await expect(points.first()).toHaveAttribute("data-chart-unit", "W");
   await expect(panel.locator(".axis-label")).toContainText("W");
-
-  await panel.locator("[data-nilm-open-interval-editor]").click();
-  await expect(panel.locator("svg.chart")).toHaveAttribute("data-nilm-chart-select", "1");
+  await expect(panel.locator("[data-nilm-open-interval-editor]")).toHaveCount(0);
 });
 
 test("NILM workspace rejects non-real-power history instead of relabeling it as watts", async ({ page }) => {
@@ -7619,6 +7617,8 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator("[data-nilm-sensitivity-action]").click();
 
   await page.evaluate(() => window.__panel._callNilmLabelIntervalAction(0, "adjust"));
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await panel.locator("[data-nilm-open-interval-editor]").click();
   await expect(panel.locator('[data-nilm-label-interval-input="observed_transition_w"]')).toHaveCount(0);
   await panel.locator('[data-nilm-label-interval-input="label"]').fill("Dishwasher");
   await panel.locator('[data-nilm-label-interval-input="appliance_profile"]').selectOption("dishwasher");
@@ -7626,8 +7626,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   const intervalEnd = "2026-07-13T18:45:00.000Z";
   const localIntervalStart = await datetimeLocalValue(page, intervalStart, homeAssistantTimeZone);
   const localIntervalEnd = await datetimeLocalValue(page, intervalEnd, homeAssistantTimeZone);
-  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(localIntervalStart);
-  await expect(panel.locator('[data-nilm-label-interval-input="end"]')).toHaveValue(localIntervalEnd);
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(localIntervalStart);
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(localIntervalEnd);
   await page.evaluate(() => {
@@ -7701,6 +7699,8 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await expect(savedInterval).toContainText("Labeled interval");
   const initialHistoryRequests = historyWindows.length;
   await savedInterval.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await panel.locator("[data-nilm-edit-focused-interval]").click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
   await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(
     await datetimeLocalValue(page, "2026-07-13T18:00:00Z", homeAssistantTimeZone),
@@ -8232,6 +8232,8 @@ test("assigned NILM intervals keep newer graph intent over delayed history", asy
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await panel.locator("[data-nilm-edit-focused-interval]").click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
   await page.evaluate(() => {
     const panelElement = window.__panel;
@@ -8341,6 +8343,8 @@ test("NILM interval boundary handles support keyboard and pointer editing", asyn
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await panel.locator("[data-nilm-edit-focused-interval]").click();
 
   const startHandle = panel.locator('[data-nilm-boundary-handle="start"]');
   const endHandle = panel.locator('[data-nilm-boundary-handle="end"]');
@@ -8401,7 +8405,7 @@ test("NILM interval boundary handles support keyboard and pointer editing", asyn
   await toHaveNoViolations(page);
 });
 
-test("NILM interval history failure preserves the graph and Cancel restores pre-edit state", async ({ page }) => {
+test("NILM interval history failure preserves the graph without opening the editor", async ({ page }) => {
   test.info().annotations.push(
     { type: "allow-browser-error", description: "500 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/nilm_workspace_history" },
     { type: "allow-browser-error", description: "Failed to load resource: the server responded with a status of 500" },
@@ -8453,7 +8457,8 @@ test("NILM interval history failure preserves the graph and Cancel restores pre-
     series: initial.series,
   };
   await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
-  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-open-interval-editor]")).toHaveCount(0);
   await expect(panel.locator("[data-retry-nilm-history]")).toBeVisible();
   await expect.poll(() => page.evaluate(() => ({
     graphWindow: window.__panel._nilmGraphWindow,
@@ -8462,26 +8467,12 @@ test("NILM interval history failure preserves the graph and Cancel restores pre-
     series: window.__panel._nilmWorkspaceHistorySeries,
   }))).toEqual(initialGraph);
 
-  await panel.locator("[data-nilm-cancel-interval-editor]").click();
-  await expect.poll(() => page.evaluate(() => ({
-    graphWindow: window.__panel._nilmGraphWindow,
-    focusedInterval: window.__panel._nilmFocusedInterval ?? null,
-    history: { ...window.__panel._nilmWorkspace.history },
-    series: window.__panel._nilmWorkspaceHistorySeries,
-    historyError: window.__panel._nilmWorkspaceHistoryError,
-    failedRequest: window.__panel._nilmWorkspaceHistoryFailedRequest,
-  }))).toEqual(initial);
+  failFocusedHistory = false;
+  await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval.start))
+    .toBe(Date.parse("2026-07-13T18:00:00Z"));
   const preEdit = await page.evaluate(() => {
     const panelElement = window.__panel;
-    panelElement._nilmGraphWindow = {
-      start: Date.parse("2026-07-13T15:30:00Z"),
-      end: Date.parse("2026-07-13T16:45:00Z"),
-    };
-    panelElement._nilmFocusedInterval = {
-      start: Date.parse("2026-07-13T16:00:00Z"),
-      end: Date.parse("2026-07-13T16:30:00Z"),
-    };
-    panelElement._render();
     return {
       graphWindow: { ...panelElement._nilmGraphWindow },
       focusedInterval: { ...panelElement._nilmFocusedInterval },
@@ -8489,10 +8480,8 @@ test("NILM interval history failure preserves the graph and Cancel restores pre-
       series: structuredClone(panelElement._nilmWorkspaceHistorySeries),
     };
   });
-  failFocusedHistory = false;
-  await panel.locator('[data-nilm-label-interval-action="adjust"]').click();
-  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval.start))
-    .toBe(Date.parse("2026-07-13T18:00:00Z"));
+  await panel.locator("[data-nilm-edit-focused-interval]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
   await panel.locator('[data-nilm-label-interval-input="start"]').fill(
     await datetimeLocalValue(page, "2026-07-13T18:05:00Z"),
   );
@@ -8503,54 +8492,6 @@ test("NILM interval history failure preserves the graph and Cancel restores pre-
     history: { ...window.__panel._nilmWorkspace.history },
     series: window.__panel._nilmWorkspaceHistorySeries,
   }))).toEqual(preEdit);
-
-  const blankPreEdit = await page.evaluate(() => {
-    const panelElement = window.__panel;
-    panelElement._nilmGraphWindow = {
-      start: Date.parse("2026-07-13T15:15:00Z"),
-      end: Date.parse("2026-07-13T16:15:00Z"),
-    };
-    panelElement._nilmFocusedInterval = {
-      start: Date.parse("2026-07-13T15:30:00Z"),
-      end: Date.parse("2026-07-13T16:00:00Z"),
-    };
-    panelElement._nilmWorkspaceHistoryError = "Existing focused-history error";
-    panelElement._nilmWorkspaceHistoryFailedRequest = {
-      window: { start: 1, end: 2 },
-      hours: 1,
-      apiPath: "existing-api-path",
-      fetchPath: "existing-fetch-path",
-    };
-    panelElement._render();
-    return {
-      graphWindow: { ...panelElement._nilmGraphWindow },
-      focusedInterval: { ...panelElement._nilmFocusedInterval },
-      history: { ...panelElement._nilmWorkspace.history },
-      series: structuredClone(panelElement._nilmWorkspaceHistorySeries),
-      historyError: panelElement._nilmWorkspaceHistoryError,
-      failedRequest: structuredClone(panelElement._nilmWorkspaceHistoryFailedRequest),
-      serviceCalls: window.__serviceCalls.length,
-    };
-  });
-  await panel.locator("[data-nilm-open-interval-editor]").click();
-  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T12:00:00Z"),
-  );
-  await panel.locator('[data-nilm-label-interval-input="end"]').fill(
-    await datetimeLocalValue(page, "2026-07-13T12:30:00Z"),
-  );
-  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval.start))
-    .toBe(Date.parse("2026-07-13T12:00:00Z"));
-  await panel.locator("[data-nilm-cancel-interval-editor]").click();
-  await expect.poll(() => page.evaluate(() => ({
-    graphWindow: window.__panel._nilmGraphWindow,
-    focusedInterval: window.__panel._nilmFocusedInterval,
-    history: { ...window.__panel._nilmWorkspace.history },
-    series: window.__panel._nilmWorkspaceHistorySeries,
-    historyError: window.__panel._nilmWorkspaceHistoryError,
-    failedRequest: window.__panel._nilmWorkspaceHistoryFailedRequest,
-    serviceCalls: window.__serviceCalls.length,
-  }))).toEqual(blankPreEdit);
 });
 
 test("NILM graph drag and edge marker Cancel restore pre-edit graph state", async ({ page }) => {

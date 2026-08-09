@@ -6,7 +6,7 @@ import math
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from statistics import median
+from statistics import fmean, median
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -1647,7 +1647,11 @@ def _nilm_assignment_payload(
     configured_circuit_names: Iterable[str] = (),
 ) -> dict[str, Any]:
     assignments = tuple(assignments)
-    payload = {str(key): value for key, value in assignment.items() if key != "actions"}
+    payload = {
+        str(key): value
+        for key, value in assignment.items()
+        if key not in {"actions", "typical_power_source"}
+    }
     if payload.get("display_name"):
         payload["display_name"] = nilm_display_name(
             str(payload["display_name"]),
@@ -1661,7 +1665,8 @@ def _nilm_assignment_payload(
         for value in _iter_items(payload.get("label_interval_ids"))
         if str(value or "").strip()
     }
-    interval_watts = []
+    transition_watts = []
+    recorded_interval_watts = []
     for interval in label_intervals:
         if (
             str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip() != assignment_id
@@ -1671,9 +1676,15 @@ def _nilm_assignment_payload(
         try:
             watts = float(interval.get("observed_transition_w"))
         except (TypeError, ValueError):
+            watts = None
+        if watts is not None and math.isfinite(watts) and watts >= 0:
+            transition_watts.append(watts)
+        try:
+            watts = float(interval.get("median_power_w"))
+        except (TypeError, ValueError):
             continue
         if math.isfinite(watts) and watts >= 0:
-            interval_watts.append(watts)
+            recorded_interval_watts.append(watts)
     try:
         existing_watts = float(payload.get("typical_power_w"))
     except (TypeError, ValueError):
@@ -1684,9 +1695,16 @@ def _nilm_assignment_payload(
             or not math.isfinite(existing_watts)
             or existing_watts < 0
         )
-        and interval_watts
+        and transition_watts
     ):
-        payload["typical_power_w"] = round(median(interval_watts), 3)
+        payload["typical_power_w"] = round(median(transition_watts), 3)
+    elif (
+        existing_watts is None
+        or not math.isfinite(existing_watts)
+        or existing_watts < 0
+    ) and recorded_interval_watts:
+        payload["typical_power_w"] = round(fmean(recorded_interval_watts), 3)
+        payload["typical_power_source"] = "interval_average"
 
     payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
         assignment_id, entry_id=entry_id
