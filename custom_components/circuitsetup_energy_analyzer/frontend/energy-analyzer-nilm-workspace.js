@@ -186,8 +186,34 @@ export function createNilmWorkspaceMethods({
     }
   }
 
-  async _applyNilmDecision(index) {
-    const signature = this._nilmReviewSignatures()[index];
+  _decisionSignature(sourceKey) {
+    const match = /^(signature|session)_(\d+)$/.exec(String(sourceKey || ""));
+    if (!match) {
+      return null;
+    }
+    const index = Number.parseInt(match[2], 10);
+    if (match[1] === "signature") {
+      return this._nilmReviewSignatures()[index] || null;
+    }
+    const sessions = this._nilmWorkspace && Array.isArray(this._nilmWorkspace.sessions)
+      ? this._nilmWorkspace.sessions
+      : [];
+    return sessions[index] && sessions[index].signature_review || null;
+  }
+
+  _nilmDecisionSession(sourceKey) {
+    const match = /^session_(\d+)$/.exec(String(sourceKey || ""));
+    if (!match) {
+      return null;
+    }
+    const sessions = this._nilmWorkspace && Array.isArray(this._nilmWorkspace.sessions)
+      ? this._nilmWorkspace.sessions
+      : [];
+    return sessions[Number.parseInt(match[1], 10)] || null;
+  }
+
+  async _applyNilmDecision(sourceKey) {
+    const signature = this._decisionSignature(sourceKey);
     if (!signature) {
       return;
     }
@@ -200,15 +226,13 @@ export function createNilmWorkspaceMethods({
         : "label";
     const actionKey = draft.decision === "identify" ? identifyMode : draft.decision;
     if (!actionKey) {
-      this._setInlineFeedback(key, "error", this._panelText("errors.nilm_decision_required"));
+      this._setInlineFeedback(sourceKey, "error", this._panelText("errors.nilm_decision_required"));
       return;
     }
-    await this._callNilmAction(index, actionKey, key);
+    await this._callNilmAction(signature, sourceKey, actionKey, sourceKey);
   }
 
-  async _callNilmAction(index, actionKey, feedbackScope) {
-    const signatures = this._nilmReviewSignatures();
-    const signature = signatures && signatures[index];
+  async _callNilmAction(signature, sourceKey, actionKey, feedbackScope = sourceKey) {
     const action = signature && signature.actions && signature.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`, feedbackScope)) {
       return;
@@ -216,8 +240,8 @@ export function createNilmWorkspaceMethods({
     const reject = (message) => this._setInlineFeedback(feedbackScope, "error", message);
     const data = Object.assign({}, action.data || {});
     if (actionKey === "label" || actionKey === "assign") {
-      const labelInput = this.shadowRoot.querySelector(`#nilm_label_${index}`);
-      const existingAssignment = actionKey === "assign" ? this._nilmExistingAssignmentSelection(`signature_${index}`) : null;
+      const labelInput = this.shadowRoot.querySelector(`#nilm_label_${sourceKey}`);
+      const existingAssignment = actionKey === "assign" ? this._nilmExistingAssignmentSelection(sourceKey) : null;
       const label = existingAssignment ? existingAssignment.label : labelInput ? labelInput.value.trim() : "";
       if (!label) {
         reject(this._panelText("errors.nilm_signature_label_required"));
@@ -229,7 +253,7 @@ export function createNilmWorkspaceMethods({
       }
     }
     if (actionKey === "merge") {
-      const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
+      const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${sourceKey}`);
       const decisionDraft = this._nilmDecisionDraft(signature);
       const target = targetList ? targetList.dataset.selected || "" : decisionDraft.mergeTarget || "";
       if (!target) {
@@ -240,12 +264,15 @@ export function createNilmWorkspaceMethods({
     }
     const actionContext = this._nilmWorkspaceActionContext();
     const previousItems = this._nilmLaneItems(this._nilmWorkspace);
-    const previousKey = `signature:${signature.signature_id || this._nilmSignatureFingerprint(signature)}`;
+    const sourceSession = this._nilmDecisionSession(sourceKey);
+    const previousKey = sourceSession
+      ? `session:${sourceSession.session_id || sourceKey}`
+      : `signature:${signature.signature_id || this._nilmSignatureFingerprint(signature)}`;
     const previousIndex = Math.max(
       0,
       previousItems.findIndex((item) => this._nilmReviewKey(item) === previousKey),
     );
-    const busyKey = `nilm_${index}_${actionKey}`;
+    const busyKey = `nilm_${sourceKey}_${actionKey}`;
     this._busyAction = busyKey;
     this._render();
     try {
@@ -810,9 +837,6 @@ export function createNilmWorkspaceMethods({
     if (actionKey === "ignore") {
       return this._panelText("messages.ignored_signature");
     }
-    if (actionKey === "mark_expected") {
-      return this._panelText("messages.marked_signature_expected");
-    }
     if (actionKey === "merge") {
       return this._panelText("messages.merged_signature");
     }
@@ -981,14 +1005,14 @@ export function createNilmWorkspaceMethods({
     return (nilm && nilm.signatures) || [];
   }
 
-  _renderNilmSignatureReview(signature, index) {
+  _renderNilmSignatureReview(signature, sourceKey, signatureIndex = null) {
     const restore = signature.actions && signature.actions.restore;
     return `
       ${signature.user_label ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.saved_label", { label: signature.user_label }))}</p>` : ""}
       ${signature.review_state ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.review_state", { state: this._friendlyFeature(signature.review_state) }))}</p>` : ""}
       ${signature.merged_into ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.merged_into", { value: signature.merged_into }))}</p>` : ""}
-      ${this._renderNilmDecisionFlow(signature, index)}
-      ${restore ? `<div class="actions"><button type="button" class="secondary" data-nilm-signature-index="${index}" data-nilm-signature-action="restore">${this._escape(this._panelText("actions.labels.restore"))}</button></div>` : ""}
+      ${this._renderNilmDecisionFlow(signature, sourceKey)}
+      ${restore && signatureIndex !== null ? `<div class="actions"><button type="button" class="secondary" data-nilm-signature-index="${signatureIndex}" data-nilm-signature-action="restore">${this._escape(this._panelText("actions.labels.restore"))}</button></div>` : ""}
     `;
   }
 
@@ -1000,11 +1024,10 @@ export function createNilmWorkspaceMethods({
     return this._nilmDecisionDrafts.get(this._nilmDecisionDraftKey(signature)) || { decision: "", identifyMode: "assign" };
   }
 
-  _renderNilmDecisionFlow(signature, index) {
+  _renderNilmDecisionFlow(signature, sourceKey) {
     const actions = signature && signature.actions ? signature.actions : {};
     const candidates = [
       ["identify", "mdi:tag-outline", "nilm_workspace.decision_identify", Boolean(actions.assign || actions.label)],
-      ["mark_expected", "mdi:check-decagram", "nilm_workspace.decision_expected", Boolean(actions.mark_expected)],
       ["ignore", "mdi:eye-off-outline", "actions.labels.ignore", Boolean(actions.ignore)],
       ["merge", "mdi:source-merge", "actions.labels.merge", Boolean(actions.merge && actions.merge.target_options && actions.merge.target_options.length)],
     ].filter(([, , , available]) => available);
@@ -1026,30 +1049,30 @@ export function createNilmWorkspaceMethods({
           ${actions.label ? `<option value="label" ${identifyMode === "label" ? "selected" : ""}>${this._escape(this._panelText("nilm_workspace.identify_label_only"))}</option>` : ""}
         </select>
       </label>
-      ${identifyMode === "assign" ? this._renderNilmExistingAssignmentField(actions.assign, `signature_${index}`, draft.assignmentId, key) : ""}
-      ${this._renderNilmLabelField(signature, index)}
+      ${identifyMode === "assign" ? this._renderNilmExistingAssignmentField(actions.assign, sourceKey, draft.assignmentId, key) : ""}
+      ${this._renderNilmLabelField(signature, sourceKey)}
     ` : "";
     return `<div class="nilm-decision-flow">
       <fieldset class="decision-group nilm-decision-group">
         <legend>${this._escape(this._panelText("nilm_workspace.choose_decision"))}</legend>
         <div class="nilm-decision-options">
           ${candidates.map(([value, icon, textKey]) => `<label class="nilm-decision-option">
-            <input type="radio" name="nilm_decision_${index}" value="${value}" data-nilm-decision data-nilm-decision-key="${this._escape(key)}" ${draft.decision === value ? "checked" : ""}>
+            <input type="radio" name="nilm_decision_${sourceKey}" value="${value}" data-nilm-decision data-nilm-decision-key="${this._escape(key)}" ${draft.decision === value ? "checked" : ""}>
             <ha-icon icon="${icon}"></ha-icon>
             <span>${this._escape(this._panelText(textKey))}</span>
           </label>`).join("")}
         </div>
       </fieldset>
       ${identifyFields}
-      ${draft.decision === "merge" ? this._renderNilmMergeTarget(signature, index) : ""}
+      ${draft.decision === "merge" ? this._renderNilmMergeTarget(signature, sourceKey) : ""}
       <div class="actions">
-        <button type="button" data-nilm-apply-decision="${index}" ${this._busyAction.startsWith(`nilm_${index}_`) ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.apply"))}</button>
+        <button type="button" data-nilm-apply-decision="${this._escape(sourceKey)}" ${this._busyAction.startsWith(`nilm_${sourceKey}_`) ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.apply"))}</button>
       </div>
-      ${this._renderInlineFeedback(key)}
+      ${this._renderInlineFeedback(sourceKey)}
     </div>`;
   }
 
-  _renderNilmLabelField(signature, index) {
+  _renderNilmLabelField(signature, sourceKey) {
     const draftKey = this._nilmLabelDraftKey(signature);
     const currentLabel = this._nilmLabelDrafts.has(draftKey)
       ? this._nilmLabelDrafts.get(draftKey)
@@ -1059,10 +1082,10 @@ export function createNilmWorkspaceMethods({
       || signature.display_label
       || "";
     return `
-      <label class="nilm-label-field" for="nilm_label_${index}">
+      <label class="nilm-label-field" for="nilm_label_${sourceKey}">
         <span class="muted">${this._escape(this._panelText("nilm_workspace.label_this_load"))}</span>
         <input
-          id="nilm_label_${index}"
+          id="nilm_label_${sourceKey}"
           type="text"
           data-nilm-label-input
           data-nilm-label-key="${this._escape(draftKey)}"
@@ -2076,7 +2099,7 @@ export function createNilmWorkspaceMethods({
     return snapped;
   }
 
-  _renderNilmMergeTarget(signature, index) {
+  _renderNilmMergeTarget(signature, sourceKey) {
     const action = signature && signature.actions && signature.actions.merge;
     const options = action && action.target_options;
     if (!options || !options.length) {
@@ -2090,8 +2113,8 @@ export function createNilmWorkspaceMethods({
     return `
       <span class="muted">${this._escape(this._panelText("nilm_workspace.merge_into"))}</span>
       ${summary}
-      <div class="merge-targets" id="nilm_merge_targets_${index}" data-selected="${this._escape(selectedTarget)}">
-        ${options.map((option) => this._nilmMergeTargetChip(index, option, option.value === selectedTarget)).join("")}
+      <div class="merge-targets" id="nilm_merge_targets_${sourceKey}" data-selected="${this._escape(selectedTarget)}">
+        ${options.map((option) => this._nilmMergeTargetChip(sourceKey, option, option.value === selectedTarget)).join("")}
       </div>
     `;
   }
@@ -2102,25 +2125,25 @@ export function createNilmWorkspaceMethods({
     this._navigate(`${routeUrl.pathname}${routeUrl.search}${routeUrl.hash}`);
   }
 
-  _nilmMergeTargetChip(index, option, selected = false) {
+  _nilmMergeTargetChip(sourceKey, option, selected = false) {
     return `
       <button
         type="button"
         class="merge-target-chip"
-        data-nilm-index="${index}"
+        data-nilm-source-key="${this._escape(sourceKey)}"
         data-nilm-merge-target="${this._escape(option.value)}"
         aria-pressed="${selected}"
       >${this._escape(option.label)}</button>
     `;
   }
 
-  _selectNilmMergeTarget(index, target) {
-    const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${index}`);
+  _selectNilmMergeTarget(sourceKey, target) {
+    const targetList = this.shadowRoot.querySelector(`#nilm_merge_targets_${sourceKey}`);
     if (!targetList || !target) {
       return;
     }
     targetList.dataset.selected = target;
-    const signature = this._nilmReviewSignatures()[index];
+    const signature = this._decisionSignature(sourceKey);
     if (signature) {
       const key = this._nilmDecisionDraftKey(signature);
       const current = this._nilmDecisionDraft(signature);
@@ -2258,10 +2281,32 @@ export function createNilmWorkspaceMethods({
     if (!primary) return "";
     const current = primary.current_binding;
     const suggestion = primary.suggestion;
+    const evidence = primary.evidence || {};
+    const signature = primary.signature || (current
+      ? { status: "established", signature_id: current.signature_id, display_label: current.display_label }
+      : { status: "not_established" });
+    const attribution = primary.attribution || {
+      status: current ? "active" : "inactive",
+      matching_detection_count: 0,
+    };
+    const signatureText = signature.status === "established"
+      ? this._panelTextFormat("nilm_workspace.primary_signature_established", {
+        load: signature.display_label || signature.signature_id || "",
+        count: Number(signature.recurrence_count || 0),
+      })
+      : this._panelText("nilm_workspace.primary_signature_not_established");
+    const attributionText = attribution.status === "active"
+      ? this._panelTextFormat("nilm_workspace.primary_attribution_active", {
+        count: Number(attribution.matching_detection_count || 0),
+      })
+      : this._panelText("nilm_workspace.primary_attribution_inactive");
     return `<section class="workspace-section section-surface" data-nilm-configured-primary>
       <h2>${this._escape(this._panelText("nilm_workspace.configured_primary"))}</h2>
       <strong>${this._escape(primary.display_name || primary.assignment_id || "")}</strong>
-      ${current ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_current", { load: current.display_label || current.signature_id || "" }))}</p>` : `<p class="muted">${this._escape(this._panelText("nilm_workspace.primary_unassigned"))}</p>`}
+      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_configured", { name: primary.display_name || primary.assignment_id || "" }))}</p>
+      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_evidence", { count: Number(evidence.confirmed_interval_count || 0) }))}</p>
+      <p class="muted">${this._escape(signatureText)}</p>
+      <p class="muted">${this._escape(attributionText)}</p>
       ${suggestion ? `<div data-nilm-primary-suggestion>
         <p><strong>${this._escape(suggestion.display_label || suggestion.signature_id || "")}</strong></p>
         ${suggestion.evidence_summary ? `<p class="muted">${this._escape(suggestion.evidence_summary)}</p>` : ""}
@@ -2311,7 +2356,7 @@ export function createNilmWorkspaceMethods({
   _nilmGraphBands(workspace, sessions) {
     const assignments = Array.isArray(workspace.assignments) ? workspace.assignments : [];
     const hiddenAssignments = new Set(assignments
-      .filter((item) => ["ignored", "expected", "retired"].includes(String(item.lifecycle_state || "").toLowerCase()))
+      .filter((item) => ["ignored", "retired"].includes(String(item.lifecycle_state || "").toLowerCase()))
       .map((item) => item.assignment_id));
     const hiddenIntervalIds = new Set(assignments
       .filter((item) => hiddenAssignments.has(item.assignment_id))
@@ -2610,12 +2655,17 @@ export function createNilmWorkspaceMethods({
           ? `
             <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence: Math.round(Number(item.confidence || 0) * 100) }))}</p>
             ${item.ambiguous ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.session_ambiguous"))}</p>` : ""}
-            ${this._renderNilmSessionAssignField(item, reviewItem.index)}
-            ${item.actions && item.actions.assign ? `<div class="actions"><button type="button" data-nilm-session-index="${reviewItem.index}" data-nilm-session-action="assign">${this._escape(this._panelText("actions.labels.assign_appliance"))}</button></div>` : ""}
+            ${item.signature_review ? `
+              <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.session_signature_review", { load: item.signature_review.display_label || item.signature_review.signature_id || "" }))}</p>
+              ${this._renderNilmSignatureReview(item.signature_review, `session_${reviewItem.index}`)}
+            ` : `
+              ${this._renderNilmSessionAssignField(item, reviewItem.index)}
+              ${item.actions && item.actions.assign ? `<div class="actions"><button type="button" data-nilm-session-index="${reviewItem.index}" data-nilm-session-action="assign">${this._escape(this._panelText("actions.labels.assign_appliance"))}</button></div>` : ""}
+            `}
           `
         : `
         ${this._renderNilmSignatureFacts(item)}
-        ${this._renderNilmSignatureReview(item, reviewItem.index)}
+        ${this._renderNilmSignatureReview(item, `signature_${reviewItem.index}`, reviewItem.index)}
       `;
     return `<div class="nilm-review-inspector section-surface" data-nilm-review-inspector role="region" aria-label="${this._escape(title)}">
       <h2>${this._escape(title)}</h2>
@@ -2628,7 +2678,6 @@ export function createNilmWorkspaceMethods({
     const lane = workspace && workspace.lanes && workspace.lanes[this._nilmActiveLane];
     const laneLabel = (lane && lane.label) || this._friendlyFeature(this._nilmActiveLane);
     const laneDescription = (lane && lane.description)
-      || (this._nilmActiveLane === "expected" ? this._panelText("nilm_workspace.expected_description") : "")
       || (this._nilmActiveLane === "hidden" ? this._panelText("nilm_workspace.hidden_description") : "");
     const selectedItem = reviewItems.length ? this._nilmSelectedReviewItem(workspace) : null;
     const selectedKey = selectedItem ? this._nilmReviewKey(selectedItem) : "";
@@ -2704,7 +2753,6 @@ export function createNilmWorkspaceMethods({
       ["needs_review", this._panelText("nilm_workspace.lane_needs_review")],
       ["assigned", this._panelText("nilm_workspace.lane_assigned")],
       ["published", this._panelText("nilm_workspace.lane_published")],
-      ["expected", this._panelText("nilm_workspace.lane_expected")],
       ["hidden", this._panelText("nilm_workspace.lane_hidden")],
     ];
     if (!Object.keys(lanes).length && !Object.keys(laneCounts).length) {

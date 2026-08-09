@@ -423,15 +423,24 @@ export const nilmWorkspace = {
           service: "label_nilm_signature",
           data: { circuit_id: "mains", signature_id: "signature-1" },
         },
+        assign: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "assign_signature_to_appliance",
+          data: { circuit_id: "mains", signature_id: "signature-1" },
+          assignment_options: [
+            { value: "mains-configured-primary", label: "Configured primary: HVAC 2" },
+          ],
+        },
         ignore: {
           domain: "circuitsetup_energy_analyzer",
           service: "ignore_nilm_signature",
           data: { circuit_id: "mains", signature_id: "signature-1" },
         },
-        mark_expected: {
+        merge: {
           domain: "circuitsetup_energy_analyzer",
-          service: "mark_nilm_signature_expected",
-          data: { circuit_id: "mains", signature_id: "signature-1" },
+          service: "merge_nilm_signatures",
+          data: { circuit_id: "mains", source_signature_id: "signature-1" },
+          target_options: [{ value: "signature-other", label: "Other signature" }],
         },
       },
     },
@@ -466,6 +475,32 @@ export const nilmWorkspace = {
       confidence: 0.78,
       on_delta_w: 900,
       off_delta_w: -900,
+      signature_review: {
+        signature_id: "signature-1",
+        display_label: "Unknown 900 W load",
+        signature_fingerprint: "signature-1",
+        actions: {
+          assign: {
+            domain: "circuitsetup_energy_analyzer",
+            service: "assign_signature_to_appliance",
+            data: { circuit_id: "mains", signature_id: "signature-1" },
+            assignment_options: [
+              { value: "mains-configured-primary", label: "Configured primary: HVAC 2" },
+            ],
+          },
+          ignore: {
+            domain: "circuitsetup_energy_analyzer",
+            service: "ignore_nilm_signature",
+            data: { circuit_id: "mains", signature_id: "signature-1" },
+          },
+          merge: {
+            domain: "circuitsetup_energy_analyzer",
+            service: "merge_nilm_signatures",
+            data: { circuit_id: "mains", source_signature_id: "signature-1" },
+            target_options: [{ value: "signature-other", label: "Other signature" }],
+          },
+        },
+      },
     },
     {
       session_id: "nilm-session-1",
@@ -522,13 +557,12 @@ export const nilmWorkspace = {
   known_load_overlays: [],
   solar_overlays: [],
   lanes: {
-    needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [] },
+    needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [], session_ids: [] },
     assigned: { label: "Assigned", signature_ids: [], assignment_ids: ["dishwasher"], interval_ids: [] },
     published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
-    expected: { label: "Expected", signature_ids: [], assignment_ids: [], interval_ids: [] },
     hidden: { label: "Removed", signature_ids: [], assignment_ids: [], interval_ids: [] },
   },
-  lane_counts: { needs_review: 1, assigned: 1, published: 0, expected: 0, hidden: 0 },
+  lane_counts: { needs_review: 1, assigned: 1, published: 0, hidden: 0 },
 };
 
 export const hvacAssociations = {

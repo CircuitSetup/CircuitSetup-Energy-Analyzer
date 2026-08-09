@@ -6353,19 +6353,12 @@ test("NILM workspace shows the backend real-power requirement when watts are una
   await expect(panel.getByText("Configure a real-power sensor reported in W, kW, mW, or MW.")).toBeVisible();
 });
 
-test("NILM workspace separates expected and hidden lanes and restores hidden assignments", async ({ page }) => {
+test("NILM workspace separates hidden lanes and restores hidden assignments", async ({ page }) => {
   let workspaceRequests = 0;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     workspaceRequests += 1;
     const payload = structuredClone(apiPayload(url.pathname));
-    const expected = {
-      ...payload.assignments[0],
-      assignment_id: "expected-load",
-      display_name: "Expected Pump",
-      lifecycle_state: "expected",
-      actions: {},
-    };
     const ignored = {
       ...payload.assignments[0],
       assignment_id: "ignored-load",
@@ -6392,24 +6385,21 @@ test("NILM workspace separates expected and hidden lanes and restores hidden ass
         },
       },
     };
-    payload.assignments = [payload.assignments[0], expected, ignored, retired];
+    payload.assignments = [payload.assignments[0], ignored, retired];
     payload.lanes = {
       needs_review: { label: "Needs Review", signature_ids: ["signature-1"], assignment_ids: [], interval_ids: [] },
       assigned: { label: "Assigned", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["dishwasher"] : ["dishwasher", "ignored-load"], interval_ids: [] },
       published: { label: "Published", signature_ids: [], assignment_ids: [], interval_ids: [] },
-      expected: { label: "Expected", signature_ids: [], assignment_ids: ["expected-load"], interval_ids: [] },
       hidden: { label: "Removed", signature_ids: [], assignment_ids: workspaceRequests === 1 ? ["ignored-load", "retired-load"] : ["retired-load"], interval_ids: [] },
     };
-    payload.lane_counts = { needs_review: 1, assigned: workspaceRequests === 1 ? 1 : 2, published: 0, expected: 1, hidden: workspaceRequests === 1 ? 2 : 1 };
+    payload.lane_counts = { needs_review: 1, assigned: workspaceRequests === 1 ? 1 : 2, published: 0, hidden: workspaceRequests === 1 ? 2 : 1 };
     await route.fulfill({ json: payload });
     return true;
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
-  await expect(panel.locator("[data-nilm-lane]")).toHaveCount(5);
-  await panel.locator('[data-nilm-lane="expected"]').click();
-  await expect(panel.getByText("Expected loads remain part of matching but are not published.")).toBeVisible();
-  await expect(panel.locator('[data-nilm-review-item="assignment:expected-load"]')).toBeVisible();
+  await expect(panel.locator("[data-nilm-lane]")).toHaveCount(4);
+  await expect(panel.getByText("Expected", { exact: true })).toHaveCount(0);
   await panel.locator('[data-nilm-lane="hidden"]').click();
   await expect(panel.getByText("Removed loads do not appear under Estimated Appliances and can be restored for review.")).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
@@ -6501,6 +6491,13 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
         display_name: "HVAC Blower",
         appliance_profile: "hvac_blower",
         current_binding: primaryConfirmed ? { signature_id: "signature-blower", display_label: "Blower signature" } : null,
+        evidence: { confirmed_interval_count: 2 },
+        signature: primaryConfirmed
+          ? { status: "established", signature_id: "signature-blower", display_label: "Blower signature", recurrence_count: 14 }
+          : { status: "not_established" },
+        attribution: primaryConfirmed
+          ? { status: "active", matching_detection_count: 2 }
+          : { status: "inactive", matching_detection_count: 0 },
         suggestion: primaryConfirmed ? null : {
           signature_id: "signature-blower",
           display_label: "Blower signature",
@@ -6529,11 +6526,15 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
   await expect(panel.getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
   await expect(primary).toContainText("HVAC Blower");
-  await expect(primary).toContainText("Blower signature");
+  await expect(primary).toContainText("Configured: HVAC Blower is the primary appliance.");
+  await expect(primary).toContainText("Evidence: 2 confirmed intervals saved.");
+  await expect(primary).toContainText("Signature not established yet.");
+  await expect(primary).toContainText("Attribution: No matching detections are currently assigned.");
   await expect(primary).toContainText("900 W · 14 matched cycles · follows AC2 calls");
   primaryConfirmed = true;
   await primary.locator("[data-nilm-primary-confirm]").click();
-  await expect(primary).toContainText("Blower signature");
+  await expect(primary).toContainText("Signature: Blower signature is established (14 recurring detections).");
+  await expect(primary).toContainText("Attribution: 2 matching detections are assigned automatically.");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
     service: "assign_signature_to_appliance",
     data: { entry_id: "entry-1", circuit_id: "hvac_2", assignment_id: "hvac_2-configured-primary", signature_id: "signature-blower" },
@@ -7548,6 +7549,11 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
     payload.source = { ...payload.source, source_kind: "mains" };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
     payload.known_load_overlays = [{ circuit_id: "fridge", name: "Fridge", entity_ids: ["sensor.fridge_power"] }];
     payload.history = {
       ...payload.history,
@@ -7600,7 +7606,10 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(panel.getByText("Confidence is lower because a competing session overlapped this run.")).toBeVisible();
   await expect(panel.getByText("Confidence is lower because known-load activity affected this run.")).toBeVisible();
 
-  await panel.locator('[data-nilm-decision][value="mark_expected"]').check();
+  await expect(panel.getByText("This detection matches Unknown 900 W load; this decision applies to the signature and future matching detections.")).toBeVisible();
+  await expect(panel.locator('[data-nilm-decision][value="mark_expected"]')).toHaveCount(0);
+  await panel.locator('[data-nilm-decision][value="identify"]').check();
+  await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("mains-configured-primary");
   await panel.locator("[data-nilm-apply-decision]").click();
 
   await panel.locator('[data-nilm-session-action="validate"]').first().click();
@@ -7627,7 +7636,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
-    "mark_nilm_signature_expected",
+    "assign_signature_to_appliance",
     "validate_nilm_session",
     "validate_nilm_assignment_history",
     "set_circuit_sensitivity",
