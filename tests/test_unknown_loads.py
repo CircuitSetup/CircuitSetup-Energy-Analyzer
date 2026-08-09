@@ -96,6 +96,257 @@ def test_directional_signatures_share_one_unknown_load_component() -> None:
     assert load["running_state"] == "probably_off"
 
 
+def test_inventory_uses_stored_sessions_for_independent_runtime_windows() -> None:
+    """Stored runs populate today, trailing-seven, and trailing-thirty separately."""
+
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    component = signature("sig-windowed", 500.0, 100.0, 510.0)
+    sessions = [
+        {
+            "session_id": "today",
+            "component_id": "sig-windowed",
+            "signature_fingerprint": "windowed-fingerprint",
+            "start": "2026-08-09T10:00:00+00:00",
+            "end": "2026-08-09T11:00:00+00:00",
+        },
+        {
+            "session_id": "two-days-ago",
+            "component_id": "sig-windowed",
+            "signature_fingerprint": "windowed-fingerprint",
+            "start": "2026-08-07T09:00:00+00:00",
+            "end": "2026-08-07T10:30:00+00:00",
+        },
+        {
+            "session_id": "ten-days-ago",
+            "component_id": "sig-windowed",
+            "signature_fingerprint": "windowed-fingerprint",
+            "start": "2026-07-30T09:00:00+00:00",
+            "end": "2026-07-30T11:00:00+00:00",
+        },
+        {
+            "session_id": "thirty-five-days-ago",
+            "component_id": "sig-windowed",
+            "signature_fingerprint": "windowed-fingerprint",
+            "start": "2026-07-05T09:00:00+00:00",
+            "end": "2026-07-05T10:00:00+00:00",
+        },
+    ]
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=sessions,
+        now=now,
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["runtime_7_days_minutes"] == 150.0
+    assert load["runtime_30_days_minutes"] == 270.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert load["estimated_energy_7_days_kwh"] == 1.25
+    assert load["estimated_energy_30_days_kwh"] == 2.25
+
+
+def test_session_windows_clip_boundaries_and_local_midnight() -> None:
+    """Runs crossing a local day boundary contribute only their clipped duration."""
+
+    component = signature("sig-boundary", 500.0, 100.0, 510.0)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "crosses-midnight",
+                "component_id": "sig-boundary",
+                "signature_fingerprint": "boundary",
+                "start": "2026-03-08T04:30:00+00:00",
+                "end": "2026-03-08T05:30:00+00:00",
+            }
+        ],
+        now=datetime(2026, 3, 8, 16, 0, tzinfo=UTC),
+        time_zone="America/New_York",
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 30.0
+    assert load["runtime_windows"]["today"]["coverage_start"] == (
+        "2026-03-08T05:00:00+00:00"
+    )
+    assert load["runtime_windows"]["today"]["nominal_days"] == 0.458
+
+
+def test_session_evidence_excludes_malformed_and_ambiguous_rows() -> None:
+    """Invalid or non-unique evidence must not inflate a component's history."""
+
+    now = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-evidence", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "usable",
+                "component_id": "sig-evidence",
+                "signature_fingerprint": "evidence",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+            {
+                "session_id": "bad-date",
+                "component_id": "sig-evidence",
+                "signature_fingerprint": "evidence",
+                "start": "not-a-date",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+            {
+                "session_id": "ambiguous",
+                "component_id": "sig-evidence",
+                "signature_fingerprint": "evidence",
+                "start": "2026-08-09T09:00:00+00:00",
+                "end": "2026-08-09T10:00:00+00:00",
+                "ambiguous": True,
+            },
+        ],
+        now=now,
+    )
+
+    window = inventory["unknown_loads"][0]["runtime_windows"]["today"]
+    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 60.0
+    assert window["included_session_count"] == 1
+    assert window["excluded_session_count"] == 2
+    assert window["estimate_status"] == "partial_history"
+
+
+def test_session_metadata_keeps_the_earliest_observation_start() -> None:
+    """Rebuilds cannot move an established observation boundary forward."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-observation", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "recent-run",
+                "component_id": "sig-observation",
+                "signature_fingerprint": "observation",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+        session_history_max_items=100,
+        existing_state={"observation_started_at": "2026-07-01T00:00:00+00:00"},
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert inventory["observation_started_at"] == "2026-07-01T00:00:00+00:00"
+    assert load["observation_started_at"] == "2026-07-01T00:00:00+00:00"
+    assert load["estimate_status"] == "partial_history"
+
+
+def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
+    """A reconstructed close replaces its stale open predecessor for one edge."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-dedup", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "open-copy",
+                "component_id": "sig-dedup",
+                "signature_fingerprint": "dedup",
+                "on_edge_id": "edge-1",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": None,
+            },
+            {
+                "session_id": "closed-copy",
+                "component_id": "sig-dedup",
+                "signature_fingerprint": "dedup",
+                "on_edge_id": "edge-1",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["current_runtime_minutes"] == 0.0
+    assert load["running_state"] == "probably_off"
+
+
+def test_session_ownership_accepts_a_matching_legacy_fingerprint() -> None:
+    """A stored row's legacy fingerprint can still resolve one canonical ON owner."""
+
+    component = signature("sig-legacy-fingerprint", 500.0, 100.0, 510.0)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "legacy-fingerprint-run",
+                "component_id": "legacy-component-id",
+                "signature_fingerprint": "retained-session-fingerprint",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+        existing_state={
+            "unknown_loads": [
+                {
+                    "component_id": "legacy-component-id",
+                    "fingerprint": unknown_loads.nilm_signature_fingerprint(component),
+                }
+            ]
+        },
+    )
+
+    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 60.0
+
+
+def test_multiple_open_sessions_make_current_runtime_ambiguous() -> None:
+    """Two distinct active runs cannot be represented as one current runtime."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-open", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "open-one",
+                "component_id": "sig-open",
+                "signature_fingerprint": "open",
+                "on_edge_id": "edge-one",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": None,
+            },
+            {
+                "session_id": "open-two",
+                "component_id": "sig-open",
+                "signature_fingerprint": "open",
+                "on_edge_id": "edge-two",
+                "start": "2026-08-09T11:00:00+00:00",
+                "end": None,
+            },
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["running_state"] == "unknown"
+    assert load["current_runtime_minutes"] == 0.0
+    assert load["runtime_today_minutes"] == 0.0
+    assert load["estimate_status"] == "ambiguous"
+
+
 def test_estimate_unknown_load_marks_reactive_signature_as_motor() -> None:
     result = estimate_unknown_load(
         signature(
@@ -299,6 +550,26 @@ def test_build_unknown_load_inventory_tracks_currently_running_load() -> None:
     assert load["running_state"] == "probably_on"
     assert load["current_runtime_minutes"] == 45.0
     assert load["estimated_energy_today_kwh"] == 0.45
+
+
+def test_edge_compatible_inventory_includes_window_metadata() -> None:
+    """Simple edge callers remain current-schema inventories after the metadata bump."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-edge-metadata", 500.0, 100.0, 510.0)],
+        edges=[edge(0, 500.0, var=100.0, direction="on")],
+        now=BASE_TIME + timedelta(minutes=30),
+    )
+
+    assert inventory["schema_version"] == 3
+    assert inventory["runtime_window_definition"]["7_days"] == (
+        "trailing_168_elapsed_hours_to_now"
+    )
+    assert inventory["unknown_loads"][0]["runtime_windows"]["today"][
+        "estimate_status"
+    ] == "partial_history"
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(inventory)
 
 
 def test_build_unknown_load_inventory_marks_overlapping_events_ambiguous() -> None:
@@ -556,7 +827,7 @@ def test_metadata_migration_deduplicates_proven_off_row_without_edges() -> None:
         signature_payloads=signature_payloads,
     )
 
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == 3
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.5
     load = migrated["unknown_loads"][0]
@@ -586,7 +857,7 @@ def test_metadata_migration_preserves_unclassifiable_legacy_row_once() -> None:
         signature_payloads=[],
     )
 
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == 3
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.0
     assert migrated["largest_unknown_load"] is None
@@ -618,3 +889,80 @@ def test_unique_paired_off_row_restores_review_state_when_on_row_is_missing() ->
     )
 
     assert inventory["unknown_loads"][0]["review_state"] == "assigned"
+
+
+def test_migration_recomputes_windowed_values_when_sessions_are_available() -> None:
+    """Migration must retain review identity while replacing stale numeric estimates."""
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "sig-migrate",
+                    "review_state": "assigned",
+                    "user_label": "Basement load",
+                    "runtime_today_minutes": 999.0,
+                }
+            ]
+        },
+        signature_payloads=[
+            {
+                "signature_id": "sig-migrate",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+            }
+        ],
+        sessions=[
+            {
+                "session_id": "migrated-run",
+                "component_id": "sig-migrate",
+                "signature_fingerprint": "migrate",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = migrated["unknown_loads"][0]
+    assert migrated["schema_version"] == 3
+    assert load["review_state"] == "assigned"
+    assert load["user_label"] == "Basement load"
+    assert load["runtime_today_minutes"] == 60.0
+
+
+def test_migration_without_sessions_marks_numeric_estimates_legacy_unverified() -> None:
+    """Legacy values remain visible when their source sessions are unavailable."""
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "sig-legacy-status",
+                    "typical_watts": 500.0,
+                    "runtime_today_minutes": 60.0,
+                    "estimated_energy_today_kwh": 0.5,
+                    "review_state": "new",
+                }
+            ]
+        },
+        signature_payloads=[
+            {
+                "signature_id": "sig-legacy-status",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+            }
+        ],
+    )
+
+    assert migrated["unknown_loads"][0]["estimate_status"] == "legacy_unverified"
+    assert migrated["estimate_status"] == "legacy_unverified"
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)

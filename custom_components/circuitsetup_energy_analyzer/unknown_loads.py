@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .nilm import (
     NilmEdge,
@@ -16,7 +17,7 @@ from .nilm import (
 
 MIN_OCCURRENCES = 3
 MIN_CONFIDENCE = 0.5
-UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 2
+UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 3
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
@@ -41,6 +42,33 @@ class _UnknownLoadAllocation:
     matched_off_count_by_component: Mapping[str, int]
     ambiguous_edge_count_by_component: Mapping[str, int]
     ambiguous_component_ids: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedUnknownLoadSession:
+    """Storage-safe session evidence normalized to UTC before windowing."""
+
+    session_id: str
+    signature_fingerprint: str
+    start: datetime
+    end: datetime
+    is_open: bool
+    on_edge_id: str
+    identities: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class _OwnedUnknownLoadSession:
+    session: _NormalizedUnknownLoadSession
+    component_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionInventoryEvidence:
+    sessions_by_component: Mapping[str, tuple[_OwnedUnknownLoadSession, ...]]
+    excluded_count_by_component: Mapping[str, int]
+    ambiguous_component_ids: frozenset[str]
+    observation_started_at: datetime | None
 
 
 def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
@@ -90,7 +118,10 @@ def build_unknown_load_inventory(
     circuit_id: str,
     signatures: Iterable[NilmSignature],
     edges: Iterable[NilmEdge],
+    sessions: Iterable[Mapping[str, Any]] = (),
     now: datetime,
+    time_zone: str = "UTC",
+    session_history_max_items: int | None = None,
     existing_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a consolidated inventory of recurring unknown NILM loads."""
@@ -99,12 +130,33 @@ def build_unknown_load_inventory(
     edge_list = sorted(edges, key=lambda edge: edge.timestamp)
     components = _unknown_load_components(signature_list)
     allocation = _allocate_unknown_edges(components, edge_list)
+    now_utc = _as_utc_datetime(now)
+    session_list = tuple(sessions)
+    session_evidence = _session_inventory_evidence(
+        session_list,
+        components=components,
+        now=now_utc,
+        existing_state=existing_state or {},
+    )
+    windows = _runtime_windows(now_utc, time_zone)
     loads = [
-        _unknown_component_payload(
-            component,
-            allocation,
-            now=now,
-            existing_state=existing_state or {},
+        (
+            _unknown_component_session_payload(
+                component,
+                allocation,
+                session_evidence,
+                windows=windows,
+                now=now_utc,
+                existing_state=existing_state or {},
+                session_history_max_items=session_history_max_items,
+            )
+            if session_list
+            else _unknown_component_payload(
+                component,
+                allocation,
+                now=now_utc,
+                existing_state=existing_state or {},
+            )
         )
         for component in components
     ]
@@ -114,7 +166,7 @@ def build_unknown_load_inventory(
         1 for load in loads if load["separation_status"] == "ambiguous"
     )
 
-    return {
+    inventory = {
         "circuit_id": circuit_id,
         "schema_version": UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION,
         "unknown_load_count": len(loads),
@@ -142,6 +194,35 @@ def build_unknown_load_inventory(
         ),
         "unknown_loads": loads,
     }
+    if session_list:
+        inventory.update(
+            {
+                "observation_started_at": _observation_started_at(
+                    session_evidence.observation_started_at,
+                    existing_state or {},
+                ),
+                "runtime_window_definition": _runtime_window_definition(),
+                "estimate_status": _worst_estimate_status(
+                    load.get("estimate_status", "complete") for load in loads
+                ),
+            }
+        )
+    else:
+        observed = _edge_observation_started_at(loads)
+        for load in loads:
+            _add_edge_window_metadata(load, windows, observed, existing_state or {})
+        inventory.update(
+            {
+                "observation_started_at": _observation_started_at(
+                    observed, existing_state or {}
+                ),
+                "runtime_window_definition": _runtime_window_definition(),
+                "estimate_status": _worst_estimate_status(
+                    load.get("estimate_status", "partial_history") for load in loads
+                ),
+            }
+        )
+    return inventory
 
 
 def unknown_load_inventory_needs_rebuild(
@@ -159,6 +240,15 @@ def unknown_load_inventory_needs_rebuild(
         return True
     loads = existing_state.get("unknown_loads")
     if not isinstance(loads, list):
+        return True
+    if not isinstance(existing_state.get("runtime_window_definition"), Mapping):
+        return True
+    if str(existing_state.get("estimate_status") or "") not in {
+        "complete",
+        "partial_history",
+        "legacy_unverified",
+        "ambiguous",
+    }:
         return True
 
     component_ids: set[str] = set()
@@ -182,6 +272,28 @@ def unknown_load_inventory_needs_rebuild(
             )
         ):
             return True
+        if str(load.get("estimate_status") or "") not in {
+            "complete",
+            "partial_history",
+            "legacy_unverified",
+            "ambiguous",
+        }:
+            return True
+        windows = load.get("runtime_windows")
+        if not isinstance(windows, Mapping) or not all(
+            isinstance(windows.get(name), Mapping)
+            and {
+                "coverage_start",
+                "coverage_end",
+                "coverage_days",
+                "estimate_status",
+                "included_session_count",
+                "excluded_session_count",
+            }
+            <= windows[name].keys()
+            for name in ("today", "7_days", "30_days")
+        ):
+            return True
     return False
 
 
@@ -190,6 +302,10 @@ def migrate_unknown_load_inventory(
     circuit_id: str,
     existing_state: Mapping[str, Any],
     signature_payloads: Iterable[Mapping[str, Any]],
+    sessions: Iterable[Mapping[str, Any]] | None = None,
+    now: datetime | None = None,
+    time_zone: str = "UTC",
+    session_history_max_items: int | None = None,
 ) -> dict[str, Any]:
     """Upgrade a stale inventory without discarding rows that lack edge evidence."""
 
@@ -199,6 +315,18 @@ def migrate_unknown_load_inventory(
         if (signature := _signature_from_payload(payload)) is not None
     ]
     components = _unknown_load_components(signatures)
+    session_list = tuple(sessions) if sessions is not None else ()
+    if session_list and now is not None:
+        return build_unknown_load_inventory(
+            circuit_id=circuit_id,
+            signatures=signatures,
+            edges=(),
+            sessions=session_list,
+            now=now,
+            time_zone=time_zone,
+            session_history_max_items=session_history_max_items,
+            existing_state=existing_state,
+        )
     existing_loads = [
         dict(load)
         for load in existing_state.get("unknown_loads", ())
@@ -254,7 +382,7 @@ def migrate_unknown_load_inventory(
             str(load.get("signature_id") or ""),
         )
     )
-    return _inventory_aggregate(circuit_id, retained)
+    return _legacy_unverified_inventory(circuit_id, retained, existing_state)
 
 
 def _inventory_aggregate(
@@ -294,6 +422,45 @@ def _inventory_aggregate(
     }
 
 
+def _legacy_unverified_inventory(
+    circuit_id: str,
+    loads: list[dict[str, Any]],
+    existing_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Preserve prior values when history was not retained for recomputation."""
+
+    observation_started = _observation_started_at(None, existing_state)
+    for load in loads:
+        status = "legacy_unverified"
+        load["estimate_status"] = status
+        load["estimate_status_by_window"] = {
+            name: status for name in ("today", "7_days", "30_days")
+        }
+        load["observation_started_at"] = observation_started
+        load["runtime_window_definition"] = _runtime_window_definition()
+        load["runtime_windows"] = {
+            name: {
+                "coverage_start": None,
+                "coverage_end": None,
+                "coverage_days": 0.0,
+                "nominal_days": days,
+                "estimate_status": status,
+                "included_session_count": 0,
+                "excluded_session_count": 0,
+            }
+            for name, days in (("today", 0.0), ("7_days", 7.0), ("30_days", 30.0))
+        }
+    inventory = _inventory_aggregate(circuit_id, loads)
+    inventory.update(
+        {
+            "observation_started_at": observation_started,
+            "runtime_window_definition": _runtime_window_definition(),
+            "estimate_status": "legacy_unverified",
+        }
+    )
+    return inventory
+
+
 def _signature_from_payload(payload: Mapping[str, Any]) -> NilmSignature | None:
     signature_id = str(payload.get("signature_id") or "").strip()
     try:
@@ -327,6 +494,8 @@ def _load_identifies_component(
             ("on_signature_id", component.on_signature.signature_id),
             ("component_fingerprint", component.component_fingerprint),
             ("on_signature_fingerprint", component.component_fingerprint),
+            ("signature_fingerprint", component.component_fingerprint),
+            ("fingerprint", component.component_fingerprint),
         )
     )
 
@@ -733,6 +902,432 @@ def _tolerance_score(
 ) -> float:
     tolerance = max(abs(reference) * ratio, floor)
     return max(0.0, 1.0 - (abs(value - reference) / tolerance))
+
+
+def _as_utc_datetime(value: datetime | str | Any) -> datetime:
+    """Parse storage timestamps, treating legacy naive values as UTC."""
+
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, datetime):
+        raise ValueError("timestamp is not a datetime")
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _runtime_windows(
+    now: datetime,
+    time_zone: str,
+) -> dict[str, tuple[datetime, datetime, float]]:
+    """Build local-midnight and elapsed-time windows in UTC."""
+
+    try:
+        local_zone = ZoneInfo(time_zone)
+    except (TypeError, ZoneInfoNotFoundError):
+        local_zone = UTC
+    local_now = now.astimezone(local_zone)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = local_midnight.astimezone(UTC)
+    return {
+        "today": (today_start, now, (now - today_start).total_seconds() / 86_400),
+        "7_days": (now - timedelta(hours=168), now, 7.0),
+        "30_days": (now - timedelta(hours=720), now, 30.0),
+    }
+
+
+def _runtime_window_definition() -> dict[str, str]:
+    return {
+        "today": "configured_local_midnight_to_now",
+        "7_days": "trailing_168_elapsed_hours_to_now",
+        "30_days": "trailing_720_elapsed_hours_to_now",
+    }
+
+
+def _normalize_unknown_load_sessions(
+    sessions: Iterable[Mapping[str, Any]], now: datetime
+) -> tuple[tuple[_NormalizedUnknownLoadSession, ...], int]:
+    """Validate persisted sessions without allowing malformed storage to raise."""
+
+    normalized: list[_NormalizedUnknownLoadSession] = []
+    excluded = 0
+    for raw in sessions:
+        if not isinstance(raw, Mapping):
+            excluded += 1
+            continue
+        try:
+            session_id = str(raw.get("session_id") or "").strip()
+            fingerprint = str(raw.get("signature_fingerprint") or "").strip()
+            if not session_id or not fingerprint:
+                raise ValueError("missing session identity")
+            if bool(raw.get("ambiguous")) or bool(raw.get("known_load_masked")):
+                raise ValueError("excluded session evidence")
+            start = _as_utc_datetime(raw.get("start"))
+            end_value = raw.get("end")
+            is_open = end_value is None
+            end = now if is_open else _as_utc_datetime(end_value)
+            if start > now or end < start or not all(
+                isfinite(value)
+                for value in ((end - start).total_seconds(),)
+            ):
+                raise ValueError("invalid session interval")
+            identities = frozenset(
+                value
+                for value in (
+                    str(raw.get("component_id") or "").strip(),
+                    str(raw.get("component_fingerprint") or "").strip(),
+                    str(raw.get("signature_id") or "").strip(),
+                    fingerprint,
+                    str(raw.get("on_signature_id") or "").strip(),
+                    str(raw.get("on_signature_fingerprint") or "").strip(),
+                )
+                if value
+            )
+            normalized.append(
+                _NormalizedUnknownLoadSession(
+                    session_id=session_id,
+                    signature_fingerprint=fingerprint,
+                    start=start,
+                    end=end,
+                    is_open=is_open,
+                    on_edge_id=str(raw.get("on_edge_id") or "").strip(),
+                    identities=identities,
+                )
+            )
+        except (TypeError, ValueError, OverflowError):
+            excluded += 1
+    return tuple(normalized), excluded
+
+
+def _session_owner_candidates(
+    session: _NormalizedUnknownLoadSession,
+    components: Iterable[_UnknownLoadComponent],
+    existing_state: Mapping[str, Any],
+) -> tuple[str, ...]:
+    """Resolve only explicit component/signature identities; never by watts."""
+
+    candidates: list[str] = []
+    for component in components:
+        identities = {
+            component.component_id,
+            component.component_fingerprint,
+            component.on_signature.signature_id,
+            nilm_signature_fingerprint(component.on_signature),
+        }
+        if session.identities & identities:
+            candidates.append(component.component_id)
+            continue
+        loads = existing_state.get("unknown_loads")
+        if not isinstance(loads, list):
+            continue
+        for load in loads:
+            if not isinstance(load, Mapping) or not _load_identifies_component(
+                load, component
+            ):
+                continue
+            legacy_identities = {
+                str(load.get(key) or "").strip()
+                for key in (
+                    "component_id",
+                    "component_fingerprint",
+                    "signature_id",
+                    "on_signature_id",
+                    "on_signature_fingerprint",
+                    "signature_fingerprint",
+                    "fingerprint",
+                )
+            }
+            if session.identities & (legacy_identities - {""}):
+                candidates.append(component.component_id)
+                break
+    return tuple(sorted(set(candidates)))
+
+
+def _deduplicate_owned_sessions(
+    sessions: Iterable[_OwnedUnknownLoadSession],
+) -> tuple[tuple[_OwnedUnknownLoadSession, ...], set[str]]:
+    """Apply stable session/on-edge/interval deduplication conservatively."""
+
+    retained = list(sessions)
+    excluded_components: set[str] = set()
+    for key_fn in (
+        lambda item: ("session", item.session.session_id),
+        lambda item: ("on_edge", item.session.on_edge_id)
+        if item.session.on_edge_id
+        else (
+            "interval",
+            item.component_id,
+            item.session.start,
+            item.session.end,
+        ),
+        lambda item: (
+            "interval", item.component_id, item.session.start, item.session.end
+        ),
+    ):
+        grouped: dict[tuple[Any, ...], list[_OwnedUnknownLoadSession]] = {}
+        for item in retained:
+            grouped.setdefault(key_fn(item), []).append(item)
+        next_retained: list[_OwnedUnknownLoadSession] = []
+        for group in grouped.values():
+            if len(group) == 1:
+                next_retained.extend(group)
+                continue
+            components = {item.component_id for item in group}
+            closed = [item for item in group if not item.session.is_open]
+            if len(components) != 1 or (
+                len(closed) > 1
+                and len({(item.session.start, item.session.end) for item in closed}) > 1
+            ):
+                excluded_components.update(components)
+                continue
+            next_retained.append(closed[0] if closed else group[0])
+        retained = next_retained
+    return tuple(retained), excluded_components
+
+
+def _session_inventory_evidence(
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    components: Iterable[_UnknownLoadComponent],
+    now: datetime,
+    existing_state: Mapping[str, Any],
+) -> _SessionInventoryEvidence:
+    component_list = tuple(components)
+    normalized, invalid_count = _normalize_unknown_load_sessions(sessions, now)
+    owned: list[_OwnedUnknownLoadSession] = []
+    excluded = {component.component_id: invalid_count for component in component_list}
+    ambiguous_ids: set[str] = set()
+    for session in normalized:
+        candidates = _session_owner_candidates(session, component_list, existing_state)
+        if len(candidates) != 1:
+            targets = candidates or tuple(
+                component.component_id for component in component_list
+            )
+            for component_id in targets:
+                excluded[component_id] += 1
+                if len(candidates) > 1:
+                    ambiguous_ids.add(component_id)
+            continue
+        owned.append(_OwnedUnknownLoadSession(session, candidates[0]))
+    retained, dedup_excluded = _deduplicate_owned_sessions(owned)
+    for component_id in dedup_excluded:
+        excluded[component_id] += 1
+        ambiguous_ids.add(component_id)
+    return _SessionInventoryEvidence(
+        sessions_by_component={
+            component.component_id: tuple(
+                item for item in retained if item.component_id == component.component_id
+            )
+            for component in component_list
+        },
+        excluded_count_by_component=excluded,
+        ambiguous_component_ids=frozenset(ambiguous_ids),
+        observation_started_at=min((item.start for item in normalized), default=None),
+    )
+
+
+def _clip_session_seconds(
+    session: _OwnedUnknownLoadSession, start: datetime, end: datetime
+) -> float:
+    clipped_start = max(session.session.start, start)
+    clipped_end = min(session.session.end, end)
+    return max(0.0, (clipped_end - clipped_start).total_seconds())
+
+
+def _estimate_status(
+    *,
+    ambiguous: bool,
+    excluded_count: int,
+    observation_started_at: datetime | None,
+    window_start: datetime,
+    session_history_max_items: int | None,
+) -> str:
+    if ambiguous:
+        return "ambiguous"
+    if (
+        excluded_count
+        or observation_started_at is None
+        or observation_started_at > window_start
+        or session_history_max_items is not None
+    ):
+        return "partial_history"
+    return "complete"
+
+
+def _worst_estimate_status(statuses: Iterable[str]) -> str:
+    severity = {
+        "complete": 0,
+        "partial_history": 1,
+        "legacy_unverified": 2,
+        "ambiguous": 3,
+    }
+    return max(statuses, key=lambda status: severity.get(status, 3), default="complete")
+
+
+def _observation_started_at(
+    observed: datetime | None, existing_state: Mapping[str, Any]
+) -> str | None:
+    values = [observed] if observed is not None else []
+    try:
+        existing = existing_state.get("observation_started_at")
+        if existing:
+            values.append(_as_utc_datetime(existing))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return min(values).isoformat() if values else None
+
+
+def _edge_observation_started_at(loads: Iterable[Mapping[str, Any]]) -> datetime | None:
+    observed: list[datetime] = []
+    for load in loads:
+        try:
+            value = load.get("first_seen")
+            if value:
+                observed.append(_as_utc_datetime(value))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    return min(observed, default=None)
+
+
+def _add_edge_window_metadata(
+    load: dict[str, Any],
+    windows: Mapping[str, tuple[datetime, datetime, float]],
+    observed: datetime | None,
+    existing_state: Mapping[str, Any],
+) -> None:
+    """Keep edge-only callers schema-compatible without claiming retained history."""
+
+    ambiguous = load.get("separation_status") == "ambiguous"
+    status = "ambiguous" if ambiguous else "partial_history"
+    included = int(load.get("matched_on_edge_count") or 0)
+    load["runtime_windows"] = {
+        name: {
+            "coverage_start": max(start, observed).isoformat()
+            if observed is not None
+            else start.isoformat(),
+            "coverage_end": end.isoformat(),
+            "coverage_days": round(
+                max(0.0, (end - max(start, observed)).total_seconds() / 86_400)
+                if observed is not None
+                else 0.0,
+                3,
+            ),
+            "nominal_days": round(nominal_days, 3),
+            "estimate_status": status,
+            "included_session_count": included,
+            "excluded_session_count": 0,
+        }
+        for name, (start, end, nominal_days) in windows.items()
+    }
+    load["estimate_status_by_window"] = {
+        name: status for name in windows
+    }
+    load["estimate_status"] = status
+    load["observation_started_at"] = _observation_started_at(observed, existing_state)
+    load["runtime_window_definition"] = _runtime_window_definition()
+
+
+def _unknown_component_session_payload(
+    component: _UnknownLoadComponent,
+    allocation: _UnknownLoadAllocation,
+    evidence: _SessionInventoryEvidence,
+    *,
+    windows: Mapping[str, tuple[datetime, datetime, float]],
+    now: datetime,
+    existing_state: Mapping[str, Any],
+    session_history_max_items: int | None,
+) -> dict[str, Any]:
+    """Assemble one component payload from reconstructed persisted runs."""
+
+    payload = _unknown_component_payload(
+        component, allocation, now=now, existing_state=existing_state
+    )
+    existing_load = _existing_component_state(existing_state, component)
+    for key in ("user_label", "labels"):
+        if key in existing_load:
+            payload[key] = existing_load[key]
+    sessions = evidence.sessions_by_component[component.component_id]
+    ambiguous = (
+        payload["separation_status"] == "ambiguous"
+        or component.component_id in evidence.ambiguous_component_ids
+    )
+    open_sessions = [item for item in sessions if item.session.is_open]
+    if ambiguous or len(open_sessions) > 1:
+        payload["running_state"] = "unknown"
+        payload["current_runtime_minutes"] = 0.0
+        ambiguous = True
+    elif open_sessions:
+        payload["running_state"] = "probably_on"
+        payload["current_runtime_minutes"] = round(
+            (now - open_sessions[0].session.start).total_seconds() / 60.0, 3
+        )
+        payload["last_start"] = open_sessions[0].session.start.isoformat()
+        payload["last_stop"] = None
+    else:
+        payload["running_state"] = "probably_off"
+        payload["current_runtime_minutes"] = 0.0
+
+    estimate_statuses: dict[str, str] = {}
+    runtime_windows: dict[str, dict[str, Any]] = {}
+    for name, (start, end, nominal_days) in windows.items():
+        seconds = 0.0 if ambiguous else sum(
+            _clip_session_seconds(item, start, end) for item in sessions
+        )
+        runtime_minutes = round(seconds / 60.0, 3)
+        status = _estimate_status(
+            ambiguous=ambiguous,
+            excluded_count=evidence.excluded_count_by_component[component.component_id],
+            observation_started_at=evidence.observation_started_at,
+            window_start=start,
+            session_history_max_items=session_history_max_items,
+        )
+        estimate_statuses[name] = status
+        runtime_windows[name] = {
+            "coverage_start": max(start, evidence.observation_started_at)
+            .isoformat()
+            if evidence.observation_started_at is not None
+            else start.isoformat(),
+            "coverage_end": end.isoformat(),
+            "coverage_days": round(
+                max(
+                    0.0,
+                    (
+                        end - max(start, evidence.observation_started_at)
+                    ).total_seconds()
+                    / 86_400,
+                )
+                if evidence.observation_started_at is not None
+                else 0.0,
+                3,
+            ),
+            "nominal_days": round(nominal_days, 3),
+            "estimate_status": status,
+            "included_session_count": sum(
+                1 for item in sessions if _clip_session_seconds(item, start, end) > 0.0
+            )
+            if not ambiguous
+            else 0,
+            "excluded_session_count": evidence.excluded_count_by_component[
+                component.component_id
+            ],
+        }
+        suffix = {"today": "today", "7_days": "7_days", "30_days": "30_days"}[name]
+        payload[f"runtime_{suffix}_minutes"] = runtime_minutes
+        payload[f"estimated_energy_{suffix}_kwh"] = _estimated_kwh(
+            float(payload["typical_watts"]), runtime_minutes
+        )
+    payload["runtime_windows"] = runtime_windows
+    payload["estimate_status_by_window"] = estimate_statuses
+    payload["estimate_status"] = _worst_estimate_status(estimate_statuses.values())
+    payload["observation_started_at"] = _observation_started_at(
+        evidence.observation_started_at, existing_state
+    )
+    payload["runtime_window_definition"] = _runtime_window_definition()
+    payload["separation_status"] = "ambiguous" if ambiguous else "separable"
+    payload["energy_estimate_confidence"] = (
+        0.0 if ambiguous else float(payload["confidence"])
+    )
+    return payload
 
 
 def _unknown_component_payload(
