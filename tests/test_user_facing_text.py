@@ -4065,6 +4065,25 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         'data-nilm-session-confidence="0.70"', 'data-nilm-low-confidence="true"',
       ]) assert.ok(html.includes(expected), expected);
     }
+
+    name = "test_nilm_review_card_labels_interval_average_power";
+    {
+      const panel = makePanel();
+      const averageHtml = panel._renderNilmReviewCard({
+        kind: "assignment",
+        item: { assignment_id: "assignment-hvac", display_name: "HVAC", typical_power_w: 400, typical_power_source: "interval_average" },
+        index: 0,
+      }, [], false);
+      assert.ok(averageHtml.includes("Average power: 400 W"));
+
+      const normalHtml = panel._renderNilmReviewCard({
+        kind: "assignment",
+        item: { assignment_id: "assignment-pump", display_name: "Pump", typical_power_w: 400 },
+        index: 1,
+      }, [], false);
+      assert.ok(normalHtml.includes("400 W"));
+      assert.ok(!normalHtml.includes("Average power"));
+    }
   } catch (error) {
     console.error(name, error);
     throw error;
