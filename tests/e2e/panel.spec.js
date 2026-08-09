@@ -7820,6 +7820,7 @@ test("NILM targeted routes focus identified intervals on initial load", async ({
     start: Date.parse("2026-07-13T18:00:00Z"),
     end: Date.parse("2026-07-13T18:45:00Z"),
   });
+  await expect(assignmentPanel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
 });
 
 test("NILM interval editor saves the selected existing appliance", async ({ page }) => {
