@@ -1459,7 +1459,6 @@
       "messages": {
         "saved_label": "Saved label: {label}.",
         "ignored_signature": "Ignored signature.",
-        "marked_signature_expected": "Marked signature expected.",
         "merged_signature": "Merged signature.",
         "assigned_signature": "Assigned signature to {label}.",
         "alert_acknowledged": "Alert acknowledged.",

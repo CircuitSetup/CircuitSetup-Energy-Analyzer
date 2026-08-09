@@ -2069,18 +2069,13 @@ def _nilm_workspace_lanes(
             lane = "hidden"
         elif assignment.get("publish_entities") is True or state == "published":
             lane = "published"
-        elif (
-            state == "expected"
-            or state
-            in {
+        elif state in {
                 "needs_validation",
                 "conflict",
                 "low_confidence",
                 "validated",
                 "ready_to_publish",
-            }
-            or confidence < 0.8
-        ):
+            } or confidence < 0.8:
             lane = "needs_review"
         else:
             lane = "assigned"

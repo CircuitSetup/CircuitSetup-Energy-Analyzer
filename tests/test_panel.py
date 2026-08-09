@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260809-1"
+    assert PANEL_MODULE_VERSION == "20260809-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2902,36 +2902,6 @@ def test_nilm_workspace_sessions_expose_signature_review_proxy() -> None:
         reviewed["signature_review"]["actions"]
     )
     assert "signature_review" not in unresolved
-
-
-def test_nilm_workspace_lanes_reopen_legacy_expected_items() -> None:
-    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
-        _nilm_workspace_lanes,
-    )
-
-    lanes = _nilm_workspace_lanes(
-        [
-            {
-                "signature_id": "signature-expected",
-                "feedback_fingerprint": "fingerprint-expected",
-                "direction": "on",
-                "session_ids": ["session-expected"],
-                "review_state": "expected",
-                "expected": True,
-            }
-        ],
-        [
-            {
-                "assignment_id": "assignment-expected",
-                "lifecycle_state": "expected",
-                "confidence": 0.9,
-            }
-        ],
-    )
-
-    assert "expected" not in lanes
-    assert lanes["needs_review"]["signature_ids"] == ["signature-expected"]
-    assert lanes["needs_review"]["assignment_ids"] == ["assignment-expected"]
 
 
 def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> None:

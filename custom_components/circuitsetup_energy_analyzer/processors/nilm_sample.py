@@ -571,17 +571,9 @@ class NilmSampleProcessor:
                 payload["user_label"] = user_label
             if ignored:
                 payload["ignored"] = True
-            legacy_expected = (
-                str(metadata_current.get("review_state") or "").strip().lower()
-                == "expected"
-                or metadata_current.get("expected") is True
-            )
-            if legacy_expected:
-                payload["review_state"] = "new"
-            else:
-                for key in ("review_state", "merged_into"):
-                    if key in metadata_current:
-                        payload[key] = metadata_current[key]
+            for key in ("review_state", "merged_into"):
+                if key in metadata_current:
+                    payload[key] = metadata_current[key]
             if legacy_owner is not None:
                 payload["review_state"] = "assigned"
                 payload["assignment_id"] = legacy_owner["assignment_id"]
@@ -604,13 +596,6 @@ class NilmSampleProcessor:
                 or signature.get("review_state")
             ):
                 payload = dict(signature)
-                if (
-                    str(payload.get("review_state") or "").strip().lower()
-                    == "expected"
-                    or payload.get("expected") is True
-                ):
-                    payload.pop("expected", None)
-                    payload["review_state"] = "new"
                 payloads.append(payload)
 
         return payloads
