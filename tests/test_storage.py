@@ -42,8 +42,39 @@ def test_feature_store_round_trips_nilm_helper_candidates() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 9
+    assert STORAGE_VERSION == 10
     assert restored.nilm_signatures["ac-2"][0]["helper_candidates"] == [candidate]
+
+
+def test_feature_store_round_trips_nilm_unmatched_edges() -> None:
+    edge = {
+        "timestamp": "2026-08-08T20:00:00+00:00",
+        "delta_w": 250.0,
+        "delta_var": 110.0,
+        "delta_va": 275.0,
+        "delta_pf": -0.08,
+        "direction": "on",
+        "leg_a_delta_w": 245.0,
+        "leg_b_delta_w": 5.0,
+        "leg_balance_ratio": 0.02,
+        "dominant_leg": "a",
+        "split_phase_type": "single_leg_a",
+    }
+    data = FeatureStoreData(nilm_unmatched_edges_by_circuit={"mains": [edge]})
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.nilm_unmatched_edges_by_circuit == {"mains": [edge]}
+
+
+def test_feature_store_preserves_empty_nilm_unmatched_edge_marker() -> None:
+    data = FeatureStoreData(nilm_unmatched_edges_by_circuit={"mains": []})
+
+    payload = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(payload)
+
+    assert payload["nilm_unmatched_edges_by_circuit"] == {"mains": []}
+    assert restored.nilm_unmatched_edges_by_circuit == {"mains": []}
 
 
 def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
@@ -425,8 +456,8 @@ def test_feature_store_round_trips_water_correlation_state() -> None:
     )
 
 
-def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None:
-    assert STORAGE_VERSION == 9
+def test_feature_store_schema_ten_round_trips_hvac_efficiency_history() -> None:
+    assert STORAGE_VERSION == 10
     history = {
         "heat_pump|climate.downstairs|heating": [
             {
@@ -452,7 +483,7 @@ def test_feature_store_schema_nine_round_trips_hvac_efficiency_history() -> None
     payload = feature_store_data_to_dict(data)
     restored = feature_store_data_from_dict(payload)
 
-    assert payload["schema_version"] == 9
+    assert payload["schema_version"] == 10
     assert restored.hvac_response_history_by_stream == history
     assert restored.hvac_response_context_by_stream == {
         "heat_pump|climate.downstairs|heating": {
@@ -483,6 +514,7 @@ def test_feature_store_schema_nine_round_trips_hvac_correlation_history() -> Non
     )
 
     assert getattr(restored, "hvac_correlation_history_by_circuit", None) == history
+    assert restored.nilm_unmatched_edges_by_circuit == {}
     assert feature_store_data_to_dict(restored)[
         "hvac_correlation_history_by_circuit"
     ] == history
@@ -1330,7 +1362,7 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 9
+    assert STORAGE_VERSION == 10
     assert restored.appliance_notification_preferences == (
         data.appliance_notification_preferences
     )

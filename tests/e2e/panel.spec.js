@@ -6493,6 +6493,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
       : { circuit_id: "hvac_2", name: "HVAC 2" };
     payload.source = { ...payload.source, source_kind: pureMixed ? "mixed" : "primary_mixed" };
     payload.known_load_overlays = [{ circuit_id: "fridge", name: "Fridge", entity_ids: ["sensor.fridge_power"] }];
+    payload.solar_overlays = [{ circuit_id: "solar", name: "Solar", entity_ids: ["sensor.solar_power"] }];
     if (!pureMixed) {
       payload.configured_primary = {
         assignment_id: "hvac_2-configured-primary",
@@ -6525,6 +6526,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2");
   const primary = panel.locator("[data-nilm-configured-primary]");
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
+  await expect(panel.getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
   await expect(primary).toContainText("HVAC Blower");
   await expect(primary).toContainText("Blower signature");
   await expect(primary).toContainText("900 W · 14 matched cycles · follows AC2 calls");
@@ -6541,6 +6543,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await page.waitForFunction(() => window.__panelReady === true);
   await expect(page.locator("circuitsetup-energy-analyzer-panel [data-nilm-configured-primary]")).toHaveCount(0);
   await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
+  await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
 });
 
 test("NILM workspace lets the configured primary assignment be approved from Needs Review", async ({ page }) => {

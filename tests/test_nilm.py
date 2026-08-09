@@ -1060,6 +1060,52 @@ def test_confirmed_edge_uses_final_sample_for_delayed_auxiliary_evidence() -> No
     assert edges[0].delta_pf == pytest.approx(0.95)
 
 
+def test_sensitive_50w_edge_requires_a_second_nearby_sample() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=50.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [
+            CircuitSample(BASE_TIME, "mains", real_power=0.0),
+            CircuitSample(
+                BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0
+            ),
+            CircuitSample(
+                BASE_TIME + timedelta(seconds=20), "mains", real_power=52.0
+            ),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].timestamp == BASE_TIME + timedelta(seconds=10)
+    assert edges[0].delta_w == 52.0
+
+
+def test_sensitive_50w_edge_rejects_a_single_sample_excursion() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=50.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [
+            CircuitSample(BASE_TIME, "mains", real_power=0.0),
+            CircuitSample(
+                BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0
+            ),
+            CircuitSample(
+                BASE_TIME + timedelta(seconds=20), "mains", real_power=0.0
+            ),
+        ]
+    )
+
+    assert edges == []
+
+
 def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window() -> (
     None
 ):
