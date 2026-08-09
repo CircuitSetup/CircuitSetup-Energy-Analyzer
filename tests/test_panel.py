@@ -2842,7 +2842,7 @@ def test_nilm_assignment_payload_uses_interval_average_when_needed() -> None:
         "mains",
         {
             "assignment_id": "assignment-hvac",
-            "label_interval_ids": ["one", "two", "three"],
+            "label_interval_ids": ["one", "two", "three", "listed-only"],
         },
         label_intervals=[
             {
@@ -2861,9 +2861,24 @@ def test_nilm_assignment_payload_uses_interval_average_when_needed() -> None:
                 "median_power_w": 480.0,
             },
             {
+                "interval_id": "listed-only",
+                "assignment_id": "assignment-other",
+                "median_power_w": 600.0,
+            },
+            {
                 "interval_id": "bad",
                 "assignment_id": "assignment-hvac",
                 "median_power_w": float("nan"),
+            },
+            {
+                "interval_id": "negative",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": -50.0,
+            },
+            {
+                "interval_id": "non-numeric",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": "unknown",
             },
             {
                 "interval_id": "other",
@@ -2873,12 +2888,16 @@ def test_nilm_assignment_payload_uses_interval_average_when_needed() -> None:
         ],
     )
 
-    assert average_payload["typical_power_w"] == 400.0
+    assert average_payload["typical_power_w"] == 450.0
     assert average_payload["typical_power_source"] == "interval_average"
 
     stored_payload = _nilm_assignment_payload(
         "mains",
-        {"assignment_id": "assignment-hvac", "typical_power_w": 600.0},
+        {
+            "assignment_id": "assignment-hvac",
+            "typical_power_w": 600.0,
+            "typical_power_source": "interval_average",
+        },
         label_intervals=[
             {
                 "interval_id": "one",
@@ -2893,7 +2912,10 @@ def test_nilm_assignment_payload_uses_interval_average_when_needed() -> None:
 
     transition_payload = _nilm_assignment_payload(
         "mains",
-        {"assignment_id": "assignment-hvac"},
+        {
+            "assignment_id": "assignment-hvac",
+            "typical_power_source": "interval_average",
+        },
         label_intervals=[
             {
                 "interval_id": "one",

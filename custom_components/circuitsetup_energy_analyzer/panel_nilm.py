@@ -1565,7 +1565,11 @@ def _nilm_assignment_payload(
     configured_circuit_names: Iterable[str] = (),
 ) -> dict[str, Any]:
     assignments = tuple(assignments)
-    payload = {str(key): value for key, value in assignment.items() if key != "actions"}
+    payload = {
+        str(key): value
+        for key, value in assignment.items()
+        if key not in {"actions", "typical_power_source"}
+    }
     if payload.get("display_name"):
         payload["display_name"] = nilm_display_name(
             str(payload["display_name"]),
