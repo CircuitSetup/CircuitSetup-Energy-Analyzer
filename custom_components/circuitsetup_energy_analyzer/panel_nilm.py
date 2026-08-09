@@ -85,7 +85,6 @@ from .services import (
     SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
     SERVICE_IGNORE_NILM_SIGNATURE,
     SERVICE_LABEL_NILM_SIGNATURE,
-    SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
     SERVICE_MERGE_NILM_ASSIGNMENTS,
     SERVICE_MERGE_NILM_SIGNATURES,
     SERVICE_PUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -135,7 +134,6 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "current_runtime_minutes",
     "estimated_energy_today_kwh",
     "review_state",
-    "expected",
     "ignored",
     "merged_into",
     "fingerprint",
@@ -589,11 +587,6 @@ def _nilm_actions_for_signature(
             "service": SERVICE_IGNORE_NILM_SIGNATURE,
             "data": dict(data),
         },
-        "mark_expected": {
-            "domain": DOMAIN,
-            "service": SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
-            "data": dict(data),
-        },
         "merge": merge_action,
     }
     if restorable:
@@ -788,8 +781,6 @@ def _nilm_review_state(signature: Mapping[str, Any]) -> str | None:
         return review_state
     if signature.get("ignored"):
         return "ignored"
-    if signature.get("expected"):
-        return "expected"
     if signature.get("merged_into"):
         return "merged"
     if str(signature.get("user_label") or "").strip():
@@ -798,7 +789,7 @@ def _nilm_review_state(signature: Mapping[str, Any]) -> str | None:
 
 
 def _nilm_signature_restorable(signature: Mapping[str, Any]) -> bool:
-    return _nilm_review_state(signature) in {"expected", "ignored", "merged"}
+    return _nilm_review_state(signature) in {"ignored", "merged"}
 
 
 def _nilm_topology_capability(
@@ -1187,7 +1178,7 @@ def _nilm_configured_primary_payload(
                 _nilm_signature_session_fingerprint(signature)
             )
             or
-            _nilm_review_state(signature) in {"expected", "ignored", "merged"}
+            _nilm_review_state(signature) in {"ignored", "merged"}
             or identifiers & competing
             or identifiers & current_identifiers
             or occurrences < MIN_OCCURRENCES
@@ -1723,7 +1714,7 @@ def _nilm_assignment_payload(
             "data": dict(action_data),
         }
     if (
-        state in {"expected", "ignored", "retired"}
+        state in {"ignored", "retired"}
         or payload.get("conversion_state") == "direct_meter"
     ):
         actions["restore"] = {
@@ -1946,7 +1937,6 @@ def _nilm_workspace_lanes(
         "needs_review": _nilm_lane("Needs Review"),
         "assigned": _nilm_lane("Assigned"),
         "published": _nilm_lane("Published"),
-        "expected": _nilm_lane("Expected"),
         "hidden": _nilm_lane("Removed"),
     }
     assigned_signature_ids = _nilm_assigned_signature_ids(assignments)
@@ -1962,13 +1952,10 @@ def _nilm_workspace_lanes(
         signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
         if not signature_id:
             continue
-        review_state = _nilm_review_state(signature)
         complete_component = _nilm_signature_direction(signature) == "on" and bool(
             signature.get("session_ids")
         )
-        if review_state == "expected" and complete_component:
-            lanes["expected"]["signature_ids"].append(signature_id)
-        elif _nilm_signature_hidden(signature) and complete_component:
+        if _nilm_signature_hidden(signature) and complete_component:
             lanes["hidden"]["signature_ids"].append(signature_id)
         elif (
             complete_component
@@ -1987,14 +1974,13 @@ def _nilm_workspace_lanes(
             continue
         state = str(assignment.get("lifecycle_state") or "").strip().lower()
         confidence = _clamped_float(assignment.get("confidence"), default=0.0)
-        if state == "expected":
-            lane = "expected"
-        elif _nilm_assignment_hidden(assignment):
+        if _nilm_assignment_hidden(assignment):
             lane = "hidden"
         elif assignment.get("publish_entities") is True or state == "published":
             lane = "published"
         elif (
-            state
+            state == "expected"
+            or state
             in {
                 "needs_validation",
                 "conflict",

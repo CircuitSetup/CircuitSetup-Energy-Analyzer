@@ -7940,7 +7940,6 @@ def test_nilm_signature_services_document_entity_targets() -> None:
     for service_name in (
         "label_nilm_signature",
         "ignore_nilm_signature",
-        "mark_nilm_signature_expected",
         "merge_nilm_signatures",
         "label_nilm_interval",
         "delete_nilm_label_interval",

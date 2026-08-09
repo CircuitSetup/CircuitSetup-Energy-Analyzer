@@ -1860,13 +1860,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "lifecycle_state": "ignored",
         },
         {
-            "assignment_id": "assignment-expected",
-            "signature_fingerprints": ["fingerprint-expected"],
-            "session_ids": ["session-1"],
-            "label_interval_ids": [],
-            "lifecycle_state": "expected",
-        },
-        {
             "assignment_id": "assignment-retired",
             "signature_fingerprints": ["fingerprint-retired"],
             "session_ids": ["session-old"],
@@ -1882,13 +1875,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "assignment_id": "assignment-ignored",
             "review_state": "ignored",
             "ignored": True,
-        },
-        {
-            "signature_id": "signature-expected",
-            "feedback_fingerprint": "fingerprint-expected",
-            "assignment_id": "assignment-expected",
-            "review_state": "expected",
-            "expected": True,
         },
         {
             "signature_id": "signature-retired",
@@ -1922,9 +1908,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
     restored_signature = await controller.async_restore_nilm_item(
         "mixed", signature_id="signature-ignored"
     )
-    restored_expected = await controller.async_restore_nilm_item(
-        "mixed", assignment_id="assignment-expected"
-    )
     restored_retired = await controller.async_restore_nilm_item(
         "mixed", assignment_id="assignment-retired"
     )
@@ -1938,13 +1921,10 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "mixed"
         ]
     )
-    assert restored_expected["lifecycle_state"] == "assigned"
-    assert signatures[1]["review_state"] == "assigned"
-    assert "expected" not in signatures[1]
     assert restored_retired["lifecycle_state"] == "assigned"
     assert restored_retired["session_ids"] == ["session-old"]
     assert restored_retired["label_interval_ids"] == ["interval-old"]
-    assert coordinator.store_persistence.async_save_if_dirty.await_count == 3
+    assert coordinator.store_persistence.async_save_if_dirty.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -2187,6 +2167,65 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
     assert assignment["model_revision"] == 2
     assert dirty == [True, True]
+
+
+def test_hydration_reopens_legacy_expected_signature_once() -> None:
+    signature = {
+        "signature_id": "signature-expected",
+        "feedback_fingerprint": "fingerprint-expected",
+        "review_state": "expected",
+        "expected": True,
+        "assignment_id": "assignment-expected",
+    }
+    expected_assignment = {
+        "assignment_id": "assignment-expected",
+        "lifecycle_state": "expected",
+        "signature_fingerprints": ["fingerprint-expected"],
+        "session_ids": ["session-expected"],
+        "label_interval_ids": ["interval-expected"],
+    }
+    retained_assignment = {
+        "assignment_id": "assignment-retained",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": ["fingerprint-retained"],
+        "session_ids": [],
+        "label_interval_ids": [],
+    }
+    session = {
+        "session_id": "session-expected",
+        "assignment_id": "assignment-expected",
+    }
+    interval = {
+        "interval_id": "interval-expected",
+        "assignment_id": "assignment-expected",
+    }
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            nilm_signatures={"mixed": [signature]},
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [expected_assignment, retained_assignment]
+            },
+            nilm_session_history_by_circuit={"mixed": [session]},
+            nilm_label_intervals_by_circuit={"mixed": [interval]},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+    controller = _nilm_controller(coordinator)
+    controller.refresh_state = lambda _circuit_id: None
+
+    controller.hydrate_state_from_store()
+    controller.hydrate_state_from_store()
+
+    assert signature["review_state"] == "new"
+    assert "expected" not in signature
+    assert "assignment_id" not in signature
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit["mixed"] == [
+        retained_assignment
+    ]
+    assert "assignment_id" not in session
+    assert "assignment_id" not in interval
+    assert dirty == [True]
 
 
 def test_component_runtime_state_is_runtime_only() -> None:

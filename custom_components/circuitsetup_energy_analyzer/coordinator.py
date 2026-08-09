@@ -1619,17 +1619,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             signature_id,
         )
 
-    async def async_mark_nilm_signature_expected(
-        self: Self,
-        circuit_id: str,
-        signature_id: str,
-    ) -> None:
-        """Persist an expected NILM signature review decision."""
-        await self.nilm_controller.async_mark_nilm_signature_expected(
-            circuit_id,
-            signature_id,
-        )
-
     async def async_merge_nilm_signatures(
         self: Self,
         circuit_id: str,

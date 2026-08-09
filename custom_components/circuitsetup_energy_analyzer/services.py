@@ -84,7 +84,6 @@ SERVICE_MARK_ALERT_CONFIRMED = "mark_alert_confirmed"
 SERVICE_MARK_ALERT_UNHELPFUL = "mark_alert_unhelpful"
 SERVICE_MARK_NILM_APPLIANCE_CORRECT = "mark_nilm_appliance_correct"
 SERVICE_MARK_NILM_APPLIANCE_WRONG = "mark_nilm_appliance_wrong"
-SERVICE_MARK_NILM_SIGNATURE_EXPECTED = "mark_nilm_signature_expected"
 SERVICE_MERGE_NILM_SIGNATURES = "merge_nilm_signatures"
 SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS = "recalculate_setting_recommendations"
 SERVICE_APPLY_SETTING_RECOMMENDATION = "apply_setting_recommendation"
@@ -677,7 +676,6 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_MARK_ALERT_UNHELPFUL: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_APPLIANCE_CORRECT: ALERT_FEEDBACK_SERVICE_SCHEMA,
     SERVICE_MARK_NILM_APPLIANCE_WRONG: ALERT_FEEDBACK_SERVICE_SCHEMA,
-    SERVICE_MARK_NILM_SIGNATURE_EXPECTED: NILM_SIGNATURE_SERVICE_SCHEMA,
     SERVICE_MERGE_NILM_SIGNATURES: NILM_MERGE_SERVICE_SCHEMA,
     SERVICE_RECALCULATE_SETTING_RECOMMENDATIONS: (
         RECALCULATE_RECOMMENDATIONS_SERVICE_SCHEMA
@@ -1380,22 +1378,6 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 "async_remove_nilm_reference_link",
                 circuit_id,
                 assignment_id,
-            )
-        return
-
-    if service == SERVICE_MARK_NILM_SIGNATURE_EXPECTED:
-        circuit_id = _service_circuit_id(hass, data)
-        for coordinator in _target_nilm_signature_coordinators(
-            hass,
-            circuit_id,
-            data.get(ATTR_SIGNATURE_ID),
-            entry_id=data.get(ATTR_ENTRY_ID),
-        ):
-            await _call_if_present(
-                coordinator,
-                "async_mark_nilm_signature_expected",
-                circuit_id,
-                data.get(ATTR_SIGNATURE_ID),
             )
         return
 

@@ -1468,10 +1468,7 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
         "service": "ignore_nilm_signature",
         "data": {"circuit_id": "mains", "signature_id": "signature_1"},
     }
-    assert payload["nilm"]["signatures"][0]["actions"]["mark_expected"]["data"] == {
-        "circuit_id": "mains",
-        "signature_id": "signature_1",
-    }
+    assert "mark_expected" not in payload["nilm"]["signatures"][0]["actions"]
     assert payload["nilm"]["signatures"][0]["actions"]["merge"]["enabled"] is False
     assert (
         payload["nilm"]["signatures"][0]["actions"]["merge"]["unavailable_reason"]
@@ -1620,8 +1617,7 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
             {
                 "signature_id": "signature_1",
                 "user_label": "Pool Pump",
-                "review_state": "expected",
-                "expected": True,
+                "review_state": "assigned",
             },
             {
                 "signature_id": "signature_2",
@@ -1643,8 +1639,8 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
     signatures = payload["nilm"]["signatures"]
     assert signatures[0]["user_label"] == "Pool Pump"
     assert signatures[0]["display_label"] == "Pool Pump, 3.8 kW"
-    assert signatures[0]["review_state"] == "expected"
-    assert signatures[0]["expected"] is True
+    assert signatures[0]["review_state"] == "assigned"
+    assert "expected" not in signatures[0]
     assert signatures[1]["review_state"] == "ignored"
     assert signatures[1]["ignored"] is True
     assert signatures[2]["review_state"] == "merged"
@@ -2105,13 +2101,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                 "publish_entities": False,
             },
             {
-                "assignment_id": "assignment-expected",
-                "display_name": "Expected Pump",
-                "lifecycle_state": "expected",
-                "confidence": 0.9,
-                "publish_entities": False,
-            },
-            {
                 "assignment_id": "assignment-retired",
                 "display_name": "Removed Pump",
                 "lifecycle_state": "retired",
@@ -2145,12 +2134,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                     "typical_watts": 110.0,
                     "ignored": True,
                 },
-                {
-                    "signature_id": "sig-expected",
-                    "display_name": "Expected recurring load",
-                    "typical_watts": 90.0,
-                    "expected": True,
-                },
             ]
         }
     }
@@ -2174,8 +2157,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     ]
     assert payload["lanes"]["hidden"]["label"] == "Removed"
     assert payload["lanes"]["hidden"]["signature_ids"] == []
-    assert payload["lanes"]["expected"]["assignment_ids"] == ["assignment-expected"]
-    assert payload["lanes"]["expected"]["signature_ids"] == []
+    assert "expected" not in payload["lanes"]
     assert payload["lane_counts"]["needs_review"] == 2
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
@@ -2238,7 +2220,7 @@ def test_nilm_workspace_lanes_only_show_complete_component_signatures() -> None:
     )
 
     assert lanes["hidden"]["signature_ids"] == ["hidden-component"]
-    assert lanes["expected"]["signature_ids"] == []
+    assert "expected" not in lanes
 
 
 def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() -> None:
@@ -2688,7 +2670,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
 
     assert _nilm_workspace_session_specs(signatures, assignments) == [("sig-new", None)]
     lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
-    assert set(lanes) == {"needs_review", "assigned", "published", "expected", "hidden"}
+    assert set(lanes) == {"needs_review", "assigned", "published", "hidden"}
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
@@ -2759,6 +2741,36 @@ def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
     ) == 1
+
+
+def test_nilm_workspace_lanes_reopen_legacy_expected_items() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        [
+            {
+                "signature_id": "signature-expected",
+                "feedback_fingerprint": "fingerprint-expected",
+                "direction": "on",
+                "session_ids": ["session-expected"],
+                "review_state": "expected",
+                "expected": True,
+            }
+        ],
+        [
+            {
+                "assignment_id": "assignment-expected",
+                "lifecycle_state": "expected",
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    assert "expected" not in lanes
+    assert lanes["needs_review"]["signature_ids"] == ["signature-expected"]
+    assert lanes["needs_review"]["assignment_ids"] == ["assignment-expected"]
 
 
 def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> None:

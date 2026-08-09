@@ -2093,36 +2093,6 @@ mark_nilm_appliance_wrong:
             - button
             - select
             - number
-mark_nilm_signature_expected:
-  name: Mark NILM signature expected
-  description: "Advanced/script action: mark an experimental NILM signature as an expected load pattern. The normal user path is the NILM/evidence panel button."
-  fields:
-    circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
-      required: false
-      example: mains
-      selector:
-        text:
-    entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
-      required: false
-      selector:
-        entity:
-          domain:
-            - sensor
-            - binary_sensor
-            - button
-            - select
-            - number
-    signature_id:
-      name: Signature ID
-      description: Detected NILM signature identifier to mark expected.
-      required: true
-      example: signature_1
-      selector:
-        text:
 merge_nilm_signatures:
   name: Merge NILM signatures
   description: "Advanced/script action: merge two experimental NILM signatures that represent the same load. The normal user path is the NILM/evidence panel button."
