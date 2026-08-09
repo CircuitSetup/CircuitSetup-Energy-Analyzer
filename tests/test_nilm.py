@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdgeDetector,
     NilmHelperCandidate,
     NilmSignature,
+    attribute_known_loads,
     build_nilm_assignment_model,
     classify_signature,
     cluster_recurring_signatures,
@@ -1492,6 +1493,152 @@ def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> No
     assert result.matched_edges[0].known_circuit_id == "fridge"
     assert result.matched_edges[0].confidence > 0.9
     assert result.unmatched_edges == (edge(40, 325.0),)
+
+
+@pytest.mark.parametrize(
+    (
+        "aggregate_delta_w",
+        "event_type",
+        "feature",
+        "expected_explained",
+        "expected_residual",
+    ),
+    [
+        (1200.0, EventType.START, {"startup_power_w": 1000.0}, 1000.0, 200.0),
+        (-1200.0, EventType.STOP, {"stop_power_w": 1000.0}, -1000.0, -200.0),
+    ],
+)
+def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
+    aggregate_delta_w: float,
+    event_type: EventType,
+    feature: dict[str, float],
+    expected_explained: float,
+    expected_residual: float,
+) -> None:
+    original = edge(10, aggregate_delta_w, delta_var=250.0, delta_va=1250.0)
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=11),
+        circuit_id="water_heater",
+        event_type=event_type,
+        features=feature,
+    )
+
+    result = attribute_known_loads(
+        [original], [event], residual_min_delta_w=100.0
+    )
+
+    assert result.unmatched_edges == (result.residual_edges[0],)
+    assert result.matched_edges[0].edge == original
+    assert result.matched_edges[0].explained_delta_w == expected_explained
+    assert result.matched_edges[0].residual_delta_w == expected_residual
+    assert original.delta_w == (
+        result.matched_edges[0].explained_delta_w
+        + result.matched_edges[0].residual_delta_w
+    )
+    residual = result.residual_edges[0]
+    assert residual.delta_w == expected_residual
+    assert residual.direction == ("on" if expected_residual > 0 else "off")
+    assert residual.origin == "known_load_residual"
+    assert residual.parent_edge_id == nilm_domain._nilm_edge_id(original)
+    assert residual.explained_known_circuit_ids == ("water_heater",)
+    assert residual.timestamp == original.timestamp
+    assert (residual.delta_var, residual.delta_va, residual.delta_pf) == (
+        None,
+        None,
+        None,
+    )
+    assert (residual.leg_a_delta_w, residual.leg_b_delta_w) == (None, None)
+
+
+@pytest.mark.parametrize("aggregate_delta_w", [1005.0, -1005.0])
+def test_attribute_known_loads_skips_residual_below_threshold(
+    aggregate_delta_w: float,
+) -> None:
+    event_type = EventType.START if aggregate_delta_w > 0 else EventType.STOP
+    feature = "startup_power_w" if aggregate_delta_w > 0 else "stop_power_w"
+
+    result = attribute_known_loads(
+        [edge(10, aggregate_delta_w)],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "dryer",
+                event_type,
+                features={feature: 1000.0},
+            )
+        ],
+        residual_min_delta_w=100.0,
+    )
+
+    assert result.matched_edges[0].residual_delta_w == (
+        aggregate_delta_w - (1000.0 if aggregate_delta_w > 0 else -1000.0)
+    )
+    assert result.residual_edges == ()
+    assert result.unmatched_edges == ()
+
+
+def test_attribute_known_loads_derives_residual_direction_from_its_sign() -> None:
+    result = attribute_known_loads(
+        [edge(10, 800.0)],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            )
+        ],
+        residual_min_delta_w=100.0,
+    )
+
+    assert result.residual_edges[0].delta_w == -200.0
+    assert result.residual_edges[0].direction == "off"
+
+
+@pytest.mark.parametrize("known_power_w", [0.0, float("inf"), float("nan")])
+def test_attribute_known_loads_rejects_nonpositive_or_nonfinite_known_power(
+    known_power_w: float,
+) -> None:
+    original = edge(10, 1000.0)
+
+    result = attribute_known_loads(
+        [original],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": known_power_w},
+            )
+        ],
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (original,)
+
+
+def test_attribute_known_loads_only_consumes_aggregate_edges() -> None:
+    residual = NilmEdge(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        delta_w=1000.0,
+        direction="on",
+        origin="known_load_residual",
+    )
+
+    result = attribute_known_loads(
+        [residual],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            )
+        ],
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (residual,)
 
 
 def test_mask_known_loads_supports_stop_power_features() -> None:

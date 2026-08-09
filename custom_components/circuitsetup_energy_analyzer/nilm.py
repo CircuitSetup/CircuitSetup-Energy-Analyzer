@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from itertools import combinations
-from math import isfinite
+from math import isclose, isfinite
 from statistics import median, multimode
 from typing import Any
 from urllib.parse import urlencode
@@ -610,6 +610,9 @@ class NilmEdge:
     leg_balance_ratio: float | None = None
     dominant_leg: str = "unknown"
     split_phase_type: str = "unknown"
+    origin: str = "aggregate"
+    parent_edge_id: str | None = None
+    explained_known_circuit_ids: tuple[str, ...] = ()
 
 
 class NilmComponentStatus(StrEnum):
@@ -1190,6 +1193,17 @@ class KnownLoadMatch:
     known_circuit_id: str
     confidence: float
     known_power_w: float = 0.0
+    event_type: EventType | None = None
+    event_timestamp: datetime | None = None
+    power_source: str | None = None
+    time_distance_seconds: float | None = None
+    magnitude_ratio: float | None = None
+    topology_compatible: bool | None = None
+    topology_score: float | None = None
+    explained_delta_w: float = 0.0
+    residual_delta_w: float = 0.0
+    residual_edge: NilmEdge | None = None
+    selection_method: str = "greedy"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1198,6 +1212,9 @@ class NilmMaskResult:
 
     matched_edges: tuple[KnownLoadMatch, ...]
     unmatched_edges: tuple[NilmEdge, ...]
+    residual_edges: tuple[NilmEdge, ...] = ()
+    ambiguous_edge_count: int = 0
+    rejected_topology_candidates: tuple[KnownLoadMatch, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1667,19 +1684,22 @@ def _aligned_optional_delta(
     return float(current) - float(previous)
 
 
-def mask_known_loads(
+def attribute_known_loads(
     aggregate_edges: Iterable[NilmEdge],
     known_events: Iterable[CircuitEvent],
     time_window: timedelta = timedelta(seconds=15),
     watt_tolerance_ratio: float = 0.25,
+    residual_min_delta_w: float = 100.0,
 ) -> NilmMaskResult:
-    """Mask aggregate edges explained by known circuit start/stop events."""
+    """Attribute aggregate edges to known circuit events and retain residuals."""
 
     edges = list(aggregate_edges)
     events = list(known_events)
     candidates: list[tuple[int, int, KnownLoadMatch, float]] = []
 
     for edge_index, edge in enumerate(edges):
+        if edge.origin != "aggregate":
+            continue
         for event_index, event in enumerate(events):
             if event.event_type not in {EventType.START, EventType.STOP}:
                 continue
@@ -1690,20 +1710,53 @@ def mask_known_loads(
             time_distance = abs(edge.timestamp - event.timestamp)
             if time_distance > time_window:
                 continue
-            known_watts = _event_power_w(event)
-            if known_watts is None or known_watts <= 0:
+            known_power = _event_power_w_with_source(event)
+            if known_power is None:
                 continue
+            known_watts, power_source = known_power
 
             ratio = abs(abs(edge.delta_w) - known_watts) / known_watts
             if ratio > watt_tolerance_ratio:
                 continue
 
             confidence = max(0.0, 1.0 - (ratio / watt_tolerance_ratio))
+            signed_known_watts = (
+                known_watts if event.event_type is EventType.START else -known_watts
+            )
+            residual_delta_w = edge.delta_w - signed_known_watts
+            if not isclose(
+                edge.delta_w,
+                signed_known_watts + residual_delta_w,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                raise ValueError("Known-load attribution must conserve real power.")
+            residual_edge = _known_load_residual_edge(
+                edge,
+                residual_delta_w,
+                event.circuit_id,
+                residual_min_delta_w=residual_min_delta_w,
+            )
             candidates.append(
                 (
                     edge_index,
                     event_index,
-                    KnownLoadMatch(edge, event.circuit_id, confidence, known_watts),
+                    KnownLoadMatch(
+                        edge,
+                        event.circuit_id,
+                        confidence,
+                        known_watts,
+                        event.event_type,
+                        event.timestamp,
+                        power_source,
+                        time_distance.total_seconds(),
+                        ratio,
+                        True,
+                        1.0,
+                        signed_known_watts,
+                        residual_delta_w,
+                        residual_edge,
+                    ),
                     time_distance.total_seconds(),
                 )
             )
@@ -1728,11 +1781,62 @@ def mask_known_loads(
         selected.append((edge_index, match))
 
     matched_edges = tuple(match for _index, match in sorted(selected))
-    unmatched_edges = tuple(
+    accepted_unmatched_edges = tuple(
         edge for index, edge in enumerate(edges) if index not in matched_edge_indices
     )
+    residual_edges = tuple(
+        match.residual_edge
+        for _index, match in sorted(selected)
+        if match.residual_edge is not None
+    )
 
-    return NilmMaskResult(matched_edges, unmatched_edges)
+    return NilmMaskResult(
+        matched_edges,
+        accepted_unmatched_edges + residual_edges,
+        residual_edges,
+    )
+
+
+def mask_known_loads(
+    aggregate_edges: Iterable[NilmEdge],
+    known_events: Iterable[CircuitEvent],
+    time_window: timedelta = timedelta(seconds=15),
+    watt_tolerance_ratio: float = 0.25,
+) -> NilmMaskResult:
+    """Compatibility wrapper for direct known-load attribution."""
+
+    return attribute_known_loads(
+        aggregate_edges,
+        known_events,
+        time_window=time_window,
+        watt_tolerance_ratio=watt_tolerance_ratio,
+    )
+
+
+def _known_load_residual_edge(
+    edge: NilmEdge,
+    residual_delta_w: float,
+    known_circuit_id: str,
+    *,
+    residual_min_delta_w: float,
+) -> NilmEdge | None:
+    """Create a provenance-linked residual when it clears the configured floor."""
+
+    threshold = (
+        max(float(residual_min_delta_w), 0.0)
+        if isfinite(float(residual_min_delta_w))
+        else 100.0
+    )
+    if abs(residual_delta_w) < threshold:
+        return None
+    return NilmEdge(
+        timestamp=edge.timestamp,
+        delta_w=residual_delta_w,
+        direction="on" if residual_delta_w > 0 else "off",
+        origin="known_load_residual",
+        parent_edge_id=_nilm_edge_id(edge),
+        explained_known_circuit_ids=(known_circuit_id,),
+    )
 
 
 def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignature]:
@@ -2278,6 +2382,11 @@ def _round_optional(value: float | None) -> float | None:
 
 
 def _event_power_w(event: CircuitEvent) -> float | None:
+    known_power = _event_power_w_with_source(event)
+    return known_power[0] if known_power is not None else None
+
+
+def _event_power_w_with_source(event: CircuitEvent) -> tuple[float, str] | None:
     preferred_keys = (
         "startup_power_w",
         "real_power_w",
@@ -2293,7 +2402,12 @@ def _event_power_w(event: CircuitEvent) -> float | None:
     for key in preferred_keys:
         value = event.features.get(key)
         if value is not None:
-            return abs(float(value))
+            try:
+                watts = abs(float(value))
+            except (TypeError, ValueError):
+                continue
+            if isfinite(watts) and watts > 0:
+                return watts, key
     return None
 
 
