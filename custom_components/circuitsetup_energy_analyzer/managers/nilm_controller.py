@@ -616,6 +616,65 @@ class NilmController:
         median_power_w: Any = None,
         measured_energy_kwh: Any = None,
     ) -> dict[str, Any]:
+        """Persist one labeled NILM interval atomically."""
+        async with self._review_transaction_lock:
+            store_data = self._coordinator.store_data
+            snapshots = {
+                name: deepcopy(getattr(store_data, name))
+                for name in (
+                    "nilm_appliance_assignments_by_circuit",
+                    "nilm_label_intervals_by_circuit",
+                    "nilm_signatures",
+                    "nilm_session_history_by_circuit",
+                )
+            }
+            try:
+                return await self._async_label_nilm_interval(
+                    circuit_id,
+                    label=label,
+                    start=start,
+                    end=end,
+                    appliance_id=appliance_id,
+                    appliance_profile=appliance_profile,
+                    assignment_id=assignment_id,
+                    mains_entity_id=mains_entity_id,
+                    ground_truth_entity_id=ground_truth_entity_id,
+                    validation_start=validation_start,
+                    validation_end=validation_end,
+                    interval_id=interval_id,
+                    source=source,
+                    confidence=confidence,
+                    observed_transition_w=observed_transition_w,
+                    median_power_w=median_power_w,
+                    measured_energy_kwh=measured_energy_kwh,
+                )
+            except Exception:
+                for name, snapshot in snapshots.items():
+                    setattr(store_data, name, snapshot)
+                self._coordinator.async_set_updated_data(self._coordinator.state)
+                raise
+
+    async def _async_label_nilm_interval(
+        self,
+        circuit_id: str,
+        *,
+        label: str,
+        start: Any,
+        end: Any,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+        mains_entity_id: str | None = None,
+        ground_truth_entity_id: str | None = None,
+        validation_start: Any = None,
+        validation_end: Any = None,
+        interval_id: str | None = None,
+        source: str = "manual",
+        confidence: float = 1.0,
+        observed_transition_w: Any = None,
+        median_power_w: Any = None,
+        measured_energy_kwh: Any = None,
+    ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         label_text = str(label or "").strip()
         if not label_text:
@@ -736,6 +795,7 @@ class NilmController:
                 interval_id_text,
             )
             linked_assignment["updated_at"] = now
+        assignment = linked_assignment
         profile_text = str(appliance_profile or "").strip()
         if profile_text:
             assignment = self.upsert_assignment(
@@ -751,6 +811,12 @@ class NilmController:
             payload["assignment_id"] = assignment["assignment_id"]
             if existing is not None:
                 existing["assignment_id"] = assignment["assignment_id"]
+        if assignment is not None and self._auto_link_configured_primary_signature(
+            circuit_id,
+            assignment,
+            (payload,),
+        ):
+            self._rebuild_assignment_model(circuit_id, assignment)
         del intervals[: -self._label_interval_max_items]
 
         coordinator.store_persistence.mark_dirty()
@@ -1042,6 +1108,11 @@ class NilmController:
                 if interval["interval_id"] in interval_ids:
                     interval["assignment_id"] = assignment_id_text
             store_data.nilm_label_intervals_by_circuit[circuit_id] = stored_intervals
+            self._auto_link_configured_primary_signature(
+                circuit_id,
+                assignment,
+                payloads,
+            )
             affected_assignments = [
                 candidate
                 for candidate in assignments
@@ -1198,37 +1269,32 @@ class NilmController:
             await reload_entry()
         return True
 
-    async def async_assign_nilm_signature(
+    def _bind_nilm_signature_to_assignment(
         self,
         circuit_id: str,
-        signature_id: str,
+        signature: dict[str, Any],
+        assignment: dict[str, Any],
+        fingerprint: str,
         *,
-        label: str,
-        appliance_id: str | None = None,
-        appliance_profile: str | None = None,
-        assignment_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Assign a NILM signature to a durable appliance assignment."""
-        coordinator = self._coordinator
-        signature = self.signature_for_review(circuit_id, signature_id)
-        fingerprint = self._signature_fingerprint_value(signature, signature_id)
+        replace_primary: bool,
+    ) -> bool:
+        """Attach one retained signature using the explicit-review mutation rules."""
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
         primary_id = configured_primary_assignment_id(circuit_id)
-        assignment = self.upsert_assignment(
-            circuit_id,
-            label=label,
-            appliance_id=appliance_id,
-            appliance_profile=appliance_profile,
-            assignment_id=assignment_id,
-            signature_fingerprint=fingerprint,
-            lifecycle_state="assigned",
-            confidence=signature.get("confidence", 1.0),
-        )
-        if assignment["assignment_id"] == primary_id:
-            previous_fingerprints = set(
-                self._clean_string_list(assignment.get("signature_fingerprints"))
-            ) - {fingerprint}
+        if assignment_id == primary_id:
+            previous_fingerprints = {
+                value
+                for value in self._clean_string_list(
+                    assignment.get("signature_fingerprints")
+                )
+                if value != fingerprint and nilm_signature_is_assignable(value)
+            }
+            if previous_fingerprints and not replace_primary:
+                return False
             assignment["signature_fingerprints"] = [fingerprint]
-            for previous in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
+            for previous in self._coordinator.store_data.nilm_signatures.get(
+                circuit_id, ()
+            ):
                 if previous is not signature and (
                     previous.get("assignment_id") == primary_id
                     or self._signature_fingerprint_value(
@@ -1240,15 +1306,155 @@ class NilmController:
                     previous.pop("assignment_id", None)
                     previous["review_state"] = "new"
                     previous.pop("user_label", None)
-        signature["assignment_id"] = assignment["assignment_id"]
+        else:
+            self._append_unique(
+                assignment.setdefault("signature_fingerprints", []),
+                fingerprint,
+            )
+        signature["assignment_id"] = assignment_id
         signature["review_state"] = "assigned"
         signature["user_label"] = assignment["display_name"]
         signature.pop("ignored", None)
-        coordinator.ignored_nilm_signatures.discard((circuit_id, signature_id))
+        signature_id = str(signature.get("signature_id") or "").strip()
+        self._coordinator.ignored_nilm_signatures.discard((circuit_id, signature_id))
         self.remove_signature_from_other_assignments(
             circuit_id,
             fingerprint,
-            assignment["assignment_id"],
+            assignment_id,
+        )
+        return True
+
+    def _auto_link_configured_primary_signature(
+        self,
+        circuit_id: str,
+        assignment: dict[str, Any],
+        intervals: Iterable[Mapping[str, Any]],
+    ) -> bool:
+        """Bind safe primary evidence to exactly one retained signature."""
+        primary_id = configured_primary_assignment_id(circuit_id)
+        if (
+            str(assignment.get("assignment_id") or "").strip() != primary_id
+            or not nilm_assignment_is_active(assignment)
+        ):
+            return False
+        saved_intervals = [
+            interval for interval in intervals if isinstance(interval, Mapping)
+        ]
+        if not saved_intervals:
+            return False
+        matched_sessions: list[dict[str, Any]] = []
+        candidate_fingerprints: set[str] = set()
+        for session in self._coordinator.store_data.nilm_session_history_by_circuit.get(
+            circuit_id, ()
+        ):
+            if not isinstance(session, dict) or not any(
+                self._overlap_seconds(interval, session) > 0.0
+                for interval in saved_intervals
+            ):
+                continue
+            session_owner = str(session.get("assignment_id") or "").strip()
+            fingerprint = str(session.get("signature_fingerprint") or "").strip()
+            if (
+                not session.get("end")
+                or bool(session.get("ambiguous"))
+                or bool(session.get("known_load_masked"))
+                or not nilm_signature_is_assignable(fingerprint)
+                or (session_owner and session_owner != primary_id)
+            ):
+                return False
+            matched_sessions.append(session)
+            candidate_fingerprints.add(fingerprint)
+        if len(candidate_fingerprints) != 1:
+            return False
+        fingerprint = next(iter(candidate_fingerprints))
+        retained_signatures = [
+            signature
+            for signature in self._coordinator.store_data.nilm_signatures.get(
+                circuit_id, ()
+            )
+            if isinstance(signature, dict)
+            if fingerprint
+            in {
+                str(signature.get(key) or "").strip()
+                for key in (
+                    "feedback_fingerprint",
+                    "signature_fingerprint",
+                    "signature_id",
+                )
+            }
+            if not bool(signature.get("ignored"))
+            if str(signature.get("review_state") or "").strip().lower()
+            not in {"ignored", "merged"}
+        ]
+        if len(retained_signatures) != 1:
+            return False
+        signature = retained_signatures[0]
+        signature_owner = str(
+            signature.get("assignment_id")
+            or signature.get("matched_assignment_id")
+            or ""
+        ).strip()
+        if signature_owner and signature_owner != primary_id:
+            return False
+        assignments = (
+            self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            )
+        )
+        for candidate in assignments:
+            if (
+                fingerprint in self._clean_string_list(
+                    candidate.get("signature_fingerprints")
+                )
+                and str(candidate.get("assignment_id") or "").strip() != primary_id
+            ):
+                return False
+        if not self._bind_nilm_signature_to_assignment(
+            circuit_id,
+            signature,
+            assignment,
+            fingerprint,
+            replace_primary=False,
+        ):
+            return False
+        for session in matched_sessions:
+            session["assignment_id"] = primary_id
+            self._append_unique(
+                assignment.setdefault("session_ids", []),
+                str(session.get("session_id") or "").strip(),
+            )
+        assignment["updated_at"] = self._coordinator.current_time().isoformat()
+        return True
+
+    async def async_assign_nilm_signature(
+        self,
+        circuit_id: str,
+        signature_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign a NILM signature to a durable appliance assignment."""
+        signature = self.signature_for_review(circuit_id, signature_id)
+        fingerprint = self._signature_fingerprint_value(signature, signature_id)
+        assignment = self.upsert_assignment(
+            circuit_id,
+            label=label,
+            appliance_id=appliance_id,
+            appliance_profile=appliance_profile,
+            assignment_id=assignment_id,
+            signature_fingerprint=fingerprint,
+            lifecycle_state="assigned",
+            confidence=signature.get("confidence", 1.0),
+        )
+        self._bind_nilm_signature_to_assignment(
+            circuit_id,
+            signature,
+            assignment,
+            fingerprint,
+            replace_primary=True,
         )
         await self._async_save_nilm_review_change(circuit_id)
         return dict(assignment)
@@ -1326,14 +1532,30 @@ class NilmController:
     ) -> dict[str, Any]:
         """Assign a NILM label interval to a durable appliance assignment."""
         async with self._review_transaction_lock:
-            return await self._async_assign_nilm_interval(
-                circuit_id,
-                interval_id,
-                label=label,
-                appliance_id=appliance_id,
-                appliance_profile=appliance_profile,
-                assignment_id=assignment_id,
-            )
+            store_data = self._coordinator.store_data
+            snapshots = {
+                name: deepcopy(getattr(store_data, name))
+                for name in (
+                    "nilm_appliance_assignments_by_circuit",
+                    "nilm_label_intervals_by_circuit",
+                    "nilm_signatures",
+                    "nilm_session_history_by_circuit",
+                )
+            }
+            try:
+                return await self._async_assign_nilm_interval(
+                    circuit_id,
+                    interval_id,
+                    label=label,
+                    appliance_id=appliance_id,
+                    appliance_profile=appliance_profile,
+                    assignment_id=assignment_id,
+                )
+            except Exception:
+                for name, snapshot in snapshots.items():
+                    setattr(store_data, name, snapshot)
+                self._coordinator.async_set_updated_data(self._coordinator.state)
+                raise
 
     async def _async_assign_nilm_interval(
         self,
@@ -1388,6 +1610,11 @@ class NilmController:
             assignment.setdefault("label_interval_ids", []), interval_id_text
         )
         interval["assignment_id"] = assignment["assignment_id"]
+        self._auto_link_configured_primary_signature(
+            circuit_id,
+            assignment,
+            (interval,),
+        )
         affected_assignments = [
             candidate
             for candidate in assignments
