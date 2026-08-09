@@ -566,3 +566,55 @@ def test_metadata_migration_deduplicates_proven_off_row_without_edges() -> None:
     assert load["review_state"] == "assigned"
     assert load["runtime_today_minutes"] == 60.0
     assert load["estimated_energy_today_kwh"] == 0.5
+
+
+def test_metadata_migration_preserves_unclassifiable_legacy_row_once() -> None:
+    existing_state = {
+        "circuit_id": "mains",
+        "unknown_loads": [
+            {
+                "display_name": "Legacy unknown load",
+                "estimated_energy_today_kwh": "unavailable",
+                "review_state": "new",
+            }
+        ],
+    }
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state=existing_state,
+        signature_payloads=[],
+    )
+
+    assert migrated["schema_version"] == 2
+    assert migrated["unknown_load_count"] == 1
+    assert migrated["unknown_estimated_energy_today_kwh"] == 0.0
+    assert migrated["largest_unknown_load"] is None
+    assert migrated["unknown_loads"][0]["display_name"] == "Legacy unknown load"
+    assert migrated["unknown_loads"][0]["legacy_identity_unresolved"] is True
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)
+
+
+def test_unique_paired_off_row_restores_review_state_when_on_row_is_missing() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-review-fallback", 500.0, 100.0, 510.0),
+            signature("off-review-fallback", -500.0, -100.0, 510.0),
+        ],
+        edges=[
+            edge(0, 500.0, var=100.0, direction="on"),
+            edge(30, -500.0, var=-100.0, direction="off"),
+        ],
+        now=BASE_TIME + timedelta(minutes=40),
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "off-review-fallback",
+                    "review_state": "assigned",
+                }
+            ]
+        },
+    )
+
+    assert inventory["unknown_loads"][0]["review_state"] == "assigned"

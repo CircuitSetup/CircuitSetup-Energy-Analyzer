@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Any
 
 from .nilm import (
@@ -19,6 +20,7 @@ UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 2
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
+LEGACY_IDENTITY_UNRESOLVED_KEY = "legacy_identity_unresolved"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +165,8 @@ def unknown_load_inventory_needs_rebuild(
     for load in loads:
         if not isinstance(load, Mapping):
             return True
+        if load.get(LEGACY_IDENTITY_UNRESOLVED_KEY) is True:
+            continue
         if _stored_signature_direction(load) == "off":
             return True
         component_id = str(load.get("component_id") or "").strip()
@@ -240,7 +244,7 @@ def migrate_unknown_load_inventory(
         component_id = str(load.get("component_id") or "").strip()
         if component_id and component_id in retained_component_ids:
             continue
-        retained.append(load)
+        retained.append(_migrated_unclassified_row(load))
         if component_id:
             retained_component_ids.add(component_id)
 
@@ -339,6 +343,7 @@ def _migrated_component_row(
     component: _UnknownLoadComponent,
 ) -> dict[str, Any]:
     migrated = dict(load)
+    migrated.pop(LEGACY_IDENTITY_UNRESOLVED_KEY, None)
     migrated.update(
         {
             "signature_id": component.on_signature.signature_id,
@@ -373,6 +378,14 @@ def _migrated_component_row(
     return migrated
 
 
+def _migrated_unclassified_row(load: Mapping[str, Any]) -> dict[str, Any]:
+    """Mark an opaque legacy row as retained so migration does not repeat."""
+
+    migrated = dict(load)
+    migrated[LEGACY_IDENTITY_UNRESOLVED_KEY] = True
+    return migrated
+
+
 def _stored_signature_direction(value: Mapping[str, Any]) -> str:
     signature_id = str(value.get("signature_id") or "").strip()
     try:
@@ -386,9 +399,10 @@ def _stored_signature_direction(value: Mapping[str, Any]) -> str:
 
 def _optional_float(value: Any) -> float | None:
     try:
-        return None if value is None else float(value)
+        number = None if value is None else float(value)
     except (TypeError, ValueError):
         return None
+    return number if number is not None and isfinite(number) else None
 
 
 def _finite_or_zero(value: Any) -> float:
@@ -915,13 +929,22 @@ def _estimated_kwh(watts: float, runtime_minutes: float) -> float:
 
 
 def _sum_loads(loads: list[dict[str, Any]], key: str) -> float:
-    return round(sum(float(load.get(key, 0.0)) for load in loads), 3)
+    return round(sum(_load_number(load, key) for load in loads), 3)
 
 
 def _largest_load(loads: list[dict[str, Any]], key: str) -> str | None:
-    if not loads:
+    identified_loads = [
+        load for load in loads if str(load.get("signature_id") or "").strip()
+    ]
+    if not identified_loads:
         return None
-    return str(max(loads, key=lambda load: float(load.get(key, 0.0)))["signature_id"])
+    return str(
+        max(identified_loads, key=lambda load: _load_number(load, key))["signature_id"]
+    )
+
+
+def _load_number(load: Mapping[str, Any], key: str) -> float:
+    return _optional_float(load.get(key)) or 0.0
 
 
 def _existing_component_state(
@@ -955,6 +978,15 @@ def _existing_component_state(
     ]
     if len(legacy_matches) == 1:
         return legacy_matches[0]
+
+    if component.pair_status == "paired" and component.off_signature is not None:
+        paired_off_matches = [
+            load
+            for load in mappings
+            if load.get("signature_id") == component.off_signature.signature_id
+        ]
+        if len(paired_off_matches) == 1:
+            return paired_off_matches[0]
     return {}
 
 
