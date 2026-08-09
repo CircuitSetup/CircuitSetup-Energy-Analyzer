@@ -35,7 +35,11 @@ from ..nilm import (
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
-from ..unknown_loads import build_unknown_load_inventory
+from ..unknown_loads import (
+    build_unknown_load_inventory,
+    migrate_unknown_load_inventory,
+    unknown_load_inventory_needs_rebuild,
+)
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 type NilmEnabledPredicate = Callable[[CircuitConfig], bool]
@@ -323,33 +327,42 @@ class NilmSampleProcessor:
                 self._observe_topology(circuit_config, match, context),
             )
 
-        if edges or next_unmatched != existing_unmatched or helper_events_changed:
-            signatures = cluster_recurring_signatures(
-                self.unmatched_edges_by_circuit[circuit_id],
-            )
-            payloads = self._nilm_signature_payloads(
-                circuit_id,
-                signatures,
-                context,
-            )
-            if self._helper_links_dirty:
-                store_dirty = True
-                self._helper_links_dirty = False
-            if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
-                context.store_data.nilm_signatures[circuit_id] = payloads
-                store_dirty = True
-            inventory = build_unknown_load_inventory(
-                circuit_id=circuit_id,
-                signatures=signatures,
-                edges=self.unmatched_edges_by_circuit[circuit_id],
-                now=sample.timestamp,
-                existing_state=(
-                    context.store_data.nilm_unknown_loads_by_circuit.get(
-                        circuit_id,
-                        {},
-                    )
-                ),
-            )
+        existing_inventory = (
+            context.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
+        )
+        inventory_stale = unknown_load_inventory_needs_rebuild(existing_inventory)
+        evidence_changed = bool(
+            edges or next_unmatched != existing_unmatched or helper_events_changed
+        )
+        if evidence_changed or inventory_stale:
+            if next_unmatched or evidence_changed:
+                signatures = cluster_recurring_signatures(
+                    self.unmatched_edges_by_circuit[circuit_id],
+                )
+                payloads = self._nilm_signature_payloads(
+                    circuit_id,
+                    signatures,
+                    context,
+                )
+                if self._helper_links_dirty:
+                    store_dirty = True
+                    self._helper_links_dirty = False
+                if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
+                    context.store_data.nilm_signatures[circuit_id] = payloads
+                    store_dirty = True
+                inventory = build_unknown_load_inventory(
+                    circuit_id=circuit_id,
+                    signatures=signatures,
+                    edges=self.unmatched_edges_by_circuit[circuit_id],
+                    now=sample.timestamp,
+                    existing_state=existing_inventory,
+                )
+            else:
+                inventory = migrate_unknown_load_inventory(
+                    circuit_id=circuit_id,
+                    existing_state=existing_inventory,
+                    signature_payloads=signature_specs,
+                )
             if inventory != context.store_data.nilm_unknown_loads_by_circuit.get(
                 circuit_id,
             ):
@@ -571,7 +584,7 @@ class NilmSampleProcessor:
                 payload["user_label"] = user_label
             if ignored:
                 payload["ignored"] = True
-            for key in ("review_state", "expected", "merged_into"):
+            for key in ("review_state", "merged_into"):
                 if key in metadata_current:
                     payload[key] = metadata_current[key]
             if legacy_owner is not None:
@@ -592,10 +605,11 @@ class NilmSampleProcessor:
         for signature_id, signature in existing.items():
             if signature_id not in seen and (
                 signature.get("user_label") or signature.get("ignored")
-                or signature.get("expected") or signature.get("merged_into")
+                or signature.get("merged_into")
                 or signature.get("review_state")
             ):
-                payloads.append(signature)
+                payload = dict(signature)
+                payloads.append(payload)
 
         return payloads
 
@@ -883,7 +897,7 @@ def _restore_unique_component_state(
             if (
                 model := _runtime_assignment_model(item, signature_specs)
             ).lifecycle_state
-            in {"assigned", "expected", "validated", "published"}
+            in {"assigned", "validated", "published"}
             and model.model_confidence >= 0.70
             and len(model.power_states_w) >= 2
             and any(state > 0.0 for state in model.power_states_w)

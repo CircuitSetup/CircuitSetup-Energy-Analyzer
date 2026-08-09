@@ -8747,6 +8747,103 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
+def test_nilm_sample_processor_repairs_stale_unknown_loads() -> None:
+    from collections import defaultdict
+    from copy import deepcopy
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    store_data.nilm_unmatched_edges_by_circuit["mains"] = [
+        {
+            "timestamp": (now + timedelta(minutes=minutes)).isoformat(),
+            "delta_w": watts,
+            "delta_var": 100.0 if watts > 0 else -100.0,
+            "delta_va": 510.0,
+            "delta_pf": 0.0,
+            "direction": direction,
+            "dominant_leg": "a",
+            "split_phase_type": "single_leg_a",
+        }
+        for minutes, watts, direction in (
+            (0, 500.0, "on"),
+            (10, -500.0, "off"),
+            (20, 500.0, "on"),
+            (40, -500.0, "off"),
+            (50, 500.0, "on"),
+            (80, -500.0, "off"),
+        )
+    ]
+    store_data.nilm_unknown_loads_by_circuit["mains"] = {
+        "circuit_id": "mains",
+        "unknown_loads": [
+            {"signature_id": "on-legacy", "review_state": "assigned"},
+            {"signature_id": "off-legacy", "review_state": "new"},
+        ],
+    }
+    context = ProcessingContext(
+        now=now + timedelta(minutes=90),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=context.now,
+        circuit_id="mains",
+        real_power=100.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+
+    result = processor.process(sample, config, context, events=())
+
+    inventory = store_data.nilm_unknown_loads_by_circuit["mains"]
+    assert result.store_dirty
+    assert inventory["schema_version"] == 2
+    assert inventory["unknown_load_count"] == 1
+    assert inventory["unknown_loads"][0]["matched_on_edge_count"] == 3
+    assert inventory["unknown_loads"][0]["matched_off_edge_count"] == 3
+
+    snapshot = deepcopy(inventory)
+    second_result = processor.process(sample, config, context, events=())
+
+    assert not second_result.store_dirty
+    assert store_data.nilm_unknown_loads_by_circuit["mains"] == snapshot
+
+
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
     from collections import defaultdict
 

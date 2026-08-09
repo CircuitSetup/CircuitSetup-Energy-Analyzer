@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260809-1"
+    assert PANEL_MODULE_VERSION == "20260809-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1468,10 +1468,7 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
         "service": "ignore_nilm_signature",
         "data": {"circuit_id": "mains", "signature_id": "signature_1"},
     }
-    assert payload["nilm"]["signatures"][0]["actions"]["mark_expected"]["data"] == {
-        "circuit_id": "mains",
-        "signature_id": "signature_1",
-    }
+    assert "mark_expected" not in payload["nilm"]["signatures"][0]["actions"]
     assert payload["nilm"]["signatures"][0]["actions"]["merge"]["enabled"] is False
     assert (
         payload["nilm"]["signatures"][0]["actions"]["merge"]["unavailable_reason"]
@@ -1620,8 +1617,7 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
             {
                 "signature_id": "signature_1",
                 "user_label": "Pool Pump",
-                "review_state": "expected",
-                "expected": True,
+                "review_state": "assigned",
             },
             {
                 "signature_id": "signature_2",
@@ -1643,8 +1639,8 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
     signatures = payload["nilm"]["signatures"]
     assert signatures[0]["user_label"] == "Pool Pump"
     assert signatures[0]["display_label"] == "Pool Pump, 3.8 kW"
-    assert signatures[0]["review_state"] == "expected"
-    assert signatures[0]["expected"] is True
+    assert signatures[0]["review_state"] == "assigned"
+    assert "expected" not in signatures[0]
     assert signatures[1]["review_state"] == "ignored"
     assert signatures[1]["ignored"] is True
     assert signatures[2]["review_state"] == "merged"
@@ -2105,13 +2101,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                 "publish_entities": False,
             },
             {
-                "assignment_id": "assignment-expected",
-                "display_name": "Expected Pump",
-                "lifecycle_state": "expected",
-                "confidence": 0.9,
-                "publish_entities": False,
-            },
-            {
                 "assignment_id": "assignment-retired",
                 "display_name": "Removed Pump",
                 "lifecycle_state": "retired",
@@ -2145,12 +2134,6 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
                     "typical_watts": 110.0,
                     "ignored": True,
                 },
-                {
-                    "signature_id": "sig-expected",
-                    "display_name": "Expected recurring load",
-                    "typical_watts": 90.0,
-                    "expected": True,
-                },
             ]
         }
     }
@@ -2174,8 +2157,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
     ]
     assert payload["lanes"]["hidden"]["label"] == "Removed"
     assert payload["lanes"]["hidden"]["signature_ids"] == []
-    assert payload["lanes"]["expected"]["assignment_ids"] == ["assignment-expected"]
-    assert payload["lanes"]["expected"]["signature_ids"] == []
+    assert "expected" not in payload["lanes"]
     assert payload["lane_counts"]["needs_review"] == 2
     signature = next(
         item for item in payload["signatures"] if item["signature_id"] == "sig-new"
@@ -2238,7 +2220,7 @@ def test_nilm_workspace_lanes_only_show_complete_component_signatures() -> None:
     )
 
     assert lanes["hidden"]["signature_ids"] == ["hidden-component"]
-    assert lanes["expected"]["signature_ids"] == []
+    assert "expected" not in lanes
 
 
 def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() -> None:
@@ -2688,7 +2670,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
 
     assert _nilm_workspace_session_specs(signatures, assignments) == [("sig-new", None)]
     lanes = _nilm_workspace_lanes(signatures, assignments, intervals)
-    assert set(lanes) == {"needs_review", "assigned", "published", "expected", "hidden"}
+    assert set(lanes) == {"needs_review", "assigned", "published", "hidden"}
     assert lanes["needs_review"]["signature_ids"] == ["sig-new"]
     assert lanes["needs_review"]["interval_ids"] == ["interval-new"]
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
@@ -2759,6 +2741,167 @@ def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
     ) == 1
+
+
+def test_nilm_workspace_exposes_configured_primary_lifecycle() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="HVAC 2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    primary_id = "mixed-configured-primary"
+    fingerprint = "direction=on|watts=300-400"
+    assignment = {
+        "assignment_id": primary_id,
+        "display_name": "HVAC 2",
+        "appliance_id": "mixed",
+        "role": "primary",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": [],
+        "label_interval_ids": ["interval-1", "interval-2"],
+    }
+    signature = {
+        "signature_id": "signature-hvac",
+        "feedback_fingerprint": fingerprint,
+        "direction": "on",
+        "typical_watts": 350.0,
+        "occurrence_count": 2,
+        "confidence": 0.9,
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [assignment]
+    }
+    coordinator.store_data.nilm_signatures = {"mixed": [signature]}
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mixed": [
+            {
+                "interval_id": "interval-1",
+                "assignment_id": primary_id,
+                "label": "HVAC 2",
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:05:00+00:00",
+            },
+            {
+                "interval_id": "interval-2",
+                "assignment_id": primary_id,
+                "label": "HVAC 2",
+                "start": "2026-06-02T11:00:00+00:00",
+                "end": "2026-06-02T11:05:00+00:00",
+            },
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mixed": [
+            {
+                "session_id": f"session-{index}",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": fingerprint,
+                "assignment_id": primary_id,
+                "start": f"2026-06-02T1{index}:00:00+00:00",
+                "end": f"2026-06-02T1{index}:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            }
+            for index in (0, 1)
+        ]
+    }
+
+    unestablished = nilm_workspace_payload([coordinator], circuit_id="mixed")[
+        "configured_primary"
+    ]
+
+    assert unestablished["evidence"] == {"confirmed_interval_count": 2}
+    assert unestablished["signature"] == {"status": "not_established"}
+    assert unestablished["attribution"] == {
+        "status": "inactive",
+        "matching_detection_count": 0,
+    }
+
+    assignment["signature_fingerprints"] = [fingerprint]
+    signature["assignment_id"] = primary_id
+
+    established = nilm_workspace_payload([coordinator], circuit_id="mixed")[
+        "configured_primary"
+    ]
+
+    assert established["signature"]["status"] == "established"
+    assert established["signature"]["signature_id"] == "signature-hvac"
+    assert established["attribution"] == {
+        "status": "active",
+        "matching_detection_count": 2,
+    }
+
+
+def test_nilm_workspace_sessions_expose_signature_review_proxy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    fingerprint = "direction=on|watts=300-400"
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-hvac",
+                "feedback_fingerprint": fingerprint,
+                "direction": "on",
+                "typical_watts": 350.0,
+                "occurrence_count": 2,
+                "confidence": 0.9,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mixed": [
+            {
+                "session_id": "session-hvac",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": fingerprint,
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            },
+            {
+                "session_id": "session-unresolved",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": "unassigned",
+                "start": "2026-06-02T11:00:00+00:00",
+                "end": "2026-06-02T11:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            },
+        ]
+    }
+
+    sessions = nilm_workspace_payload([coordinator], circuit_id="mixed")["sessions"]
+    reviewed = next(
+        session for session in sessions if session["session_id"] == "session-hvac"
+    )
+    unresolved = next(
+        session for session in sessions if session["session_id"] == "session-unresolved"
+    )
+
+    assert reviewed["signature_review"]["signature_id"] == "signature-hvac"
+    assert reviewed["signature_review"]["signature_fingerprint"] == fingerprint
+    assert {"assign", "ignore", "merge"} <= set(
+        reviewed["signature_review"]["actions"]
+    )
+    assert "signature_review" not in unresolved
 
 
 def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> None:
@@ -7057,3 +7200,44 @@ async def test_nilm_workspace_history_falls_through_to_live_watts(
     assert requested_entity_ids == ["sensor.mixed_watts"]
     assert rows[0][0]["effective_role"] == "real_power"
     assert rows[0][0]["source_unit"] == "W"
+
+
+def test_nilm_inventory_keeps_raw_off_signature_as_diagnostic_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_signatures_for_circuit,
+    )
+
+    coordinator = SimpleNamespace(
+        store_data=SimpleNamespace(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "on-1", "median_delta_w": 500.0},
+                    {"signature_id": "off-1", "median_delta_w": -500.0},
+                ]
+            }
+        ),
+        state=SimpleNamespace(
+            nilm_unknown_loads_by_circuit={
+                "mains": {
+                    "unknown_load_count": 1,
+                    "unknown_loads": [
+                        {
+                            "signature_id": "on-1",
+                            "component_id": "on-1",
+                            "off_signature_id": "off-1",
+                            "estimated_energy_today_kwh": 0.5,
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+
+    signatures = _nilm_signatures_for_circuit(coordinator, "mains")
+
+    assert [signature["signature_id"] for signature in signatures] == [
+        "on-1",
+        "off-1",
+    ]
+    assert signatures[0]["component_id"] == "on-1"
+    assert "component_id" not in signatures[1]

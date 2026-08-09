@@ -1450,12 +1450,7 @@ def test_nilm_signature_service_schemas_accept_analyzer_entity_targets() -> None
         "entity_id": "sensor.mains_health_summary",
         "signature_id": "signature_1",
     }
-    assert _SERVICE_SCHEMAS["mark_nilm_signature_expected"](
-        {"entity_id": "sensor.mains_health_summary", "signature_id": "signature_1"}
-    ) == {
-        "entity_id": "sensor.mains_health_summary",
-        "signature_id": "signature_1",
-    }
+    assert "mark_nilm_signature_expected" not in _SERVICE_SCHEMAS
     assert _SERVICE_SCHEMAS["merge_nilm_signatures"](
         {
             "entity_id": "sensor.mains_health_summary",
@@ -4099,7 +4094,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_MARK_ALERT_CONFIRMED,
         SERVICE_MARK_ALERT_EXPECTED,
         SERVICE_MARK_ALERT_UNHELPFUL,
-        SERVICE_MARK_NILM_SIGNATURE_EXPECTED,
         SERVICE_MERGE_NILM_SIGNATURES,
         SERVICE_SET_ACTIVITY_ALERT_SETTINGS,
         SERVICE_SET_BILLING_CYCLE_SETTINGS,
@@ -4395,15 +4389,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             self.calls.append(("async_mark_alert_unhelpful", (alert_id,)))
             return True
 
-        async def async_mark_nilm_signature_expected(
-            self,
-            circuit_id: str,
-            signature_id: str,
-        ) -> None:
-            self.calls.append(
-                ("async_mark_nilm_signature_expected", (circuit_id, signature_id))
-            )
-
         async def async_merge_nilm_signatures(
             self,
             circuit_id: str,
@@ -4577,9 +4562,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_UNHELPFUL)](
         SimpleNamespace(data={"alert_id": "alert-2"})
     )
-    await hass.services.registered[(DOMAIN, SERVICE_MARK_NILM_SIGNATURE_EXPECTED)](
-        SimpleNamespace(data={"circuit_id": "mains", "signature_id": "signature_1"})
-    )
+    assert (DOMAIN, "mark_nilm_signature_expected") not in hass.services.registered
     await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
         SimpleNamespace(
             data={
@@ -4628,7 +4611,6 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         ("async_mark_alert_expected", ("alert-1",)),
         ("async_mark_alert_confirmed", ("alert-confirmed",)),
         ("async_mark_alert_unhelpful", ("alert-2",)),
-        ("async_mark_nilm_signature_expected", ("mains", "signature_1")),
         ("async_merge_nilm_signatures", ("mains", "signature_2", "signature_1")),
     ]
 

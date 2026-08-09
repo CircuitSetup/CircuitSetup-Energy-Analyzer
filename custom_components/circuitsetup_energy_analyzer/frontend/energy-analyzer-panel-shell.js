@@ -1615,14 +1615,15 @@ export class PanelShellMethods {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-apply-decision]")) {
       button.addEventListener("click", () => {
-        this._applyNilmDecision(Number.parseInt(button.dataset.nilmApplyDecision, 10));
+        this._applyNilmDecision(button.dataset.nilmApplyDecision);
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-signature-action]")) {
       button.addEventListener("click", () => {
         const index = Number.parseInt(button.dataset.nilmSignatureIndex || "-1", 10);
-        const signature = this._nilmReviewSignatures()[index];
-        this._callNilmAction(index, button.dataset.nilmSignatureAction, this._nilmDecisionDraftKey(signature));
+        const sourceKey = `signature_${index}`;
+        const signature = this._decisionSignature(sourceKey);
+        this._callNilmAction(signature, sourceKey, button.dataset.nilmSignatureAction);
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-primary-confirm]")) {
@@ -1840,8 +1841,7 @@ export class PanelShellMethods {
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-merge-target]")) {
       button.addEventListener("click", () => {
-        const index = Number.parseInt(button.dataset.nilmIndex, 10);
-        this._selectNilmMergeTarget(index, button.dataset.nilmMergeTarget);
+        this._selectNilmMergeTarget(button.dataset.nilmSourceKey, button.dataset.nilmMergeTarget);
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-load-all-nilm]")) {

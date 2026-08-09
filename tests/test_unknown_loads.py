@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge, NilmSignature
+from custom_components.circuitsetup_energy_analyzer import unknown_loads
+from custom_components.circuitsetup_energy_analyzer.nilm import (
+    NilmEdge,
+    NilmSignature,
+    cluster_recurring_signatures,
+)
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
     build_unknown_load_inventory,
     estimate_unknown_load,
@@ -55,6 +60,40 @@ def edge(
         split_phase_type=split_phase_type,
         dominant_leg=dominant_leg,
     )
+
+
+def test_directional_signatures_share_one_unknown_load_component() -> None:
+    """ON/OFF clusters for one appliance must not duplicate its runtime or energy."""
+
+    edges = [
+        edge(0, 500.0, var=100.0, direction="on"),
+        edge(10, -500.0, var=-100.0, direction="off"),
+        edge(20, 500.0, var=100.0, direction="on"),
+        edge(40, -500.0, var=-100.0, direction="off"),
+        edge(50, 500.0, var=100.0, direction="on"),
+        edge(80, -500.0, var=-100.0, direction="off"),
+    ]
+
+    signatures = cluster_recurring_signatures(edges)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=signatures,
+        edges=edges,
+        now=BASE_TIME + timedelta(minutes=90),
+    )
+
+    assert len(signatures) == 2
+    assert inventory["unknown_load_count"] == 1
+    assert len(inventory["unknown_loads"]) == 1
+    load = inventory["unknown_loads"][0]
+    assert load["signature_id"].startswith("on-")
+    assert load["off_signature_id"].startswith("off-")
+    assert load["matched_on_edge_count"] == 3
+    assert load["matched_off_edge_count"] == 3
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert inventory["unknown_estimated_energy_today_kwh"] == 0.5
+    assert load["running_state"] == "probably_off"
 
 
 def test_estimate_unknown_load_marks_reactive_signature_as_motor() -> None:
@@ -288,3 +327,294 @@ def test_build_unknown_load_inventory_marks_overlapping_events_ambiguous() -> No
         load["estimated_energy_today_kwh"] == 0.0
         for load in inventory["unknown_loads"]
     )
+
+
+def test_negative_or_conflicted_signatures_never_own_unknown_components() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("sig-negative", -500.0, -100.0, 510.0),
+            signature("off-conflict", 500.0, 100.0, 510.0),
+        ],
+        edges=[
+            edge(0, -500.0, var=-100.0, direction="off"),
+            edge(10, 500.0, var=100.0, direction="on"),
+        ],
+        now=BASE_TIME + timedelta(minutes=20),
+    )
+
+    assert inventory["unknown_load_count"] == 0
+    assert inventory["largest_unknown_load"] is None
+    assert inventory["unknown_loads"] == []
+
+
+def test_positive_only_component_uses_negative_edge_fallback() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-positive-only", 500.0, 100.0, 510.0)],
+        edges=[
+            edge(0, 500.0, var=100.0, direction="on"),
+            edge(30, -500.0, var=-100.0, direction="off"),
+        ],
+        now=BASE_TIME + timedelta(minutes=40),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["signature_pair_status"] == "on_only"
+    assert load["off_signature_id"] is None
+    assert load["matched_on_edge_count"] == 1
+    assert load["matched_off_edge_count"] == 1
+    assert load["runtime_today_minutes"] == 30.0
+    assert load["estimated_energy_today_kwh"] == 0.25
+
+
+def test_paired_off_edges_use_the_off_signature_prototype() -> None:
+    on_signature = signature("on-prototype", 500.0, 100.0, 510.0)
+    off_signature = signature("off-prototype", -550.0, -150.0, 570.0)
+    component = unknown_loads._unknown_load_components(
+        [on_signature, off_signature]
+    )[0]
+
+    score = unknown_loads._component_edge_score(
+        component,
+        edge(0, -550.0, var=-150.0, direction="off"),
+    )
+
+    assert component.off_signature == off_signature
+    assert score is not None
+    assert score > 0.99
+
+
+def test_off_signatures_pair_with_topology_compatible_on_owner() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature(
+                "on-a",
+                500.0,
+                100.0,
+                510.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            signature(
+                "on-b",
+                500.0,
+                100.0,
+                510.0,
+                split_phase_type="single_leg_b",
+                dominant_leg="b",
+            ),
+            signature(
+                "off-a",
+                -500.0,
+                -100.0,
+                510.0,
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            ),
+            signature(
+                "off-b",
+                -500.0,
+                -100.0,
+                510.0,
+                split_phase_type="single_leg_b",
+                dominant_leg="b",
+            ),
+        ],
+        edges=[],
+        now=BASE_TIME,
+    )
+
+    by_id = {load["signature_id"]: load for load in inventory["unknown_loads"]}
+    assert by_id["on-a"]["off_signature_id"] == "off-a"
+    assert by_id["on-b"]["off_signature_id"] == "off-b"
+
+
+def test_close_off_pairing_is_marked_ambiguous_without_a_winner() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-load", 500.0, 100.0, 510.0),
+            signature("off-first", -500.0, -100.0, 510.0),
+            signature("off-second", -500.0, -100.0, 510.0),
+        ],
+        edges=[edge(0, 500.0, var=100.0, direction="on")],
+        now=BASE_TIME + timedelta(minutes=30),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["signature_pair_status"] == "ambiguous"
+    assert load["off_signature_id"] is None
+    assert load["alternate_signature_pair_count"] == 1
+    assert load["running_state"] == "unknown"
+    assert load["estimated_energy_today_kwh"] == 0.0
+
+
+def test_close_component_competition_leaves_edge_unallocated() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("sig-500", 500.0, 100.0, 510.0),
+            signature("sig-520", 520.0, 100.0, 510.0),
+        ],
+        edges=[edge(0, 510.0, var=100.0, direction="on")],
+        now=BASE_TIME + timedelta(minutes=30),
+    )
+
+    assert inventory["ambiguous_unknown_load_count"] == 2
+    assert inventory["unknown_estimated_energy_today_kwh"] == 0.0
+    assert all(
+        load["matched_on_edge_count"] == 0
+        and load["separation_status"] == "ambiguous"
+        for load in inventory["unknown_loads"]
+    )
+
+
+def test_canonical_on_review_state_wins_over_paired_off_duplicate() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-review", 500.0, 100.0, 510.0),
+            signature("off-review", -500.0, -100.0, 510.0),
+        ],
+        edges=[
+            edge(0, 500.0, var=100.0, direction="on"),
+            edge(30, -500.0, var=-100.0, direction="off"),
+        ],
+        now=BASE_TIME + timedelta(minutes=40),
+        existing_state={
+            "unknown_loads": [
+                {"signature_id": "on-review", "review_state": "assigned"},
+                {"signature_id": "off-review", "review_state": "ignored"},
+            ]
+        },
+    )
+
+    assert inventory["unknown_load_count"] == 1
+    assert inventory["unknown_loads"][0]["review_state"] == "assigned"
+
+
+def test_metadata_migration_deduplicates_proven_off_row_without_edges() -> None:
+    existing_state = {
+        "circuit_id": "mains",
+        "unknown_loads": [
+            {
+                "signature_id": "on-legacy",
+                "typical_watts": 500.0,
+                "split_phase_type": "single_leg_a",
+                "review_state": "assigned",
+                "first_seen": BASE_TIME.isoformat(),
+                "last_seen": (BASE_TIME + timedelta(minutes=60)).isoformat(),
+                "runtime_today_minutes": 60.0,
+                "runtime_7_days_minutes": 60.0,
+                "runtime_30_days_minutes": 60.0,
+                "estimated_energy_today_kwh": 0.5,
+                "estimated_energy_7_days_kwh": 0.5,
+                "estimated_energy_30_days_kwh": 0.5,
+                "running_state": "probably_off",
+            },
+            {
+                "signature_id": "off-legacy",
+                "typical_watts": 500.0,
+                "split_phase_type": "single_leg_a",
+                "review_state": "ignored",
+                "runtime_today_minutes": 60.0,
+                "estimated_energy_today_kwh": 0.5,
+            },
+        ],
+    }
+    signature_payloads = [
+        {
+            "signature_id": "on-legacy",
+            "median_delta_w": 500.0,
+            "median_delta_var": 100.0,
+            "median_delta_va": 510.0,
+            "median_delta_pf": 0.0,
+            "occurrence_count": 3,
+            "confidence": 0.6,
+            "split_phase_type": "single_leg_a",
+            "dominant_leg": "a",
+        },
+        {
+            "signature_id": "off-legacy",
+            "median_delta_w": -500.0,
+            "median_delta_var": -100.0,
+            "median_delta_va": 510.0,
+            "median_delta_pf": 0.0,
+            "occurrence_count": 3,
+            "confidence": 0.6,
+            "split_phase_type": "single_leg_a",
+            "dominant_leg": "a",
+        },
+    ]
+
+    assert unknown_loads.unknown_load_inventory_needs_rebuild(existing_state)
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state=existing_state,
+        signature_payloads=signature_payloads,
+    )
+
+    assert migrated["schema_version"] == 2
+    assert migrated["unknown_load_count"] == 1
+    assert migrated["unknown_estimated_energy_today_kwh"] == 0.5
+    load = migrated["unknown_loads"][0]
+    assert load["signature_id"] == "on-legacy"
+    assert load["component_id"] == "on-legacy"
+    assert load["off_signature_id"] == "off-legacy"
+    assert load["review_state"] == "assigned"
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+
+
+def test_metadata_migration_preserves_unclassifiable_legacy_row_once() -> None:
+    existing_state = {
+        "circuit_id": "mains",
+        "unknown_loads": [
+            {
+                "display_name": "Legacy unknown load",
+                "estimated_energy_today_kwh": "unavailable",
+                "review_state": "new",
+            }
+        ],
+    }
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state=existing_state,
+        signature_payloads=[],
+    )
+
+    assert migrated["schema_version"] == 2
+    assert migrated["unknown_load_count"] == 1
+    assert migrated["unknown_estimated_energy_today_kwh"] == 0.0
+    assert migrated["largest_unknown_load"] is None
+    assert migrated["unknown_loads"][0]["display_name"] == "Legacy unknown load"
+    assert migrated["unknown_loads"][0]["legacy_identity_unresolved"] is True
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)
+
+
+def test_unique_paired_off_row_restores_review_state_when_on_row_is_missing() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-review-fallback", 500.0, 100.0, 510.0),
+            signature("off-review-fallback", -500.0, -100.0, 510.0),
+        ],
+        edges=[
+            edge(0, 500.0, var=100.0, direction="on"),
+            edge(30, -500.0, var=-100.0, direction="off"),
+        ],
+        now=BASE_TIME + timedelta(minutes=40),
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "off-review-fallback",
+                    "review_state": "assigned",
+                }
+            ]
+        },
+    )
+
+    assert inventory["unknown_loads"][0]["review_state"] == "assigned"

@@ -428,7 +428,6 @@ def _assert_appliance_workflow_payloads(
         "needs_review",
         "assigned",
         "published",
-        "expected",
         "hidden",
     }
     label_action_data = nilm_workspace["actions"]["label_interval"]["data"]
@@ -515,7 +514,6 @@ async def _assert_appliance_workflow_panel_views(
         "needs_review",
         "assigned",
         "published",
-        "expected",
         "hidden",
     }
     label_action_data = nilm_workspace["actions"]["label_interval"]["data"]

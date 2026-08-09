@@ -406,6 +406,326 @@ async def test_label_intervals_validate_and_retain_observed_transition_w() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("save_path", ("label", "bulk", "assign"))
+async def test_primary_interval_saves_establish_matching_signature(
+    save_path: str,
+) -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    fingerprint = "direction=on|watts=300-400"
+    primary_id = configured_primary_assignment_id("hvac_2")
+    primary = {
+        "assignment_id": primary_id,
+        "display_name": "HVAC 2",
+        "appliance_id": "hvac_2",
+        "role": "primary",
+        "lifecycle_state": "needs_validation",
+        "signature_fingerprints": [],
+        "session_ids": [],
+        "label_interval_ids": [],
+    }
+    signature = {
+        "signature_id": "signature-hvac",
+        "feedback_fingerprint": fingerprint,
+        "review_state": "new",
+    }
+    session = {
+        "session_id": "session-hvac",
+        "signature_fingerprint": fingerprint,
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:05:00+00:00",
+        "ambiguous": False,
+        "known_load_masked": False,
+    }
+    interval = {
+        "interval_id": "interval-hvac",
+        "label": "HVAC 2",
+        "appliance_id": "hvac_2",
+        "start": session["start"],
+        "end": session["end"],
+    }
+    saves = AsyncMock()
+    config = _config(
+        ApplianceProfile.HVAC_BLOWER,
+        CircuitMode.MIXED,
+        "hvac_2",
+        "HVAC 2",
+    )
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda _circuit_id: config),
+        ignored_nilm_signatures=set(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"hvac_2": [primary]},
+            nilm_label_intervals_by_circuit={"hvac_2": [interval]},
+            nilm_signatures={"hvac_2": [signature]},
+            nilm_session_history_by_circuit={"hvac_2": [session]},
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=saves,
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=10,
+        assignment_max_items=10,
+    )
+
+    if save_path == "label":
+        await controller.async_label_nilm_interval(
+            "hvac_2",
+            label="HVAC 2",
+            start=interval["start"],
+            end=interval["end"],
+            assignment_id=primary_id,
+            interval_id="interval-hvac",
+        )
+    elif save_path == "bulk":
+        await controller.async_save_nilm_interval_changes(
+            "hvac_2",
+            label="HVAC 2",
+            assignment_id=primary_id,
+            intervals=[interval],
+        )
+    else:
+        await controller.async_assign_nilm_interval(
+            "hvac_2",
+            "interval-hvac",
+            label="HVAC 2",
+            assignment_id=primary_id,
+        )
+
+    assert primary["signature_fingerprints"] == [fingerprint]
+    assert signature["assignment_id"] == primary_id
+    assert signature["review_state"] == "assigned"
+    assert session["assignment_id"] == primary_id
+    assert primary["session_ids"] == ["session-hvac"]
+    assert saves.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "session_overrides",
+        "primary_fingerprints",
+        "signature_owner",
+        "add_second_signature",
+    ),
+    (
+        ({"ambiguous": True}, (), None, False),
+        ({"known_load_masked": True}, (), None, False),
+        ({"end": None}, (), None, False),
+        ({"signature_fingerprint": "unassigned"}, (), None, False),
+        ({}, (), None, True),
+        ({}, (), "assignment-other", False),
+        ({}, ("direction=on|watts=500-600",), None, False),
+    ),
+)
+async def test_unsafe_primary_interval_evidence_does_not_auto_link_signature(
+    session_overrides: dict[str, object],
+    primary_fingerprints: tuple[str, ...],
+    signature_owner: str | None,
+    add_second_signature: bool,
+) -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    fingerprint = "direction=on|watts=300-400"
+    primary_id = configured_primary_assignment_id("hvac_2")
+    primary = {
+        "assignment_id": primary_id,
+        "display_name": "HVAC 2",
+        "appliance_id": "hvac_2",
+        "role": "primary",
+        "lifecycle_state": "needs_validation",
+        "signature_fingerprints": list(primary_fingerprints),
+        "session_ids": [],
+        "label_interval_ids": [],
+    }
+    signature = {
+        "signature_id": "signature-hvac",
+        "feedback_fingerprint": fingerprint,
+        "review_state": "new",
+        **({"assignment_id": signature_owner} if signature_owner else {}),
+    }
+    session = {
+        "session_id": "session-hvac",
+        "signature_fingerprint": fingerprint,
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:05:00+00:00",
+        "ambiguous": False,
+        "known_load_masked": False,
+        **session_overrides,
+    }
+    interval = {
+        "interval_id": "interval-hvac",
+        "label": "HVAC 2",
+        "appliance_id": "hvac_2",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:05:00+00:00",
+    }
+    signatures = [signature]
+    sessions = [session]
+    if add_second_signature:
+        second_fingerprint = "direction=on|watts=500-600"
+        signatures.append(
+            {
+                "signature_id": "signature-other",
+                "feedback_fingerprint": second_fingerprint,
+                "review_state": "new",
+            }
+        )
+        sessions.append(
+            {
+                **session,
+                "session_id": "session-other",
+                "signature_fingerprint": second_fingerprint,
+            }
+        )
+    other_assignments = (
+        [
+            {
+                "assignment_id": "assignment-other",
+                "signature_fingerprints": [fingerprint],
+            }
+        ]
+        if signature_owner
+        else []
+    )
+    saves = AsyncMock()
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        ignored_nilm_signatures=set(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "hvac_2": [primary, *other_assignments]
+            },
+            nilm_label_intervals_by_circuit={"hvac_2": [interval]},
+            nilm_signatures={"hvac_2": signatures},
+            nilm_session_history_by_circuit={"hvac_2": sessions},
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=saves,
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=10,
+        assignment_max_items=10,
+    )
+
+    await controller.async_save_nilm_interval_changes(
+        "hvac_2",
+        label="HVAC 2",
+        assignment_id=primary_id,
+        intervals=[interval],
+    )
+
+    assert primary["signature_fingerprints"] == list(primary_fingerprints)
+    assert (
+        "assignment_id" not in signature
+        or signature["assignment_id"] == signature_owner
+    )
+    assert primary["session_ids"] == []
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["hvac_2"][0][
+        "assignment_id"
+    ] == primary_id
+    assert saves.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_assign_primary_interval_rolls_back_auto_link_when_save_fails() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    fingerprint = "direction=on|watts=300-400"
+    primary_id = configured_primary_assignment_id("hvac_2")
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            "hvac_2": [
+                {
+                    "assignment_id": primary_id,
+                    "display_name": "HVAC 2",
+                    "appliance_id": "hvac_2",
+                    "role": "primary",
+                    "lifecycle_state": "needs_validation",
+                    "signature_fingerprints": [],
+                    "session_ids": [],
+                    "label_interval_ids": [],
+                }
+            ]
+        },
+        nilm_label_intervals_by_circuit={
+            "hvac_2": [
+                {
+                    "interval_id": "interval-hvac",
+                    "label": "HVAC 2",
+                    "appliance_id": "hvac_2",
+                    "start": "2026-06-02T10:00:00+00:00",
+                    "end": "2026-06-02T10:05:00+00:00",
+                }
+            ]
+        },
+        nilm_signatures={
+            "hvac_2": [
+                {
+                    "signature_id": "signature-hvac",
+                    "feedback_fingerprint": fingerprint,
+                    "review_state": "new",
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "hvac_2": [
+                {
+                    "session_id": "session-hvac",
+                    "signature_fingerprint": fingerprint,
+                    "start": "2026-06-02T10:00:00+00:00",
+                    "end": "2026-06-02T10:05:00+00:00",
+                    "ambiguous": False,
+                    "known_load_masked": False,
+                }
+            ]
+        },
+    )
+    before = deepcopy(store_data)
+    config = _config(
+        ApplianceProfile.HVAC_BLOWER,
+        CircuitMode.MIXED,
+        "hvac_2",
+        "HVAC 2",
+    )
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        circuit_registry=SimpleNamespace(config_for_circuit=lambda _circuit_id: config),
+        ignored_nilm_signatures=set(),
+        store_data=store_data,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(side_effect=RuntimeError("storage down")),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=10,
+        assignment_max_items=10,
+    )
+
+    with pytest.raises(RuntimeError, match="storage down"):
+        await controller.async_assign_nilm_interval(
+            "hvac_2",
+            "interval-hvac",
+            label="HVAC 2",
+            assignment_id=primary_id,
+        )
+
+    assert coordinator.store_data == before
+
+
+@pytest.mark.asyncio
 async def test_save_nilm_interval_changes_reassign_owner_rebuilds_models() -> None:
     saves = AsyncMock()
     assignment = {
@@ -1860,13 +2180,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "lifecycle_state": "ignored",
         },
         {
-            "assignment_id": "assignment-expected",
-            "signature_fingerprints": ["fingerprint-expected"],
-            "session_ids": ["session-1"],
-            "label_interval_ids": [],
-            "lifecycle_state": "expected",
-        },
-        {
             "assignment_id": "assignment-retired",
             "signature_fingerprints": ["fingerprint-retired"],
             "session_ids": ["session-old"],
@@ -1882,13 +2195,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "assignment_id": "assignment-ignored",
             "review_state": "ignored",
             "ignored": True,
-        },
-        {
-            "signature_id": "signature-expected",
-            "feedback_fingerprint": "fingerprint-expected",
-            "assignment_id": "assignment-expected",
-            "review_state": "expected",
-            "expected": True,
         },
         {
             "signature_id": "signature-retired",
@@ -1922,9 +2228,6 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
     restored_signature = await controller.async_restore_nilm_item(
         "mixed", signature_id="signature-ignored"
     )
-    restored_expected = await controller.async_restore_nilm_item(
-        "mixed", assignment_id="assignment-expected"
-    )
     restored_retired = await controller.async_restore_nilm_item(
         "mixed", assignment_id="assignment-retired"
     )
@@ -1938,13 +2241,10 @@ async def test_restore_nilm_item_reverses_hidden_lifecycles_and_persists() -> No
             "mixed"
         ]
     )
-    assert restored_expected["lifecycle_state"] == "assigned"
-    assert signatures[1]["review_state"] == "assigned"
-    assert "expected" not in signatures[1]
     assert restored_retired["lifecycle_state"] == "assigned"
     assert restored_retired["session_ids"] == ["session-old"]
     assert restored_retired["label_interval_ids"] == ["interval-old"]
-    assert coordinator.store_persistence.async_save_if_dirty.await_count == 3
+    assert coordinator.store_persistence.async_save_if_dirty.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -2187,6 +2487,65 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
     assert assignment["model_revision"] == 2
     assert dirty == [True, True]
+
+
+def test_hydration_reopens_legacy_expected_signature_once() -> None:
+    signature = {
+        "signature_id": "signature-expected",
+        "feedback_fingerprint": "fingerprint-expected",
+        "review_state": "expected",
+        "expected": True,
+        "assignment_id": "assignment-expected",
+    }
+    expected_assignment = {
+        "assignment_id": "assignment-expected",
+        "lifecycle_state": "expected",
+        "signature_fingerprints": ["fingerprint-expected"],
+        "session_ids": ["session-expected"],
+        "label_interval_ids": ["interval-expected"],
+    }
+    retained_assignment = {
+        "assignment_id": "assignment-retained",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": ["fingerprint-retained"],
+        "session_ids": [],
+        "label_interval_ids": [],
+    }
+    session = {
+        "session_id": "session-expected",
+        "assignment_id": "assignment-expected",
+    }
+    interval = {
+        "interval_id": "interval-expected",
+        "assignment_id": "assignment-expected",
+    }
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            nilm_signatures={"mixed": [signature]},
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [expected_assignment, retained_assignment]
+            },
+            nilm_session_history_by_circuit={"mixed": [session]},
+            nilm_label_intervals_by_circuit={"mixed": [interval]},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+    controller = _nilm_controller(coordinator)
+    controller.refresh_state = lambda _circuit_id: None
+
+    controller.hydrate_state_from_store()
+    controller.hydrate_state_from_store()
+
+    assert signature["review_state"] == "new"
+    assert "expected" not in signature
+    assert "assignment_id" not in signature
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit["mixed"] == [
+        retained_assignment
+    ]
+    assert "assignment_id" not in session
+    assert "assignment_id" not in interval
+    assert dirty == [True]
 
 
 def test_component_runtime_state_is_runtime_only() -> None:

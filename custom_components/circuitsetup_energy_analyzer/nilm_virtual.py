@@ -874,7 +874,6 @@ def _published_assignment(assignment: Mapping[str, Any]) -> bool:
 def _matching_assignment(assignment: Mapping[str, Any]) -> bool:
     return str(assignment.get("lifecycle_state") or "") not in {
         "ignored",
-        "expected",
         "retired",
     }
 

@@ -2908,7 +2908,11 @@ def test_nilm_controller_exposes_signature_review_actions() -> None:
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
 
     assert callable(coordinator.nilm_controller.async_ignore_nilm_signature)
-    assert callable(coordinator.nilm_controller.async_mark_nilm_signature_expected)
+    assert not hasattr(
+        coordinator.nilm_controller,
+        "async_mark_nilm_signature_expected",
+    )
+    assert not hasattr(coordinator, "async_mark_nilm_signature_expected")
     assert callable(coordinator.nilm_controller.async_merge_nilm_signatures)
     assert callable(coordinator.nilm_controller.signature_for_review)
 
@@ -7806,7 +7810,7 @@ async def test_runtime_weather_context_clears_persisted_state_when_not_applicabl
 
 
 @pytest.mark.asyncio
-async def test_nilm_signature_expected_and_merge_review_state() -> None:
+async def test_nilm_signature_merge_and_ignore_review_state() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
@@ -7834,7 +7838,6 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
         ),
     )
 
-    await coordinator.async_mark_nilm_signature_expected("mains", "on-1")
     await coordinator.async_merge_nilm_signatures("mains", "on-2", "on-1")
     await coordinator.async_ignore_nilm_signature("mains", "on-3")
 
@@ -7842,19 +7845,17 @@ async def test_nilm_signature_expected_and_merge_review_state() -> None:
         signature["signature_id"]: signature
         for signature in coordinator.store_data.nilm_signatures["mains"]
     }
-    assert signatures["on-1"]["review_state"] == "expected"
-    assert signatures["on-1"]["expected"] is True
+    assert "expected" not in signatures["on-1"]
     assert signatures["on-2"]["review_state"] == "merged"
     assert signatures["on-2"]["merged_into"] == "on-1"
     assert coordinator.state.nilm_signature_count_by_circuit["mains"] == 1
     assert {
         signature["review_state"]
         for signature in coordinator.state.nilm_review_by_circuit["mains"]
-    } == {"expected", "merged", "ignored"}
+    } == {"new", "merged", "ignored"}
     assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
-    assert {assignment["lifecycle_state"] for assignment in assignments} >= {
-        "expected",
-        "ignored",
+    assert {assignment["lifecycle_state"] for assignment in assignments} == {
+        "ignored"
     }
 
 
@@ -12698,8 +12699,8 @@ def test_nilm_signature_payloads_reuse_review_by_stable_fingerprint() -> None:
 
     assert payloads[0]["signature_id"] == "on-2"
     assert payloads[0]["user_label"] == "Guest room heater"
-    assert payloads[0]["expected"] is True
-    assert payloads[0]["review_state"] == "expected"
+    assert "expected" not in payloads[0]
+    assert payloads[0]["review_state"] == "new"
 
 
 def test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint() -> None:
@@ -12746,7 +12747,7 @@ def test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint() -> N
                         "median_delta_var": target.median_delta_var,
                         "median_delta_va": target.median_delta_va,
                         "split_phase_type": target.split_phase_type,
-                        "review_state": "expected",
+                        "review_state": "new",
                     },
                 ]
             }
@@ -12774,7 +12775,7 @@ def test_nilm_signature_payloads_remap_merge_target_by_stable_fingerprint() -> N
     by_id = {payload["signature_id"]: payload for payload in payloads}
     assert by_id["on-4"]["review_state"] == "merged"
     assert by_id["on-4"]["merged_into"] == "on-5"
-    assert by_id["on-5"]["review_state"] == "expected"
+    assert by_id["on-5"]["review_state"] == "new"
 
 
 @pytest.mark.asyncio

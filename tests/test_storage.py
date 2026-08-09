@@ -376,10 +376,23 @@ def test_feature_store_round_trips_unknown_load_inventory() -> None:
     data = FeatureStoreData(
         nilm_unknown_loads_by_circuit={
             "mains": {
+                "schema_version": 2,
                 "unknown_load_count": 1,
                 "unknown_loads": [
                     {
                         "signature_id": "on-1",
+                        "component_id": "on-1",
+                        "component_fingerprint": "direction=on|watts=500",
+                        "on_signature_id": "on-1",
+                        "on_signature_fingerprint": "direction=on|watts=500",
+                        "off_signature_id": "off-1",
+                        "off_signature_fingerprint": "direction=off|watts=500",
+                        "signature_pair_status": "paired",
+                        "signature_pair_score": 0.92,
+                        "alternate_signature_pair_count": 0,
+                        "matched_on_edge_count": 3,
+                        "matched_off_edge_count": 3,
+                        "ambiguous_edge_count": 0,
                         "likely_type": "motor",
                         "estimated_energy_today_kwh": 0.42,
                     }
@@ -391,6 +404,7 @@ def test_feature_store_round_trips_unknown_load_inventory() -> None:
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
     assert restored.nilm_unknown_loads_by_circuit == data.nilm_unknown_loads_by_circuit
+    assert feature_store_data_to_dict(data)["schema_version"] == STORAGE_VERSION
 
 
 def test_feature_store_round_trips_weather_context() -> None:
