@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
@@ -127,7 +127,10 @@ def build_unknown_load_inventory(
     """Build a consolidated inventory of recurring unknown NILM loads."""
 
     signature_list = list(signatures)
-    edge_list = sorted(edges, key=lambda edge: edge.timestamp)
+    edge_list = sorted(
+        (_edge_with_utc_timestamp(edge) for edge in edges),
+        key=lambda edge: edge.timestamp,
+    )
     components = _unknown_load_components(signature_list)
     allocation = _allocate_unknown_edges(components, edge_list)
     now_utc = _as_utc_datetime(now)
@@ -255,23 +258,6 @@ def unknown_load_inventory_needs_rebuild(
     for load in loads:
         if not isinstance(load, Mapping):
             return True
-        if load.get(LEGACY_IDENTITY_UNRESOLVED_KEY) is True:
-            continue
-        if _stored_signature_direction(load) == "off":
-            return True
-        component_id = str(load.get("component_id") or "").strip()
-        if not component_id or component_id in component_ids:
-            return True
-        component_ids.add(component_id)
-        if not all(
-            str(load.get(key) or "").strip()
-            for key in (
-                "component_fingerprint",
-                "on_signature_id",
-                "on_signature_fingerprint",
-            )
-        ):
-            return True
         if str(load.get("estimate_status") or "") not in {
             "complete",
             "partial_history",
@@ -292,6 +278,23 @@ def unknown_load_inventory_needs_rebuild(
             }
             <= windows[name].keys()
             for name in ("today", "7_days", "30_days")
+        ):
+            return True
+        if load.get(LEGACY_IDENTITY_UNRESOLVED_KEY) is True:
+            continue
+        if _stored_signature_direction(load) == "off":
+            return True
+        component_id = str(load.get("component_id") or "").strip()
+        if not component_id or component_id in component_ids:
+            return True
+        component_ids.add(component_id)
+        if not all(
+            str(load.get(key) or "").strip()
+            for key in (
+                "component_fingerprint",
+                "on_signature_id",
+                "on_signature_fingerprint",
+            )
         ):
             return True
     return False
@@ -429,7 +432,9 @@ def _legacy_unverified_inventory(
 ) -> dict[str, Any]:
     """Preserve prior values when history was not retained for recomputation."""
 
-    observation_started = _observation_started_at(None, existing_state)
+    observation_started = _observation_started_at(
+        _edge_observation_started_at(loads), existing_state
+    )
     for load in loads:
         status = "legacy_unverified"
         load["estimate_status"] = status
@@ -914,6 +919,13 @@ def _as_utc_datetime(value: datetime | str | Any) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _edge_with_utc_timestamp(edge: NilmEdge) -> NilmEdge:
+    """Apply the legacy UTC convention before edge timestamps reach runtime math."""
+
+    timestamp = _as_utc_datetime(edge.timestamp)
+    return replace(edge, timestamp=timestamp) if timestamp != edge.timestamp else edge
 
 
 def _runtime_windows(

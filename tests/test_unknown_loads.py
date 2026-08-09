@@ -966,3 +966,77 @@ def test_migration_without_sessions_marks_numeric_estimates_legacy_unverified() 
     assert migrated["unknown_loads"][0]["estimate_status"] == "legacy_unverified"
     assert migrated["estimate_status"] == "legacy_unverified"
     assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)
+
+
+def test_edge_only_inventory_treats_naive_legacy_timestamps_as_utc() -> None:
+    """Legacy naive edge timestamps must not be compared directly to aware now."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-naive-edge", 500.0, 100.0, 510.0)],
+        edges=[
+            NilmEdge(
+                timestamp=datetime(2026, 6, 7, 12, 0),
+                delta_w=500.0,
+                delta_var=100.0,
+                delta_va=510.0,
+                delta_pf=0.0,
+                direction="on",
+                split_phase_type="single_leg_a",
+                dominant_leg="a",
+            )
+        ],
+        now=BASE_TIME + timedelta(minutes=30),
+    )
+
+    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 30.0
+
+
+def test_migration_uses_earliest_per_load_observation_boundary() -> None:
+    """A top-level omission must not discard reliable row-level first-seen evidence."""
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "sig-row-observation",
+                    "typical_watts": 500.0,
+                    "first_seen": "2026-06-01T00:00:00+00:00",
+                    "runtime_today_minutes": 60.0,
+                }
+            ]
+        },
+        signature_payloads=[
+            {
+                "signature_id": "sig-row-observation",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+            }
+        ],
+    )
+
+    assert migrated["observation_started_at"] == "2026-06-01T00:00:00+00:00"
+    assert migrated["unknown_loads"][0]["observation_started_at"] == (
+        "2026-06-01T00:00:00+00:00"
+    )
+
+
+def test_stale_check_requires_metadata_for_unresolved_legacy_rows() -> None:
+    """Opaque rows cannot bypass the schema-v3 runtime-window metadata contract."""
+
+    state = {
+        "schema_version": 3,
+        "runtime_window_definition": {
+            "today": "configured_local_midnight_to_now",
+            "7_days": "trailing_168_elapsed_hours_to_now",
+            "30_days": "trailing_720_elapsed_hours_to_now",
+        },
+        "estimate_status": "legacy_unverified",
+        "unknown_loads": [{"legacy_identity_unresolved": True}],
+    }
+
+    assert unknown_loads.unknown_load_inventory_needs_rebuild(state)
