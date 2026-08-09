@@ -34,6 +34,9 @@ export function createNilmWorkspaceMethods({
       this._nilmWorkspace = workspace;
       this._nilmSyncHelperSelection(workspace);
       await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
+      if (!this._isCurrentRequest(requestId, routeKey)) {
+        return;
+      }
       await this._focusNilmRouteTarget(workspace, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
@@ -1524,7 +1527,7 @@ export function createNilmWorkspaceMethods({
       } else {
         this._render();
       }
-      return;
+      return true;
     }
     const occurrenceIndex = Math.max(
       0,
@@ -1535,7 +1538,7 @@ export function createNilmWorkspaceMethods({
       const historyLoaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
       const isCurrent = this._isCurrentNilmGraphIntent(intentToken);
       if (historyLoaded !== true || !isCurrent) {
-        return;
+        return false;
       }
     }
     this._nilmFocusedSignature = signatureFingerprint;
@@ -1550,6 +1553,7 @@ export function createNilmWorkspaceMethods({
     } else {
       this._render();
     }
+    return focused;
   }
 
   _focusNilmGraphWindowForSignature(signatureFingerprint, intentToken = null) {
@@ -2363,8 +2367,10 @@ export function createNilmWorkspaceMethods({
     if (reviewItem.kind === "signature") {
       const fingerprint = this._nilmSignatureFingerprint(reviewItem.item);
       if (!fingerprint) return false;
-      await this._focusNilmSignatureOnGraph(fingerprint, { scroll: options.scroll === true, toggle: false });
-      return true;
+      return (await this._focusNilmSignatureOnGraph(
+        fingerprint,
+        { scroll: options.scroll === true, toggle: false },
+      )) === true;
     }
     if (reviewItem.kind === "session") {
       return this._loadNilmSessionInterval(reviewItem.item);
@@ -2372,18 +2378,21 @@ export function createNilmWorkspaceMethods({
     const interval = reviewItem.kind === "assignment"
       ? this._nilmAssignmentFocusInterval(reviewItem.item)
       : reviewItem.item;
-    if (!interval || !interval.start || !interval.end) {
-      if (reviewItem.kind === "assignment") {
-        this._lastActionMessage = this._panelText("messages.no_completed_assignment_interval");
-      }
-      await this._loadNilmWorkspaceHistory();
-      this._render();
-      return false;
-    }
+    const start = Date.parse(interval && interval.start || "");
+    const end = Date.parse(interval && interval.end || "");
     this._beginNilmGraphIntent();
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
     this._nilmFocusedInterval = null;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      this._lastActionMessage = reviewItem.kind === "assignment"
+        ? this._panelText("messages.no_completed_assignment_interval")
+        : "";
+      await this._loadNilmWorkspaceHistory();
+      this._render();
+      return false;
+    }
+    this._lastActionMessage = "";
     return this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: options.scroll !== false });
   }
 
