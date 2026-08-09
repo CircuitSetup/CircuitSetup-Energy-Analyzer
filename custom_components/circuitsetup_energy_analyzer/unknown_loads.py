@@ -320,7 +320,7 @@ def migrate_unknown_load_inventory(
     components = _unknown_load_components(signatures)
     session_list = tuple(sessions) if sessions is not None else ()
     if session_list and now is not None:
-        return build_unknown_load_inventory(
+        rebuilt = build_unknown_load_inventory(
             circuit_id=circuit_id,
             signatures=signatures,
             edges=(),
@@ -330,6 +330,51 @@ def migrate_unknown_load_inventory(
             session_history_max_items=session_history_max_items,
             existing_state=existing_state,
         )
+        existing_loads = [
+            dict(load)
+            for load in existing_state.get("unknown_loads", ())
+            if isinstance(load, Mapping)
+        ]
+        covered_indexes = {
+            index
+            for component in components
+            for index, load in enumerate(existing_loads)
+            if _load_identifies_component(load, component)
+            or _legacy_load_matches_on_signature(load, component.on_signature)
+            or (
+                component.off_signature is not None
+                and _load_is_off_duplicate(load, component.off_signature)
+            )
+        }
+        retained = [
+            _migrated_unclassified_row(load)
+            for index, load in enumerate(existing_loads)
+            if index not in covered_indexes
+        ]
+        if retained:
+            legacy = _legacy_unverified_inventory(
+                circuit_id, retained, existing_state
+            )
+            loads = [*rebuilt["unknown_loads"], *legacy["unknown_loads"]]
+            loads.sort(
+                key=lambda load: (
+                    str(load.get("component_id") or load.get("signature_id") or ""),
+                    str(load.get("signature_id") or ""),
+                )
+            )
+            rebuilt.update(_inventory_aggregate(circuit_id, loads))
+            rebuilt["estimate_status"] = _worst_estimate_status(
+                str(load.get("estimate_status") or "legacy_unverified")
+                for load in loads
+            )
+            legacy_observed = legacy.get("observation_started_at")
+            if legacy_observed:
+                rebuilt["observation_started_at"] = _observation_started_at(
+                    _as_utc_datetime(legacy_observed), rebuilt
+                )
+        elif not rebuilt["unknown_loads"]:
+            rebuilt["estimate_status"] = "partial_history"
+        return rebuilt
     existing_loads = [
         dict(load)
         for load in existing_state.get("unknown_loads", ())
@@ -1146,6 +1191,34 @@ def _clip_session_seconds(
     return max(0.0, (clipped_end - clipped_start).total_seconds())
 
 
+def _union_session_seconds(
+    sessions: Iterable[_OwnedUnknownLoadSession],
+    start: datetime,
+    end: datetime,
+) -> float:
+    """Return clipped runtime without counting overlapping intervals twice."""
+
+    intervals = sorted(
+        (
+            max(item.session.start, start),
+            min(item.session.end, end),
+        )
+        for item in sessions
+        if min(item.session.end, end) > max(item.session.start, start)
+    )
+    if not intervals:
+        return 0.0
+    total = 0.0
+    current_start, current_end = intervals[0]
+    for interval_start, interval_end in intervals[1:]:
+        if interval_start <= current_end:
+            current_end = max(current_end, interval_end)
+            continue
+        total += (current_end - current_start).total_seconds()
+        current_start, current_end = interval_start, interval_end
+    return total + (current_end - current_start).total_seconds()
+
+
 def _estimate_status(
     *,
     ambiguous: bool,
@@ -1282,8 +1355,8 @@ def _unknown_component_session_payload(
     estimate_statuses: dict[str, str] = {}
     runtime_windows: dict[str, dict[str, Any]] = {}
     for name, (start, end, nominal_days) in windows.items():
-        seconds = 0.0 if ambiguous else sum(
-            _clip_session_seconds(item, start, end) for item in sessions
+        seconds = (
+            0.0 if ambiguous else _union_session_seconds(sessions, start, end)
         )
         runtime_minutes = round(seconds / 60.0, 3)
         status = _estimate_status(

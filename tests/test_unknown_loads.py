@@ -281,6 +281,68 @@ def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
     assert load["running_state"] == "probably_off"
 
 
+def test_partially_overlapping_closed_sessions_count_union_runtime_once() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-partial-overlap", 600.0, 100.0, 610.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "partial-one",
+                "component_id": "sig-partial-overlap",
+                "signature_fingerprint": "partial-overlap",
+                "on_edge_id": "partial-edge-one",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+            {
+                "session_id": "partial-two",
+                "component_id": "sig-partial-overlap",
+                "signature_fingerprint": "partial-overlap",
+                "on_edge_id": "partial-edge-two",
+                "start": "2026-08-09T10:30:00+00:00",
+                "end": "2026-08-09T11:30:00+00:00",
+            },
+        ],
+        now=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 90.0
+    assert load["estimated_energy_today_kwh"] == 0.9
+
+
+def test_nested_closed_session_counts_outer_interval_once() -> None:
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-nested-overlap", 600.0, 100.0, 610.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "outer",
+                "component_id": "sig-nested-overlap",
+                "signature_fingerprint": "nested-overlap",
+                "on_edge_id": "outer-edge",
+                "start": "2026-08-09T09:00:00+00:00",
+                "end": "2026-08-09T12:00:00+00:00",
+            },
+            {
+                "session_id": "inner",
+                "component_id": "sig-nested-overlap",
+                "signature_fingerprint": "nested-overlap",
+                "on_edge_id": "inner-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+        ],
+        now=datetime(2026, 8, 9, 13, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 180.0
+    assert load["estimated_energy_today_kwh"] == 1.8
+
+
 def test_session_ownership_accepts_a_matching_legacy_fingerprint() -> None:
     """A stored row's legacy fingerprint can still resolve one canonical ON owner."""
 
@@ -933,6 +995,85 @@ def test_migration_recomputes_windowed_values_when_sessions_are_available() -> N
     assert load["review_state"] == "assigned"
     assert load["user_label"] == "Basement load"
     assert load["runtime_today_minutes"] == 60.0
+
+
+def test_session_migration_preserves_legacy_rows_missing_current_components() -> None:
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={
+            "unknown_loads": [
+                {"signature_id": "sig-current", "review_state": "assigned"},
+                {
+                    "signature_id": "sig-missing",
+                    "review_state": "labeled",
+                    "user_label": "Legacy workshop load",
+                    "estimated_energy_today_kwh": 0.25,
+                },
+            ]
+        },
+        signature_payloads=[
+            {
+                "signature_id": "sig-current",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+            }
+        ],
+        sessions=[
+            {
+                "session_id": "current-run",
+                "component_id": "sig-current",
+                "signature_fingerprint": "current-fingerprint",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    by_signature = {
+        load["signature_id"]: load for load in migrated["unknown_loads"]
+    }
+    assert migrated["unknown_load_count"] == 2
+    assert by_signature["sig-current"]["runtime_today_minutes"] == 60.0
+    assert by_signature["sig-missing"]["user_label"] == "Legacy workshop load"
+    assert by_signature["sig-missing"]["estimate_status"] == "legacy_unverified"
+    assert migrated["estimate_status"] == "legacy_unverified"
+
+
+def test_session_migration_retains_legacy_row_when_no_component_is_classifiable(
+) -> None:
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={
+            "unknown_loads": [
+                {
+                    "signature_id": "sig-legacy-only",
+                    "review_state": "assigned",
+                    "user_label": "Unresolved legacy load",
+                    "estimated_energy_today_kwh": 0.5,
+                }
+            ]
+        },
+        signature_payloads=[],
+        sessions=[
+            {
+                "session_id": "unowned-run",
+                "component_id": "removed-component",
+                "signature_fingerprint": "removed-fingerprint",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    assert migrated["unknown_load_count"] == 1
+    assert migrated["unknown_loads"][0]["signature_id"] == "sig-legacy-only"
+    assert migrated["unknown_loads"][0]["review_state"] == "assigned"
+    assert migrated["estimate_status"] == "legacy_unverified"
 
 
 def test_migration_without_sessions_marks_numeric_estimates_legacy_unverified() -> None:

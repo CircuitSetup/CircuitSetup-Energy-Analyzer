@@ -8839,10 +8839,17 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions() -> 
     assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 30.0
 
     snapshot = deepcopy(inventory)
-    second_result = processor.process(sample, config, context, events=())
+    later_sample = replace(sample, timestamp=sample.timestamp + timedelta(minutes=5))
+    second_result = processor.process(later_sample, config, context, events=())
+    current_inventory = {
+        update.path: update.value for update in second_result.state_updates
+    }[("nilm_unknown_loads_by_circuit", "mains")]
 
     assert not second_result.store_dirty
     assert store_data.nilm_unknown_loads_by_circuit["mains"] == snapshot
+    assert current_inventory["unknown_loads"][0]["runtime_windows"]["today"][
+        "coverage_end"
+    ] == later_sample.timestamp.isoformat()
 
 
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
