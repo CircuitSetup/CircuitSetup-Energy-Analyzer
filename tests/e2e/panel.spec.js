@@ -7748,6 +7748,80 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   });
 });
 
+test("NILM identified interval review cards focus the graph", async ({ page }) => {
+  const historyWindows = [];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      historyWindows.push({
+        start: url.searchParams.get("start"),
+        end: url.searchParams.get("end"),
+      });
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = { ...payload.history, api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8", fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8" };
+    payload.lanes.needs_review = { ...payload.lanes.needs_review, interval_ids: ["interval-1"] };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-review-item="interval:interval-1"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
+    start: Date.parse("2026-07-13T18:00:00Z"),
+    end: Date.parse("2026-07-13T18:45:00Z"),
+  });
+  await expect(panel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
+  expect(Date.parse(historyWindows.at(-1).start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
+  expect(Date.parse(historyWindows.at(-1).end)).toBeGreaterThanOrEqual(Date.parse("2026-07-13T18:50:00Z"));
+});
+
+test("NILM targeted routes focus identified intervals on initial load", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = { ...payload.history, api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8", fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8" };
+    payload.lanes.needs_review = { ...payload.lanes.needs_review, interval_ids: ["interval-1"] };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const intervalPanel = await openPanel(
+    page,
+    "?nilm_workspace=1&circuit_id=mains&interval_id=interval-1",
+  );
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
+    start: Date.parse("2026-07-13T18:00:00Z"),
+    end: Date.parse("2026-07-13T18:45:00Z"),
+  });
+  await expect(intervalPanel.locator('[data-nilm-review-item="interval:interval-1"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(intervalPanel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
+
+  const assignmentPanel = await openPanel(
+    page,
+    "?nilm_workspace=1&circuit_id=mains&assignment_id=dishwasher",
+  );
+  await expect(assignmentPanel.locator('[data-nilm-lane="assigned"]')).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
+    start: Date.parse("2026-07-13T18:00:00Z"),
+    end: Date.parse("2026-07-13T18:45:00Z"),
+  });
+});
+
 test("NILM interval editor saves the selected existing appliance", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
