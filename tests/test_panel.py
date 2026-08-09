@@ -455,7 +455,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260808-5"
+    assert PANEL_MODULE_VERSION == "20260809-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2831,6 +2831,112 @@ def test_nilm_assignment_actions_accept_manual_interval_and_delete_retired() -> 
     assert _nilm_assignment_options([active, ignored, retired]) == [
         {"value": "assignment-washer", "label": "Washer"}
     ]
+
+
+def test_nilm_assignment_payload_uses_interval_average_when_needed() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_assignment_payload,
+    )
+
+    average_payload = _nilm_assignment_payload(
+        "mains",
+        {
+            "assignment_id": "assignment-hvac",
+            "label_interval_ids": ["one", "two", "three", "listed-only"],
+        },
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": 300.0,
+            },
+            {
+                "interval_id": "two",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": 420.0,
+            },
+            {
+                "interval_id": "three",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": 480.0,
+            },
+            {
+                "interval_id": "listed-only",
+                "assignment_id": "assignment-other",
+                "median_power_w": 600.0,
+            },
+            {
+                "interval_id": "bad",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": float("nan"),
+            },
+            {
+                "interval_id": "negative",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": -50.0,
+            },
+            {
+                "interval_id": "non-numeric",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": "unknown",
+            },
+            {
+                "interval_id": "other",
+                "assignment_id": "assignment-other",
+                "median_power_w": 900.0,
+            },
+        ],
+    )
+
+    assert average_payload["typical_power_w"] == 450.0
+    assert average_payload["typical_power_source"] == "interval_average"
+
+    stored_payload = _nilm_assignment_payload(
+        "mains",
+        {
+            "assignment_id": "assignment-hvac",
+            "typical_power_w": 600.0,
+            "typical_power_source": "interval_average",
+        },
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "assignment-hvac",
+                "median_power_w": 300.0,
+            },
+        ],
+    )
+
+    assert stored_payload["typical_power_w"] == 600.0
+    assert "typical_power_source" not in stored_payload
+
+    transition_payload = _nilm_assignment_payload(
+        "mains",
+        {
+            "assignment_id": "assignment-hvac",
+            "typical_power_source": "interval_average",
+        },
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "assignment-hvac",
+                "observed_transition_w": 80.0,
+            },
+            {
+                "interval_id": "two",
+                "assignment_id": "assignment-hvac",
+                "observed_transition_w": 83.0,
+            },
+            {
+                "interval_id": "three",
+                "assignment_id": "assignment-hvac",
+                "observed_transition_w": 86.0,
+            },
+        ],
+    )
+
+    assert transition_payload["typical_power_w"] == 83.0
+    assert "typical_power_source" not in transition_payload
 
 
 def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit() -> (

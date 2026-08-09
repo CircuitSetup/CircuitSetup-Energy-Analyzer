@@ -2574,6 +2574,9 @@ export function createNilmWorkspaceMethods({
     const title = item.display_label || item.display_name || item.label || item.likely_type || this._panelText("common.unknown_load");
     const confidence = Math.max(0, Math.min(100, Math.round(Number(item.confidence || 0) * 100)));
     const power = item.typical_power_w ?? item.estimated_power_w ?? item.median_power_w;
+    const powerText = item.typical_power_source === "interval_average"
+      ? `${this._panelText("nilm_workspace.average_power")}: ${this._formatMetricValue(power)} W`
+      : `${this._formatMetricValue(power)} W`;
     const state = String(item.review_state || item.lifecycle_state || this._nilmActiveLane).toLowerCase();
     const stateLabel = state === "retired"
       ? this._panelText("nilm_workspace.lane_hidden")
@@ -2599,7 +2602,7 @@ export function createNilmWorkspaceMethods({
     return `<button type="button" class="nilm-review-card" data-nilm-review-item="${this._escape(this._nilmReviewKey(reviewItem))}" ${fingerprint ? `data-nilm-signature-fingerprint="${this._escape(fingerprint)}"` : ""} aria-pressed="${selected}">
       <span class="review-card-heading"><strong>${this._escape(title)}</strong><span>${this._escape(stateLabel)}</span></span>
       <span class="power-meter" style="--power-percent:${this._nilmPowerPercent(reviewItem, reviewItems)}%"><span></span></span>
-      <span class="review-card-facts"><span>${this._escape(this._formatMetricValue(power))} W</span><span>${confidence}%</span></span>
+      <span class="review-card-facts"><span>${this._escape(powerText)}</span><span>${confidence}%</span></span>
       ${ambiguity ? `<span class="review-card-facts">${ambiguity}</span>` : ""}
       ${contextFacts.length ? `<span class="review-card-facts review-card-context">${contextFacts.map((fact) => `<span>${this._escape(fact)}</span>`).join("")}</span>` : ""}
       <progress max="100" value="${confidence}" aria-label="${this._escape(this._panelTextFormat("nilm_workspace.assignment_confidence", { confidence }))}"></progress>

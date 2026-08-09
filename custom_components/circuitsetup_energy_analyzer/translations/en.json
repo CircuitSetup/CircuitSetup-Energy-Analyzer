@@ -1844,6 +1844,7 @@
         "preview_alert_selected_history": "A reliable preview is unavailable because retained history contains only alerts selected by the current setting."
       },
       "nilm_workspace": {
+        "average_power": "Average power",
         "source_picker_label": "Load Separation source",
         "sensitivity": "Detection sensitivity and effective minimum edge",
         "use_sensitivity": "Use {setting}",
