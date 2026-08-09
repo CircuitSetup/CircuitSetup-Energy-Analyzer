@@ -2743,6 +2743,167 @@ def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
     ) == 1
 
 
+def test_nilm_workspace_exposes_configured_primary_lifecycle() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="HVAC 2",
+        appliance_profile=ApplianceProfile.HVAC_BLOWER,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    primary_id = "mixed-configured-primary"
+    fingerprint = "direction=on|watts=300-400"
+    assignment = {
+        "assignment_id": primary_id,
+        "display_name": "HVAC 2",
+        "appliance_id": "mixed",
+        "role": "primary",
+        "lifecycle_state": "assigned",
+        "signature_fingerprints": [],
+        "label_interval_ids": ["interval-1", "interval-2"],
+    }
+    signature = {
+        "signature_id": "signature-hvac",
+        "feedback_fingerprint": fingerprint,
+        "direction": "on",
+        "typical_watts": 350.0,
+        "occurrence_count": 2,
+        "confidence": 0.9,
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mixed": [assignment]
+    }
+    coordinator.store_data.nilm_signatures = {"mixed": [signature]}
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mixed": [
+            {
+                "interval_id": "interval-1",
+                "assignment_id": primary_id,
+                "label": "HVAC 2",
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:05:00+00:00",
+            },
+            {
+                "interval_id": "interval-2",
+                "assignment_id": primary_id,
+                "label": "HVAC 2",
+                "start": "2026-06-02T11:00:00+00:00",
+                "end": "2026-06-02T11:05:00+00:00",
+            },
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mixed": [
+            {
+                "session_id": f"session-{index}",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": fingerprint,
+                "assignment_id": primary_id,
+                "start": f"2026-06-02T1{index}:00:00+00:00",
+                "end": f"2026-06-02T1{index}:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            }
+            for index in (0, 1)
+        ]
+    }
+
+    unestablished = nilm_workspace_payload([coordinator], circuit_id="mixed")[
+        "configured_primary"
+    ]
+
+    assert unestablished["evidence"] == {"confirmed_interval_count": 2}
+    assert unestablished["signature"] == {"status": "not_established"}
+    assert unestablished["attribution"] == {
+        "status": "inactive",
+        "matching_detection_count": 0,
+    }
+
+    assignment["signature_fingerprints"] = [fingerprint]
+    signature["assignment_id"] = primary_id
+
+    established = nilm_workspace_payload([coordinator], circuit_id="mixed")[
+        "configured_primary"
+    ]
+
+    assert established["signature"]["status"] == "established"
+    assert established["signature"]["signature_id"] == "signature-hvac"
+    assert established["attribution"] == {
+        "status": "active",
+        "matching_detection_count": 2,
+    }
+
+
+def test_nilm_workspace_sessions_expose_signature_review_proxy() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = _coordinator(config=config, configs=(config,))
+    fingerprint = "direction=on|watts=300-400"
+    coordinator.store_data.nilm_signatures = {
+        "mixed": [
+            {
+                "signature_id": "signature-hvac",
+                "feedback_fingerprint": fingerprint,
+                "direction": "on",
+                "typical_watts": 350.0,
+                "occurrence_count": 2,
+                "confidence": 0.9,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mixed": [
+            {
+                "session_id": "session-hvac",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": fingerprint,
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            },
+            {
+                "session_id": "session-unresolved",
+                "mains_circuit_id": "mixed",
+                "signature_fingerprint": "unassigned",
+                "start": "2026-06-02T11:00:00+00:00",
+                "end": "2026-06-02T11:05:00+00:00",
+                "ambiguous": False,
+                "known_load_masked": False,
+            },
+        ]
+    }
+
+    sessions = nilm_workspace_payload([coordinator], circuit_id="mixed")["sessions"]
+    reviewed = next(
+        session for session in sessions if session["session_id"] == "session-hvac"
+    )
+    unresolved = next(
+        session for session in sessions if session["session_id"] == "session-unresolved"
+    )
+
+    assert reviewed["signature_review"]["signature_id"] == "signature-hvac"
+    assert reviewed["signature_review"]["signature_fingerprint"] == fingerprint
+    assert {"assign", "ignore", "merge"} <= set(
+        reviewed["signature_review"]["actions"]
+    )
+    assert "signature_review" not in unresolved
+
+
 def test_nilm_workspace_lanes_reopen_legacy_expected_items() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,

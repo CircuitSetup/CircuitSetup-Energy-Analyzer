@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import Any
@@ -264,6 +265,7 @@ def nilm_workspace_payload(
     _add_nilm_assignment_options(signatures, assignment_options)
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
+    _add_nilm_session_signature_reviews(sessions, signatures)
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
@@ -280,6 +282,8 @@ def nilm_workspace_payload(
         config,
         signatures,
         assignments,
+        label_intervals=all_label_intervals,
+        sessions=all_sessions,
     )
     payload = {
         "status": "ok",
@@ -1101,6 +1105,9 @@ def _nilm_configured_primary_payload(
     config: CircuitConfig,
     signatures: list[dict[str, Any]],
     assignments: list[dict[str, Any]],
+    *,
+    label_intervals: Iterable[Mapping[str, Any]] = (),
+    sessions: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any] | None:
     if nilm_source_kind(config) is not NilmSourceKind.PRIMARY_MIXED:
         return None
@@ -1158,6 +1165,47 @@ def _nilm_configured_primary_payload(
                 ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
                 "display_label": signature.get("display_label"),
             }
+
+    confirmed_interval_ids = {
+        str(value or "").strip()
+        for value in _iter_items((assignment or {}).get("label_interval_ids"))
+        if str(value or "").strip()
+    }
+    confirmed_interval_count = sum(
+        1
+        for interval in label_intervals
+        if isinstance(interval, Mapping)
+        if str(interval.get(ATTR_ASSIGNMENT_ID) or "").strip() == assignment_id
+        or str(interval.get(ATTR_INTERVAL_ID) or "").strip()
+        in confirmed_interval_ids
+    )
+    signature_status: dict[str, Any] = {"status": "not_established"}
+    attribution_count = 0
+    if current_signature is not None:
+        signature_identifiers = _nilm_signature_identifiers(current_signature)
+        recurrence_count = int(
+            _clamped_float(
+                current_signature.get(
+                    "occurrence_count",
+                    current_signature.get("seen_count"),
+                ),
+                default=0.0,
+            )
+        )
+        signature_status = {
+            "status": "established",
+            ATTR_SIGNATURE_ID: current_signature[ATTR_SIGNATURE_ID],
+            "display_label": current_signature.get("display_label"),
+            "recurrence_count": recurrence_count,
+        }
+        attribution_count = sum(
+            1
+            for session in sessions
+            if isinstance(session, Mapping)
+            if str(session.get(ATTR_ASSIGNMENT_ID) or "").strip() == assignment_id
+            if str(session.get("signature_fingerprint") or "").strip()
+            in signature_identifiers
+        )
 
     competing = _nilm_assigned_signature_ids(
         item for item in assignments if item.get(ATTR_ASSIGNMENT_ID) != assignment_id
@@ -1235,6 +1283,12 @@ def _nilm_configured_primary_payload(
         "display_name": config.name,
         ATTR_APPLIANCE_PROFILE: config.appliance_profile.value,
         "current_binding": current_binding,
+        "evidence": {"confirmed_interval_count": confirmed_interval_count},
+        "signature": signature_status,
+        "attribution": {
+            "status": "active" if current_binding is not None else "inactive",
+            "matching_detection_count": attribution_count,
+        },
         "suggestion": suggestion,
     }
 
@@ -1544,6 +1598,43 @@ def _add_nilm_assignment_options(
         assign = actions.get("assign") if isinstance(actions, dict) else None
         if isinstance(assign, dict):
             assign["assignment_options"] = list(assignment_options)
+
+
+def _add_nilm_session_signature_reviews(
+    sessions: Iterable[dict[str, Any]],
+    signatures: Iterable[Mapping[str, Any]],
+) -> None:
+    """Expose the retained signature decision on safe, unassigned sessions."""
+    by_identifier: dict[str, list[Mapping[str, Any]]] = {}
+    for signature in signatures:
+        if (
+            _nilm_signature_hidden(signature)
+            or not isinstance(signature.get("actions"), Mapping)
+        ):
+            continue
+        for identifier in _nilm_signature_identifiers(signature):
+            by_identifier.setdefault(identifier, []).append(signature)
+    for session in sessions:
+        session.pop("signature_review", None)
+        fingerprint = str(session.get("signature_fingerprint") or "").strip()
+        if (
+            not session.get("end")
+            or bool(session.get("ambiguous"))
+            or bool(session.get("known_load_masked"))
+            or str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            or not nilm_signature_is_assignable(fingerprint)
+        ):
+            continue
+        matches = by_identifier.get(fingerprint, [])
+        if len(matches) != 1:
+            continue
+        signature = matches[0]
+        session["signature_review"] = {
+            ATTR_SIGNATURE_ID: signature[ATTR_SIGNATURE_ID],
+            "display_label": signature.get("display_label"),
+            "signature_fingerprint": fingerprint,
+            "actions": deepcopy(signature["actions"]),
+        }
 
 
 def _nilm_assignment_payload(
