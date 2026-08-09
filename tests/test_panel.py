@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -1645,6 +1646,41 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
     assert signatures[1]["ignored"] is True
     assert signatures[2]["review_state"] == "merged"
     assert signatures[2]["merged_into"] == "signature_1"
+
+
+def test_nilm_signature_payload_exposes_windowed_estimates_as_json_safe_data() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_signature_payload,
+    )
+
+    payload = _nilm_signature_payload(
+        {
+            "signature_id": "signature_1",
+            "estimated_energy_today_kwh": 0.3,
+            "estimated_energy_7_days_kwh": 1.8,
+            "estimated_energy_30_days_kwh": 7.2,
+            "runtime_7_days_minutes": 240.0,
+            "runtime_30_days_minutes": 960.0,
+            "estimate_status": "partial_history",
+            "estimate_status_by_window": {
+                "today": "complete",
+                "7_days": "partial_history",
+                "30_days": "partial_history",
+            },
+            "runtime_windows": {
+                name: {
+                    "coverage_days": days,
+                    "estimate_status": "partial_history",
+                }
+                for name, days in (("today", 1.0), ("7_days", 7.0), ("30_days", 30.0))
+            },
+        }
+    )
+
+    assert payload["estimated_energy_7_days_kwh"] == 1.8
+    assert payload["estimated_energy_30_days_kwh"] == 7.2
+    assert payload["runtime_windows"]["30_days"]["coverage_days"] == 30.0
+    json.dumps(payload)
 
 
 def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:

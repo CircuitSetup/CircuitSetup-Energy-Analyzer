@@ -75,6 +75,7 @@ class NilmSampleProcessor:
         observe_topology: TopologyObserver,
         helper_candidate_events: HelperCandidateEventsProvider | None = None,
         unmatched_edges_max_items: int = 512,
+        session_history_max_items: int = 2000,
     ) -> None:
         self._nilm_enabled = nilm_enabled
         self._seed_demo_nilm_state = seed_demo_nilm_state
@@ -92,6 +93,7 @@ class NilmSampleProcessor:
         self._helper_links_dirty = False
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
+        self._session_history_max_items = max(int(session_history_max_items), 0)
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
         self._hydrated_unmatched_edge_circuits: set[str] = set()
 
@@ -303,7 +305,15 @@ class NilmSampleProcessor:
                     )
                 )
                 history.extend(completed_sessions)
-                del history[:-512]
+                history.sort(
+                    key=lambda item: str(
+                        item.get("end") or item.get("start") or ""
+                    )
+                    if isinstance(item, Mapping)
+                    else "",
+                    reverse=True,
+                )
+                del history[self._session_history_max_items :]
                 store_dirty = True
 
         next_unmatched = _newest_nilm_edges(
@@ -327,50 +337,68 @@ class NilmSampleProcessor:
                 self._observe_topology(circuit_config, match, context),
             )
 
+        evidence_changed = bool(
+            edges or next_unmatched != existing_unmatched or helper_events_changed
+        )
+        signatures: list[NilmSignature] = []
+        payloads = list(signature_specs)
+        if next_unmatched or evidence_changed:
+            signatures = cluster_recurring_signatures(
+                self.unmatched_edges_by_circuit[circuit_id],
+            )
+            payloads = self._nilm_signature_payloads(circuit_id, signatures, context)
+            if self._helper_links_dirty:
+                store_dirty = True
+                self._helper_links_dirty = False
+            if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
+                context.store_data.nilm_signatures[circuit_id] = payloads
+                store_dirty = True
+        session_history_changed = self.refresh_session_history(
+            circuit_id, context.store_data
+        )
+        if session_history_changed:
+            store_dirty = True
+
         existing_inventory = (
             context.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
         )
         inventory_stale = unknown_load_inventory_needs_rebuild(existing_inventory)
-        evidence_changed = bool(
-            edges or next_unmatched != existing_unmatched or helper_events_changed
+        sessions = context.store_data.nilm_session_history_by_circuit.get(
+            circuit_id, ()
         )
-        if evidence_changed or inventory_stale:
-            if next_unmatched or evidence_changed:
-                signatures = cluster_recurring_signatures(
-                    self.unmatched_edges_by_circuit[circuit_id],
-                )
-                payloads = self._nilm_signature_payloads(
-                    circuit_id,
-                    signatures,
-                    context,
-                )
-                if self._helper_links_dirty:
-                    store_dirty = True
-                    self._helper_links_dirty = False
-                if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
-                    context.store_data.nilm_signatures[circuit_id] = payloads
-                    store_dirty = True
+        current_inventory = existing_inventory
+        if next_unmatched or sessions or evidence_changed or inventory_stale:
+            if signatures:
                 inventory = build_unknown_load_inventory(
                     circuit_id=circuit_id,
                     signatures=signatures,
                     edges=self.unmatched_edges_by_circuit[circuit_id],
+                    sessions=sessions,
                     now=sample.timestamp,
+                    time_zone=context.time_zone or "UTC",
+                    session_history_max_items=self._session_history_max_items,
                     existing_state=existing_inventory,
                 )
             else:
                 inventory = migrate_unknown_load_inventory(
                     circuit_id=circuit_id,
                     existing_state=existing_inventory,
-                    signature_payloads=signature_specs,
+                    signature_payloads=payloads,
+                    sessions=sessions,
+                    now=sample.timestamp,
+                    time_zone=context.time_zone or "UTC",
+                    session_history_max_items=self._session_history_max_items,
                 )
-            if inventory != context.store_data.nilm_unknown_loads_by_circuit.get(
-                circuit_id,
+            current_inventory = inventory
+            inventory_evidence_changed = (
+                evidence_changed or session_history_changed or inventory_stale
+            )
+            if inventory_evidence_changed and inventory != (
+                context.store_data.nilm_unknown_loads_by_circuit.get(circuit_id)
             ):
                 context.store_data.nilm_unknown_loads_by_circuit[circuit_id] = (
                     inventory
                 )
-                store_dirty = True
-            if self.refresh_session_history(circuit_id, context.store_data):
                 store_dirty = True
 
         return FeatureResult(
@@ -382,6 +410,7 @@ class NilmSampleProcessor:
                     context,
                     total_events_by_circuit=self.total_events_by_circuit,
                     unmatched_edges_by_circuit=self.unmatched_edges_by_circuit,
+                    unknown_load_inventory=current_inventory,
                 ),
                 *(
                     [
@@ -428,6 +457,7 @@ class NilmSampleProcessor:
                 session_payloads,
                 assignments=assignments,
             )
+        next_sessions = next_sessions[: self._session_history_max_items]
         if next_sessions == existing_sessions:
             return False
         store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
@@ -1716,6 +1746,7 @@ def nilm_state_updates(
     *,
     total_events_by_circuit: defaultdict[str, int],
     unmatched_edges_by_circuit: defaultdict[str, list[NilmEdge]],
+    unknown_load_inventory: Mapping[str, Any] | None = None,
 ) -> list[StateUpdate]:
     """Build state updates for current NILM signatures and unknown loads."""
     signatures = context.store_data.nilm_signatures.get(circuit_id, [])
@@ -1740,7 +1771,13 @@ def nilm_state_updates(
         ),
         StateUpdate(
             ("nilm_unknown_loads_by_circuit", circuit_id),
-            dict(context.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})),
+            dict(
+                unknown_load_inventory
+                if unknown_load_inventory is not None
+                else context.store_data.nilm_unknown_loads_by_circuit.get(
+                    circuit_id, {}
+                )
+            ),
         ),
     ]
 

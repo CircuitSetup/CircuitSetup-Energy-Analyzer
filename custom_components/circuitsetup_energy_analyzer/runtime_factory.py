@@ -344,6 +344,7 @@ def initialize_runtime(
             ]
         ),
         unmatched_edges_max_items=NILM_UNMATCHED_EDGES_MAX_ITEMS_PER_CIRCUIT,
+        session_history_max_items=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
     )
     self.nilm_controller.configure_processors(
         sample_processor=self._nilm_sample_processor,
