@@ -8747,7 +8747,7 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
-def test_nilm_sample_processor_repairs_stale_unknown_loads() -> None:
+def test_nilm_processor_builds_inventory_after_refreshing_current_sessions() -> None:
     from collections import defaultdict
     from copy import deepcopy
 
@@ -8832,10 +8832,11 @@ def test_nilm_sample_processor_repairs_stale_unknown_loads() -> None:
 
     inventory = store_data.nilm_unknown_loads_by_circuit["mains"]
     assert result.store_dirty
-    assert inventory["schema_version"] == 2
+    assert inventory["schema_version"] == 3
     assert inventory["unknown_load_count"] == 1
     assert inventory["unknown_loads"][0]["matched_on_edge_count"] == 3
     assert inventory["unknown_loads"][0]["matched_off_edge_count"] == 3
+    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 30.0
 
     snapshot = deepcopy(inventory)
     second_result = processor.process(sample, config, context, events=())

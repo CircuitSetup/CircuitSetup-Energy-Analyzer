@@ -11,6 +11,12 @@ NILM_UNKNOWN_LOADS_ATTRIBUTE_FIELDS = (
     "typical_watts",
     "confidence",
     "first_seen",
+    "runtime_7_days_minutes",
+    "runtime_30_days_minutes",
+    "estimated_energy_7_days_kwh",
+    "estimated_energy_30_days_kwh",
+    "runtime_windows",
+    "estimate_status",
 )
 
 
