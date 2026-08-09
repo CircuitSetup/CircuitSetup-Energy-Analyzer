@@ -162,7 +162,6 @@ function makeWorkspace({{ lanes = {{}}, lane_counts = {{}}, ...overrides }} = {{
     needs_review: "Needs Review",
     assigned: "Assigned",
     published: "Published",
-    expected: "Expected",
     hidden: "Removed",
   }};
   const baseLanes = Object.fromEntries(Object.entries(labels).map(([key, label]) => [
@@ -1584,7 +1583,7 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "`#nilm_session_label_${index}`",
         "data-nilm-existing-assignment",
         'actionKey === "assign" ? '
-        "this._nilmExistingAssignmentSelection(`signature_${index}`) : null",
+        "this._nilmExistingAssignmentSelection(sourceKey) : null",
         "_renderNilmExistingAssignmentField",
         "_saveNilmAssignmentChanges",
         "nilm_interval_energy_preview",
@@ -3412,8 +3411,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       const panel = makePanel();
       const workspace = makeWorkspace({
         circuit: { circuit_id: "mains", name: "Whole Home Main" },
-        lane_counts: { needs_review: 5, assigned: 1, published: 2,
-          expected: 1, hidden: 0 },
+        lane_counts: { needs_review: 5, assigned: 1, published: 2, hidden: 0 },
       });
       workspace.lanes.needs_review.signature_ids = ["sig-1", "sig-2"];
       workspace.lanes.assigned.assignment_ids = ["assignment-1"];
@@ -3421,8 +3419,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       for (const expected of [
         "Whole Home Main",
         "data-nilm-review-progress",
-        'value="4"',
-        'max="9"',
+        'value="3"',
+        'max="8"',
       ]) {
         assert.ok(summary.includes(expected));
       }
@@ -3434,17 +3432,16 @@ def test_nilm_lane_rendering_contracts() -> None:
         "Needs Validation",
         "Ready to Publish",
         "Published",
-        "Expected",
         "Removed",
       ]) {
         assert.ok(!summary.includes(duplicate));
       }
       name = "test_nilm_workspace_renders_review_lanes_from_payload";
       const lanes = panel._renderNilmWorkspaceLanes(workspace);
-      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 5);
+      assert.equal((lanes.match(/data-nilm-lane=/g) || []).length, 4);
       for (const expected of [
         'role="tablist"', 'role="tab"', 'data-nilm-lane="needs_review"',
-        "Needs Review", "Published", "Expected", "Removed", "<strong>5</strong>",
+        "Needs Review", "Published", "Removed", "<strong>5</strong>",
       ]) assert.ok(lanes.includes(expected), expected);
       assert.doesNotMatch(
         context.Panel.prototype._renderNilmWorkspaceLanes.toString(),
@@ -3498,7 +3495,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       for (const expected of [
         'aria-pressed="true"',
         "Unknown load 2",
-        'data-nilm-apply-decision="2"',
+        'data-nilm-apply-decision="signature_2"',
       ]) {
         assert.ok(html.includes(expected));
       }
@@ -3618,7 +3615,7 @@ def test_nilm_lane_rendering_contracts() -> None:
         panel._renderNilmReviewCard(item, [item], true)
           .includes('data-nilm-signature-fingerprint="fingerprint-1"'),
       );
-      const inspector = panel._renderNilmSignatureReview(item.item, 0);
+      const inspector = panel._renderNilmSignatureReview(item.item, "signature_0", 0);
       assert.ok(!inspector.includes("Show on Graph"));
       assert.ok(!inspector.includes("data-nilm-signature-focus"));
     }
@@ -3728,8 +3725,8 @@ def test_nilm_lane_rendering_contracts() -> None:
       });
       const html = panel._renderNilmWorkspaceLanes(makeWorkspace());
       assert.equal((html.match(/tabindex="0"/g) || []).length, 1);
-      assert.equal((html.match(/tabindex="-1"/g) || []).length, 4);
-      const laneKeys = ["needs_review", "assigned", "published", "expected", "hidden"];
+      assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
+      const laneKeys = ["needs_review", "assigned", "published", "hidden"];
       let buttons = [];
       const shadow = {
         activeElement: null,
@@ -4036,11 +4033,11 @@ def test_nilm_decision_render_contracts() -> None:
         },
       };
       panel._nilmWorkspace = makeWorkspace({ signatures: [signature] });
-      const html = panel._renderNilmDecisionFlow(signature, 0);
+      const html = panel._renderNilmDecisionFlow(signature, "signature_0");
       for (const expected of [
-        'name="nilm_decision_0"',
+        'name="nilm_decision_signature_0"',
         'value="ignore"',
-        'data-nilm-apply-decision="0"',
+        'data-nilm-apply-decision="signature_0"',
       ]) {
         assert.ok(html.includes(expected));
       }
@@ -4064,26 +4061,24 @@ def test_nilm_decision_render_contracts() -> None:
             assignment_options: [{ value: "assignment-washer", label: "Washer" }],
           },
           ignore: {},
-          mark_expected: {},
           merge: {
             target_options: [{ value: "sig-2", label: "Load 2" }],
           },
         },
       };
       panel._nilmWorkspace = makeWorkspace({ signatures: [signature] });
-      let html = panel._renderNilmDecisionFlow(signature, 0);
+      let html = panel._renderNilmDecisionFlow(signature, "signature_0");
       for (const expected of [
-        'name="nilm_decision_0"',
+        'name="nilm_decision_signature_0"',
         'value="identify"',
-        'value="mark_expected"',
         'value="ignore"',
         'value="merge"',
-        'data-nilm-apply-decision="0"',
+        'data-nilm-apply-decision="signature_0"',
       ]) {
         assert.ok(html.includes(expected));
       }
       assert.equal((html.match(/data-nilm-apply-decision/g) || []).length, 1);
-      for (const action of ["label", "assign", "ignore", "mark_expected", "merge"]) {
+      for (const action of ["label", "assign", "ignore", "merge"]) {
         assert.ok(!html.includes(`data-nilm-action="${action}"`));
       }
       const key = panel._nilmDecisionDraftKey(signature);
@@ -4094,7 +4089,7 @@ def test_nilm_decision_render_contracts() -> None:
         assignmentId: "assignment-washer",
         mergeTarget: "sig-2",
       });
-      html = panel._renderNilmDecisionFlow(signature, 0);
+      html = panel._renderNilmDecisionFlow(signature, "signature_0");
       for (const expected of [
         'value="assign" selected',
         'value="label"',
@@ -4104,16 +4099,16 @@ def test_nilm_decision_render_contracts() -> None:
         assert.ok(html.includes(expected));
       }
       name = "test_nilm_workspace_does_not_duplicate_review_item_control_ids";
-      assert.equal((html.match(/id="nilm_label_0"/g) || []).length, 1);
-      assert.ok(!html.includes('id="nilm_merge_targets_0"'));
+      assert.equal((html.match(/id="nilm_label_signature_0"/g) || []).length, 1);
+      assert.ok(!html.includes('id="nilm_merge_targets_signature_0"'));
       panel._nilmDecisionDrafts.set(key, {
         ...panel._nilmDecisionDraft(signature),
         decision: "merge",
       });
-      const mergeHtml = panel._renderNilmDecisionFlow(signature, 0);
+      const mergeHtml = panel._renderNilmDecisionFlow(signature, "signature_0");
       assert.ok(mergeHtml.includes('data-selected="sig-2"'));
-      assert.equal((mergeHtml.match(/id="nilm_merge_targets_0"/g) || []).length, 1);
-      assert.ok(!mergeHtml.includes('id="nilm_label_0"'));
+      assert.equal((mergeHtml.match(/id="nilm_merge_targets_signature_0"/g) || []).length, 1);
+      assert.ok(!mergeHtml.includes('id="nilm_label_signature_0"'));
     }
 
     name = "test_nilm_identify_modes_rerender_only_their_relevant_fields";
@@ -4155,10 +4150,10 @@ def test_nilm_decision_render_contracts() -> None:
       assert.equal(typeof listeners.change, "function");
       panel._render = () => { rerenders += 1; };
       listeners.change();
-      const html = panel._renderNilmDecisionFlow(signature, 0);
+      const html = panel._renderNilmDecisionFlow(signature, "signature_0");
       assert.ok(html.includes('<fieldset class="decision-group nilm-decision-group"'));
       assert.ok(html.includes("<legend>"));
-      assert.ok(html.includes('id="nilm_label_0"'));
+      assert.ok(html.includes('id="nilm_label_signature_0"'));
       assert.equal(
         html.includes('data-nilm-existing-assignment="signature_0"'),
         mode === "assign",
@@ -5638,7 +5633,7 @@ def test_nilm_decision_action_contracts() -> None:
         callService: async (domain, service, data) => calls.push({ domain, service, data }),
       };
       panel.shadowRoot.querySelector = (selector) =>
-        selector === "#nilm_label_0" ? { value: "Dishwasher" } : null;
+        selector === "#nilm_label_signature_0" ? { value: "Dishwasher" } : null;
       const signature = {
         signature_id: "sig-1",
         actions: {
@@ -5651,7 +5646,7 @@ def test_nilm_decision_action_contracts() -> None:
       panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-1"];
       const key = panel._nilmDecisionDraftKey(signature);
       panel._nilmDecisionDrafts.set(key, { decision: "identify", identifyMode: "assign" });
-      await panel._applyNilmDecision(0);
+      await panel._applyNilmDecision("signature_0");
       assert.deepEqual(
         [calls.length, calls[0].service, calls[0].data.label, scrolled,
           panel._nilmDecisionDrafts.has(key)],
@@ -5669,7 +5664,7 @@ def test_nilm_decision_action_contracts() -> None:
       panel._renderAndScrollToTop = () => { scrolled += 1; };
       panel._hass = { callService: async () => { throw new Error("service failed"); } };
       panel.shadowRoot.querySelector = (selector) => {
-        if (selector === "#nilm_label_0") return { value: "Dishwasher" };
+        if (selector === "#nilm_label_signature_0") return { value: "Dishwasher" };
         if (selector.startsWith("[data-inline-feedback=")) {
           return { focus() { focused += 1; } };
         }
@@ -5685,11 +5680,11 @@ def test_nilm_decision_action_contracts() -> None:
       const key = panel._nilmDecisionDraftKey(signature);
       const draft = { decision: "identify", identifyMode: "label" };
       panel._nilmDecisionDrafts.set(key, draft);
-      await panel._applyNilmDecision(0);
+      await panel._applyNilmDecision("signature_0");
       assert.deepEqual(
         [panel._nilmDecisionDrafts.get(key), panel._inlineFeedback.scope,
           panel._inlineFeedback.kind, scrolled, focused],
-        [draft, key, "error", 0, 1],
+        [draft, "signature_0", "error", 0, 1],
       );
     }
 
@@ -5734,7 +5729,7 @@ def test_nilm_decision_action_contracts() -> None:
         assert.ok(!options.toggle);
         panel._nilmFocusedSignature = fingerprint;
       };
-      await panel._applyNilmDecision(0);
+      await panel._applyNilmDecision("signature_0");
       assert.deepEqual(
         [panel._nilmActiveLane, panel._nilmSelectedReviewKey, focused,
           panel._nilmDecisionDrafts.has(firstKey), panel._nilmDecisionDrafts.has(secondKey),
@@ -5772,9 +5767,7 @@ def test_nilm_decision_action_contracts() -> None:
       panel._nilmSelectedReviewKey = "signature:sig-a";
       panel._refreshNilmWorkspaceData = async () => { workspaceLoads += 1; return true; };
       panel._focusNilmSignatureOnGraph = async () => { graphFocus += 1; };
-      const operation = panel._callNilmAction(
-        0, "ignore", panel._nilmDecisionDraftKey(signature),
-      );
+      const operation = panel._callNilmAction(signature, "signature_0", "ignore");
       await Promise.resolve();
       assert.ok(panel._busyAction);
       context.window.location.search = "?circuit_id=mains-b";
@@ -5801,7 +5794,7 @@ def test_nilm_decision_action_contracts() -> None:
       panel._render = () => {};
       panel._hass = { callService: async () => {} };
       panel.shadowRoot.querySelector = (selector) =>
-        selector === "#nilm_label_0" ? { value: "Dishwasher" } : null;
+        selector === "#nilm_label_signature_0" ? { value: "Dishwasher" } : null;
       const signature = {
         signature_id: "sig-1",
         feedback_fingerprint: "fingerprint-1",
@@ -5817,7 +5810,7 @@ def test_nilm_decision_action_contracts() -> None:
         signature.user_label = "Dishwasher";
         return true;
       };
-      await panel._callNilmAction(0, "label", panel._nilmDecisionDraftKey(signature));
+      await panel._callNilmAction(signature, "signature_0", "label");
       const html = panel._renderNilmReviewLayout(panel._nilmWorkspace);
       for (const expected of [
         'data-inline-feedback="nilm-review"',
@@ -7083,7 +7076,7 @@ def test_nilm_interval_action_contracts() -> None:
       const publish = panel._callNilmWorkspaceItemAction("assignments", 0, "publish");
       const mutation = kind === "interval"
         ? panel._callNilmLabelIntervalAction(0, "delete")
-        : panel._callNilmAction(0, "ignore", "signature:signature-1");
+        : panel._callNilmAction(signature, "signature_0", "ignore");
       await new Promise((resolve) => setImmediate(resolve));
       assert.equal(requests.length, 1);
       requests[0](makeWorkspace({ assignments: [assignment] }));
