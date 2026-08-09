@@ -1689,6 +1689,16 @@ export class PanelShellMethods {
         });
       });
     }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-edit-focused-interval]")) {
+      button.addEventListener("click", () => {
+        if (this._editNilmFocusedInterval()) {
+          requestAnimationFrame(() => {
+            const chart = this.shadowRoot.querySelector("[data-nilm-chart-select]");
+            if (chart) chart.scrollIntoView({ block: "nearest" });
+          });
+        }
+      });
+    }
     for (const row of this.shadowRoot.querySelectorAll("[data-nilm-interval-row]")) {
       row.addEventListener("click", () => {
         this._selectNilmDraftInterval(Number.parseInt(row.dataset.nilmIntervalRow, 10));
