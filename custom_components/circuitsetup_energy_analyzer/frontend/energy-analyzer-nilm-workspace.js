@@ -34,14 +34,7 @@ export function createNilmWorkspaceMethods({
       this._nilmWorkspace = workspace;
       this._nilmSyncHelperSelection(workspace);
       await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
-      const routeUrl = new URL(routeKey, window.location.origin);
-      const sessionId = routeUrl.searchParams.get("session_id") || "";
-      const routedSession = sessionId && Array.isArray(workspace.sessions)
-        ? workspace.sessions.find((session) => session.session_id === sessionId)
-        : null;
-      if (routedSession) {
-        this._loadNilmSessionInterval(routedSession);
-      }
+      await this._focusNilmRouteTarget(workspace, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -2365,6 +2358,35 @@ export function createNilmWorkspaceMethods({
       .sort((left, right) => Date.parse(right.end) - Date.parse(left.end))[0] || null;
   }
 
+  async _focusNilmReviewItem(reviewItem, options = {}) {
+    if (!reviewItem) return false;
+    if (reviewItem.kind === "signature") {
+      const fingerprint = this._nilmSignatureFingerprint(reviewItem.item);
+      if (!fingerprint) return false;
+      await this._focusNilmSignatureOnGraph(fingerprint, { scroll: options.scroll === true, toggle: false });
+      return true;
+    }
+    if (reviewItem.kind === "session") {
+      return this._loadNilmSessionInterval(reviewItem.item);
+    }
+    const interval = reviewItem.kind === "assignment"
+      ? this._nilmAssignmentFocusInterval(reviewItem.item)
+      : reviewItem.item;
+    if (!interval || !interval.start || !interval.end) {
+      if (reviewItem.kind === "assignment") {
+        this._lastActionMessage = this._panelText("messages.no_completed_assignment_interval");
+      }
+      await this._loadNilmWorkspaceHistory();
+      this._render();
+      return false;
+    }
+    this._beginNilmGraphIntent();
+    this._nilmFocusedSignature = "";
+    this._nilmFocusedOccurrenceIndex = -1;
+    this._nilmFocusedInterval = null;
+    return this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: options.scroll !== false });
+  }
+
   _renderNilmSecondaryCollections(workspace) {
     const unassignedSessions = (Array.isArray(workspace.sessions) ? workspace.sessions : [])
       .map((item, index) => ({ ...item, workspace_index: index }))
@@ -2454,6 +2476,38 @@ export function createNilmWorkspaceMethods({
   _nilmSelectedReviewItem(workspace) {
     const items = this._nilmLaneItems(workspace);
     return items.find((item) => this._nilmReviewKey(item) === this._nilmSelectedReviewKey) || items[0] || null;
+  }
+
+  _selectNilmReviewItemForFocus(workspace, reviewItem) {
+    const key = this._nilmReviewKey(reviewItem);
+    const laneKey = Object.keys(workspace.lanes || {}).find((candidate) => (
+      this._nilmLaneItems(workspace, candidate).some((item) => (
+        this._nilmReviewKey(item) === key
+      ))
+    ));
+    if (laneKey) {
+      this._nilmActiveLane = laneKey;
+      this._nilmSelectedReviewKey = key;
+    }
+    this._nilmSyncHelperSelection(workspace);
+  }
+
+  async _focusNilmRouteTarget(workspace, routeKey) {
+    const params = new URL(routeKey, window.location.origin).searchParams;
+    const candidates = [
+      ["interval", "interval_id", workspace.label_intervals || [], "interval_id"],
+      ["session", "session_id", workspace.sessions || [], "session_id"],
+      ["assignment", "assignment_id", workspace.assignments || [], "assignment_id"],
+    ];
+    for (const [kind, parameter, items, idKey] of candidates) {
+      const id = params.get(parameter) || "";
+      const index = id ? items.findIndex((item) => item[idKey] === id) : -1;
+      if (index < 0) continue;
+      const reviewItem = { kind, item: items[index], index };
+      this._selectNilmReviewItemForFocus(workspace, reviewItem);
+      return this._focusNilmReviewItem(reviewItem, { scroll: false });
+    }
+    return false;
   }
 
   _nilmPowerPercent(reviewItem, reviewItems) {
