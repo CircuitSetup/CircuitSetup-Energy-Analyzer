@@ -11,9 +11,9 @@ interval evidence.
 
 The review lanes also suppress a signature review card when an unassigned
 auto-detected session refers to that signature.  The session card exposes only
-an appliance-assignment field, not the signature's Identify, Mark expected, or
-Ignore decisions.  This strands the detection in review without a complete
-decision path.
+an appliance-assignment field, not the signature's Identify, Ignore, or Merge
+decisions.  This strands the detection in review without a complete decision
+path.
 
 ## Goals
 
@@ -24,7 +24,9 @@ decision path.
    interval evidence identifies one safe, unambiguous signature.
 3. Give every auto-detected session that represents a signature access to that
    signature's full review decisions.
-4. Preserve manual control: automatic linking must never guess, replace a
+4. Remove the NILM Expected state and reopen every existing Expected item for
+   review.
+5. Preserve manual control: automatic linking must never guess, replace a
    different binding, or take a decision intended for a human reviewer.
 
 ## Definitions and states
@@ -93,6 +95,30 @@ This replaces the current ambiguous sentence.  Empty evidence and no signature
 will be stated plainly, and a configured appliance will never be labelled as
 unassigned merely because it lacks a signature.
 
+## Remove the NILM Expected state
+
+Expected is removed from NILM rather than hidden.  New NILM reviews will have
+no Expected decision, no Expected lane, no Expected signature or assignment
+state, no service dispatch, and no translation or renderer branch for it.
+
+During controller initialization, persisted NILM records that previously used
+Expected will be normalized before the workspace is served:
+
+1. An Expected signature becomes a new, unassigned signature.  Its retained
+   signature/model evidence remains intact; its `expected` marker and Expected
+   review state are cleared.
+2. The synthetic Expected assignment created solely to own that signature is
+   removed.  Its matching stored sessions are detached from that removed
+   assignment so they re-enter review with the signature.
+3. A malformed legacy Expected assignment with no surviving signature is also
+   removed.  A non-Expected assignment is never altered by this migration.
+4. The normalized state is saved once only when a record actually changed.
+
+The migration deliberately does not convert Expected to ignored/dismissed:
+every previously Expected signature returns to Needs Review, where the user
+can identify it, dismiss it, or merge it.  Requests for the removed service
+are not supported after this change.
+
 ## Auto-detection review workflow
 
 For every review-lane session with a resolvable signature fingerprint, the
@@ -105,7 +131,6 @@ It will render the signature decisions in that session context:
 
 - **Identify / assign** the signature to an appliance, including the configured
   primary;
-- **Mark expected**;
 - **Ignore** (the current dismissal equivalent); and
 - **Merge** where the signature supports it.
 
@@ -124,8 +149,9 @@ context the user was reviewing.
   malformed/missing session or signature records, and logs no false success.
 - Automatic linking changes no other appliance assignment and does not create a
   signature from a lone interval.
-- Existing explicit assignment, expected, ignore, merge, and interval-edit
-  endpoints retain their current authorization and persistence behavior.
+- Existing explicit assignment, ignore, merge, and interval-edit endpoints
+  retain their current authorization and persistence behavior; the Expected
+  endpoint is removed.
 - The frontend module version is bumped with the JavaScript change so Home
   Assistant clients receive the new UI.
 
@@ -143,7 +169,10 @@ Write failing regression tests before implementation that cover:
 4. A review-lane session that stands in for a signature exposes the signature
    decision target/actions, while a session with no resolvable signature does
    not.
-5. Existing explicit primary confirmation and review-decision behavior remains
+5. Legacy Expected signatures and their synthetic assignments normalize to new,
+   unassigned review data exactly once; Expected cannot appear in a new payload
+   or action set.
+6. Existing explicit primary confirmation and review-decision behavior remains
    covered by the focused NILM controller and panel tests.
 
 After implementation, run the focused regression tests, then the repository's
