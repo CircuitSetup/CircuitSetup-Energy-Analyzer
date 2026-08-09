@@ -7200,3 +7200,44 @@ async def test_nilm_workspace_history_falls_through_to_live_watts(
     assert requested_entity_ids == ["sensor.mixed_watts"]
     assert rows[0][0]["effective_role"] == "real_power"
     assert rows[0][0]["source_unit"] == "W"
+
+
+def test_nilm_inventory_keeps_raw_off_signature_as_diagnostic_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_signatures_for_circuit,
+    )
+
+    coordinator = SimpleNamespace(
+        store_data=SimpleNamespace(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": "on-1", "median_delta_w": 500.0},
+                    {"signature_id": "off-1", "median_delta_w": -500.0},
+                ]
+            }
+        ),
+        state=SimpleNamespace(
+            nilm_unknown_loads_by_circuit={
+                "mains": {
+                    "unknown_load_count": 1,
+                    "unknown_loads": [
+                        {
+                            "signature_id": "on-1",
+                            "component_id": "on-1",
+                            "off_signature_id": "off-1",
+                            "estimated_energy_today_kwh": 0.5,
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+
+    signatures = _nilm_signatures_for_circuit(coordinator, "mains")
+
+    assert [signature["signature_id"] for signature in signatures] == [
+        "on-1",
+        "off-1",
+    ]
+    assert signatures[0]["component_id"] == "on-1"
+    assert "component_id" not in signatures[1]

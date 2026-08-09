@@ -35,7 +35,11 @@ from ..nilm import (
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
-from ..unknown_loads import build_unknown_load_inventory
+from ..unknown_loads import (
+    build_unknown_load_inventory,
+    migrate_unknown_load_inventory,
+    unknown_load_inventory_needs_rebuild,
+)
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 type NilmEnabledPredicate = Callable[[CircuitConfig], bool]
@@ -323,33 +327,42 @@ class NilmSampleProcessor:
                 self._observe_topology(circuit_config, match, context),
             )
 
-        if edges or next_unmatched != existing_unmatched or helper_events_changed:
-            signatures = cluster_recurring_signatures(
-                self.unmatched_edges_by_circuit[circuit_id],
-            )
-            payloads = self._nilm_signature_payloads(
-                circuit_id,
-                signatures,
-                context,
-            )
-            if self._helper_links_dirty:
-                store_dirty = True
-                self._helper_links_dirty = False
-            if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
-                context.store_data.nilm_signatures[circuit_id] = payloads
-                store_dirty = True
-            inventory = build_unknown_load_inventory(
-                circuit_id=circuit_id,
-                signatures=signatures,
-                edges=self.unmatched_edges_by_circuit[circuit_id],
-                now=sample.timestamp,
-                existing_state=(
-                    context.store_data.nilm_unknown_loads_by_circuit.get(
-                        circuit_id,
-                        {},
-                    )
-                ),
-            )
+        existing_inventory = (
+            context.store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {})
+        )
+        inventory_stale = unknown_load_inventory_needs_rebuild(existing_inventory)
+        evidence_changed = bool(
+            edges or next_unmatched != existing_unmatched or helper_events_changed
+        )
+        if evidence_changed or inventory_stale:
+            if next_unmatched or evidence_changed:
+                signatures = cluster_recurring_signatures(
+                    self.unmatched_edges_by_circuit[circuit_id],
+                )
+                payloads = self._nilm_signature_payloads(
+                    circuit_id,
+                    signatures,
+                    context,
+                )
+                if self._helper_links_dirty:
+                    store_dirty = True
+                    self._helper_links_dirty = False
+                if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
+                    context.store_data.nilm_signatures[circuit_id] = payloads
+                    store_dirty = True
+                inventory = build_unknown_load_inventory(
+                    circuit_id=circuit_id,
+                    signatures=signatures,
+                    edges=self.unmatched_edges_by_circuit[circuit_id],
+                    now=sample.timestamp,
+                    existing_state=existing_inventory,
+                )
+            else:
+                inventory = migrate_unknown_load_inventory(
+                    circuit_id=circuit_id,
+                    existing_state=existing_inventory,
+                    signature_payloads=signature_specs,
+                )
             if inventory != context.store_data.nilm_unknown_loads_by_circuit.get(
                 circuit_id,
             ):
