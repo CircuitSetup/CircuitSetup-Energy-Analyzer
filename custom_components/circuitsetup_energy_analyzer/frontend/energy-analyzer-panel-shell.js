@@ -1635,30 +1635,11 @@ export class PanelShellMethods {
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-review-item]")) {
       button.addEventListener("click", () => {
         this._nilmSelectedReviewKey = button.dataset.nilmReviewItem;
-        const fingerprint = button.dataset.nilmSignatureFingerprint || "";
         this._nilmSyncHelperSelection(this._nilmWorkspace);
-        const selected = this._nilmSelectedReviewItem(this._nilmWorkspace);
-        if (selected && selected.kind === "assignment") {
-          this._beginNilmGraphIntent();
-          this._nilmFocusedSignature = "";
-          this._nilmFocusedOccurrenceIndex = -1;
-          this._nilmFocusedInterval = null;
-          const interval = this._nilmAssignmentFocusInterval(selected.item);
-          if (interval) {
-            this._lastActionMessage = "";
-            void this._loadNilmIntervalOnGraph(interval, { edit: false });
-          } else {
-            this._lastActionMessage = this._panelText("messages.no_completed_assignment_interval");
-            this._render();
-            void this._loadNilmWorkspaceHistory();
-          }
-          return;
-        }
-        if (fingerprint) {
-          void this._focusNilmSignatureOnGraph(fingerprint, { scroll: false, toggle: false });
-        } else {
-          void this._loadNilmWorkspaceHistory();
-        }
+        void this._focusNilmReviewItem(
+          this._nilmSelectedReviewItem(this._nilmWorkspace),
+          { scroll: false },
+        );
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-occurrence-step]")) {

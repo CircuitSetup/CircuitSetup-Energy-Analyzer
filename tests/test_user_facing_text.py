@@ -3689,10 +3689,18 @@ def test_nilm_lane_rendering_contracts() -> None:
       };
       panel.shadowRoot = shadow;
       if (item.loadsGraph) {
+        panel._nilmWorkspace = makeWorkspace({
+          signatures: [{
+            signature_id: "sig-1",
+            feedback_fingerprint: "fingerprint-1",
+          }],
+        });
+        panel._nilmWorkspace.lanes.needs_review.signature_ids = ["sig-1"];
         panel._focusNilmSignatureOnGraph = async () => {
           panel._render();
           await Promise.resolve();
           panel._render();
+          return true;
         };
       }
       panel._render();
