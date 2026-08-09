@@ -7956,6 +7956,44 @@ test("NILM valid graph focus clears a prior assignment failure message", async (
   await expect.poll(() => page.evaluate(() => window.__panel._lastActionMessage)).toBe("");
 });
 
+test("NILM session selection clears prior signature graph evidence", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: nilmGraphFocusHistoryFixture() });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    await route.fulfill({ json: nilmGraphFocusWorkspaceFixture(url.pathname) });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-review-item="signature:signature-1"]').click();
+  await panel.locator('[data-nilm-occurrence-step="-1"]').click();
+  const sessionBand = panel.locator(
+    '.nilm-session-band[data-nilm-session-start="2026-07-13T16:00:00Z"]',
+  );
+  await expect(sessionBand).toHaveAttribute("data-nilm-selected", "true");
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+
+  await sessionBand.dispatchEvent("click");
+
+  await expect.poll(() => page.evaluate(() => ({
+    focusedSignature: window.__panel._nilmFocusedSignature,
+    focusedOccurrenceIndex: window.__panel._nilmFocusedOccurrenceIndex,
+    focusedInterval: window.__panel._nilmFocusedInterval,
+  }))).toEqual({
+    focusedSignature: "",
+    focusedOccurrenceIndex: -1,
+    focusedInterval: {
+      start: Date.parse("2026-07-13T16:00:00Z"),
+      end: Date.parse("2026-07-13T16:30:00Z"),
+    },
+  });
+  await expect(panel.locator("[data-nilm-occurrence-controls]")).toHaveCount(0);
+  await expect(panel.locator(".nilm-edge-marker")).toHaveCount(0);
+});
+
 test("NILM signature review focus reports missing graph targets", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
