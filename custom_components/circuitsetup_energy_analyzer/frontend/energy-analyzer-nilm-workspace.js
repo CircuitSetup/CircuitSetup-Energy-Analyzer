@@ -1417,11 +1417,6 @@ export function createNilmWorkspaceMethods({
     const padding = Math.max(5 * 60 * 1000, (end - start) * 0.2);
     const targetWindow = { start: start - padding, end: end + padding };
     if (options.edit) this._setNilmIntervalDraft(interval, options.assignment);
-    if (options.clearSignature) {
-      this._nilmFocusedSignature = "";
-      this._nilmFocusedOccurrenceIndex = -1;
-      this._nilmFocusedInterval = null;
-    }
     const history = this._nilmWorkspace && this._nilmWorkspace.history;
     if (!history || !history.api_path) {
       if (options.edit) this._render();
@@ -1429,6 +1424,11 @@ export function createNilmWorkspaceMethods({
     }
     const loaded = await this._loadNilmWorkspaceHistoryForWindow(targetWindow);
     if (loaded !== true || !this._isCurrentNilmGraphIntent(intentToken)) return false;
+    if (options.clearSignature) {
+      this._nilmFocusedSignature = "";
+      this._nilmFocusedOccurrenceIndex = -1;
+      this._nilmFocusedInterval = null;
+    }
     this._nilmGraphWindow = targetWindow;
     this._nilmFocusedInterval = { start, end };
     this._render();
