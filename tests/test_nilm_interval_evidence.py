@@ -137,3 +137,209 @@ def test_short_interval_context_windows_are_bounded_without_overlap() -> None:
     end = BASE + timedelta(seconds=20)
 
     assert context_window_seconds(start, end) == 5
+
+
+def test_transition_direction_must_match_the_selected_boundary() -> None:
+    reversed_edges = derive_manual_interval_evidence(
+        [
+            sample(-20, 700),
+            sample(0, 200),
+            sample(30, 200),
+            sample(100, 200),
+            sample(130, 700),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert reversed_edges.start_transition_eligible is False
+    assert reversed_edges.stop_transition_eligible is False
+
+
+def test_selection_after_start_does_not_fabricate_a_start_transition() -> None:
+    evidence = derive_manual_interval_evidence(
+        [sample(-20, 700), sample(0, 700), sample(30, 700)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert evidence.start_transition_w == 0
+    assert evidence.start_transition_eligible is False
+
+
+def test_selection_before_stop_does_not_fabricate_a_stop_transition() -> None:
+    evidence = derive_manual_interval_evidence(
+        [sample(0, 700), sample(100, 700), sample(130, 700)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert evidence.stop_transition_w == 0
+    assert evidence.stop_transition_eligible is False
+
+
+def test_synchronous_legs_sum_their_independent_boundary_deltas() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.a"),
+            NilmPowerSample(BASE, 350, "sensor.a"),
+            NilmPowerSample(BASE + timedelta(seconds=30), 350, "sensor.a"),
+            NilmPowerSample(BASE + timedelta(seconds=100), 350, "sensor.a"),
+            NilmPowerSample(BASE + timedelta(seconds=130), 100, "sensor.a"),
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.b"),
+            NilmPowerSample(BASE, 350, "sensor.b"),
+            NilmPowerSample(BASE + timedelta(seconds=30), 350, "sensor.b"),
+            NilmPowerSample(BASE + timedelta(seconds=100), 350, "sensor.b"),
+            NilmPowerSample(BASE + timedelta(seconds=130), 100, "sensor.b"),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+        source_entity_ids=("sensor.a", "sensor.b"),
+    )
+
+    assert evidence.start_transition_w == 500
+    assert evidence.stop_transition_w == -500
+
+
+def test_boundary_source_skew_is_accepted_below_limit_and_rejected_above() -> None:
+    accepted = derive_manual_interval_evidence(
+        [
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.a"),
+            NilmPowerSample(BASE, 350, "sensor.a"),
+            NilmPowerSample(BASE - timedelta(seconds=10), 100, "sensor.b"),
+            NilmPowerSample(BASE + timedelta(seconds=5), 350, "sensor.b"),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+        source_entity_ids=("sensor.a", "sensor.b"),
+    )
+    rejected = derive_manual_interval_evidence(
+        [
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.a"),
+            NilmPowerSample(BASE, 350, "sensor.a"),
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.b"),
+            NilmPowerSample(BASE + timedelta(seconds=16), 350, "sensor.b"),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+        source_entity_ids=("sensor.a", "sensor.b"),
+    )
+
+    assert accepted.start_transition_eligible is True
+    assert rejected.start_transition_eligible is False
+
+
+def test_unavailable_leg_at_boundary_makes_that_transition_ineligible() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.a"),
+            NilmPowerSample(BASE, 350, "sensor.a"),
+            NilmPowerSample(BASE - timedelta(seconds=20), 100, "sensor.b"),
+            NilmPowerSample(BASE, None, "sensor.b", "unavailable"),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+        source_entity_ids=("sensor.a", "sensor.b"),
+    )
+
+    assert evidence.start_transition_eligible is False
+
+
+def test_drifting_baseline_is_interpolated_from_plateau_and_energy() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            sample(-20, 200),
+            sample(0, 700),
+            sample(30, 725),
+            sample(60, 750),
+            sample(90, 775),
+            sample(120, 800),
+            sample(130, 300),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert evidence.net_plateau_power_w == 500
+    assert evidence.average_power_w == 500
+
+
+def test_negative_net_power_blocks_complete_energy() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            sample(-20, 200),
+            sample(0, 100),
+            sample(30, 100),
+            sample(60, 100),
+            sample(130, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert "material_negative_net_power" in evidence.quality_flags
+    assert evidence.energy_complete is False
+
+
+def test_transition_threshold_is_inclusive_at_the_materiality_boundary() -> None:
+    below = derive_manual_interval_evidence(
+        [sample(-20, 200), sample(0, 249), sample(30, 249)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+    at = derive_manual_interval_evidence(
+        [sample(-20, 200), sample(0, 250), sample(30, 250)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert below.start_transition_eligible is False
+    assert at.start_transition_eligible is True
+
+
+def test_context_size_grows_for_slower_observed_cadence_without_overlap() -> None:
+    start = BASE
+    end = BASE + timedelta(seconds=200)
+
+    assert context_window_seconds(start, end, observed_cadence_seconds=20) == 40
+
+
+def test_neither_boundary_can_be_eligible_while_interval_remains_reviewable() -> None:
+    evidence = derive_manual_interval_evidence(
+        [sample(0, 700), sample(30, 700), sample(60, 700), sample(90, 700)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert evidence.start_transition_eligible is False
+    assert evidence.stop_transition_eligible is False
+    assert evidence.source_coverage == 1.0
+
+
+def test_interior_residual_diagnostics_exclude_boundary_steps() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            sample(-30, 200),
+            sample(0, 700),
+            sample(30, 700),
+            sample(60, 1600),
+            sample(90, 700),
+            sample(150, 700),
+            sample(190, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=180),
+    )
+
+    assert evidence.interior_transition_count == 2
+    assert evidence.largest_interior_transition_w == 900
+
+
+def test_longest_gap_includes_uncovered_interval_edges() -> None:
+    evidence = derive_manual_interval_evidence(
+        [sample(-20, 200), sample(30, 700), sample(90, 700), sample(130, 200)],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert evidence.longest_power_gap_seconds == 30

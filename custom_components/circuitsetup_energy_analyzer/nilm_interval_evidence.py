@@ -23,6 +23,9 @@ class NilmEvidenceThresholds:
     freshness_cadence_multiplier: float = 3.0
     complete_energy_coverage: float = 0.95
     numerical_noise_w: float = 2.0
+    minimum_boundary_coverage: float = 0.75
+    maximum_boundary_spread_w: float = 100.0
+    maximum_boundary_gap_seconds: float = 60.0
 
 
 DEFAULT_THRESHOLDS = NilmEvidenceThresholds()
@@ -69,6 +72,8 @@ class NilmIntervalEvidence:
     energy_complete: bool
     evidence_confidence: float
     power_confidence: float
+    interior_transition_count: int
+    largest_interior_transition_w: float | None
     quality_flags: tuple[str, ...]
 
 
@@ -169,12 +174,14 @@ def context_window_seconds(
     start: datetime,
     end: datetime,
     thresholds: NilmEvidenceThresholds = DEFAULT_THRESHOLDS,
+    observed_cadence_seconds: float | None = None,
 ) -> float:
     """Return a bounded side window that leaves at least 20% interior context."""
     duration = max(0.0, (end - start).total_seconds())
     requested = max(
         thresholds.minimum_context_seconds,
         duration * thresholds.context_interval_fraction,
+        (observed_cadence_seconds or 0.0) * 2,
     )
     return min(thresholds.maximum_context_seconds, requested, duration / 4)
 
@@ -190,10 +197,12 @@ def derive_manual_interval_evidence(
     """Extract independent boundary, plateau, and coverage evidence for an interval."""
     if end <= start:
         raise ValueError("end must be after start")
+    normalized = normalize_power_samples(samples)
     points = aggregate_power_samples(
-        samples, source_entity_ids=source_entity_ids, thresholds=thresholds
+        normalized, source_entity_ids=source_entity_ids, thresholds=thresholds
     )
-    window = context_window_seconds(start, end, thresholds)
+    observed_cadence = _cadence(normalized)
+    window = context_window_seconds(start, end, thresholds, observed_cadence)
     pre = _points_between(points, _offset(start, -window), start, end_inclusive=False)
     early = _points_between(points, start, _offset(start, window))
     late = _points_between(points, _offset(end, -window), end, end_inclusive=False)
@@ -203,17 +212,52 @@ def derive_manual_interval_evidence(
     pre_power, early_power, late_power, post_power = (
         _robust_power(group) for group in (pre, early, late, post)
     )
-    start_delta = _difference(early_power, pre_power)
-    stop_delta = _difference(post_power, late_power)
+    sources = tuple(
+        source_entity_ids
+        or tuple(sorted({sample.source_entity_id for sample in normalized}))
+    )
+    by_source = {
+        source: tuple(
+            sample for sample in normalized if sample.source_entity_id == source
+        )
+        for source in sources
+    }
+    start_delta, start_reliable = _boundary_delta(
+        by_source,
+        _offset(start, -window),
+        start,
+        start,
+        _offset(start, window),
+        thresholds,
+        after_start_inclusive=True,
+    )
+    stop_delta, stop_reliable = _boundary_delta(
+        by_source,
+        _offset(end, -window),
+        end,
+        end,
+        _offset(end, window),
+        thresholds,
+        after_start_inclusive=False,
+    )
     flags: set[str] = set()
-    start_ok = _eligible(start_delta, pre, early, thresholds)
-    stop_ok = _eligible(stop_delta, late, post, thresholds)
+    start_ok = start_reliable and _eligible_start(start_delta, thresholds)
+    stop_ok = stop_reliable and _eligible_stop(stop_delta, thresholds)
     if not start_ok:
         flags.add("start_transition_ineligible")
     if not stop_ok:
         flags.add("stop_transition_ineligible")
     interior = _points_between(points, _offset(start, window), _offset(end, -window))
-    changes = _material_changes(interior, thresholds.minimum_transition_w)
+    net_points = _net_points(
+        _points_between(points, start, end), start, end, pre_power, post_power
+    )
+    interior_net_points = _net_points(interior, start, end, pre_power, post_power)
+    changes = _material_changes_net(
+        net_points,
+        thresholds.minimum_transition_w,
+        start=_offset(start, window),
+        end=_offset(end, -window),
+    )
     if changes:
         flags.add("interior_transition_present")
     if len(changes) > 1:
@@ -223,16 +267,16 @@ def derive_manual_interval_evidence(
         flags.add("baseline_unavailable")
     elif pre_power is None or post_power is None:
         flags.add("one_sided_baseline")
-    net_points = _net_points(
-        _points_between(points, start, end), start, end, pre_power, post_power
-    )
     partial_energy, coverage, longest_gap, average = _integrate(net_points, start, end)
     net_values = [power for _, power in net_points if power is not None]
     if any(power < -thresholds.numerical_noise_w for power in net_values):
         flags.add("material_negative_net_power")
     if coverage < thresholds.complete_energy_coverage:
         flags.add("incomplete_power_coverage")
-    plateau = median(net_values) if net_values and baseline is not None else None
+    interior_values = [power for _, power in interior_net_points if power is not None]
+    plateau = (
+        median(interior_values) if interior_values and baseline is not None else None
+    )
     plateau_ok = (
         plateau is not None
         and coverage > 0
@@ -261,7 +305,7 @@ def derive_manual_interval_evidence(
             1.0,
             coverage
             * source_coverage
-            * (0.7 if changes else 1.0)
+            * max(0.4, 1.0 - 0.15 * len(changes))
             * (0.8 if baseline is None else 1.0),
         ),
     )
@@ -286,6 +330,8 @@ def derive_manual_interval_evidence(
         complete,
         confidence,
         coverage,
+        len(changes),
+        max((abs(change) for change in changes), default=None),
         tuple(sorted(flags)),
     )
 
@@ -345,17 +391,117 @@ def _difference(after: float | None, before: float | None) -> float | None:
     return None if after is None or before is None else after - before
 
 
-def _eligible(
-    delta: float | None,
-    before: Sequence[NilmAggregatePoint],
-    after: Sequence[NilmAggregatePoint],
+@dataclass(frozen=True)
+class _WindowStats:
+    power_w: float | None
+    spread_w: float | None
+    coverage: float
+    representative_timestamp: datetime | None
+    last_timestamp: datetime | None
+    first_timestamp: datetime | None
+
+
+def _boundary_delta(
+    by_source: dict[str, Sequence[NilmPowerSample]],
+    before_start: datetime,
+    boundary: datetime,
+    after_start: datetime,
+    after_end: datetime,
     thresholds: NilmEvidenceThresholds,
+    *,
+    after_start_inclusive: bool,
+) -> tuple[float | None, bool]:
+    deltas: list[float] = []
+    before_times: list[datetime] = []
+    after_times: list[datetime] = []
+    for series in by_source.values():
+        before = _window_stats(series, before_start, boundary, end_inclusive=False)
+        after = _window_stats(
+            series,
+            after_start,
+            after_end,
+            start_inclusive=after_start_inclusive,
+        )
+        if not _reliable_boundary_windows(before, after, thresholds):
+            return None, False
+        assert before.power_w is not None and after.power_w is not None
+        assert before.last_timestamp is not None and after.first_timestamp is not None
+        assert before.representative_timestamp is not None
+        assert after.representative_timestamp is not None
+        deltas.append(after.power_w - before.power_w)
+        before_times.append(before.representative_timestamp)
+        after_times.append(after.representative_timestamp)
+        if (
+            after.first_timestamp - before.last_timestamp
+        ).total_seconds() > thresholds.maximum_boundary_gap_seconds:
+            return None, False
+    compatible = (
+        _timestamp_spread(before_times) <= thresholds.maximum_source_skew_seconds
+    )
+    compatible &= (
+        _timestamp_spread(after_times) <= thresholds.maximum_source_skew_seconds
+    )
+    return (sum(deltas), compatible) if compatible else (None, False)
+
+
+def _window_stats(
+    series: Sequence[NilmPowerSample],
+    start: datetime,
+    end: datetime,
+    *,
+    start_inclusive: bool = True,
+    end_inclusive: bool = True,
+) -> _WindowStats:
+    selected = [
+        sample
+        for sample in series
+        if (sample.timestamp >= start if start_inclusive else sample.timestamp > start)
+        and (sample.timestamp <= end if end_inclusive else sample.timestamp < end)
+    ]
+    usable = [
+        sample
+        for sample in selected
+        if sample.value_w is not None and sample.quality == "valid"
+    ]
+    if not selected or not usable:
+        return _WindowStats(None, None, 0.0, None, None, None)
+    values = [sample.value_w for sample in usable if sample.value_w is not None]
+    timestamps = sorted(sample.timestamp for sample in usable)
+    return _WindowStats(
+        median(values),
+        max(values) - min(values),
+        len(usable) / len(selected),
+        timestamps[len(timestamps) // 2],
+        max(timestamps),
+        min(timestamps),
+    )
+
+
+def _reliable_boundary_windows(
+    before: _WindowStats, after: _WindowStats, thresholds: NilmEvidenceThresholds
 ) -> bool:
     return (
-        delta is not None
-        and abs(delta) >= thresholds.minimum_transition_w
-        and all(p.power_w is not None for p in (*before, *after))
+        before.power_w is not None
+        and after.power_w is not None
+        and before.coverage >= thresholds.minimum_boundary_coverage
+        and after.coverage >= thresholds.minimum_boundary_coverage
+        and (before.spread_w or 0.0) <= thresholds.maximum_boundary_spread_w
+        and (after.spread_w or 0.0) <= thresholds.maximum_boundary_spread_w
     )
+
+
+def _eligible_start(delta: float | None, thresholds: NilmEvidenceThresholds) -> bool:
+    return delta is not None and delta >= thresholds.minimum_transition_w
+
+
+def _eligible_stop(delta: float | None, thresholds: NilmEvidenceThresholds) -> bool:
+    return delta is not None and delta <= -thresholds.minimum_transition_w
+
+
+def _timestamp_spread(timestamps: Sequence[datetime]) -> float:
+    if not timestamps:
+        return float("inf")
+    return (max(timestamps) - min(timestamps)).total_seconds()
 
 
 def _material_changes(
@@ -367,6 +513,25 @@ def _material_changes(
         if a.power_w is not None
         and b.power_w is not None
         and abs(b.power_w - a.power_w) >= threshold
+    ]
+
+
+def _material_changes_net(
+    points: Sequence[tuple[datetime, float | None]],
+    threshold: float,
+    *,
+    start: datetime,
+    end: datetime,
+) -> list[float]:
+    return [
+        right_power - left_power
+        for (_, left_power), (right_time, right_power) in zip(
+            points, points[1:], strict=False
+        )
+        if left_power is not None
+        and right_power is not None
+        and start <= right_time <= end
+        and abs(right_power - left_power) >= threshold
     ]
 
 
@@ -410,6 +575,11 @@ def _integrate(
     covered = 0.0
     energy_ws = 0.0
     longest_gap = 0.0
+    if not points:
+        return None, 0.0, duration or None, None
+    longest_gap = max(
+        (points[0][0] - start).total_seconds(), (end - points[-1][0]).total_seconds()
+    )
     gap_start: datetime | None = None
     for (left_time, left_power), (right_time, right_power) in zip(
         points, points[1:], strict=False
