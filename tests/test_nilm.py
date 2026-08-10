@@ -95,7 +95,7 @@ def test_assignment_model_falls_back_to_one_legacy_manual_label_interval() -> No
     ]
     assert model["transition_prototypes"][0]["sample_count"] == 1
     assert "delta_var" not in model["transition_prototypes"][0]
-    assert model["model_confidence"] == 0.3
+    assert model["model_confidence"] == 0.083
 
 
 def test_assignment_model_reviewed_session_transitions_outrank_legacy_intervals(
@@ -358,6 +358,28 @@ def test_assignment_model_keeps_reviewed_session_transition_behavior() -> None:
         -80.0,
     ]
     assert model["model_confidence"] == 0.3
+
+
+def test_assignment_model_caps_confidence_for_multiple_legacy_intervals() -> None:
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": ["legacy-1", "legacy-2", "legacy-3"],
+        },
+        [],
+        label_intervals=[
+            {
+                "interval_id": interval_id,
+                "assignment_id": "pump",
+                "observed_transition_w": 84.0,
+                "confidence": 1.0,
+            }
+            for interval_id in ("legacy-1", "legacy-2", "legacy-3")
+        ],
+    )
+
+    assert model["transition_prototypes"][0]["sample_count"] == 3
+    assert model["model_confidence"] == 0.25
 
 
 def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:

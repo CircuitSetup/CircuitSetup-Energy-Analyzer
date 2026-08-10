@@ -23,6 +23,8 @@ from .models import (
 )
 from .nilm_interval_evidence import DEFAULT_THRESHOLDS
 
+_LEGACY_INTERVAL_CONFIDENCE_CAP = 0.25
+
 
 def build_nilm_assignment_model(
     assignment: Mapping[str, Any],
@@ -137,7 +139,10 @@ def build_nilm_assignment_model(
                 "off": -observed_transition_w,
                 "on_var": None,
                 "off_var": None,
-                "confidence": _model_number(interval.get("confidence")) or 0.0,
+                "confidence": min(
+                    _model_number(interval.get("confidence")) or 0.0,
+                    _LEGACY_INTERVAL_CONFIDENCE_CAP,
+                ),
                 "plateau": None,
             }
             for interval, observed_transition_w in legacy_intervals
