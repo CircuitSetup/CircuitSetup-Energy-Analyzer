@@ -75,3 +75,38 @@ def test_coordinator_exposes_processor_runtime_learning_maturity() -> None:
         coordinator.circuit_configs[0],
         now,
     )
+
+
+def test_power_transition_does_not_advance_lifecycle_learning() -> None:
+    now = datetime(2026, 7, 2, 12, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(days=8),
+                circuit_id="fridge",
+                event_type=EventType.POWER_TRANSITION,
+                features={"transition_delta_w": 400.0},
+            )
+        ]
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    assert not coordinator.processor_runtime.learning_mature(
+        coordinator.circuit_configs[0],
+        now,
+    )

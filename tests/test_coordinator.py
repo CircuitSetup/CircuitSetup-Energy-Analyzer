@@ -1295,6 +1295,26 @@ def test_process_events_into_state_tracks_latest_event_per_circuit() -> None:
     }
 
 
+def test_power_transition_does_not_replace_lifecycle_last_event() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+        process_events_into_state,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    start = CircuitEvent(timestamp=now, circuit_id="fridge", event_type=EventType.START)
+    step = CircuitEvent(
+        timestamp=now + timedelta(minutes=2),
+        circuit_id="fridge",
+        event_type=EventType.POWER_TRANSITION,
+        features={"transition_delta_w": 400.0},
+    )
+
+    state = process_events_into_state(AnalyzerState(), [start, step], [])
+
+    assert state.last_event_by_circuit["fridge"] is start
+
+
 def test_process_events_into_state_uses_strongest_absolute_alert_change_ratio() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,

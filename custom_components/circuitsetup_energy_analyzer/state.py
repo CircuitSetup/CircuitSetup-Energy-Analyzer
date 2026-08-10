@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .alerting import alert_anomaly_score
-from .models import AlertEvidence, CircuitEvent
+from .models import AlertEvidence, CircuitEvent, EventType
 
 
 @dataclass(slots=True)
@@ -278,6 +278,8 @@ def process_events_into_state(
 ) -> AnalyzerState:
     """Fold newly detected events and alerts into analyzer runtime state."""
     for event in events:
+        if event.event_type is EventType.POWER_TRANSITION:
+            continue
         previous = state.last_event_by_circuit.get(event.circuit_id)
         if previous is None or event.timestamp >= previous.timestamp:
             state.last_event_by_circuit[event.circuit_id] = event

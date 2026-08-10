@@ -91,6 +91,7 @@ class EventType(StrEnum):
 
     START = "start"
     STOP = "stop"
+    POWER_TRANSITION = "power_transition"
     STEADY_WINDOW = "steady_window"
     VOLTAGE_SAG = "voltage_sag"
     VOLTAGE_SWELL = "voltage_swell"

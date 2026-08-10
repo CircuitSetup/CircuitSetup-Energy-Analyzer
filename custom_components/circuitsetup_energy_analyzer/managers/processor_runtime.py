@@ -152,6 +152,7 @@ class ProcessorRuntimeManager:
                 self._coordinator.store_data.events if events is None else events
             )
             if event.circuit_id == config.circuit_id
+            and event.event_type in {EventType.START, EventType.STOP}
             and (
                 learning_started_at is None
                 or event.timestamp >= learning_started_at

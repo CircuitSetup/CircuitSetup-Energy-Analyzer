@@ -42,6 +42,10 @@ _OPERATING_LEARNING_SAMPLE_LIMIT = 512
 _OPERATING_LEARNING_MIN_SAMPLES = 3
 _TRANSITION_CONTEXT_SAMPLE_LIMIT = 12
 _TRANSITION_CONTEXT_MAX_AGE_SECONDS = 60.0
+_RUNNING_STEP_MATERIAL_FLOOR_W = 100.0
+_RUNNING_STEP_POST_SAMPLE_COUNT = 3
+_RUNNING_STEP_MAX_POST_SPREAD_W = 25.0
+_RUNNING_STEP_COOLDOWN_SECONDS = 60.0
 
 _GENERIC_PROFILE = {
     "on_threshold_w": 80.0,
@@ -534,6 +538,11 @@ class OperatingStateMachine:
         self._pending_transition_post: deque[_TransitionSample] = deque(
             maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
         )
+        self._pending_running_step_pre: tuple[_TransitionSample, ...] = ()
+        self._pending_running_step_post: deque[_TransitionSample] = deque(
+            maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
+        )
+        self._last_running_step_at: datetime | None = None
         self._run_idle_upper_w: float | None = None
         self._run_idle_sample_count = 0
         self._nominal_voltage: float | None = None
@@ -578,6 +587,17 @@ class OperatingStateMachine:
             result = self._process_from_off(sample, watts)
         else:
             result = self._process_from_running(sample, watts)
+
+        if (
+            self._state is OperatingState.RUNNING
+            and self._stable_state is OperatingState.RUNNING
+        ):
+            step_event = self._detect_running_power_step(sample, watts)
+            if step_event is not None:
+                result = OperatingDetectionResult(
+                    snapshot=result.snapshot,
+                    events=(*result.events, step_event),
+                )
 
         if (
             self._stable_state is OperatingState.RUNNING
@@ -931,6 +951,76 @@ class OperatingStateMachine:
         self._off_transition_context.clear()
         self._running_transition_context.clear()
         self._clear_pending_transition()
+        self._clear_pending_running_step()
+
+    def _detect_running_power_step(
+        self,
+        sample: NormalizedCircuitSample,
+        watts: float,
+    ) -> CircuitEvent | None:
+        if self._pending_running_step_pre:
+            self._append_running_step_post(sample.timestamp, watts)
+            post = tuple(self._pending_running_step_post)
+            if len(post) < _RUNNING_STEP_POST_SAMPLE_COUNT:
+                return None
+            features = _transition_features(
+                self._pending_running_step_pre,
+                post,
+                transition_timestamp=post[0].timestamp,
+            )
+            spread = float(features.get("post_power_spread_w", math.inf))
+            delta = _finite_or_none(features.get("transition_delta_w"))
+            if (
+                delta is None
+                or abs(delta) < _RUNNING_STEP_MATERIAL_FLOOR_W
+                or spread > _RUNNING_STEP_MAX_POST_SPREAD_W
+            ):
+                return None
+            event_timestamp = post[0].timestamp
+            self._last_running_step_at = event_timestamp
+            self._clear_pending_running_step()
+            features.update(
+                {
+                    "transition_kind": "step",
+                    "lifecycle_state_before": OperatingState.RUNNING.value,
+                    "lifecycle_state_after": OperatingState.RUNNING.value,
+                }
+            )
+            return CircuitEvent(
+                timestamp=event_timestamp,
+                circuit_id=sample.circuit_id,
+                event_type=EventType.POWER_TRANSITION,
+                features=features,
+            )
+
+        if not self._running_step_cooldown_elapsed(sample.timestamp):
+            return None
+        pre = tuple(self._running_transition_context)[:-1]
+        if len(pre) < 2:
+            return None
+        pre_median = float(median([item.power_w for item in pre]))
+        if abs(watts - pre_median) < _RUNNING_STEP_MATERIAL_FLOOR_W:
+            return None
+        self._pending_running_step_pre = pre
+        self._pending_running_step_post.append(
+            _TransitionSample(timestamp=sample.timestamp, power_w=watts)
+        )
+        return None
+
+    def _append_running_step_post(self, timestamp: datetime, watts: float) -> None:
+        self._prune_transition_buffer(self._pending_running_step_post, timestamp)
+        self._pending_running_step_post.append(
+            _TransitionSample(timestamp=timestamp, power_w=watts)
+        )
+
+    def _running_step_cooldown_elapsed(self, timestamp: datetime) -> bool:
+        return self._last_running_step_at is None or (
+            timestamp - self._last_running_step_at
+        ).total_seconds() >= _RUNNING_STEP_COOLDOWN_SECONDS
+
+    def _clear_pending_running_step(self) -> None:
+        self._pending_running_step_pre = ()
+        self._pending_running_step_post.clear()
 
     def _clear_learning_state(self) -> None:
         self._stable_off_power_w.clear()

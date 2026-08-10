@@ -334,6 +334,135 @@ def test_operating_state_machine_ignores_short_below_threshold_dip() -> None:
     assert stopped.events[0].features[OPERATING_RUNNING_SAMPLE_COUNT] == 6
 
 
+@pytest.mark.parametrize(
+    ("before_w", "after_w", "expected_delta_w"),
+    ((500.0, 900.0, 400.0), (900.0, 500.0, -400.0)),
+)
+def test_running_power_step_emits_confirmed_transition_evidence(
+    before_w: float,
+    after_w: float,
+    expected_delta_w: float,
+) -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, before_w),
+        (15, before_w),
+        (20, before_w),
+        (25, before_w),
+        (30, after_w),
+        (35, after_w),
+        (40, after_w),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    transition = transitions[0]
+    assert transition.timestamp == _sample(30, after_w, circuit_id="fridge").timestamp
+    assert transition.features["transition_delta_w"] == expected_delta_w
+    assert transition.features["pre_power_median_w"] == before_w
+    assert transition.features["post_power_median_w"] == after_w
+    assert transition.features["pre_power_spread_w"] == 0.0
+    assert transition.features["post_power_spread_w"] == 0.0
+    assert transition.features["transition_kind"] == "step"
+    assert transition.features["lifecycle_state_before"] == "running"
+    assert transition.features["lifecycle_state_after"] == "running"
+    assert transition.features["transition_evidence_version"] == 1
+    assert transition.features["transition_quality"] == "measured"
+
+
+def test_running_power_steps_do_not_duplicate_lifecycle_events_or_cycles() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 900.0),
+        (40, 900.0),
+        (50, 5.0),
+        (70, 5.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert [event.event_type for event in events] == [
+        EventType.START,
+        EventType.POWER_TRANSITION,
+        EventType.STOP,
+    ]
+    summary = summarize_circuit_cycles(
+        events,
+        circuit_id="fridge",
+        now=_sample(70, 5.0, circuit_id="fridge").timestamp,
+        merge_gap_seconds=60.0,
+    )
+    assert summary.completed_cycle_count == 1
+
+
+def test_running_power_step_ignores_short_spikes_and_unsettled_ramps() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 500.0),
+        (40, 550.0),
+        (45, 600.0),
+        (50, 650.0),
+        (55, 700.0),
+        (60, 750.0),
+        (65, 800.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_running_power_step_cooldown_prevents_duplicate_plateau_events() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 900.0),
+        (40, 900.0),
+        (45, 900.0),
+        (50, 900.0),
+        (55, 900.0),
+        (60, 900.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert [event.event_type for event in events].count(EventType.POWER_TRANSITION) == 1
+
+
 def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         OperatingDetectionProfile,
