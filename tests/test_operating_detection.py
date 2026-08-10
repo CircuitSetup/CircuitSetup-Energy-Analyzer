@@ -870,8 +870,8 @@ def test_confirmed_start_includes_synchronized_transition_evidence() -> None:
     assert start.features["transition_quality"] == "measured"
     assert start.features["transition_timestamp"] == "2026-06-18T12:00:05+00:00"
     assert start.features["transition_window_start"] == "2026-06-18T12:00:00+00:00"
-    assert start.features["transition_window_end"] == "2026-06-18T12:00:15+00:00"
-    assert start.features["transition_timing_uncertainty_s"] == 15.0
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:05+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 5.0
     json.dumps(dict(start.features), allow_nan=False)
 
 
@@ -886,6 +886,27 @@ def test_confirmed_start_uses_post_plateau_median_not_confirmation_power() -> No
     assert start.features["post_plateau_power_w"] == 122.0
     assert start.features["post_power_median_w"] == 122.0
     assert start.features["transition_delta_w"] == 102.0
+
+
+def test_transition_features_use_plateau_medians_and_adjacent_boundaries() -> None:
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 22.0, circuit_id="fridge"))
+    machine.process(_sample(10, 18.0, circuit_id="fridge"))
+    machine.process(_sample(15, 145.0, circuit_id="fridge"))
+    machine.process(_sample(20, 118.0, circuit_id="fridge"))
+    start = machine.process(_sample(25, 122.0, circuit_id="fridge")).events[0]
+
+    assert start.features["pre_power_median_w"] == 20.0
+    assert start.features["post_power_median_w"] == 122.0
+    assert start.features["transition_delta_w"] == 102.0
+    assert start.features["transition_window_start"] == "2026-06-18T12:00:10+00:00"
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:15+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 5.0
+    assert start.features["pre_sample_count"] == 3
+    assert start.features["post_sample_count"] == 3
+    assert start.features["transition_pre_sample_count"] == 3
+    assert start.features["transition_post_sample_count"] == 3
 
 
 def test_confirmed_stop_includes_signed_transition_evidence() -> None:
@@ -1004,7 +1025,7 @@ def test_pending_transition_post_samples_remain_bounded_and_age_pruned() -> None
 
     assert start.features["post_sample_count"] == 12
     assert start.features["post_power_median_w"] == 120.0
-    assert start.features["transition_window_end"] == "2026-06-18T12:01:41+00:00"
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:46+00:00"
 
 
 def test_pending_transition_post_window_excludes_samples_older_than_sixty_seconds(

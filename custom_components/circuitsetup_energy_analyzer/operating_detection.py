@@ -334,6 +334,8 @@ def _transition_features(
     features: dict[str, Any] = {
         "pre_sample_count": len(pre),
         "post_sample_count": len(post),
+        "transition_pre_sample_count": len(pre),
+        "transition_post_sample_count": len(post),
         "transition_evidence_version": 1,
     }
     if transition_timestamp is not None:
@@ -345,7 +347,7 @@ def _transition_features(
         features["pre_power_spread_w"] = float(
             median([abs(value - pre_median) for value in pre_values])
         )
-        features["transition_window_start"] = pre[0].timestamp.isoformat()
+        features["transition_window_start"] = pre[-1].timestamp.isoformat()
     if post:
         post_values = [sample.power_w for sample in post]
         post_median = float(median(post_values))
@@ -354,14 +356,14 @@ def _transition_features(
         features["post_power_spread_w"] = float(
             median([abs(value - post_median) for value in post_values])
         )
-        features["transition_window_end"] = post[-1].timestamp.isoformat()
+        features["transition_window_end"] = post[0].timestamp.isoformat()
     if pre and post:
         features["transition_delta_w"] = post_median - pre_median
         features["transition_spread_w"] = (
             features["pre_power_spread_w"] + features["post_power_spread_w"]
         )
         features["transition_timing_uncertainty_s"] = (
-            post[-1].timestamp - pre[0].timestamp
+            post[0].timestamp - pre[-1].timestamp
         ).total_seconds()
         features["transition_quality"] = "measured"
     elif post:
