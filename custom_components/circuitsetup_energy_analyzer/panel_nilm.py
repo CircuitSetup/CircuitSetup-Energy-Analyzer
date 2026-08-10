@@ -36,6 +36,10 @@ from .nilm import (
     resolve_nilm_signature_fingerprint,
 )
 from .nilm_interval_evidence import NilmReferenceExtractionSettings
+from .nilm_validation import (
+    match_nilm_validation_intervals,
+    nilm_validation_interval_id,
+)
 from .nilm_virtual import (
     nilm_live_runtime,
     nilm_model_status,
@@ -2239,16 +2243,62 @@ def _nilm_validation_payload(
         if str(assignment.get("assignment_id") or "").strip()
     }
     matched_prediction_ids: set[str] = set()
+    evaluable_prediction_ids: set[str] = set()
+    unevaluated_prediction_ids: set[str] = set()
+    matched_sessions_by_interval_id: dict[str, dict[str, Any]] = {}
+    matches_by_interval_id = {}
+    for assignment_id, assignment in assignment_by_id.items():
+        assignment_intervals = [
+            interval
+            for interval in ground_truth_intervals
+            if _nilm_validation_assignment_matches(interval, assignment)
+        ]
+        if not assignment_intervals:
+            continue
+        assignment_sessions = [
+            session
+            for session in predictions
+            if str(session.get("assignment_id") or "").strip() == assignment_id
+        ]
+        circuit_id = next(
+            (
+                str(interval.get("mains_circuit_id") or "").strip()
+                for interval in assignment_intervals
+                if str(interval.get("mains_circuit_id") or "").strip()
+            ),
+            "panel",
+        )
+        result = match_nilm_validation_intervals(
+            assignment_sessions,
+            assignment_intervals,
+            circuit_id=circuit_id,
+        )
+        evaluable_prediction_ids.update(
+            match.session_id for match in result.matches
+        )
+        evaluable_prediction_ids.update(result.false_positive_session_ids)
+        unevaluated_prediction_ids.update(result.unevaluated_session_ids)
+        sessions_by_id = {
+            str(session.get("session_id") or "").strip(): session
+            for session in assignment_sessions
+            if str(session.get("session_id") or "").strip()
+        }
+        for match in result.matches:
+            session = sessions_by_id.get(match.session_id)
+            if session is None:
+                continue
+            matched_prediction_ids.add(match.session_id)
+            matched_sessions_by_interval_id[match.interval_id] = session
+            matches_by_interval_id[match.interval_id] = match
     preview = []
     for interval in ground_truth_intervals:
-        session, overlap = _nilm_validation_best_match(
+        circuit_id = str(interval.get("mains_circuit_id") or "").strip() or "panel"
+        interval_id = nilm_validation_interval_id(
             interval,
-            predictions,
-            assignment_by_id,
-            matched_prediction_ids,
+            circuit_id=circuit_id,
         )
-        if session is not None:
-            matched_prediction_ids.add(str(session.get("session_id") or ""))
+        match = matches_by_interval_id.get(interval_id)
+        session = matched_sessions_by_interval_id.get(interval_id)
         measured_power_w = _optional_round_float(interval.get("median_power_w"))
         measured_energy_kwh = _optional_round_float(
             interval.get("measured_energy_kwh"), digits=6
@@ -2274,7 +2324,7 @@ def _nilm_validation_payload(
                 "matched_session_id": (
                     str(session.get("session_id") or "") if session else None
                 ),
-                "overlap_seconds": overlap,
+                "overlap_seconds": match.overlap_seconds if match else 0.0,
                 "prediction_confidence": session.get("confidence") if session else None,
                 "measured_power_w": measured_power_w,
                 "estimated_power_w": estimated_power_w,
@@ -2304,6 +2354,8 @@ def _nilm_validation_payload(
         "metrics": {
             "ground_truth_interval_count": ground_truth_count,
             "prediction_count": prediction_count,
+            "evaluable_prediction_count": len(evaluable_prediction_ids),
+            "unevaluated_prediction_count": len(unevaluated_prediction_ids),
             "matched_ground_truth_count": matched_ground_truth_count,
             "matched_prediction_count": matched_prediction_count,
             "missed_ground_truth_count": (
@@ -2311,7 +2363,7 @@ def _nilm_validation_payload(
             ),
             "precision": _nilm_validation_ratio(
                 matched_prediction_count,
-                prediction_count,
+                len(evaluable_prediction_ids),
             ),
             "recall": _nilm_validation_ratio(
                 matched_ground_truth_count,
@@ -2322,37 +2374,14 @@ def _nilm_validation_payload(
     }
 
 
-def _nilm_validation_best_match(
-    interval: Mapping[str, Any],
-    sessions: list[dict[str, Any]],
-    assignment_by_id: Mapping[str, Mapping[str, Any]],
-    matched_prediction_ids: set[str],
-) -> tuple[dict[str, Any] | None, float]:
-    candidates: list[tuple[float, dict[str, Any]]] = []
-    for session in sessions:
-        session_id = str(session.get("session_id") or "")
-        if session_id and session_id in matched_prediction_ids:
-            continue
-        assignment = assignment_by_id.get(str(session.get("assignment_id") or ""))
-        if assignment is None or not _nilm_validation_assignment_matches(
-            interval,
-            assignment,
-        ):
-            continue
-        overlap = _nilm_validation_overlap_seconds(interval, session)
-        if overlap > 0:
-            candidates.append((overlap, session))
-    if not candidates:
-        return None, 0.0
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    overlap, session = candidates[0]
-    return session, overlap
-
-
 def _nilm_validation_assignment_matches(
     interval: Mapping[str, Any],
     assignment: Mapping[str, Any],
 ) -> bool:
+    if "assignment_id" in interval:
+        return str(interval.get("assignment_id") or "").strip() == str(
+            assignment.get("assignment_id") or ""
+        ).strip()
     interval_id = str(interval.get("interval_id") or "").strip()
     if interval_id and interval_id in {
         str(value or "").strip()
@@ -2370,23 +2399,6 @@ def _nilm_validation_assignment_matches(
         str(assignment.get("appliance_id") or "").strip().casefold(),
         str(assignment.get("display_name") or "").strip().casefold(),
     }
-
-
-def _nilm_validation_overlap_seconds(
-    interval: Mapping[str, Any],
-    session: Mapping[str, Any],
-) -> float:
-    interval_start = _datetime_from_iso(interval.get("start"))
-    interval_end = _datetime_from_iso(interval.get("end"))
-    session_start = _datetime_from_iso(session.get("start"))
-    session_end = _datetime_from_iso(session.get("end"))
-    if not all((interval_start, interval_end, session_start, session_end)):
-        return 0.0
-    overlap_start = max(interval_start, session_start)
-    overlap_end = min(interval_end, session_end)
-    if overlap_end <= overlap_start:
-        return 0.0
-    return (overlap_end - overlap_start).total_seconds()
 
 
 def _nilm_validation_ratio(numerator: int, denominator: int) -> float:

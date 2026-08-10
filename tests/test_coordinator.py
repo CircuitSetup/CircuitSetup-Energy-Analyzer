@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType, ModuleType, SimpleNamespace
@@ -8501,6 +8502,7 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
                         "label_interval_ids": ["label-dishwasher"],
                         "confirmed_session_ids": [],
                         "rejected_session_ids": ["session-match"],
+                        "last_validation": "history",
                         "lifecycle_state": "assigned",
                         "confidence": 0.8,
                         "created_at": "2026-06-02T11:00:00+00:00",
@@ -8533,6 +8535,33 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
     assert validated["missed_ground_truth_count"] == 0
     assert validated["false_positive_rate"] == pytest.approx(0.0)
     assert validated["false_negative_rate"] == pytest.approx(0.0)
+    assert validated["validation_true_positive_count"] == 1
+    assert validated["validation_false_positive_count"] == 0
+    assert validated["validation_false_negative_count"] == 0
+    assert validated["validation_precision"] == pytest.approx(1.0)
+    assert validated["validation_recall"] == pytest.approx(1.0)
+    assert validated["validation_f1"] == pytest.approx(1.0)
+    assert validated["validation_evaluable_session_count"] == 1
+    assert validated["validation_unevaluated_session_count"] == 1
+    assert validated["median_temporal_iou"] == pytest.approx(0.667)
+    assert validated["median_start_error_seconds"] == pytest.approx(600.0)
+    assert validated["median_end_error_seconds"] == pytest.approx(300.0)
+    assert validated["median_duration_error_seconds"] == pytest.approx(900.0)
+    assert validated["history_validation_session_ids"] == ["session-match"]
+    assert validated["history_validation_revision"] == 2
+    assert validated["history_validation_matches"] == [
+        {
+            "session_id": "session-match",
+            "interval_id": "label-dishwasher",
+            "score": pytest.approx(0.617),
+            "iou": pytest.approx(0.667),
+            "ground_truth_coverage": pytest.approx(1.0),
+            "prediction_coverage": pytest.approx(0.667),
+            "start_error_seconds": 600.0,
+            "end_error_seconds": 300.0,
+            "duration_error_seconds": 900.0,
+        }
+    ]
     assert validated["median_power_error"] == pytest.approx(20.0)
     assert validated["energy_estimate_error"] == pytest.approx(0.115)
     assert "session-later" not in validated["confirmed_session_ids"]
@@ -8676,7 +8705,7 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
                         "label_interval_ids": ["label-dishwasher"],
                         "confirmed_session_ids": [],
                         "rejected_session_ids": [],
-                        "lifecycle_state": "validated",
+                        "lifecycle_state": "published",
                         "confidence": 0.8,
                         "created_device": True,
                         "publish_entities": True,
@@ -8698,7 +8727,9 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
     assert validated["rejected_sessions"] == 1
     assert validated["adjusted_sessions"] == 0
     assert validated["confidence"] == pytest.approx(0.65)
-    assert validated["lifecycle_state"] == "conflict"
+    assert validated["lifecycle_state"] == "published"
+    assert validated["validation_status"] == "conflict"
+    assert validated["publication_review_required"] is True
     assert validated["last_validation"] == "direct_meter_conflict"
     assert validated["last_rejected_at"] == "2026-06-02T15:00:00+00:00"
     assert validated["ground_truth_interval_count"] == 1
@@ -8775,16 +8806,233 @@ async def test_nilm_assignment_history_validation_preserves_existing_conflicts()
         now_fn=lambda: now,
     )
 
+    first = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+    second = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert first["rejected_session_ids"] == ["session-false-positive"]
+    assert first["history_validation_session_ids"] == ["session-false-positive"]
+    assert first["history_validation_manual_session_ids"] == [
+        "session-false-positive"
+    ]
+    assert first["confidence"] == pytest.approx(0.65)
+    assert second["rejected_session_ids"] == ["session-false-positive"]
+    assert second["confidence"] == pytest.approx(0.65)
+    assert second["lifecycle_state"] == "conflict"
+    assert second["last_validation"] == "direct_meter_conflict"
+    assert second["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_nilm_history_validation_records_false_negative_without_prediction(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-dishwasher",
+                        "assignment_id": "assignment-dishwasher",
+                        "ground_truth_entity_id": "sensor.dishwasher_power",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:30:00+00:00",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={"mains": []},
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "session_ids": [],
+                        "confirmed_session_ids": [],
+                        "rejected_session_ids": [],
+                        "lifecycle_state": "published",
+                        "publish_entities": True,
+                        "confidence": 0.8,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 15, 10, tzinfo=UTC),
+    )
+
     validated = await coordinator.async_validate_nilm_assignment_history(
         "mains",
         "assignment-dishwasher",
     )
 
-    assert validated["rejected_session_ids"] == ["session-false-positive"]
-    assert validated["confidence"] == pytest.approx(0.65)
-    assert validated["lifecycle_state"] == "conflict"
-    assert validated["last_validation"] == "direct_meter_conflict"
-    assert validated["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
+    assert validated["lifecycle_state"] == "published"
+    assert validated["validation_status"] == "needs_validation"
+    assert validated["publication_review_required"] is True
+    assert validated["validation_true_positive_count"] == 0
+    assert validated["validation_false_positive_count"] == 0
+    assert validated["validation_false_negative_count"] == 1
+    assert validated["validation_precision"] is None
+    assert validated["validation_recall"] == pytest.approx(0.0)
+    assert validated["validation_f1"] is None
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_history_validation_keeps_manual_decisions_idempotently(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = {"value": datetime(2026, 6, 2, 15, 15, tzinfo=UTC)}
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={
+                "mains": [
+                    {
+                        "interval_id": "label-dishwasher",
+                        "assignment_id": "assignment-dishwasher",
+                        "ground_truth_entity_id": "sensor.dishwasher_power",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:30:00+00:00",
+                        "validation_start": "2026-06-02T12:00:00+00:00",
+                        "validation_end": "2026-06-02T14:00:00+00:00",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "history-match",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:30:00+00:00",
+                    },
+                    {
+                        "session_id": "history-false-positive",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T13:00:00+00:00",
+                        "end": "2026-06-02T13:30:00+00:00",
+                    },
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "session_ids": [
+                            "history-match",
+                            "history-false-positive",
+                            "manual-confirm",
+                            "manual-reject",
+                        ],
+                        "confirmed_session_ids": ["manual-confirm"],
+                        "rejected_session_ids": ["manual-reject"],
+                        "lifecycle_state": "assigned",
+                        "confidence": 0.6,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now["value"],
+    )
+
+    first = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+    now["value"] = datetime(2026, 6, 2, 15, 20, tzinfo=UTC)
+    second = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert first["confirmed_session_ids"] == ["manual-confirm", "history-match"]
+    assert first["rejected_session_ids"] == [
+        "manual-reject",
+        "history-false-positive",
+    ]
+    assert first["history_validation_session_ids"] == [
+        "history-match",
+        "history-false-positive",
+    ]
+    assert first["confidence"] == pytest.approx(0.5)
+    assert second["confirmed_session_ids"] == first["confirmed_session_ids"]
+    assert second["rejected_session_ids"] == first["rejected_session_ids"]
+    assert second["confidence"] == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_nilm_assignment_history_validation_rolls_back_on_save_failure() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    store_data = FeatureStoreData(
+        nilm_label_intervals_by_circuit={
+            "mains": [
+                {
+                    "interval_id": "label-dishwasher",
+                    "assignment_id": "assignment-dishwasher",
+                    "ground_truth_entity_id": "sensor.dishwasher_power",
+                    "start": "2026-06-02T12:00:00+00:00",
+                    "end": "2026-06-02T12:30:00+00:00",
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-match",
+                    "assignment_id": "assignment-dishwasher",
+                    "start": "2026-06-02T12:00:00+00:00",
+                    "end": "2026-06-02T12:30:00+00:00",
+                }
+            ]
+        },
+        nilm_appliance_assignments_by_circuit={
+            "mains": [
+                {
+                    "assignment_id": "assignment-dishwasher",
+                    "appliance_id": "dishwasher",
+                    "display_name": "Dishwasher",
+                    "session_ids": ["session-match"],
+                    "confirmed_session_ids": [],
+                    "rejected_session_ids": [],
+                    "lifecycle_state": "assigned",
+                    "confidence": 0.8,
+                }
+            ]
+        },
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=store_data,
+        now_fn=lambda: datetime(2026, 6, 2, 15, 30, tzinfo=UTC),
+    )
+    original = deepcopy(store_data.nilm_appliance_assignments_by_circuit)
+    save = AsyncMock(side_effect=[RuntimeError("save failed"), None])
+    coordinator.store_persistence.async_save_if_dirty = save
+
+    with pytest.raises(RuntimeError, match="save failed"):
+        await coordinator.async_validate_nilm_assignment_history(
+            "mains",
+            "assignment-dishwasher",
+        )
+
+    assert coordinator.store_data.nilm_appliance_assignments_by_circuit == original
+    assert save.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -8844,11 +9092,15 @@ async def test_adjusted_nilm_label_interval_improves_history_matching() -> None:
         now_fn=lambda: now["value"],
     )
 
-    with pytest.raises(ValueError, match="No matching ground-truth NILM sessions"):
-        await coordinator.async_validate_nilm_assignment_history(
-            "mains",
-            "assignment-dishwasher",
-        )
+    unmatched = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert unmatched["lifecycle_state"] == "needs_validation"
+    assert unmatched["validation_true_positive_count"] == 0
+    assert unmatched["validation_false_positive_count"] == 0
+    assert unmatched["validation_false_negative_count"] == 1
 
     now["value"] = datetime(2026, 6, 2, 15, 5, tzinfo=UTC)
     await coordinator.async_label_nilm_interval(
