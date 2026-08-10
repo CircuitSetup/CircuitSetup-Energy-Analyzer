@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import combinations as stdlib_combinations
 from urllib.parse import parse_qs, urlparse
@@ -3149,6 +3150,53 @@ def test_sensitive_50w_edge_rejects_a_single_sample_excursion() -> None:
     assert edges == []
 
 
+def test_edge_detector_raises_threshold_from_observed_noise() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 60.0),
+            sample(20, 0.0),
+            sample(30, 60.0),
+            sample(40, 0.0),
+            sample(50, 150.0),
+        ]
+    )
+
+    assert edges == []
+
+
+def test_edge_detector_adapts_confirmation_window_to_observed_cadence() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    detector.process_many([sample(0, 0.0), sample(30, 0.0), sample(60, 0.0)])
+
+    assert detector.effective_confirmation_max_interval == timedelta(seconds=90)
+
+
+def test_edge_detector_merges_confirmed_monotonic_ramp_fragments() -> None:
+    detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
+
+    edges = detector.process_many(
+        [
+            sample(0, 0.0),
+            sample(10, 60.0),
+            sample(20, 120.0),
+            sample(30, 180.0),
+            sample(40, 180.0),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].delta_w == 180.0
+    assert edges[0].transition_kind == "ramp"
+
+
 def test_edge_detector_discards_auxiliary_evidence_outside_confirmation_window() -> (
     None
 ):
@@ -3787,7 +3835,17 @@ def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
     expected_explained: float,
     expected_residual: float,
 ) -> None:
-    original = edge(10, aggregate_delta_w, delta_var=250.0, delta_va=1250.0)
+    original = edge(
+        10,
+        aggregate_delta_w,
+        delta_var=250.0,
+        delta_va=1250.0,
+        delta_pf=0.2,
+        leg_a_delta_w=600.0,
+        leg_b_delta_w=600.0,
+        split_phase_type="balanced_240v",
+        dominant_leg="balanced",
+    )
     event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=11),
         circuit_id="water_heater",
@@ -3818,6 +3876,8 @@ def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
         None,
     )
     assert (residual.leg_a_delta_w, residual.leg_b_delta_w) == (None, None)
+    assert residual.split_phase_type == "unknown"
+    assert residual.dominant_leg is None
 
 
 def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
@@ -3835,6 +3895,9 @@ def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
     )
 
     assert nilm_domain._nilm_edge_id(aggregate) != nilm_domain._nilm_edge_id(residual)
+    assert nilm_domain._nilm_edge_id(residual) != nilm_domain._nilm_edge_id(
+        replace(residual, transition_kind="ramp")
+    )
 
 
 @pytest.mark.parametrize("aggregate_delta_w", [1005.0, -1005.0])
@@ -3880,6 +3943,68 @@ def test_attribute_known_loads_derives_residual_direction_from_its_sign() -> Non
 
     assert result.residual_edges[0].delta_w == -200.0
     assert result.residual_edges[0].direction == "off"
+
+
+def test_attribute_known_loads_matches_bounded_compound_known_events() -> None:
+    aggregate = edge(10, 1200.0)
+    events = [
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=10),
+            "dryer",
+            EventType.START,
+            features={"startup_power_w": 600.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=11),
+            "water_heater",
+            EventType.START,
+            features={"startup_power_w": 600.0},
+        ),
+    ]
+
+    result = attribute_known_loads([aggregate], events)
+
+    assert result.unmatched_edges == ()
+    assert len(result.matched_edges) == 1
+    match = result.matched_edges[0]
+    assert match.known_circuit_ids == ("dryer", "water_heater")
+    assert match.explained_delta_w == 1200.0
+    assert match.residual_edge is None
+    assert match.selection_method == "compound"
+
+
+def test_known_load_attribution_prefers_exact_compound_over_weaker_single_match() -> (
+    None
+):
+    aggregate = edge(10, 1200.0)
+    events = [
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=10),
+            "single_1000_w",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=10),
+            "first_600_w",
+            EventType.START,
+            features={"startup_power_w": 600.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=11),
+            "second_600_w",
+            EventType.START,
+            features={"startup_power_w": 600.0},
+        ),
+    ]
+
+    result = attribute_known_loads([aggregate], events)
+
+    assert len(result.matched_edges) == 1
+    match = result.matched_edges[0]
+    assert match.selection_method == "compound"
+    assert match.known_circuit_ids == ("first_600_w", "second_600_w")
+    assert match.explained_delta_w == 1200.0
 
 
 @pytest.mark.parametrize("known_power_w", [0.0, float("inf"), float("nan")])
@@ -4372,7 +4497,7 @@ def test_attribute_known_loads_preserves_stable_edge_order() -> None:
     }
 
 
-def test_attribute_known_loads_marks_large_component_greedy_fallback() -> None:
+def test_attribute_known_loads_solves_large_component_globally() -> None:
     edges = [edge(index * 15, 1000.0) for index in range(13)]
     events = [
         CircuitEvent(
@@ -4388,7 +4513,7 @@ def test_attribute_known_loads_marks_large_component_greedy_fallback() -> None:
 
     assert len(result.matched_edges) == 13
     assert {match.selection_method for match in result.matched_edges} == {
-        "greedy_fallback"
+        "global_assignment"
     }
     assert result.ambiguous_edge_count == 0
 
@@ -4419,8 +4544,33 @@ def test_attribute_known_loads_fallback_rejects_local_candidate_ambiguity() -> N
     assert result.ambiguous_edge_count == 1
     assert len(result.matched_edges) == 12
     assert {match.selection_method for match in result.matched_edges} == {
-        "greedy_fallback"
+        "global_assignment"
     }
+
+
+def test_large_compound_attribution_component_is_retained_as_ambiguous() -> None:
+    edges = [edge(index, 1000.0) for index in range(13)]
+    candidates = [
+        nilm_domain._KnownLoadAttributionCandidate(  # noqa: SLF001
+            edge_index=index,
+            event_indices=(index, (index + 1) % 13),
+            match=nilm_domain.KnownLoadMatch(
+                edge=edges[index],
+                known_circuit_id=f"load-{index}",
+                confidence=1.0,
+            ),
+            score=1.0,
+            time_offset_seconds=0.0,
+        )
+        for index in range(13)
+    ]
+
+    selected, ambiguous = nilm_domain._select_known_load_attribution_candidates(  # noqa: SLF001
+        candidates
+    )
+
+    assert selected == set()
+    assert ambiguous == set(range(13))
 
 
 def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> None:
@@ -5126,6 +5276,203 @@ def test_global_session_pairing_assigns_each_edge_pair_once() -> None:
     assert len(sessions) == 1
     assert sessions[0].signature_fingerprint == "120-w"
     assert sessions[0].off_edge_id is not None
+
+
+def test_session_pairing_selection_allows_nested_concurrent_evidence() -> None:
+    on_first = edge(0, 100.0)
+    on_second = edge(10, 100.0)
+    off_first = edge(100, -100.0)
+    off_second = edge(200, -100.0)
+    candidates = [
+        nilm_domain._NilmSessionCandidate(  # noqa: SLF001
+            0, 1, on_first, off_second, "outer", None, 0.85
+        ),
+        nilm_domain._NilmSessionCandidate(  # noqa: SLF001
+            1, 0, on_second, off_first, "inner", None, 0.85
+        ),
+    ]
+
+    selected = nilm_domain._select_nilm_session_candidates(candidates)  # noqa: SLF001
+
+    assert [(candidate.on_index, candidate.off_index) for candidate in selected] == [
+        (0, 1),
+        (1, 0),
+    ]
+
+
+def test_large_session_pairing_component_uses_global_matching() -> None:
+    on_edges = [edge(index, 100.0) for index in range(13)]
+    off_edges = [edge(3600 + index, -100.0) for index in range(13)]
+    scores = {
+        (0, 0): 1.0,
+        (0, 1): 0.9,
+        (1, 0): 0.9,
+        (1, 1): 0.1,
+        **{(index, index): 0.8 for index in range(2, 13)},
+        **{(index, index + 1): 0.01 for index in range(1, 12)},
+    }
+    candidates = [
+        nilm_domain._NilmSessionCandidate(  # noqa: SLF001
+            on_index,
+            off_index,
+            on_edges[on_index],
+            off_edges[off_index],
+            f"load-{on_index}-{off_index}",
+            None,
+            score,
+        )
+        for (on_index, off_index), score in scores.items()
+    ]
+
+    selected = nilm_domain._select_nilm_session_candidates(candidates)  # noqa: SLF001
+
+    assert {(candidate.on_index, candidate.off_index) for candidate in selected} == {
+        (0, 1),
+        (1, 0),
+        *((index, index) for index in range(2, 13)),
+    }
+
+
+def test_session_pairing_retains_overlimit_component_unpaired() -> None:
+    on_edges = [edge(index, 100.0) for index in range(65)]
+    off_edges = [edge(3600 + index, -100.0) for index in range(65)]
+    candidates = [
+        nilm_domain._NilmSessionCandidate(  # noqa: SLF001
+            on_index,
+            off_index,
+            on_edge,
+            off_edge,
+            "load",
+            None,
+            0.8,
+        )
+        for on_index, on_edge in enumerate(on_edges)
+        for off_index, off_edge in enumerate(off_edges)
+    ]
+
+    selected = nilm_domain._select_nilm_session_candidates(candidates)  # noqa: SLF001
+
+    assert selected == ()
+
+
+def test_session_pairing_rewards_learned_duration_likelihood() -> None:
+    on_edge = edge(0, 100.0)
+    duration_profile = {
+        "effective_support": 5.0,
+        "distinct_days": 3.0,
+        "median_seconds": 600.0,
+        "p10_seconds": 570.0,
+        "p90_seconds": 630.0,
+    }
+
+    short_score = nilm_domain._nilm_session_pair_score(  # noqa: SLF001
+        on_edge,
+        edge(60, -100.0),
+        min_duration=timedelta(seconds=30),
+        max_duration=timedelta(hours=12),
+        duration_profile=duration_profile,
+    )
+    expected_score = nilm_domain._nilm_session_pair_score(  # noqa: SLF001
+        on_edge,
+        edge(600, -100.0),
+        min_duration=timedelta(seconds=30),
+        max_duration=timedelta(hours=12),
+        duration_profile=duration_profile,
+    )
+
+    assert short_score is not None
+    assert expected_score is not None
+    assert expected_score > short_score
+
+
+def test_session_pairing_uses_residual_trace_for_plateau_and_energy() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 100.0), edge(600, -100.0)],
+        mains_circuit_id="mains",
+        signature_specs=[{"signature_fingerprint": "pump", "typical_watts": 100.0}],
+        power_trace=[
+            (BASE_TIME - timedelta(seconds=30), 0.0),
+            (BASE_TIME, 0.0),
+            (BASE_TIME + timedelta(seconds=60), 120.0),
+            (BASE_TIME + timedelta(seconds=300), 120.0),
+            (BASE_TIME + timedelta(seconds=540), 120.0),
+            (BASE_TIME + timedelta(seconds=600), 0.0),
+        ],
+    )
+
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session.plateau_power_w == 120.0
+    assert session.median_power_w == 120.0
+    assert session.measured_energy_kwh == pytest.approx(0.018)
+    assert session.power_coverage == 1.0
+    assert session.estimated_energy_kwh == pytest.approx(0.018)
+
+
+def test_session_pairing_does_not_learn_energy_from_partial_residual_trace() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 100.0), edge(600, -100.0)],
+        mains_circuit_id="mains",
+        signature_specs=[{"signature_fingerprint": "pump", "typical_watts": 100.0}],
+        power_trace=[
+            (BASE_TIME - timedelta(seconds=30), 0.0),
+            (BASE_TIME, 0.0),
+            (BASE_TIME + timedelta(seconds=60), 120.0),
+            (BASE_TIME + timedelta(seconds=540), 120.0),
+            (BASE_TIME + timedelta(seconds=600), 0.0),
+        ],
+    )
+
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session.plateau_power_w == 120.0
+    assert session.power_coverage == pytest.approx(0.5)
+    assert session.measured_energy_kwh is None
+    assert session.estimated_energy_kwh == pytest.approx(0.02)
+
+
+def test_session_pairing_memoizes_and_bounds_trace_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_pairs: list[tuple[datetime, datetime]] = []
+
+    def trace_evidence(
+        on_edge: NilmEdge,
+        off_edge: NilmEdge,
+        _trace: object,
+    ) -> None:
+        trace_pairs.append((on_edge.timestamp, off_edge.timestamp))
+        return None
+
+    monkeypatch.setattr(nilm_domain, "_nilm_session_trace_evidence", trace_evidence)
+    pair_nilm_sessions_for_signatures(
+        [
+            *(edge(index, 100.0) for index in range(10)),
+            *(edge(600 + index, -100.0) for index in range(10)),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "load-a", "typical_watts": 100.0},
+            {"signature_fingerprint": "load-b", "typical_watts": 100.0},
+        ],
+        power_trace=[(BASE_TIME, 0.0)],
+    )
+
+    assert len(trace_pairs) == nilm_domain.NILM_SESSION_TRACE_PAIR_MAX_ITEMS
+    assert len(set(trace_pairs)) == len(trace_pairs)
+
+
+def test_session_pair_budget_does_not_turn_observed_off_edges_into_opens() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            *(edge(index, 100.0) for index in range(65)),
+            *(edge(600 + index, -100.0) for index in range(65)),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[{"signature_fingerprint": "load", "typical_watts": 100.0}],
+    )
+
+    assert not any(session.end is None for session in sessions)
 
 
 def test_global_session_pairing_records_close_signature_match_as_ambiguous() -> None:

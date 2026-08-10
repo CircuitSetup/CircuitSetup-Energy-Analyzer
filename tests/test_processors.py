@@ -8302,6 +8302,7 @@ def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
         origin="known_load_residual",
         parent_edge_id="mains:2026-06-11T12:00:00+00:00:500",
         explained_known_circuit_ids=("fridge",),
+        transition_kind="ramp",
     )
 
     payload = _nilm_edge_to_storage(residual)
@@ -8310,17 +8311,20 @@ def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
     assert payload["origin"] == "known_load_residual"
     assert payload["parent_edge_id"] == residual.parent_edge_id
     assert payload["explained_known_circuit_ids"] == ["fridge"]
+    assert payload["transition_kind"] == "ramp"
     assert _nilm_edges_from_storage([payload], max_items=10) == [residual]
 
     legacy = dict(payload)
     legacy.pop("origin")
     legacy.pop("parent_edge_id")
     legacy.pop("explained_known_circuit_ids")
+    legacy.pop("transition_kind")
     restored_legacy = _nilm_edges_from_storage([legacy], max_items=10)
 
     assert restored_legacy[0].origin == "aggregate"
     assert restored_legacy[0].parent_edge_id is None
     assert restored_legacy[0].explained_known_circuit_ids == ()
+    assert restored_legacy[0].transition_kind == "step"
 
 
 def test_water_context_alert_processor_returns_flow_alert() -> None:
@@ -8545,6 +8549,36 @@ def test_nilm_session_history_assigns_overlapping_signatures_once() -> None:
 
     assert len(sessions) == 1
     assert sessions[0]["signature_fingerprint"] == "120-w"
+
+
+def test_nilm_session_history_persists_residual_trace_measurements() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_session_history_payloads,
+    )
+
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    sessions = _nilm_session_history_payloads(
+        "mains",
+        [
+            NilmEdge(start, 100.0, direction="on"),
+            NilmEdge(start + timedelta(minutes=10), -100.0, direction="off"),
+        ],
+        [{"signature_id": "pump", "typical_watts": 100.0}],
+        [],
+        power_trace=[
+            (start - timedelta(seconds=30), 0.0),
+            (start, 0.0),
+            (start + timedelta(minutes=1), 120.0),
+            (start + timedelta(minutes=5), 120.0),
+            (start + timedelta(minutes=9), 120.0),
+            (start + timedelta(minutes=10), 0.0),
+        ],
+    )
+
+    assert sessions[0]["plateau_power_w"] == 120.0
+    assert sessions[0]["measured_energy_kwh"] == pytest.approx(0.018)
+    assert sessions[0]["power_coverage"] == 1.0
 
 
 def test_nilm_completed_session_retains_separate_transition_deltas() -> None:
@@ -9008,7 +9042,9 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     assert "estimated_energy_today_kwh" in inventory["unknown_loads"][0]
 
 
-def test_nilm_processor_builds_inventory_after_refreshing_current_sessions() -> None:
+def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from collections import defaultdict
     from copy import deepcopy
 
@@ -9100,6 +9136,25 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions() -> 
     assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 30.0
 
     snapshot = deepcopy(inventory)
+    def unexpected_rebuild(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("stable NILM samples must not rebuild derived history")
+
+    monkeypatch.setattr(processor, "refresh_session_history", unexpected_rebuild)
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.processors.nilm_sample"
+        ".cluster_recurring_signatures",
+        unexpected_rebuild,
+    )
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.processors.nilm_sample"
+        ".build_unknown_load_inventory",
+        unexpected_rebuild,
+    )
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.processors.nilm_sample"
+        ".migrate_unknown_load_inventory",
+        unexpected_rebuild,
+    )
     later_sample = replace(sample, timestamp=sample.timestamp + timedelta(minutes=5))
     second_result = processor.process(later_sample, config, context, events=())
     current_inventory = {
@@ -9108,9 +9163,144 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions() -> 
 
     assert not second_result.store_dirty
     assert store_data.nilm_unknown_loads_by_circuit["mains"] == snapshot
-    assert current_inventory["unknown_loads"][0]["runtime_windows"]["today"][
-        "coverage_end"
-    ] == later_sample.timestamp.isoformat()
+    assert current_inventory == snapshot
+
+
+def test_nilm_processor_does_not_recluster_an_empty_signature_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A retained edge set with no signature is still stable evidence."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    store_data.nilm_unmatched_edges_by_circuit["mains"] = [
+        {
+            "timestamp": now.isoformat(),
+            "delta_w": 500.0,
+            "direction": "on",
+        }
+    ]
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=100.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+
+    processor.process(sample, config, context, events=())
+    assert store_data.nilm_signatures.get("mains", []) == []
+
+    def unexpected_recluster(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("steady empty NILM evidence must not be reclustered")
+
+    monkeypatch.setattr(
+        "custom_components.circuitsetup_energy_analyzer.processors.nilm_sample"
+        ".cluster_recurring_signatures",
+        unexpected_recluster,
+    )
+    processor.process(
+        replace(sample, timestamp=sample.timestamp + timedelta(minutes=5)),
+        config,
+        context,
+        events=(),
+    )
+
+
+def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> None:
+    """Keep dynamic inventory fields fresh without rebuilding stable history."""
+    from custom_components.circuitsetup_energy_analyzer import processors
+
+    now = datetime(2026, 6, 11, 23, 55, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    store_data.nilm_session_history_by_circuit["mains"] = [
+        {
+            "session_id": "open",
+            "start": (now - timedelta(minutes=30)).isoformat(),
+            "end": None,
+            "signature_fingerprint": "open-signature",
+        }
+    ]
+    first_open_context = processors.NilmSampleProcessor._inventory_context(
+        "mains",
+        store_data,
+        existing_inventory={"active_unknown_load_count": 1},
+        now=now,
+        time_zone="UTC",
+    )
+    later_open_context = processors.NilmSampleProcessor._inventory_context(
+        "mains",
+        store_data,
+        existing_inventory={"active_unknown_load_count": 1},
+        now=now + timedelta(minutes=5),
+        time_zone="UTC",
+    )
+    assert first_open_context != later_open_context
+
+    store_data.nilm_session_history_by_circuit["mains"] = [
+        {
+            "session_id": "closed",
+            "start": (now - timedelta(hours=2)).isoformat(),
+            "end": (now - timedelta(hours=1)).isoformat(),
+            "signature_fingerprint": "closed-signature",
+        }
+    ]
+    before_midnight = processors.NilmSampleProcessor._inventory_context(
+        "mains",
+        store_data,
+        existing_inventory={"active_unknown_load_count": 0},
+        now=now,
+        time_zone="UTC",
+    )
+    after_midnight = processors.NilmSampleProcessor._inventory_context(
+        "mains",
+        store_data,
+        existing_inventory={"active_unknown_load_count": 0},
+        now=now + timedelta(minutes=10),
+        time_zone="UTC",
+    )
+    assert before_midnight != after_midnight
 
 
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:

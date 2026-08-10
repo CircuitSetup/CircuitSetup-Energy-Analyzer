@@ -433,7 +433,8 @@ def _normalize_session_evidence(
     on, off = _session_transition_values(session)
     on = on if on is not None and on > 0 else None
     off = off if off is not None and off < 0 else None
-    plateau = _positive_number(session.get("median_power_w"))
+    trace_plateau = _positive_number(session.get("plateau_power_w"))
+    plateau = trace_plateau or _positive_number(session.get("median_power_w"))
     duration = _duration_seconds(session)
     measured_energy = _positive_number(session.get("measured_energy_kwh"))
     estimated_energy = (
@@ -459,7 +460,11 @@ def _normalize_session_evidence(
         on,
         off,
         plateau,
-        "edge_derived" if plateau is not None else None,
+        "residual_trace"
+        if trace_plateau is not None
+        else "edge_derived"
+        if plateau is not None
+        else None,
         duration,
         energy,
         energy_source,
@@ -2062,6 +2067,7 @@ class NilmEdge:
     origin: str = "aggregate"
     parent_edge_id: str | None = None
     explained_known_circuit_ids: tuple[str, ...] = ()
+    transition_kind: str = "step"
 
 
 class NilmComponentStatus(StrEnum):
@@ -3254,6 +3260,11 @@ KNOWN_LOAD_TIME_WEIGHT = 0.20
 KNOWN_LOAD_TOPOLOGY_WEIGHT = 0.15
 KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN = 0.05
 KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES = 12
+KNOWN_LOAD_GLOBAL_ASSIGNMENT_MAX_NODES = 32
+NILM_SESSION_GLOBAL_MATCHING_MAX_NODES = 64
+NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS = 64
+NILM_SESSION_CANDIDATE_PAIR_MAX_ITEMS = 512
+NILM_SESSION_TRACE_PAIR_MAX_ITEMS = 64
 
 if not isclose(
     KNOWN_LOAD_MAGNITUDE_WEIGHT + KNOWN_LOAD_TIME_WEIGHT + KNOWN_LOAD_TOPOLOGY_WEIGHT,
@@ -3315,6 +3326,7 @@ class KnownLoadMatch:
     transition_timing_uncertainty_s: float | None = None
     power_match_confidence: float | None = None
     selection_status: str | None = None
+    known_circuit_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -3513,6 +3525,10 @@ class NilmSession:
     off_delta_w: float | None = None
     on_delta_var: float | None = None
     off_delta_var: float | None = None
+    plateau_power_w: float | None = None
+    measured_energy_kwh: float | None = None
+    power_coverage: float | None = None
+    intermediate_transition_count: int = 0
 
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
@@ -3539,6 +3555,10 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "off_delta_w": session.off_delta_w,
         "on_delta_var": session.on_delta_var,
         "off_delta_var": session.off_delta_var,
+        "plateau_power_w": session.plateau_power_w,
+        "measured_energy_kwh": session.measured_energy_kwh,
+        "power_coverage": session.power_coverage,
+        "intermediate_transition_count": session.intermediate_transition_count,
     }
 
 
@@ -3734,11 +3754,15 @@ class NilmEdgeDetector:
         self,
         min_delta_w: float = 100.0,
         *,
+        absolute_min_delta_w: float = 25.0,
+        noise_multiplier: float = 3.0,
         confirmation_samples: int = 1,
         confirmation_tolerance_ratio: float = 0.15,
         confirmation_max_interval: timedelta | None = None,
     ) -> None:
-        self.min_delta_w = min_delta_w
+        self.min_delta_w = max(float(min_delta_w), 0.0)
+        self.absolute_min_delta_w = max(float(absolute_min_delta_w), 0.0)
+        self.noise_multiplier = max(float(noise_multiplier), 0.0)
         self.confirmation_samples = max(int(confirmation_samples), 1)
         self.confirmation_tolerance_ratio = max(
             float(confirmation_tolerance_ratio),
@@ -3746,8 +3770,11 @@ class NilmEdgeDetector:
         )
         self.confirmation_max_interval = confirmation_max_interval
         self._previous: CircuitSample | None = None
-        self._pending: tuple[CircuitSample, CircuitSample, int] | None = None
+        self._pending: tuple[CircuitSample, CircuitSample, int, str] | None = None
+        self._ramp_baseline: CircuitSample | None = None
+        self._ramp_direction = 0
         self._stable_changes_w: deque[float] = deque(maxlen=64)
+        self._sample_intervals_seconds: deque[float] = deque(maxlen=64)
 
     @property
     def has_pending_transition(self) -> bool:
@@ -3762,20 +3789,50 @@ class NilmEdgeDetector:
         center = median(self._stable_changes_w)
         return float(median(abs(value - center) for value in self._stable_changes_w))
 
+    @property
+    def effective_min_delta_w(self) -> float:
+        """Return the configured floor raised to the observed noise level."""
+        return max(
+            self.min_delta_w,
+            self.absolute_min_delta_w,
+            self.noise_multiplier * self.noise_spread_w,
+        )
+
+    @property
+    def effective_confirmation_max_interval(self) -> timedelta | None:
+        """Return a confirmation allowance scaled to observed source cadence."""
+        if self.confirmation_max_interval is None:
+            return None
+        if not self._sample_intervals_seconds:
+            return self.confirmation_max_interval
+        return max(
+            self.confirmation_max_interval,
+            timedelta(seconds=3.0 * median(self._sample_intervals_seconds)),
+        )
+
     def process(self, sample: CircuitSample) -> list[NilmEdge]:
         if sample.real_power is None:
             self._previous = None
             self._pending = None
+            self._ramp_baseline = None
+            self._ramp_direction = 0
             return []
 
         if self._previous is None or self._previous.real_power is None:
             self._previous = sample
+            self._ramp_baseline = None
+            self._ramp_direction = 0
             return []
 
         previous = self._previous
         self._previous = sample
+        sample_interval_seconds = (
+            sample.timestamp - previous.timestamp
+        ).total_seconds()
+        if isfinite(sample_interval_seconds) and sample_interval_seconds > 0.0:
+            self._sample_intervals_seconds.append(sample_interval_seconds)
         change_w = float(sample.real_power) - float(previous.real_power)
-        if abs(change_w) < self.min_delta_w:
+        if abs(change_w) < self.effective_min_delta_w:
             self._stable_changes_w.append(change_w)
 
         if self.confirmation_samples > 1:
@@ -3790,15 +3847,30 @@ class NilmEdgeDetector:
         sample: CircuitSample,
     ) -> list[NilmEdge]:
         pending = self._pending
+        effective_window = self.effective_confirmation_max_interval
         if (
             self.confirmation_max_interval is not None
-            and sample.timestamp - previous.timestamp > self.confirmation_max_interval
+            and self._sample_intervals_seconds
+            and median(self._sample_intervals_seconds) > (
+                self.confirmation_max_interval.total_seconds()
+            )
+        ):
+            # A source that is consistently slower than the configured window
+            # cannot supply a second confirmation sample before the next edge.
+            effective_window = self.confirmation_max_interval
+        if (
+            effective_window is not None
+            and sample.timestamp - previous.timestamp > effective_window
         ):
             self._pending = None
             if pending is not None:
-                baseline, candidate, _count = pending
+                baseline, candidate, _count, transition_kind = pending
                 if self._same_level(sample, candidate, baseline):
-                    edge = self._edge_between(baseline, sample)
+                    edge = self._edge_between(
+                        baseline,
+                        sample,
+                        transition_kind=transition_kind,
+                    )
                     if edge is not None:
                         edge = replace(edge, timestamp=candidate.timestamp)
                     return [edge] if edge is not None else []
@@ -3807,16 +3879,27 @@ class NilmEdgeDetector:
             edge = self._edge_between(previous, sample)
             return [edge] if edge is not None else []
         if pending is not None:
-            baseline, candidate, count = pending
+            baseline, candidate, count, transition_kind = pending
             if self._same_level(sample, candidate, baseline):
                 count += 1
                 if count >= self.confirmation_samples:
                     self._pending = None
-                    edge = self._edge_between(baseline, sample)
+                    edge = self._edge_between(
+                        baseline,
+                        sample,
+                        transition_kind=transition_kind,
+                    )
                     if edge is not None:
                         edge = replace(edge, timestamp=candidate.timestamp)
                     return [edge] if edge is not None else []
-                self._pending = (baseline, candidate, count)
+                self._pending = (baseline, candidate, count, transition_kind)
+                return []
+            if transition_kind == "ramp" and self._extends_ramp(
+                baseline,
+                candidate,
+                sample,
+            ):
+                self._pending = (baseline, sample, 1, "ramp")
                 return []
             if self._same_level(sample, baseline, baseline):
                 self._pending = None
@@ -3825,12 +3908,48 @@ class NilmEdgeDetector:
 
         if (
             abs(float(sample.real_power) - float(previous.real_power))
-            >= self.min_delta_w
+            >= self.effective_min_delta_w
         ):
-            self._pending = (previous, sample, 1)
+            self._ramp_baseline = None
+            self._ramp_direction = 0
+            self._pending = (previous, sample, 1, "step")
+        elif (ramp := self._ramp_candidate(previous, sample)) is not None:
+            self._pending = (*ramp, 1, "ramp")
         else:
             self._pending = None
         return []
+
+    def _ramp_candidate(
+        self,
+        previous: CircuitSample,
+        sample: CircuitSample,
+    ) -> tuple[CircuitSample, CircuitSample] | None:
+        change_w = float(sample.real_power) - float(previous.real_power)
+        direction = 1 if change_w > 0 else -1 if change_w < 0 else 0
+        if direction == 0:
+            self._ramp_baseline = None
+            self._ramp_direction = 0
+            return None
+        if self._ramp_baseline is None or direction != self._ramp_direction:
+            self._ramp_baseline = previous
+            self._ramp_direction = direction
+        baseline = self._ramp_baseline
+        total_change_w = float(sample.real_power) - float(baseline.real_power)
+        if direction * total_change_w < self.effective_min_delta_w:
+            return None
+        self._ramp_baseline = None
+        self._ramp_direction = 0
+        return baseline, sample
+
+    @staticmethod
+    def _extends_ramp(
+        baseline: CircuitSample,
+        candidate: CircuitSample,
+        sample: CircuitSample,
+    ) -> bool:
+        current_change = float(candidate.real_power) - float(baseline.real_power)
+        next_change = float(sample.real_power) - float(candidate.real_power)
+        return current_change * next_change > 0.0
 
     def _same_level(
         self,
@@ -3846,9 +3965,11 @@ class NilmEdgeDetector:
         self,
         previous: CircuitSample,
         sample: CircuitSample,
+        *,
+        transition_kind: str = "step",
     ) -> NilmEdge | None:
         delta_w = float(sample.real_power) - float(previous.real_power)
-        if abs(delta_w) < self.min_delta_w:
+        if abs(delta_w) < self.effective_min_delta_w:
             return None
 
         leg_a_delta = _optional_delta(
@@ -3860,17 +3981,18 @@ class NilmEdgeDetector:
             getattr(previous, "leg_b_real_power", None),
         )
         topology = _split_phase_topology(leg_a_delta, leg_b_delta)
+        confirmation_window = self.confirmation_max_interval
         previous_real_time = _source_updated_at(previous, SensorRole.REAL_POWER)
         sample_real_time = _source_updated_at(sample, SensorRole.REAL_POWER)
         previous_va, previous_pf = _nilm_electrical_features(
             previous,
             previous_real_time,
-            self.confirmation_max_interval,
+            confirmation_window,
         )
         sample_va, sample_pf = _nilm_electrical_features(
             sample,
             sample_real_time,
-            self.confirmation_max_interval,
+            confirmation_window,
         )
         previous_var_time = _source_updated_at(previous, SensorRole.REACTIVE_POWER)
         sample_var_time = _source_updated_at(sample, SensorRole.REACTIVE_POWER)
@@ -3885,7 +4007,7 @@ class NilmEdgeDetector:
                 previous_var_time,
                 sample_real_time,
                 previous_real_time,
-                self.confirmation_max_interval,
+                confirmation_window,
             ),
             delta_va=_aligned_optional_delta(
                 sample_va[0],
@@ -3894,7 +4016,7 @@ class NilmEdgeDetector:
                 previous_va[1],
                 sample_real_time,
                 previous_real_time,
-                self.confirmation_max_interval,
+                confirmation_window,
             ),
             delta_pf=_aligned_optional_delta(
                 sample_pf[0],
@@ -3903,7 +4025,7 @@ class NilmEdgeDetector:
                 previous_pf[1],
                 sample_real_time,
                 previous_real_time,
-                self.confirmation_max_interval,
+                confirmation_window,
             ),
             direction="on" if delta_w > 0 else "off",
             leg_a_delta_w=_round_optional(leg_a_delta),
@@ -3911,6 +4033,7 @@ class NilmEdgeDetector:
             leg_balance_ratio=topology["leg_balance_ratio"],
             dominant_leg=topology["dominant_leg"],
             split_phase_type=topology["split_phase_type"],
+            transition_kind=transition_kind,
         )
 
     def process_many(self, samples: Iterable[CircuitSample]) -> list[NilmEdge]:
@@ -4030,6 +4153,17 @@ class _KnownLoadCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class _KnownLoadAttributionCandidate:
+    """One bounded single- or multi-event explanation for an aggregate edge."""
+
+    edge_index: int
+    event_indices: tuple[int, ...]
+    match: KnownLoadMatch
+    score: float
+    time_offset_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class _KnownLoadAssignment:
     candidate_indices: tuple[int, ...] = ()
     total_score: float = 0.0
@@ -4044,6 +4178,143 @@ def _known_load_topology_score(status: str) -> float:
     return 0.0
 
 
+def _select_known_load_attribution_candidates(
+    candidates: Iterable[_KnownLoadAttributionCandidate],
+) -> tuple[set[int], set[int]]:
+    """Select bounded competing single and compound known-load explanations."""
+    values = list(candidates)
+    if not values:
+        return set(), set()
+
+    by_edge: dict[int, list[int]] = defaultdict(list)
+    by_event: dict[int, list[int]] = defaultdict(list)
+    for index, candidate in enumerate(values):
+        by_edge[candidate.edge_index].append(index)
+        for event_index in candidate.event_indices:
+            by_event[event_index].append(index)
+
+    selected: set[int] = set()
+    ambiguous_edges: set[int] = set()
+    remaining = set(range(len(values)))
+
+    def assignment_key(
+        assignment: tuple[float, tuple[int, ...]],
+    ) -> tuple[float, int, float, tuple[tuple[int, tuple[int, ...]], ...]]:
+        score, indices = assignment
+        return (
+            -score,
+            -len(indices),
+            sum(abs(values[index].time_offset_seconds) for index in indices),
+            tuple(
+                (values[index].edge_index, values[index].event_indices)
+                for index in indices
+            ),
+        )
+
+    while remaining:
+        start = min(
+            remaining,
+            key=lambda index: (values[index].edge_index, values[index].event_indices),
+        )
+        pending = [start]
+        component: set[int] = set()
+        while pending:
+            index = pending.pop()
+            if index in component:
+                continue
+            component.add(index)
+            candidate = values[index]
+            pending.extend(by_edge[candidate.edge_index])
+            for event_index in candidate.event_indices:
+                pending.extend(by_event[event_index])
+        remaining.difference_update(component)
+
+        edge_nodes = {values[index].edge_index for index in component}
+        event_nodes = {
+            event_index
+            for index in component
+            for event_index in values[index].event_indices
+        }
+        ordered_component = tuple(
+            sorted(
+                component,
+                key=lambda index: (
+                    values[index].edge_index,
+                    values[index].event_indices,
+                ),
+            )
+        )
+        if (
+            max(len(edge_nodes), len(event_nodes))
+            > KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES
+        ):
+            # Multi-event attribution is a set-packing problem.  Do not make
+            # a greedy, irreversible attribution when it exceeds the bounded
+            # exact solver; retain the edge as ambiguous instead.
+            ambiguous_edges.update(edge_nodes)
+            continue
+
+        candidates_by_edge: dict[int, list[int]] = defaultdict(list)
+        for index in ordered_component:
+            candidates_by_edge[values[index].edge_index].append(index)
+        event_position = {
+            event: position for position, event in enumerate(sorted(event_nodes))
+        }
+        states: dict[int, list[tuple[float, tuple[int, ...]]]] = {0: [(0.0, ())]}
+        for edge_index in sorted(edge_nodes):
+            next_states: dict[int, list[tuple[float, tuple[int, ...]]]] = defaultdict(
+                list
+            )
+            for mask, assignments in states.items():
+                for assignment in assignments:
+                    next_states[mask].append(assignment)
+                    for candidate_index in candidates_by_edge[edge_index]:
+                        candidate = values[candidate_index]
+                        event_mask = sum(
+                            1 << event_position[event]
+                            for event in candidate.event_indices
+                        )
+                        if mask & event_mask:
+                            continue
+                        next_states[mask | event_mask].append(
+                            (
+                                assignment[0] + candidate.score,
+                                (*assignment[1], candidate_index),
+                            )
+                        )
+            states = {}
+            for mask, assignments in next_states.items():
+                distinct = {assignment[1]: assignment for assignment in assignments}
+                states[mask] = sorted(distinct.values(), key=assignment_key)[:2]
+
+        ranked = sorted(
+            (
+                assignment
+                for assignments in states.values()
+                for assignment in assignments
+            ),
+            key=assignment_key,
+        )
+        best = ranked[0]
+        second = next(
+            (assignment for assignment in ranked[1:] if assignment[1] != best[1]),
+            None,
+        )
+        best_indices = set(best[1])
+        if (
+            second is not None
+            and best[0] - second[0] <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+        ):
+            second_indices = set(second[1])
+            selected.update(best_indices & second_indices)
+            ambiguous_edges.update(
+                values[index].edge_index for index in best_indices ^ second_indices
+            )
+        else:
+            selected.update(best_indices)
+    return selected, ambiguous_edges
+
+
 def _select_known_load_candidates(
     candidates: list[_KnownLoadCandidate],
 ) -> tuple[set[int], set[int]]:
@@ -4055,11 +4326,35 @@ def _select_known_load_candidates(
         if min(len(edge_nodes), len(event_nodes)) > (
             KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES
         ):
-            component_selected, component_ambiguous = _greedy_known_load_component(
-                candidates, component
-            )
-            selected.update(component_selected)
-            ambiguous_edges.update(component_ambiguous)
+            if max(len(edge_nodes), len(event_nodes)) > (
+                KNOWN_LOAD_GLOBAL_ASSIGNMENT_MAX_NODES
+            ):
+                # The processor is synchronous on Home Assistant's update
+                # path.  Keep the exact optimizer bounded and retain
+                # over-limit evidence for a later, smaller component rather
+                # than committing a non-optimal greedy match.
+                ambiguous_edges.update(edge_nodes)
+                continue
+            assignments = _global_known_load_component(candidates, component)
+            if not assignments:
+                continue
+            best = assignments[0]
+            second = assignments[1] if len(assignments) > 1 else None
+            best_indices = set(best.candidate_indices)
+            if (
+                second is not None
+                and best.candidate_indices != second.candidate_indices
+                and best.total_score - second.total_score
+                <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+            ):
+                second_indices = set(second.candidate_indices)
+                selected.update(best_indices & second_indices)
+                ambiguous_edges.update(
+                    candidates[index].edge_index
+                    for index in best_indices ^ second_indices
+                )
+            else:
+                selected.update(best_indices)
             continue
 
         assignments = _exact_known_load_component(candidates, component)
@@ -4173,6 +4468,121 @@ def _exact_known_load_component(
     )
 
 
+def _global_known_load_component(
+    candidates: list[_KnownLoadCandidate],
+    component: tuple[int, ...],
+) -> tuple[_KnownLoadAssignment, ...]:
+    """Solve a bounded single-event component with maximum-weight matching."""
+    edge_nodes = sorted({candidates[index].edge_index for index in component})
+    event_nodes = sorted({candidates[index].event_index for index in component})
+    size = max(len(edge_nodes), len(event_nodes))
+    edge_position = {node: position for position, node in enumerate(edge_nodes)}
+    event_position = {node: position for position, node in enumerate(event_nodes)}
+    candidate_by_pair: dict[tuple[int, int], int] = {}
+    weights = [[0.0] * size for _ in range(size)]
+    for index in component:
+        candidate = candidates[index]
+        row = edge_position[candidate.edge_index]
+        column = event_position[candidate.event_index]
+        pair = (row, column)
+        existing = candidate_by_pair.get(pair)
+        if existing is None or _candidate_selection_key(candidate) < (
+            _candidate_selection_key(candidates[existing])
+        ):
+            candidate_by_pair[pair] = index
+            weights[row][column] = candidate.score.total
+
+    def assignment_for(matrix: list[list[float]]) -> _KnownLoadAssignment:
+        selected_indices = tuple(
+            sorted(
+                (
+                    candidate_by_pair[(row, column)]
+                    for row, column in enumerate(_maximum_weight_assignment(matrix))
+                    if (row, column) in candidate_by_pair
+                    and matrix[row][column] > 0.0
+                ),
+                key=lambda index: _candidate_stable_key(candidates[index]),
+            )
+        )
+        return _KnownLoadAssignment(
+            candidate_indices=selected_indices,
+            total_score=sum(
+                candidates[index].score.total for index in selected_indices
+            ),
+            total_offset_seconds=sum(
+                abs(candidates[index].score.time_offset_seconds)
+                for index in selected_indices
+            ),
+        )
+
+    best = assignment_for(weights)
+    alternatives = [best]
+    for index in best.candidate_indices:
+        candidate = candidates[index]
+        matrix = [list(row) for row in weights]
+        row = edge_position[candidate.edge_index]
+        column = event_position[candidate.event_index]
+        matrix[row][column] = 0.0
+        alternatives.append(assignment_for(matrix))
+    return _best_known_load_assignments(alternatives, candidates)
+
+
+def _maximum_weight_assignment(weights: list[list[float]]) -> list[int]:
+    """Solve a square maximum-weight assignment with deterministic ordering."""
+    size = len(weights)
+    if not size:
+        return []
+    maximum = max(max(row) for row in weights)
+    costs = [[maximum - weight for weight in row] for row in weights]
+    u = [0.0] * (size + 1)
+    v = [0.0] * (size + 1)
+    p = [0] * (size + 1)
+    way = [0] * (size + 1)
+    for row in range(1, size + 1):
+        p[0] = row
+        column = 0
+        min_cost = [float("inf")] * (size + 1)
+        used = [False] * (size + 1)
+        while True:
+            used[column] = True
+            assigned_row = p[column]
+            delta = float("inf")
+            next_column = 0
+            for candidate_column in range(1, size + 1):
+                if used[candidate_column]:
+                    continue
+                reduced_cost = (
+                    costs[assigned_row - 1][candidate_column - 1]
+                    - u[assigned_row]
+                    - v[candidate_column]
+                )
+                if reduced_cost < min_cost[candidate_column]:
+                    min_cost[candidate_column] = reduced_cost
+                    way[candidate_column] = column
+                if min_cost[candidate_column] < delta:
+                    delta = min_cost[candidate_column]
+                    next_column = candidate_column
+            for candidate_column in range(size + 1):
+                if used[candidate_column]:
+                    u[p[candidate_column]] += delta
+                    v[candidate_column] -= delta
+                else:
+                    min_cost[candidate_column] -= delta
+            column = next_column
+            if p[column] == 0:
+                break
+        while True:
+            previous_column = way[column]
+            p[column] = p[previous_column]
+            column = previous_column
+            if column == 0:
+                break
+    assignment = [0] * size
+    for column in range(1, size + 1):
+        assignment[p[column] - 1] = column - 1
+    return assignment
+
+
 def _extend_known_load_assignment(
     assignment: _KnownLoadAssignment,
     candidate_index: int,
@@ -4223,70 +4633,6 @@ def _known_load_assignment_sort_key(
     )
 
 
-def _greedy_known_load_component(
-    candidates: list[_KnownLoadCandidate],
-    component: tuple[int, ...],
-) -> tuple[set[int], set[int]]:
-    by_edge: dict[int, list[int]] = defaultdict(list)
-    by_event: dict[int, list[int]] = defaultdict(list)
-    for index in component:
-        by_edge[candidates[index].edge_index].append(index)
-        by_event[candidates[index].event_index].append(index)
-
-    ambiguous_edges: set[int] = set()
-    ambiguous_events: set[int] = set()
-    for values in by_edge.values():
-        ranked = sorted(
-            values,
-            key=lambda index: _candidate_selection_key(candidates[index]),
-        )
-        if len(ranked) > 1 and (
-            candidates[ranked[0]].score.total - candidates[ranked[1]].score.total
-            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
-        ):
-            ambiguous_edges.add(candidates[ranked[0]].edge_index)
-            ambiguous_events.update(
-                candidates[index].event_index for index in ranked[:2]
-            )
-    for values in by_event.values():
-        ranked = sorted(
-            values,
-            key=lambda index: _candidate_selection_key(candidates[index]),
-        )
-        if len(ranked) > 1 and (
-            candidates[ranked[0]].score.total - candidates[ranked[1]].score.total
-            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
-        ):
-            ambiguous_events.add(candidates[ranked[0]].event_index)
-            ambiguous_edges.update(candidates[index].edge_index for index in ranked[:2])
-
-    selected: set[int] = set()
-    used_edges: set[int] = set()
-    used_events: set[int] = set()
-    for index in sorted(
-        component,
-        key=lambda candidate_index: _candidate_selection_key(
-            candidates[candidate_index]
-        ),
-    ):
-        candidate = candidates[index]
-        if (
-            candidate.edge_index in ambiguous_edges
-            or candidate.event_index in ambiguous_events
-            or candidate.edge_index in used_edges
-            or candidate.event_index in used_events
-        ):
-            continue
-        selected.add(index)
-        used_edges.add(candidate.edge_index)
-        used_events.add(candidate.event_index)
-        candidates[index] = replace(
-            candidate,
-            match=replace(candidate.match, selection_method="greedy_fallback"),
-        )
-    return selected, ambiguous_edges
-
-
 def _candidate_selection_key(
     candidate: _KnownLoadCandidate,
 ) -> tuple[float, float, int, int]:
@@ -4300,6 +4646,220 @@ def _candidate_selection_key(
 
 def _candidate_stable_key(candidate: _KnownLoadCandidate) -> tuple[int, int]:
     return candidate.edge_index, candidate.event_index
+
+
+def _compound_known_load_matches(
+    edges: Iterable[NilmEdge],
+    events: Iterable[CircuitEvent],
+    *,
+    excluded_edge_indices: set[int],
+    excluded_event_indices: set[int],
+    time_window_seconds: float,
+    magnitude_tolerance: float,
+    residual_min_delta_w: float,
+    topology_by_circuit: Mapping[str, KnownLoadTopology],
+) -> list[tuple[int, tuple[int, ...], KnownLoadMatch]]:
+    """Return the best unambiguous two/three-event explanation per edge."""
+    events = tuple(events)
+    matches: list[tuple[int, tuple[int, ...], KnownLoadMatch]] = []
+    for edge_index, edge in enumerate(edges):
+        if edge_index in excluded_edge_indices or edge.origin != "aggregate":
+            continue
+        compatible: list[
+            tuple[int, CircuitEvent, KnownEventPowerEstimate, float, float, str]
+        ] = []
+        for event_index, event in enumerate(events):
+            if event_index in excluded_event_indices or event.event_type not in {
+                EventType.START,
+                EventType.STOP,
+                EventType.POWER_TRANSITION,
+            }:
+                continue
+            estimate = _event_power_estimate(event)
+            if estimate is None:
+                continue
+            direction = (
+                "on"
+                if event.event_type is EventType.START
+                or estimate.signed_delta_w is not None
+                and estimate.signed_delta_w > 0.0
+                else "off"
+            )
+            if edge.direction != direction:
+                continue
+            time_distance, time_offset = _known_event_time_distance(
+                event,
+                edge.timestamp,
+            )
+            if time_distance > time_window_seconds:
+                continue
+            topology_status = evaluate_known_load_topology(
+                edge,
+                topology_by_circuit.get(event.circuit_id, KnownLoadTopology()),
+            )
+            if topology_status in {"topology_mismatch", "leg_mismatch"}:
+                continue
+            compatible.append(
+                (
+                    event_index,
+                    event,
+                    estimate,
+                    time_distance,
+                    time_offset,
+                    topology_status,
+                )
+            )
+        compatible.sort(key=lambda item: (item[3], item[0]))
+        compatible = compatible[:8]
+        choices: list[tuple[float, tuple[Any, ...]]] = []
+        for group_size in (2, 3):
+            for group in combinations(compatible, group_size):
+                known_circuit_ids = tuple(item[1].circuit_id for item in group)
+                if len(set(known_circuit_ids)) != len(known_circuit_ids):
+                    continue
+                signed_delta_w = sum(
+                    item[2].signed_delta_w
+                    if item[2].signed_delta_w is not None
+                    else item[2].magnitude_w
+                    if item[1].event_type is EventType.START
+                    else -item[2].magnitude_w
+                    for item in group
+                )
+                known_power_w = abs(signed_delta_w)
+                if known_power_w <= 0.0:
+                    continue
+                magnitude_ratio = (
+                    abs(abs(edge.delta_w) - known_power_w) / known_power_w
+                )
+                if magnitude_ratio > magnitude_tolerance:
+                    continue
+                magnitude_score = (
+                    1.0
+                    if magnitude_tolerance == 0.0 and magnitude_ratio == 0.0
+                    else max(0.0, 1.0 - magnitude_ratio / magnitude_tolerance)
+                    if magnitude_tolerance > 0.0
+                    else 0.0
+                )
+                time_score = sum(
+                    1.0
+                    if time_window_seconds == 0.0 and item[3] == 0.0
+                    else max(0.0, 1.0 - item[3] / time_window_seconds)
+                    if time_window_seconds > 0.0
+                    else 0.0
+                    for item in group
+                ) / len(group)
+                topology_score = sum(
+                    _known_load_topology_score(item[5]) for item in group
+                ) / len(group)
+                score = (
+                    KNOWN_LOAD_MAGNITUDE_WEIGHT * magnitude_score
+                    + KNOWN_LOAD_TIME_WEIGHT * time_score
+                    + KNOWN_LOAD_TOPOLOGY_WEIGHT * topology_score
+                )
+                choices.append((score, group))
+        if not choices:
+            continue
+        choices.sort(
+            key=lambda item: (
+                -item[0],
+                tuple(candidate[0] for candidate in item[1]),
+            )
+        )
+        if (
+            len(choices) > 1
+            and choices[0][0] - choices[1][0]
+            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+        ):
+            continue
+        score, group = choices[0]
+        known_circuit_ids = tuple(item[1].circuit_id for item in group)
+        signed_delta_w = sum(
+            item[2].signed_delta_w
+            if item[2].signed_delta_w is not None
+            else item[2].magnitude_w
+            if item[1].event_type is EventType.START
+            else -item[2].magnitude_w
+            for item in group
+        )
+        residual_delta_w = edge.delta_w - signed_delta_w
+        residual_edge = _known_load_residual_edge(
+            edge,
+            residual_delta_w,
+            known_circuit_ids=known_circuit_ids,
+            residual_min_delta_w=residual_min_delta_w,
+        )
+        topology_statuses = tuple(item[5] for item in group)
+        match = KnownLoadMatch(
+            edge=edge,
+            known_circuit_id=known_circuit_ids[0],
+            known_circuit_ids=known_circuit_ids,
+            confidence=score,
+            known_power_w=abs(signed_delta_w),
+            event_type=group[0][1].event_type,
+            event_timestamp=min(item[1].timestamp for item in group),
+            power_source="compound",
+            time_distance_seconds=max(item[3] for item in group),
+            magnitude_ratio=abs(abs(edge.delta_w) - abs(signed_delta_w))
+            / abs(signed_delta_w),
+            topology_compatible=(
+                True
+                if all(status == "consistent" for status in topology_statuses)
+                else None
+            ),
+            topology_score=sum(
+                _known_load_topology_score(status) for status in topology_statuses
+            ) / len(topology_statuses),
+            explained_delta_w=signed_delta_w,
+            residual_delta_w=residual_delta_w,
+            residual_edge=residual_edge,
+            selection_method="compound",
+            time_offset_seconds=sum(item[4] for item in group) / len(group),
+            magnitude_score=(
+                1.0
+                if abs(edge.delta_w) == abs(signed_delta_w)
+                else max(
+                    0.0,
+                    1.0
+                    - (
+                        abs(abs(edge.delta_w) - abs(signed_delta_w))
+                        / abs(signed_delta_w)
+                    )
+                    / magnitude_tolerance,
+                )
+            ),
+            time_score=sum(
+                1.0
+                if time_window_seconds == 0.0 and item[3] == 0.0
+                else max(0.0, 1.0 - item[3] / time_window_seconds)
+                if time_window_seconds > 0.0
+                else 0.0
+                for item in group
+            ) / len(group),
+            topology_status=(
+                "consistent"
+                if all(status == "consistent" for status in topology_statuses)
+                else "compound_unknown_topology"
+            ),
+            known_power_source="compound",
+            known_transition_delta_w=signed_delta_w,
+            power_match_confidence=(
+                1.0
+                if abs(edge.delta_w) == abs(signed_delta_w)
+                else max(
+                    0.0,
+                    1.0
+                    - (
+                        abs(abs(edge.delta_w) - abs(signed_delta_w))
+                        / abs(signed_delta_w)
+                    )
+                    / magnitude_tolerance,
+                )
+            ),
+            selection_status="candidate",
+        )
+        event_indices = tuple(item[0] for item in group)
+        matches.append((edge_index, event_indices, match))
+    return matches
 
 
 def attribute_known_loads(
@@ -4405,7 +4965,7 @@ def attribute_known_loads(
                 _known_load_residual_edge(
                     edge,
                     residual_delta_w,
-                    event.circuit_id,
+                    known_circuit_ids=(event.circuit_id,),
                     residual_min_delta_w=residual_min_delta_w,
                 )
                 if eligible
@@ -4447,6 +5007,7 @@ def attribute_known_loads(
                 ),
                 power_match_confidence=score.magnitude,
                 selection_status=("candidate" if eligible else "rejected_topology"),
+                known_circuit_ids=(event.circuit_id,),
             )
             if eligible:
                 candidates.append(
@@ -4455,27 +5016,84 @@ def attribute_known_loads(
             else:
                 rejected_topology_candidates.append((edge_index, event_index, match))
 
-    selected_candidate_indices, ambiguous_edge_indices = _select_known_load_candidates(
-        candidates
+    compound_matches = _compound_known_load_matches(
+        edges,
+        events,
+        excluded_edge_indices=set(),
+        excluded_event_indices=set(),
+        time_window_seconds=time_window_seconds,
+        magnitude_tolerance=magnitude_tolerance,
+        residual_min_delta_w=residual_min_delta_w,
+        topology_by_circuit=topology_by_circuit,
     )
-    selected_candidates = sorted(
-        (candidates[index] for index in selected_candidate_indices),
-        key=lambda candidate: (candidate.edge_index, candidate.event_index),
-    )
-    matched_edge_indices = {candidate.edge_index for candidate in selected_candidates}
+    if compound_matches:
+        attribution_candidates = [
+            _KnownLoadAttributionCandidate(
+                edge_index=candidate.edge_index,
+                event_indices=(candidate.event_index,),
+                match=candidate.match,
+                score=candidate.score.total,
+                time_offset_seconds=candidate.score.time_offset_seconds,
+            )
+            for candidate in candidates
+        ]
+        attribution_candidates.extend(
+            _KnownLoadAttributionCandidate(
+                edge_index=edge_index,
+                event_indices=event_indices,
+                match=match,
+                score=match.confidence,
+                time_offset_seconds=float(match.time_offset_seconds or 0.0),
+            )
+            for edge_index, event_indices, match in compound_matches
+        )
+        selected_attribution_indices, ambiguous_edge_indices = (
+            _select_known_load_attribution_candidates(attribution_candidates)
+        )
+        selected_attributions = sorted(
+            (attribution_candidates[index] for index in selected_attribution_indices),
+            key=lambda candidate: (candidate.edge_index, candidate.event_indices),
+        )
+    else:
+        selected_candidate_indices, ambiguous_edge_indices = (
+            _select_known_load_candidates(candidates)
+        )
+        selected_attributions = [
+            _KnownLoadAttributionCandidate(
+                edge_index=candidate.edge_index,
+                event_indices=(candidate.event_index,),
+                match=candidate.match,
+                score=candidate.score.total,
+                time_offset_seconds=candidate.score.time_offset_seconds,
+            )
+            for candidate in sorted(
+                (candidates[index] for index in selected_candidate_indices),
+                key=lambda candidate: (candidate.edge_index, candidate.event_index),
+            )
+        ]
+    matched_edge_indices = {
+        candidate.edge_index for candidate in selected_attributions
+    }
+    matched_event_indices = {
+        event_index
+        for candidate in selected_attributions
+        for event_index in candidate.event_indices
+    }
+    matches_by_edge_index = {
+        candidate.edge_index: replace(candidate.match, selection_status="matched")
+        for candidate in selected_attributions
+    }
     matched_edges = tuple(
-        replace(candidate.match, selection_status="matched")
-        for candidate in selected_candidates
+        matches_by_edge_index[index] for index in sorted(matches_by_edge_index)
     )
     accepted_unmatched_edges = tuple(
         edge for index, edge in enumerate(edges) if index not in matched_edge_indices
     )
     residual_edges = tuple(
-        candidate.match.residual_edge
-        for candidate in selected_candidates
-        if candidate.match.residual_edge is not None
+        match.residual_edge
+        for match in matched_edges
+        if match.residual_edge is not None
     )
-    matched_event_indices = {candidate.event_index for candidate in selected_candidates}
     strongest_rejections_by_event: dict[int, tuple[int, int, KnownLoadMatch]] = {}
     for edge_index, event_index, match in rejected_topology_candidates:
         if edge_index in matched_edge_indices or event_index in matched_event_indices:
@@ -4533,7 +5151,7 @@ def mask_known_loads(
 def _known_load_residual_edge(
     edge: NilmEdge,
     residual_delta_w: float,
-    known_circuit_id: str,
+    known_circuit_ids: tuple[str, ...],
     *,
     residual_min_delta_w: float,
 ) -> NilmEdge | None:
@@ -4549,10 +5167,22 @@ def _known_load_residual_edge(
     return NilmEdge(
         timestamp=edge.timestamp,
         delta_w=residual_delta_w,
+        # The direct-meter event only establishes real-power attribution.
+        # Reactive, apparent, PF and leg deltas are not proportional to real
+        # power, so carrying scaled aggregate values would fabricate evidence.
+        delta_var=None,
+        delta_va=None,
+        delta_pf=None,
         direction="on" if residual_delta_w > 0 else "off",
+        leg_a_delta_w=None,
+        leg_b_delta_w=None,
+        leg_balance_ratio=None,
+        dominant_leg=None,
+        split_phase_type="unknown",
         origin="known_load_residual",
         parent_edge_id=_nilm_edge_id(edge),
-        explained_known_circuit_ids=(known_circuit_id,),
+        explained_known_circuit_ids=known_circuit_ids,
+        transition_kind=edge.transition_kind,
     )
 
 
@@ -5169,6 +5799,16 @@ def classify_signature(signature: NilmSignature) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class _NilmSessionTraceEvidence:
+    """Bounded residual-trace evidence for one proposed ON/OFF session."""
+
+    plateau_power_w: float | None
+    measured_energy_kwh: float | None
+    power_coverage: float
+    intermediate_transition_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class _NilmSessionCandidate:
     on_index: int
     off_index: int
@@ -5177,6 +5817,168 @@ class _NilmSessionCandidate:
     signature_fingerprint: str
     assignment_id: str | None
     score: float
+    trace_evidence: _NilmSessionTraceEvidence | None = None
+
+
+def _select_nilm_session_candidates(
+    candidates: Iterable[_NilmSessionCandidate],
+    *,
+    unmatched_penalty: float = 0.0,
+) -> tuple[_NilmSessionCandidate, ...]:
+    """Choose the highest-scoring edge-disjoint set of session candidates.
+
+    Aggregate traces may contain both nested and partially overlapping runs
+    from different appliances.  Ordering their ON/OFF indices would reject
+    one of those valid patterns, so selection is a bounded maximum-weight
+    bipartite matching instead.  Each aggregate edge remains usable at most
+    once.
+    """
+    best_by_pair: dict[tuple[int, int], _NilmSessionCandidate] = {}
+    for candidate in candidates:
+        pair = (candidate.on_index, candidate.off_index)
+        existing = best_by_pair.get(pair)
+        if existing is None or (
+            candidate.score,
+            candidate.signature_fingerprint,
+            candidate.assignment_id or "",
+        ) > (
+            existing.score,
+            existing.signature_fingerprint,
+            existing.assignment_id or "",
+        ):
+            best_by_pair[pair] = candidate
+    if not best_by_pair:
+        return ()
+
+    def selection_key(
+        selection: tuple[float, tuple[_NilmSessionCandidate, ...]],
+    ) -> tuple[float, int, tuple[tuple[int, int, str, str], ...]]:
+        score, selected = selection
+        return (
+            -score,
+            -len(selected),
+            tuple(
+                (
+                    item.on_index,
+                    item.off_index,
+                    item.signature_fingerprint,
+                    item.assignment_id or "",
+                )
+                for item in selected
+            ),
+        )
+
+    candidates_by_on: dict[int, list[_NilmSessionCandidate]] = defaultdict(list)
+    candidates_by_off: dict[int, list[_NilmSessionCandidate]] = defaultdict(list)
+    for candidate in best_by_pair.values():
+        candidates_by_on[candidate.on_index].append(candidate)
+        candidates_by_off[candidate.off_index].append(candidate)
+
+    remaining_on = set(candidates_by_on)
+    selected: list[_NilmSessionCandidate] = []
+    while remaining_on:
+        start_on = min(remaining_on)
+        pending_on = [start_on]
+        component_on: set[int] = set()
+        component_off: set[int] = set()
+        component_candidates: set[_NilmSessionCandidate] = set()
+        while pending_on:
+            on_index = pending_on.pop()
+            if on_index in component_on:
+                continue
+            component_on.add(on_index)
+            for candidate in candidates_by_on[on_index]:
+                component_candidates.add(candidate)
+                if candidate.off_index in component_off:
+                    continue
+                component_off.add(candidate.off_index)
+                pending_on.extend(
+                    item.on_index for item in candidates_by_off[candidate.off_index]
+                )
+        remaining_on.difference_update(component_on)
+        ordered_candidates = sorted(
+            component_candidates,
+            key=lambda item: (
+                item.on_index,
+                item.off_index,
+                item.signature_fingerprint,
+                item.assignment_id or "",
+            ),
+        )
+        if max(len(component_on), len(component_off)) > (
+            NILM_SESSION_GLOBAL_MATCHING_MAX_NODES
+        ):
+            # Keep synchronous update work bounded.  Retaining this evidence
+            # unpaired is safer than committing a greedy, non-optimal session.
+            continue
+
+        if min(len(component_on), len(component_off)) > 12:
+            on_nodes = sorted(component_on)
+            off_nodes = sorted(component_off)
+            size = max(len(on_nodes), len(off_nodes))
+            on_position = {node: position for position, node in enumerate(on_nodes)}
+            off_position = {
+                node: position for position, node in enumerate(off_nodes)
+            }
+            candidate_by_pair = {
+                (candidate.on_index, candidate.off_index): candidate
+                for candidate in ordered_candidates
+            }
+            weights = [[0.0] * size for _ in range(size)]
+            for candidate in ordered_candidates:
+                row = on_position[candidate.on_index]
+                column = off_position[candidate.off_index]
+                weights[row][column] = candidate.score - (2.0 * unmatched_penalty)
+            for row, column in enumerate(_maximum_weight_assignment(weights)):
+                if row >= len(on_nodes) or column >= len(off_nodes):
+                    continue
+                candidate = candidate_by_pair.get((on_nodes[row], off_nodes[column]))
+                if candidate is not None and weights[row][column] > 0.0:
+                    selected.append(candidate)
+            continue
+
+        bitmask_on = len(component_on) <= len(component_off)
+        bit_nodes = sorted(component_on if bitmask_on else component_off)
+        other_nodes = sorted(component_off if bitmask_on else component_on)
+        bit_position = {node: position for position, node in enumerate(bit_nodes)}
+        candidates_by_other: dict[int, list[_NilmSessionCandidate]] = defaultdict(list)
+        for candidate in ordered_candidates:
+            other = candidate.off_index if bitmask_on else candidate.on_index
+            candidates_by_other[other].append(candidate)
+        states: dict[int, tuple[float, tuple[_NilmSessionCandidate, ...]]] = {
+            0: (0.0, ())
+        }
+        for other in other_nodes:
+            next_states = dict(states)
+            for mask, selection in states.items():
+                for candidate in candidates_by_other[other]:
+                    bit_node = candidate.on_index if bitmask_on else candidate.off_index
+                    bit = 1 << bit_position[bit_node]
+                    if mask & bit:
+                        continue
+                    proposal = (
+                        selection[0] + candidate.score - (2.0 * unmatched_penalty),
+                        (*selection[1], candidate),
+                    )
+                    existing = next_states.get(mask | bit)
+                    if existing is None or selection_key(proposal) < selection_key(
+                        existing
+                    ):
+                        next_states[mask | bit] = proposal
+            states = next_states
+        selected.extend(min(states.values(), key=selection_key)[1])
+
+    return tuple(
+        sorted(
+            selected,
+            key=lambda item: (
+                item.on_edge.timestamp,
+                item.off_edge.timestamp,
+                item.on_index,
+                item.off_index,
+            ),
+        )
+    )
 
 
 def pair_nilm_sessions_for_signatures(
@@ -5188,6 +5990,7 @@ def pair_nilm_sessions_for_signatures(
     max_duration: timedelta = timedelta(hours=12),
     min_confidence: float = 0.5,
     ambiguity_margin: float = 0.08,
+    power_trace: Iterable[tuple[datetime, float]] = (),
 ) -> list[NilmSession]:
     """Pair NILM sessions once across all competing signatures."""
 
@@ -5206,9 +6009,25 @@ def pair_nilm_sessions_for_signatures(
         return []
 
     ordered_edges = sorted(edges, key=lambda edge: edge.timestamp)
-    on_edges = [edge for edge in ordered_edges if edge.direction == "on"]
-    off_edges = [edge for edge in ordered_edges if edge.direction == "off"]
-    candidates: list[_NilmSessionCandidate] = []
+    normalized_trace = _nilm_normalized_power_trace(power_trace)
+    # Session pairing runs synchronously during a Home Assistant source
+    # update.  Bound candidate extraction before any cross-product or trace
+    # scan; older retained edges remain visible as open evidence instead of
+    # causing an unbounded update-time calculation.
+    all_on_edges = [edge for edge in ordered_edges if edge.direction == "on"]
+    candidate_on_start = max(
+        len(all_on_edges) - NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS,
+        0,
+    )
+    on_edges = all_on_edges[candidate_on_start:]
+    off_edges = [
+        edge for edge in ordered_edges if edge.direction == "off"
+    ][-NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS:]
+    preliminary_candidates: list[
+        tuple[int, int, NilmEdge, NilmEdge, Mapping[str, Any], float, float]
+    ] = []
+    best_pair_scores: dict[tuple[int, int], float] = {}
+    preliminary_off_indices_by_on: dict[int, set[int]] = defaultdict(set)
     for on_index, on_edge in enumerate(on_edges):
         for off_index, off_edge in enumerate(off_edges):
             for spec in specs:
@@ -5227,24 +6046,104 @@ def pair_nilm_sessions_for_signatures(
                     off_edge,
                     min_duration=spec_min_duration,
                     max_duration=spec_max_duration,
+                    duration_profile=_nilm_session_spec_duration_profile(spec),
+                    energy_profile=_nilm_session_spec_energy_profile(spec),
                 )
                 signature_score = _nilm_signature_pair_score(on_edge, off_edge, spec)
                 if pair_score is None or signature_score is None:
                     continue
                 score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
-                if score <= min_confidence:
-                    continue
-                candidates.append(
-                    _NilmSessionCandidate(
-                        on_index=on_index,
-                        off_index=off_index,
-                        on_edge=on_edge,
-                        off_edge=off_edge,
-                        signature_fingerprint=_nilm_session_spec_fingerprint(spec),
-                        assignment_id=_nilm_session_spec_assignment_id(spec),
-                        score=score,
+                preliminary_candidates.append(
+                    (
+                        on_index,
+                        off_index,
+                        on_edge,
+                        off_edge,
+                        spec,
+                        pair_score,
+                        signature_score,
                     )
                 )
+                preliminary_off_indices_by_on[on_index].add(off_index)
+                pair = (on_index, off_index)
+                best_pair_scores[pair] = max(best_pair_scores.get(pair, 0.0), score)
+
+    candidate_pairs = tuple(
+        pair
+        for pair, _score in sorted(
+            best_pair_scores.items(),
+            key=lambda item: (
+                -item[1],
+                on_edges[item[0][0]].timestamp,
+                off_edges[item[0][1]].timestamp,
+                item[0],
+            ),
+        )[:NILM_SESSION_CANDIDATE_PAIR_MAX_ITEMS]
+    )
+    candidate_pair_budget_truncated = len(candidate_pairs) < len(best_pair_scores)
+    candidate_off_indices_by_on: dict[int, set[int]] = defaultdict(set)
+    for on_index, off_index in candidate_pairs:
+        candidate_off_indices_by_on[on_index].add(off_index)
+    trace_pairs = set(candidate_pairs[:NILM_SESSION_TRACE_PAIR_MAX_ITEMS])
+    trace_evidence_by_pair = {
+        pair: _nilm_session_trace_evidence(
+            on_edges[pair[0]],
+            off_edges[pair[1]],
+            normalized_trace,
+        )
+        for pair in trace_pairs
+    }
+    candidates: list[_NilmSessionCandidate] = []
+    candidate_pair_set = set(candidate_pairs)
+    for (
+        on_index,
+        off_index,
+        on_edge,
+        off_edge,
+        spec,
+        base_pair_score,
+        signature_score,
+    ) in preliminary_candidates:
+        pair = (on_index, off_index)
+        if pair not in candidate_pair_set:
+            continue
+        trace_evidence = trace_evidence_by_pair.get(pair)
+        pair_score = base_pair_score
+        if pair in trace_pairs:
+            pair_score = _nilm_session_pair_score(
+                on_edge,
+                off_edge,
+                min_duration=_nilm_session_spec_duration(
+                    spec,
+                    "min_duration_seconds",
+                    min_duration,
+                ),
+                max_duration=_nilm_session_spec_duration(
+                    spec,
+                    "max_duration_seconds",
+                    max_duration,
+                ),
+                duration_profile=_nilm_session_spec_duration_profile(spec),
+                trace_evidence=trace_evidence,
+                energy_profile=_nilm_session_spec_energy_profile(spec),
+            )
+        if pair_score is None:
+            continue
+        score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+        if score <= min_confidence:
+            continue
+        candidates.append(
+            _NilmSessionCandidate(
+                on_index=on_index,
+                off_index=off_index,
+                on_edge=on_edge,
+                off_edge=off_edge,
+                signature_fingerprint=_nilm_session_spec_fingerprint(spec),
+                assignment_id=_nilm_session_spec_assignment_id(spec),
+                score=score,
+                trace_evidence=trace_evidence,
+            )
+        )
 
     ambiguous_pairs: set[tuple[int, int]] = set()
     preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
@@ -5282,16 +6181,9 @@ def pair_nilm_sessions_for_signatures(
     force_open_on_indices: set[int] = set()
     sessions: list[NilmSession] = []
     eligible_candidates = list(preferred_candidates.values())
-    # ponytail: greedy global assignment is intentionally bounded; replace it with
-    # maximum-weight matching only if labelled replay data shows a measurable gap.
-    for candidate in sorted(
+    for candidate in _select_nilm_session_candidates(
         eligible_candidates,
-        key=lambda item: (
-            -item.score,
-            item.off_edge.timestamp,
-            item.on_edge.timestamp,
-            item.signature_fingerprint,
-        ),
+        unmatched_penalty=-0.05,
     ):
         if candidate.on_index in force_open_on_indices:
             continue
@@ -5340,11 +6232,18 @@ def pair_nilm_sessions_for_signatures(
                 alternate_match_count=alternate_match_count,
                 known_load_masked=False,
                 known_load_confidence=None,
+                trace_evidence=candidate.trace_evidence,
             )
         )
 
-    for on_index, on_edge in enumerate(on_edges):
-        if on_index in used_on_indices:
+    for original_on_index, on_edge in enumerate(all_on_edges):
+        on_index = original_on_index - candidate_on_start
+        candidate_on_index = on_index if on_index >= 0 else None
+        if candidate_on_index is None:
+            # Raw edges preserve this older evidence.  Do not reclassify it
+            # as an active session after it falls outside the bounded matcher.
+            continue
+        if candidate_on_index is not None and on_index in used_on_indices:
             continue
         ranked_specs = sorted(
             (
@@ -5395,15 +6294,30 @@ def pair_nilm_sessions_for_signatures(
         spec = ranked_specs[0][1]
         assignment_id = _nilm_session_spec_assignment_id(spec)
         fingerprint = _nilm_session_spec_fingerprint(spec)
-        candidate_eligible_off = any(
-            candidate.on_index == on_index
-            and candidate.off_index not in used_off_indices
-            and (
-                candidate.assignment_id == assignment_id
-                if assignment_id
-                else candidate.signature_fingerprint == fingerprint
+        candidate_eligible_off = (
+            (
+                any(
+                    off_index not in used_off_indices
+                    for off_index in preliminary_off_indices_by_on.get(on_index, ())
+                )
+                or any(
+                    candidate.on_index == on_index
+                    and candidate.off_index not in used_off_indices
+                    and (
+                        candidate.assignment_id == assignment_id
+                        if assignment_id
+                        else candidate.signature_fingerprint == fingerprint
+                    )
+                    for candidate in candidates
+                )
             )
-            for candidate in candidates
+            if candidate_on_index is not None
+            else False
+        )
+        dropped_candidate_off = any(
+            off_index not in used_off_indices
+            and off_index not in candidate_off_indices_by_on.get(on_index, ())
+            for off_index in preliminary_off_indices_by_on.get(on_index, ())
         )
         spec_min_duration = _nilm_session_spec_duration(
             spec,
@@ -5421,9 +6335,17 @@ def pair_nilm_sessions_for_signatures(
             is not None
             and _nilm_signature_pair_score(on_edge, off_edge, spec) is not None
             for off_index, off_edge in enumerate(off_edges)
-        )
-        if on_index not in force_open_on_indices and (
-            candidate_eligible_off or too_early_off
+        ) if candidate_on_index is not None else False
+        if (
+            (
+                (
+                    on_index not in force_open_on_indices
+                    or candidate_pair_budget_truncated
+                )
+                and candidate_eligible_off
+            )
+            or dropped_candidate_off
+            or too_early_off
         ):
             continue
         sessions.append(
@@ -5466,6 +6388,32 @@ def _nilm_session_spec_duration(
     if seconds is None or seconds <= 0:
         return default
     return timedelta(seconds=seconds)
+
+
+def _nilm_session_spec_duration_profile(spec: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return only the learned duration profile used for session pairing."""
+    profile = spec.get("duration_profile")
+    if isinstance(profile, Mapping):
+        return profile
+    run_profile = spec.get("run_profile")
+    if isinstance(run_profile, Mapping) and isinstance(
+        run_profile.get("duration_s"), Mapping
+    ):
+        return run_profile["duration_s"]
+    return {}
+
+
+def _nilm_session_spec_energy_profile(spec: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return only the learned energy profile used for session pairing."""
+    profile = spec.get("energy_profile")
+    if isinstance(profile, Mapping):
+        return profile
+    run_profile = spec.get("run_profile")
+    if isinstance(run_profile, Mapping) and isinstance(
+        run_profile.get("energy_kwh"), Mapping
+    ):
+        return run_profile["energy_kwh"]
+    return {}
 
 
 def _nilm_signature_pair_score(
@@ -5882,6 +6830,7 @@ def _closed_nilm_session(
     alternate_match_count: int,
     known_load_masked: bool,
     known_load_confidence: float | None,
+    trace_evidence: _NilmSessionTraceEvidence | None = None,
 ) -> NilmSession:
     on_edge_id = _nilm_edge_id(on_edge)
     off_edge_id = _nilm_edge_id(off_edge)
@@ -5889,9 +6838,26 @@ def _closed_nilm_session(
         0.0,
         (off_edge.timestamp - on_edge.timestamp).total_seconds(),
     )
-    median_power_w = round(
+    edge_derived_power_w = round(
         (abs(float(on_edge.delta_w)) + abs(float(off_edge.delta_w))) / 2.0,
         3,
+    )
+    plateau_power_w = (
+        round(trace_evidence.plateau_power_w, 3)
+        if trace_evidence is not None and trace_evidence.plateau_power_w is not None
+        else None
+    )
+    median_power_w = plateau_power_w or edge_derived_power_w
+    measured_energy_kwh = (
+        round(trace_evidence.measured_energy_kwh, 6)
+        if trace_evidence is not None
+        and trace_evidence.measured_energy_kwh is not None
+        else None
+    )
+    estimated_energy_kwh = (
+        measured_energy_kwh
+        if measured_energy_kwh is not None
+        else round((median_power_w * duration_seconds) / 3_600_000.0, 3)
     )
     return NilmSession(
         session_id=_nilm_session_id(
@@ -5908,10 +6874,7 @@ def _closed_nilm_session(
         end=off_edge.timestamp,
         duration_seconds=duration_seconds,
         median_power_w=median_power_w,
-        estimated_energy_kwh=round(
-            (median_power_w * duration_seconds) / 3_600_000.0,
-            3,
-        ),
+        estimated_energy_kwh=estimated_energy_kwh,
         confidence=round(_clamp(confidence), 3),
         ambiguous=ambiguous,
         alternate_match_count=alternate_match_count,
@@ -5925,6 +6888,18 @@ def _closed_nilm_session(
         off_delta_w=round(float(off_edge.delta_w), 3),
         on_delta_var=_round_optional(on_edge.delta_var),
         off_delta_var=_round_optional(off_edge.delta_var),
+        plateau_power_w=plateau_power_w,
+        measured_energy_kwh=measured_energy_kwh,
+        power_coverage=(
+            round(trace_evidence.power_coverage, 3)
+            if trace_evidence is not None
+            else None
+        ),
+        intermediate_transition_count=(
+            trace_evidence.intermediate_transition_count
+            if trace_evidence is not None
+            else 0
+        ),
     )
 
 
@@ -5934,6 +6909,9 @@ def _nilm_session_pair_score(
     *,
     min_duration: timedelta,
     max_duration: timedelta,
+    duration_profile: Mapping[str, Any] | None = None,
+    trace_evidence: _NilmSessionTraceEvidence | None = None,
+    energy_profile: Mapping[str, Any] | None = None,
 ) -> float | None:
     if on_edge.direction != "on" or off_edge.direction != "off":
         return None
@@ -5973,7 +6951,202 @@ def _nilm_session_pair_score(
         if score is not None:
             scores.append(score)
 
+    duration_score = _nilm_session_duration_likelihood(
+        duration.total_seconds(),
+        duration_profile,
+    )
+    if duration_score is not None:
+        scores.append(duration_score)
+
+    if (
+        trace_evidence is not None
+        and trace_evidence.power_coverage >= 0.75
+        and trace_evidence.plateau_power_w is not None
+    ):
+        plateau_score = _nilm_magnitude_score(
+            trace_evidence.plateau_power_w,
+            on_edge.delta_w,
+            tolerance_ratio=0.35,
+            floor=50.0,
+        )
+        if plateau_score is not None:
+            scores.append(plateau_score)
+    if (
+        trace_evidence is not None
+        and trace_evidence.power_coverage >= 0.75
+        and trace_evidence.measured_energy_kwh is not None
+        and (
+            energy_score := _nilm_session_energy_likelihood(
+                trace_evidence.measured_energy_kwh,
+                energy_profile,
+            )
+        )
+        is not None
+    ):
+        scores.append(energy_score)
+
     return _clamp(sum(scores) / len(scores))
+
+
+def _nilm_session_duration_likelihood(
+    duration_seconds: float,
+    profile: Mapping[str, Any] | None,
+) -> float | None:
+    """Score a candidate duration only when learned evidence is sufficient."""
+    if not isinstance(profile, Mapping) or duration_seconds <= 0.0:
+        return None
+    support = _nilm_number(profile.get("effective_support"))
+    distinct_days = _nilm_number(profile.get("distinct_days"))
+    p10 = _nilm_number(profile.get("p10_seconds", profile.get("p10")))
+    p90 = _nilm_number(profile.get("p90_seconds", profile.get("p90")))
+    median_seconds = _nilm_number(
+        profile.get("median_seconds", profile.get("median"))
+    )
+    if (
+        support is None
+        or support < NILM_DURATION_MIN_EFFECTIVE_SUPPORT
+        or distinct_days is None
+        or distinct_days < NILM_DURATION_MIN_DISTINCT_DAYS
+        or p10 is None
+        or p90 is None
+        or median_seconds is None
+        or p10 <= 0.0
+        or p90 < p10
+        or not p10 <= median_seconds <= p90
+    ):
+        return None
+    if p10 <= duration_seconds <= p90:
+        return 1.0
+    boundary = p10 if duration_seconds < p10 else p90
+    taper = max(
+        log(median_seconds / p10) if median_seconds > p10 else 0.0,
+        log(p90 / median_seconds) if p90 > median_seconds else 0.0,
+        NILM_DURATION_MIN_LOG_TAPER,
+    )
+    position = min(abs(log(duration_seconds / boundary)) / taper, 1.0)
+    return _nilm_unit(1.0 - (3.0 * position**2 - 2.0 * position**3))
+
+
+def _nilm_session_energy_likelihood(
+    energy_kwh: float,
+    profile: Mapping[str, Any] | None,
+) -> float | None:
+    """Score integrated energy against a supported learned energy envelope."""
+    if not isinstance(profile, Mapping) or energy_kwh <= 0.0:
+        return None
+    support = _nilm_number(profile.get("effective_support"))
+    distinct_days = _nilm_number(profile.get("distinct_days"))
+    p10 = _nilm_number(profile.get("weighted_p10_kwh", profile.get("p10")))
+    p90 = _nilm_number(profile.get("weighted_p90_kwh", profile.get("p90")))
+    center = _nilm_number(profile.get("weighted_median_kwh", profile.get("median")))
+    if (
+        support is None
+        or support < NILM_DURATION_MIN_EFFECTIVE_SUPPORT
+        or distinct_days is None
+        or distinct_days < NILM_DURATION_MIN_DISTINCT_DAYS
+        or p10 is None
+        or p90 is None
+        or center is None
+        or p10 <= 0.0
+        or p90 < p10
+        or not p10 <= center <= p90
+    ):
+        return None
+    if p10 <= energy_kwh <= p90:
+        return 1.0
+    boundary = p10 if energy_kwh < p10 else p90
+    taper = max(
+        log(center / p10) if center > p10 else 0.0,
+        log(p90 / center) if p90 > center else 0.0,
+        log(2.0),
+    )
+    position = min(abs(log(energy_kwh / boundary)) / taper, 1.0)
+    return _nilm_unit(1.0 - (3.0 * position**2 - 2.0 * position**3))
+
+
+def _nilm_normalized_power_trace(
+    power_trace: Iterable[tuple[datetime, float]],
+) -> tuple[tuple[datetime, float], ...]:
+    """Return finite trace points ordered by timestamp with deterministic ties."""
+    points: dict[datetime, float] = {}
+    for timestamp, power_w in power_trace:
+        if not isinstance(timestamp, datetime):
+            continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        power = _nilm_number(power_w)
+        if power is not None:
+            points[timestamp] = power
+    return tuple(sorted(points.items()))
+
+
+def _nilm_session_trace_evidence(
+    on_edge: NilmEdge,
+    off_edge: NilmEdge,
+    power_trace: Iterable[tuple[datetime, float]],
+) -> _NilmSessionTraceEvidence | None:
+    """Calculate bounded plateau, energy, coverage, and state-change evidence."""
+    duration_seconds = (off_edge.timestamp - on_edge.timestamp).total_seconds()
+    if duration_seconds <= 0.0:
+        return None
+    points = tuple(power_trace)
+    in_session = tuple(
+        point
+        for point in points
+        if on_edge.timestamp <= point[0] <= off_edge.timestamp
+    )
+    if len(in_session) < 2:
+        return None
+    gaps = [
+        (right[0] - left[0]).total_seconds()
+        for left, right in zip(in_session, in_session[1:], strict=False)
+        if right[0] > left[0]
+    ]
+    if not gaps:
+        return None
+    cadence_seconds = median(gaps)
+    covered_seconds = min(
+        duration_seconds,
+        sum(min(gap, max(30.0, 3.0 * cadence_seconds)) for gap in gaps),
+    )
+    coverage = _nilm_unit(covered_seconds / duration_seconds)
+    pre_event = [power for timestamp, power in points if timestamp < on_edge.timestamp]
+    if not pre_event:
+        return _NilmSessionTraceEvidence(None, None, coverage, 0)
+    baseline_power_w = median(pre_event[-3:])
+    plateau_values = [
+        power - baseline_power_w
+        for timestamp, power in in_session
+        if on_edge.timestamp < timestamp < off_edge.timestamp
+    ]
+    if len(plateau_values) < 2 or coverage < 0.5:
+        return _NilmSessionTraceEvidence(None, None, coverage, 0)
+    plateau_power_w = median(plateau_values)
+    if plateau_power_w <= 0.0:
+        return _NilmSessionTraceEvidence(None, None, coverage, 0)
+    energy_watt_seconds = sum(
+        max(0.0, ((left[1] - baseline_power_w) + (right[1] - baseline_power_w)) / 2)
+        * (right[0] - left[0]).total_seconds()
+        for left, right in zip(in_session, in_session[1:], strict=False)
+    )
+    intermediate_threshold = max(25.0, 0.20 * abs(on_edge.delta_w))
+    intermediate_changes = sum(
+        abs(right - left) >= intermediate_threshold
+        for left, right in zip(plateau_values, plateau_values[1:], strict=False)
+    )
+    return _NilmSessionTraceEvidence(
+        plateau_power_w=round(float(plateau_power_w), 3),
+        # A partially observed trace can still establish a plateau, but its
+        # trapezoid is not a measured run energy.  Keep that distinction so
+        # missing spans cannot bias learned energy profiles downward.
+        measured_energy_kwh=(
+            round(energy_watt_seconds / 3_600_000.0, 6)
+            if coverage >= DEFAULT_THRESHOLDS.complete_energy_coverage
+            else None
+        ),
+        power_coverage=coverage,
+        intermediate_transition_count=intermediate_changes,
+    )
 
 
 def _nilm_pair_topology_compatible(on_edge: NilmEdge, off_edge: NilmEdge) -> bool:
@@ -6090,6 +7263,8 @@ def _nilm_edge_id(edge: NilmEdge) -> str:
             f"parent={edge.parent_edge_id or 'none'}",
             "explained=" + ",".join(edge.explained_known_circuit_ids),
         )
+    if edge.transition_kind != "step":
+        fields += (f"kind={edge.transition_kind}",)
     return "|".join(fields)
 
 
