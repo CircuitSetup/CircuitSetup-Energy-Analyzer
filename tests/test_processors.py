@@ -8120,7 +8120,7 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
 
 @pytest.mark.parametrize(
     ("confidence", "expects_alert"),
-    [(0.49, False), (0.5, True)],
+    [(0.49, False), (0.4999, False), (0.5, True)],
 )
 def test_nilm_topology_rejection_requires_minimum_confidence_for_alerts(
     confidence: float,
@@ -8189,6 +8189,8 @@ def test_nilm_topology_rejection_requires_minimum_confidence_for_alerts(
     assert evidence["status"] == "topology_mismatch"
     assert evidence["attribution_rejected"] is True
     assert "low_confidence_match" not in str(evidence)
+    if confidence == 0.4999:
+        assert evidence["match_confidence"] == 0.5
     assert len(policy.observations) == int(expects_alert)
     assert len(result.alerts) == int(expects_alert)
     assert result.notifications == result.alerts
