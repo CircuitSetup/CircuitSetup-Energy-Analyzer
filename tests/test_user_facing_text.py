@@ -1586,8 +1586,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._nilmExistingAssignmentSelection(sourceKey) : null",
         "_renderNilmExistingAssignmentField",
         "_saveNilmAssignmentChanges",
-        "nilm_interval_energy_preview",
-        "_nilmLabelIntervalEnergyPreview",
+        "data-nilm-interval-evidence",
+        "_requestNilmIntervalEvidence",
         "datetime-local",
         "MAX_CHART_POINTS_PER_SERIES",
         "_boundedChartPoints",
@@ -6653,16 +6653,14 @@ const bands = panel._nilmGraphBands(workspace, []);
 assert.equal(bands.length, 1);
 assert.equal(bands[0].band_kind, "draft");
 assert.equal(bands[0].start, changedStartIso);
-assert.equal(panel._nilmLabelIntervalPowerPreview(), 84);
 const previewHtml = panel._renderNilmLabelIntervalEditor(workspace);
-assert.ok(previewHtml.includes("Estimated load 84 W"), previewHtml);
-assert.ok(!previewHtml.includes("Unknown W"), previewHtml);
+assert.ok(!previewHtml.includes("Estimated load"), previewHtml);
 
 await panel._callNilmLabelIntervalAction(-1, "save");
 assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
 assert.equal(calls[0].data.interval_id, "saved-interval");
 assert.equal(calls[0].data.start, changedStartIso);
-assert.equal(calls[0].data.observed_transition_w, 84);
+assert.ok(!("observed_transition_w" in calls[0].data));
 assert.ok(!("appliance_profile" in calls[0].data));
 assert.equal(panel._nilmIntervalEditorOpen, false);
 })().catch((error) => {
@@ -6671,6 +6669,15 @@ assert.equal(panel._nilmIntervalEditorOpen, false);
 });
 """
     )
+
+
+def test_nilm_interval_evidence_preview_is_backend_authoritative() -> None:
+    workspace_source = NILM_WORKSPACE_ASSET.read_text(encoding="utf-8")
+
+    assert "NILM_INTERVAL_EVIDENCE_API_PATH" in workspace_source
+    assert "_requestNilmIntervalEvidence" in workspace_source
+    assert "data-nilm-interval-evidence" in workspace_source
+    assert "saved.observed_transition_w" not in workspace_source
 
 
 def test_nilm_assigned_interval_is_visible_and_persistently_removable() -> None:
