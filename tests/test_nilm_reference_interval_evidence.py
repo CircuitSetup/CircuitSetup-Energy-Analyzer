@@ -288,3 +288,16 @@ def test_resume_after_long_unknown_is_left_uncertain() -> None:
     assert resumed.left_censored is True
     assert "left_uncertain_after_unknown_gap" in resumed.quality_flags
     assert resumed.evidence_confidence < 0.85
+
+
+def test_horizon_confirmed_resume_after_long_unknown_is_left_uncertain() -> None:
+    result = extract_reference_intervals(
+        rows((0, "on"), (20, "on"), (30, "unknown"), (60, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=80),
+        settings=SETTINGS,
+    )
+    resumed = result.intervals[-1]
+    assert resumed.left_censored is True
+    assert "left_uncertain_after_unknown_gap" in resumed.quality_flags
+    assert resumed.evidence_confidence < 0.85

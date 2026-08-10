@@ -336,6 +336,10 @@ def extract_reference_intervals(
     ):
         if candidate is ReferenceActivityState.ACTIVE and not active:
             active, interval_start, left_censored = True, candidate_at, False
+            if resumed_after_unknown_gap:
+                left_censored = True
+                interval_flags = {"left_uncertain_after_unknown_gap"}
+                resumed_after_unknown_gap = False
         elif candidate is ReferenceActivityState.INACTIVE and active:
             raw.append(
                 (
