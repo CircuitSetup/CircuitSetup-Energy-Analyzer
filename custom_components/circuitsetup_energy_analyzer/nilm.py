@@ -35,6 +35,15 @@ _TRANSITION_ONLY_CONFIDENCE_CAP = 0.65
 _SOURCE_TRUST = {"session": 1.0, "interval": 0.85, "legacy_interval": 0.45}
 _CONFIDENCE_CAP = 0.95
 _POWER_ENERGY_DISAGREEMENT_RATIO = 0.35
+_NILM_MAX_SCORE_BREAKDOWNS = 5
+NILM_DURATION_MIN_EFFECTIVE_SUPPORT = 5.0
+NILM_DURATION_MIN_DISTINCT_DAYS = 3
+NILM_DURATION_MAX_CENTRAL_RATIO = 100.0
+NILM_DURATION_MIN_LOG_TAPER = log(2.0)
+NILM_VALIDATION_MIN_OUTCOMES = 5
+NILM_VALIDATION_MIN_DISTINCT_DAYS = 3
+NILM_VALIDATION_PRIOR_CORRECT = 2.0
+NILM_VALIDATION_PRIOR_WRONG = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1589,6 +1598,10 @@ class NilmTransitionPrototype:
     sample_count: int
     delta_var: float | None = None
     spread_var: float | None = None
+    prototype_id: str = ""
+    transition_kind: str = ""
+    from_state_id: str = ""
+    to_state_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1604,6 +1617,52 @@ class NilmAssignmentModel:
 
 
 @dataclass(frozen=True, slots=True)
+class NilmScoreBreakdown:
+    """Immutable components of one renormalized transition score."""
+
+    total: float
+    electrical_fit: float
+    helper_score: float | None
+    duration_state_score: float | None
+    validation_score: float | None
+    available_weight: float
+    prototype_id: str = ""
+    assignment_id: str = ""
+
+    @property
+    def electrical_contribution(self) -> float:
+        """Return the renormalized electrical contribution to ``total``."""
+        return 0.55 * self.electrical_fit / self.available_weight
+
+    @property
+    def helper_contribution(self) -> float | None:
+        """Return the optional renormalized helper contribution."""
+        return (
+            0.25 * self.helper_score / self.available_weight
+            if self.helper_score is not None
+            else None
+        )
+
+    @property
+    def duration_contribution(self) -> float | None:
+        """Return the optional renormalized duration contribution."""
+        return (
+            0.10 * self.duration_state_score / self.available_weight
+            if self.duration_state_score is not None
+            else None
+        )
+
+    @property
+    def validation_contribution(self) -> float | None:
+        """Return the optional renormalized validation contribution."""
+        return (
+            0.10 * self.validation_score / self.available_weight
+            if self.validation_score is not None
+            else None
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class NilmReconciliationResult:
     """Pure result of matching one source edge to assignment transitions."""
 
@@ -1615,6 +1674,13 @@ class NilmReconciliationResult:
     consistent: bool
     energy_allocation_allowed: bool
     reason: str
+    accepted_score: float | None = None
+    runner_up_score: float | None = None
+    score_margin: float | None = None
+    accepted_prototype_ids: tuple[str, ...] = ()
+    score_breakdowns: tuple[NilmScoreBreakdown, ...] = ()
+    component_breakdowns: tuple[NilmScoreBreakdown, ...] = ()
+    unavailable_channels: tuple[str, ...] = ()
 
 
 def nilm_transition_tolerance_w(prototype: NilmTransitionPrototype) -> float:
@@ -1627,6 +1693,215 @@ def conservation_tolerance_w(source_power_w: float, noise_spread_w: float) -> fl
     return max(25.0, 3.0 * noise_spread_w, 0.10 * abs(source_power_w))
 
 
+def duration_state_score_for_transition(
+    prototype: NilmTransitionPrototype,
+    assignment: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    timestamp: datetime,
+) -> float | None:
+    """Return soft full-run duration evidence for a stop-to-off transition."""
+    kind = prototype.transition_kind.strip().lower()
+    if kind and kind != "stop":
+        return None
+    if prototype.direction != "off" or prototype.delta_w >= 0:
+        return None
+    if prototype.to_state_id and prototype.to_state_id != "off":
+        return None
+    if prototype.from_state_id == "off":
+        return None
+
+    run_profile = assignment.get("run_profile")
+    profile = (
+        run_profile.get("duration_s") if isinstance(run_profile, Mapping) else None
+    )
+    if not isinstance(profile, Mapping):
+        return None
+    support = _nilm_finite_number(profile.get("effective_support"))
+    distinct_days = _nilm_finite_number(profile.get("distinct_days"))
+    p10 = _nilm_positive_finite(
+        profile.get("p10_seconds", profile.get("p10"))
+    )
+    p90 = _nilm_positive_finite(
+        profile.get("p90_seconds", profile.get("p90"))
+    )
+    median_seconds = _nilm_positive_finite(
+        profile.get("median_seconds", profile.get("median"))
+    )
+    if (
+        support is None
+        or support < NILM_DURATION_MIN_EFFECTIVE_SUPPORT
+        or distinct_days is None
+        or distinct_days < NILM_DURATION_MIN_DISTINCT_DAYS
+        or p10 is None
+        or p90 is None
+        or median_seconds is None
+        or not p10 <= median_seconds <= p90
+        or p90 / p10 > NILM_DURATION_MAX_CENTRAL_RATIO
+    ):
+        return None
+
+    started_at = _nilm_runtime_started_at(runtime)
+    observed_at = _nilm_datetime(timestamp)
+    if started_at is None or observed_at is None:
+        return None
+    duration_seconds = (observed_at - started_at).total_seconds()
+    if not isfinite(duration_seconds) or duration_seconds <= 0:
+        return None
+    if p10 <= duration_seconds <= p90:
+        return 1.0
+
+    median_log = _nilm_finite_number(profile.get("median_log_seconds"))
+    mad_log = _nilm_finite_number(profile.get("mad_log_seconds"))
+    center_log = median_log if median_log is not None else log(median_seconds)
+    dispersion = max(mad_log or 0.0, 0.0)
+    lower_log = log(p10)
+    upper_log = log(p90)
+    taper = max(
+        3.0 * dispersion,
+        center_log - lower_log,
+        upper_log - center_log,
+        NILM_DURATION_MIN_LOG_TAPER,
+    )
+    distance = (
+        lower_log - log(duration_seconds)
+        if duration_seconds < p10
+        else log(duration_seconds) - upper_log
+    )
+    position = min(max(distance / taper, 0.0), 1.0)
+    return _nilm_unit(1.0 - (3.0 * position**2 - 2.0 * position**3))
+
+
+def build_nilm_validation_profile(
+    assignment: Mapping[str, Any],
+    *,
+    session_outcomes: Iterable[Mapping[str, Any]] = (),
+    held_out_replay: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Build a deterministic, revision-matched validation reliability profile."""
+    trusted: list[tuple[str, bool, str | None]] = []
+    for source, records in (
+        ("session_outcome", session_outcomes),
+        ("held_out_replay", held_out_replay),
+    ):
+        trusted.extend(
+            item
+            for record in records
+            if (item := _nilm_trusted_validation_outcome(assignment, record, source))
+            is not None
+        )
+
+    schema = _nilm_finite_number(assignment.get("validation_schema_version"))
+    method = str(assignment.get("validation_method") or "").strip().lower()
+    if schema is not None and schema >= 2 and method == "one_to_one_iou":
+        stored = assignment.get("validation_outcomes")
+        if isinstance(stored, list | tuple):
+            trusted.extend(
+                item
+                for record in stored
+                if isinstance(record, Mapping)
+                and (
+                    item := _nilm_trusted_validation_outcome(
+                        assignment, record, "ground_truth"
+                    )
+                )
+                is not None
+            )
+
+    correct_count = sum(outcome for _, outcome, _ in trusted)
+    wrong_count = len(trusted) - correct_count
+    days = {day for _, _, day in trusted if day is not None}
+    reliability = (
+        (correct_count + NILM_VALIDATION_PRIOR_CORRECT)
+        / (
+            len(trusted)
+            + NILM_VALIDATION_PRIOR_CORRECT
+            + NILM_VALIDATION_PRIOR_WRONG
+        )
+    )
+    eligible = (
+        len(trusted) >= NILM_VALIDATION_MIN_OUTCOMES
+        and len(days) >= NILM_VALIDATION_MIN_DISTINCT_DAYS
+    )
+    source_counts = {
+        source: sum(item_source == source for item_source, _, _ in trusted)
+        for source in sorted({item_source for item_source, _, _ in trusted})
+    }
+    return {
+        "sample_count": len(trusted),
+        "effective_support": float(len(trusted)),
+        "distinct_days": len(days),
+        "correct_count": correct_count,
+        "wrong_count": wrong_count,
+        "reliability": reliability,
+        "runtime_eligible": eligible,
+        "runtime_score": reliability if eligible else None,
+        "source_counts": source_counts,
+    }
+
+
+def _nilm_trusted_validation_outcome(
+    assignment: Mapping[str, Any],
+    record: Mapping[str, Any],
+    source: str,
+) -> tuple[str, bool, str | None] | None:
+    outcome = str(record.get("outcome") or record.get("result") or "").strip().lower()
+    if outcome not in {"correct", "wrong"}:
+        return None
+    if not _nilm_validation_revision_matches(assignment, record):
+        return None
+    timestamp = _nilm_datetime(record.get("timestamp") or record.get("created_at"))
+    day = timestamp.date().isoformat() if timestamp else None
+    return source, outcome == "correct", day
+
+
+def _nilm_validation_revision_matches(
+    assignment: Mapping[str, Any], record: Mapping[str, Any]
+) -> bool:
+    expected_revision = _model_nonnegative_int(assignment.get("model_revision"))
+    recorded_revision = _nilm_finite_number(
+        record.get("model_revision", record.get("prediction_model_revision"))
+    )
+    expected_fingerprint = str(assignment.get("model_fingerprint") or "").strip()
+    recorded_fingerprint = str(
+        record.get("model_fingerprint")
+        or record.get("prediction_model_fingerprint")
+        or ""
+    ).strip()
+    matches: list[bool] = []
+    if recorded_revision is not None and expected_revision > 0:
+        matches.append(recorded_revision == expected_revision)
+    if recorded_fingerprint and expected_fingerprint:
+        matches.append(recorded_fingerprint == expected_fingerprint)
+    return bool(matches) and all(matches)
+
+
+def _nilm_runtime_started_at(runtime: Mapping[str, Any]) -> datetime | None:
+    for key in (
+        "session_started_at",
+        "current_session_started_at",
+        "started_at",
+        "start",
+    ):
+        if (value := _nilm_datetime(runtime.get(key))) is not None:
+            return value
+    current_session = runtime.get("current_session")
+    return (
+        _nilm_runtime_started_at(current_session)
+        if isinstance(current_session, Mapping)
+        else None
+    )
+
+
+def _nilm_finite_number(value: Any) -> float | None:
+    number = _nilm_number(value)
+    return number if number is not None and isfinite(number) else None
+
+
+def _nilm_positive_finite(value: Any) -> float | None:
+    number = _nilm_finite_number(value)
+    return number if number is not None and number > 0 else None
+
+
 def score_nilm_transition(
     edge: NilmEdge,
     prototype: NilmTransitionPrototype,
@@ -1637,23 +1912,53 @@ def score_nilm_transition(
     optional_electrical_fit: float | None = None,
 ) -> float:
     """Score a transition, omitting and renormalizing unavailable evidence."""
+    return score_nilm_transition_breakdown(
+        edge,
+        prototype,
+        helper_score=helper_score,
+        duration_state_score=duration_state_score,
+        validation_score=validation_score,
+        optional_electrical_fit=optional_electrical_fit,
+    ).total
+
+
+def score_nilm_transition_breakdown(
+    edge: NilmEdge,
+    prototype: NilmTransitionPrototype,
+    *,
+    helper_score: float | None,
+    duration_state_score: float | None,
+    validation_score: float | None,
+    optional_electrical_fit: float | None = None,
+) -> NilmScoreBreakdown:
+    """Return the immutable components of a transition score."""
     tolerance = nilm_transition_tolerance_w(prototype)
     real_fit = max(0.0, 1.0 - abs(edge.delta_w - prototype.delta_w) / tolerance)
     electrical_fit = real_fit
     if optional_electrical_fit is not None and isfinite(optional_electrical_fit):
         electrical_fit = 0.70 * real_fit + 0.30 * _nilm_unit(optional_electrical_fit)
-    terms = [(0.55, electrical_fit)]
-    terms.extend(
-        (weight, _nilm_unit(value))
+    helper = _nilm_optional_unit(helper_score)
+    duration = _nilm_optional_unit(duration_state_score)
+    validation = _nilm_optional_unit(validation_score)
+    terms = [(0.55, electrical_fit)] + [
+        (weight, value)
         for weight, value in (
-            (0.25, helper_score),
-            (0.10, duration_state_score),
-            (0.10, validation_score),
+            (0.25, helper),
+            (0.10, duration),
+            (0.10, validation),
         )
-        if value is not None and isfinite(value)
-    )
-    return sum(weight * value for weight, value in terms) / sum(
-        weight for weight, _ in terms
+        if value is not None
+    ]
+    available_weight = sum(weight for weight, _ in terms)
+    return NilmScoreBreakdown(
+        total=sum(weight * value for weight, value in terms) / available_weight,
+        electrical_fit=electrical_fit,
+        helper_score=helper,
+        duration_state_score=duration,
+        validation_score=validation,
+        available_weight=available_weight,
+        prototype_id=prototype.prototype_id or prototype.assignment_id,
+        assignment_id=prototype.assignment_id,
     )
 
 
@@ -1681,7 +1986,7 @@ def reconcile_nilm_edge(
     singles = sorted(
         [
             (
-                _nilm_candidate_score(
+                _nilm_candidate_breakdown(
                     edge,
                     prototype,
                     helper_scores,
@@ -1694,12 +1999,18 @@ def reconcile_nilm_edge(
             if abs(edge.delta_w - prototype.delta_w)
             <= nilm_transition_tolerance_w(prototype)
         ],
-        key=lambda item: item[0],
-        reverse=True,
+        key=lambda item: (-item[0].total, _nilm_transition_choice_key(edge, item[1])),
     )
-    if singles and singles[0][0] >= 0.70:
-        if len(singles) == 1 or singles[0][0] - singles[1][0] >= 0.15:
-            return _nilm_reconciliation(edge, (singles[0][1],), reason="single")
+    if singles and singles[0][0].total >= 0.70:
+        if len(singles) == 1 or singles[0][0].total - singles[1][0].total >= 0.15:
+            return _nilm_reconciliation(
+                edge,
+                (singles[0][1],),
+                reason="single",
+                accepted_breakdown=singles[0][0],
+                runner_up_score=singles[1][0].total if len(singles) > 1 else None,
+                score_breakdowns=tuple(item[0] for item in singles),
+            )
         single_reason = "ambiguous"
     else:
         single_reason = "below_threshold"
@@ -1737,14 +2048,26 @@ def reconcile_nilm_edge(
         (abs(edge.delta_w - prototype.delta_w) for _, prototype in legal),
         default=abs(edge.delta_w),
     )
-    compounds: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
+    compounds: list[
+        tuple[
+            NilmScoreBreakdown,
+            tuple[NilmTransitionPrototype, ...],
+            tuple[NilmScoreBreakdown, ...],
+        ]
+    ] = []
     ordered_transitions = tuple(
         per_assignment[assignment_id] for assignment_id in sorted(per_assignment)
     )
     # ponytail: four simultaneous transitions bound combinatorial work; already-active
     # components remain unlimited. Raise only if labelled replay needs larger groups.
     for size in range(2, min(4, len(ordered_transitions)) + 1):
-        sized_compounds: list[tuple[float, tuple[NilmTransitionPrototype, ...]]] = []
+        sized_compounds: list[
+            tuple[
+                NilmScoreBreakdown,
+                tuple[NilmTransitionPrototype, ...],
+                tuple[NilmScoreBreakdown, ...],
+            ]
+        ] = []
         for group in combinations(ordered_transitions, size):
             combined = _nilm_combined_transition(group)
             residual = abs(edge.delta_w - combined.delta_w)
@@ -1757,40 +2080,69 @@ def reconcile_nilm_edge(
                 if best_single_residual
                 else 0.0
             )
-            score = _nilm_candidate_score(
+            duration_score = _nilm_mean_available(
+                duration_state_scores, group, prototype_level=True
+            )
+            validation_score = _nilm_mean_available(
+                validation_scores, group, prototype_level=True
+            )
+            breakdown = score_nilm_transition_breakdown(
                 edge,
                 combined,
-                {combined.assignment_id: _nilm_mean_available(helper_scores, group)},
-                {
-                    combined.assignment_id: _nilm_mean_available(
-                        duration_state_scores, group
-                    )
-                },
-                {
-                    combined.assignment_id: _nilm_mean_available(
-                        validation_scores, group
-                    )
-                },
+                helper_score=_nilm_mean_available(helper_scores, group),
+                duration_state_score=duration_score,
+                validation_score=validation_score,
+                optional_electrical_fit=_nilm_reactive_fit(edge, combined),
             )
-            if score >= 0.75 and improvement >= 0.30:
-                sized_compounds.append((score, group))
+            if breakdown.total >= 0.75 and improvement >= 0.30:
+                component_breakdowns = tuple(
+                    _nilm_component_breakdown(
+                        prototype,
+                        helper_scores.get(prototype.assignment_id),
+                        _nilm_score_lookup(duration_state_scores, prototype),
+                        _nilm_score_lookup(validation_scores, prototype),
+                    )
+                    for prototype in group
+                )
+                sized_compounds.append((breakdown, group, component_breakdowns))
         if sized_compounds:
             compounds = sized_compounds
             break
-    compounds.sort(reverse=True, key=lambda item: item[0])
-    if compounds and (len(compounds) == 1 or compounds[0][0] - compounds[1][0] >= 0.15):
-        return _nilm_reconciliation(edge, compounds[0][1], reason="compound")
+    compounds.sort(
+        key=lambda item: (
+            -item[0].total,
+            tuple(_nilm_prototype_score_id(prototype) for prototype in item[1]),
+        )
+    )
+    if compounds and (
+        len(compounds) == 1
+        or compounds[0][0].total - compounds[1][0].total >= 0.15
+    ):
+        return _nilm_reconciliation(
+            edge,
+            compounds[0][1],
+            reason="compound",
+            accepted_breakdown=compounds[0][0],
+            runner_up_score=compounds[1][0].total if len(compounds) > 1 else None,
+            score_breakdowns=tuple(item[0] for item in compounds),
+            component_breakdowns=compounds[0][2],
+        )
     return _nilm_reconciliation(
         edge,
         (),
         reason=(
             "ambiguous" if compounds or single_reason == "ambiguous" else single_reason
         ),
+        score_breakdowns=tuple(item[0] for item in singles),
     )
 
 
 def _nilm_unit(value: float) -> float:
     return min(max(float(value), 0.0), 1.0)
+
+
+def _nilm_optional_unit(value: float | None) -> float | None:
+    return _nilm_unit(value) if value is not None and isfinite(value) else None
 
 
 def _nilm_transition_legal(
@@ -1818,7 +2170,7 @@ def _nilm_transition_legal(
 
 def _nilm_transition_choice_key(
     edge: NilmEdge, prototype: NilmTransitionPrototype
-) -> tuple[float, str, float, float, float, float, int]:
+) -> tuple[float, str, float, float, float, float, int, str, str]:
     return (
         abs(edge.delta_w - prototype.delta_w),
         prototype.direction,
@@ -1827,6 +2179,8 @@ def _nilm_transition_choice_key(
         prototype.delta_w,
         prototype.spread_w,
         prototype.sample_count,
+        prototype.assignment_id,
+        prototype.prototype_id,
     )
 
 
@@ -1837,13 +2191,59 @@ def _nilm_candidate_score(
     durations: Mapping[str, float | None],
     validations: Mapping[str, float | None],
 ) -> float:
-    return score_nilm_transition(
+    return _nilm_candidate_breakdown(
+        edge, prototype, helpers, durations, validations
+    ).total
+
+
+def _nilm_candidate_breakdown(
+    edge: NilmEdge,
+    prototype: NilmTransitionPrototype,
+    helpers: Mapping[str, float | None],
+    durations: Mapping[str, float | None],
+    validations: Mapping[str, float | None],
+) -> NilmScoreBreakdown:
+    return score_nilm_transition_breakdown(
         edge,
         prototype,
         helper_score=helpers.get(prototype.assignment_id),
-        duration_state_score=durations.get(prototype.assignment_id),
-        validation_score=validations.get(prototype.assignment_id),
+        duration_state_score=_nilm_score_lookup(durations, prototype),
+        validation_score=_nilm_score_lookup(validations, prototype),
         optional_electrical_fit=_nilm_reactive_fit(edge, prototype),
+    )
+
+
+def _nilm_score_lookup(
+    scores: Mapping[str, float | None], prototype: NilmTransitionPrototype
+) -> float | None:
+    if prototype.prototype_id and prototype.prototype_id in scores:
+        return scores[prototype.prototype_id]
+    return scores.get(prototype.assignment_id)
+
+
+def _nilm_prototype_score_id(prototype: NilmTransitionPrototype) -> str:
+    return prototype.prototype_id or prototype.assignment_id
+
+
+def _nilm_component_breakdown(
+    prototype: NilmTransitionPrototype,
+    helper_score: float | None,
+    duration_state_score: float | None,
+    validation_score: float | None,
+) -> NilmScoreBreakdown:
+    component_edge = NilmEdge(
+        timestamp=datetime.min.replace(tzinfo=UTC),
+        delta_w=prototype.delta_w,
+        delta_var=prototype.delta_var,
+        direction=prototype.direction,
+    )
+    return score_nilm_transition_breakdown(
+        component_edge,
+        prototype,
+        helper_score=helper_score,
+        duration_state_score=duration_state_score,
+        validation_score=validation_score,
+        optional_electrical_fit=(1.0 if prototype.delta_var is not None else None),
     )
 
 
@@ -1889,11 +2289,21 @@ def _nilm_combined_transition(
 def _nilm_mean_available(
     scores: Mapping[str, float | None],
     transitions: Iterable[NilmTransitionPrototype],
+    *,
+    prototype_level: bool = False,
 ) -> float | None:
     values = [
         value
-        for assignment_id in (item.assignment_id for item in transitions)
-        if (value := scores.get(assignment_id)) is not None and isfinite(value)
+        for item in transitions
+        if (
+            value := (
+                _nilm_score_lookup(scores, item)
+                if prototype_level
+                else scores.get(item.assignment_id)
+            )
+        )
+        is not None
+        and isfinite(value)
     ]
     return sum(values) / len(values) if values else None
 
@@ -1903,6 +2313,10 @@ def _nilm_reconciliation(
     transitions: tuple[NilmTransitionPrototype, ...],
     *,
     reason: str,
+    accepted_breakdown: NilmScoreBreakdown | None = None,
+    runner_up_score: float | None = None,
+    score_breakdowns: tuple[NilmScoreBreakdown, ...] = (),
+    component_breakdowns: tuple[NilmScoreBreakdown, ...] = (),
 ) -> NilmReconciliationResult:
     residual = edge.delta_w - sum(item.delta_w for item in transitions)
     tolerance = (
@@ -1919,6 +2333,11 @@ def _nilm_reconciliation(
     if accepted and not consistent:
         reason = "conservation_conflict"
         accepted = False
+        accepted_breakdown = None
+        component_breakdowns = ()
+    accepted_score = (
+        accepted_breakdown.total if accepted_breakdown is not None else None
+    )
     return NilmReconciliationResult(
         accepted=accepted,
         transitions=transitions if accepted else (),
@@ -1928,6 +2347,33 @@ def _nilm_reconciliation(
         consistent=consistent,
         energy_allocation_allowed=accepted and consistent,
         reason=reason,
+        accepted_score=accepted_score,
+        runner_up_score=runner_up_score,
+        score_margin=(
+            accepted_score - runner_up_score
+            if accepted_score is not None and runner_up_score is not None
+            else None
+        ),
+        accepted_prototype_ids=(
+            tuple(_nilm_prototype_score_id(item) for item in transitions)
+            if accepted
+            else ()
+        ),
+        score_breakdowns=score_breakdowns[:_NILM_MAX_SCORE_BREAKDOWNS],
+        component_breakdowns=component_breakdowns[:4],
+        unavailable_channels=(
+            tuple(
+                name
+                for name, value in (
+                    ("helper", accepted_breakdown.helper_score),
+                    ("duration", accepted_breakdown.duration_state_score),
+                    ("validation", accepted_breakdown.validation_score),
+                )
+                if value is None
+            )
+            if accepted_breakdown is not None
+            else ()
+        ),
     )
 
 
