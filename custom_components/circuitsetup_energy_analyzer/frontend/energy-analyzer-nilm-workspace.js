@@ -3047,6 +3047,7 @@ export function createNilmWorkspaceMethods({
     const token = (this._nilmIntervalEvidenceToken || 0) + 1;
     this._nilmIntervalEvidenceToken = token;
     if (this._nilmIntervalEvidenceTimer) clearTimeout(this._nilmIntervalEvidenceTimer);
+    this._render();
     if (!path) return;
     this._nilmIntervalEvidenceTimer = setTimeout(() => this._requestNilmIntervalEvidence(path, token), 180);
   }

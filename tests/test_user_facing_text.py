@@ -6648,7 +6648,7 @@ panel._rememberNilmLabelIntervalDraft({
   dataset: { nilmLabelIntervalInput: "start", nilmIntervalIndex: "0" },
   value: changedStart,
 });
-assert.equal(renders, 1);
+assert.equal(renders, 2, "boundary edits render both the draft and cleared backend evidence");
 const bands = panel._nilmGraphBands(workspace, []);
 assert.equal(bands.length, 1);
 assert.equal(bands[0].band_kind, "draft");
@@ -6769,17 +6769,41 @@ assert.ok(path.includes("circuit_id=mains"), path);
 assert.equal(new URL(path, "http://example.local").searchParams.get("start"), "2026-08-04T08:00:00.000Z");
 let rendered = 0;
 panel._render = () => { rendered += 1; };
-panel._requestJson = async () => ({ interval_evidence: {
+const requestedPaths = [];
+panel._requestJson = async (requestPath) => {
+  requestedPaths.push(requestPath);
+  return { interval_evidence: {
   start_transition_w: 500, stop_transition_w: -490, average_power_w: 480,
   median_power_w: 475, partial_energy_kwh: 0.12, source_coverage: 0.9,
   power_coverage: 0.8, quality_flags: ["power_gap"],
-} });
+  } };
+};
+const timers = new Map();
+let nextTimer = 0;
+context.setTimeout = (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; };
+context.clearTimeout = (id) => timers.delete(id);
+panel._nilmIntervalEvidence = { start_transition_w: 1 };
+panel._scheduleNilmIntervalEvidence();
+panel._nilmLabelIntervalDraft.intervals[0].end = "2026-08-04T08:12:00Z";
+panel._scheduleNilmIntervalEvidence();
+assert.equal(panel._nilmIntervalEvidence, null, "new bounds must immediately clear stale evidence");
+assert.equal(rendered, 2, "each valid boundary edit renders its cleared preview");
+assert.equal(timers.size, 1, "rapid boundary edits retain only the final debounce timer");
+for (const callback of timers.values()) callback();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(requestedPaths.length, 1, "only the final bounds request may be fetched");
+const finalQuery = new URL(requestedPaths[0], "http://example.local").searchParams;
+assert.equal(finalQuery.get("entry_id"), "entry-1");
+assert.equal(finalQuery.get("circuit_id"), "mains");
+assert.equal(finalQuery.get("start"), "2026-08-04T08:00:00.000Z");
+assert.equal(finalQuery.get("end"), "2026-08-04T08:12:00.000Z");
 panel._nilmIntervalEvidenceToken = 2;
+panel._nilmIntervalEvidence = null;
 await panel._requestNilmIntervalEvidence(path, 1);
-assert.equal(panel._nilmIntervalEvidence, undefined, "stale response must not update evidence");
+assert.equal(panel._nilmIntervalEvidence, null, "stale response must not update evidence");
 await panel._requestNilmIntervalEvidence(path, 2);
 assert.equal(panel._nilmIntervalEvidence.start_transition_w, 500);
-assert.equal(rendered, 1);
+assert.equal(rendered, 4);
 const html = panel._renderNilmIntervalEvidence(panel._nilmIntervalEvidence);
 for (const text of ["Start: 500 W", "Stop: -490 W", "Average: 480 W", "Median: 475 W", "Partial energy: 0.12 kWh", "Source coverage: 0.9", "Power coverage: 0.8", "Quality: power_gap"]) {
   assert.ok(html.includes(text), html);
