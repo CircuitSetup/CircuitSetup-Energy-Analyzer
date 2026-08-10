@@ -6758,7 +6758,7 @@ test("NILM assignment links authoritative state and separate power history", asy
   }, homeAssistantTimeZone);
   await panel.locator('[data-nilm-lane="assigned"]').click();
   const details = panel.locator("[data-nilm-reference-details]");
-  await details.locator("summary").click();
+  await details.locator(":scope > summary").click();
   const statePicker = details.locator('ha-entity-picker[data-nilm-reference-input="stateEntityId"]');
   const powerPicker = details.locator('ha-entity-picker[data-nilm-reference-input="powerEntityId"]');
   await expect.poll(() => statePicker.evaluate((el) => el.includeEntities)).toEqual(["switch.pump"]);
@@ -6794,20 +6794,22 @@ test("NILM assignment links authoritative state and separate power history", asy
   await details.locator('[data-nilm-reference-action="link_import"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service).slice(-2))).toEqual([
-    "generate_nilm_sensor_label_intervals",
     "set_nilm_reference_link",
+    "generate_nilm_sensor_label_intervals",
   ]);
   const calls = await page.evaluate(() => window.__serviceCalls.slice(-2));
   expect(calls[0].data).toMatchObject({
+    reference_state_entity_id: "switch.pump",
+    reference_power_entity_id: "sensor.pump_power",
+  });
+  expect(calls[0].data).not.toHaveProperty("reference_threshold_w");
+  expect(calls[1].data).toMatchObject({
     ground_truth_entity_id: "switch.pump",
     reference_power_entity_id: "sensor.pump_power",
     start: referenceStart,
     end: referenceEnd,
   });
-  expect(calls[1].data).toMatchObject({
-    reference_state_entity_id: "switch.pump",
-    reference_power_entity_id: "sensor.pump_power",
-  });
+  expect(calls[1].data).not.toHaveProperty("threshold_w");
   await expect(details).toHaveAttribute("open", "");
   await toHaveNoViolations(page);
 });
