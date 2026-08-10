@@ -1696,6 +1696,39 @@ def test_attribute_known_loads_transition_delta_conserves_residual() -> None:
 
 
 @pytest.mark.parametrize(
+    ("aggregate_delta_w", "transition_delta_w", "expected_residual_w"),
+    ((120.0, 100.0, 20.0), (-120.0, -100.0, -20.0)),
+)
+def test_power_transition_conserves_signed_nonzero_residual_with_provenance(
+    aggregate_delta_w: float,
+    transition_delta_w: float,
+    expected_residual_w: float,
+) -> None:
+    aggregate = edge(10, aggregate_delta_w)
+    event = CircuitEvent(
+        timestamp=aggregate.timestamp,
+        circuit_id="variable-speed-load",
+        event_type=EventType.POWER_TRANSITION,
+        features={"transition_delta_w": transition_delta_w},
+    )
+
+    result = attribute_known_loads(
+        [aggregate], [event], residual_min_delta_w=10.0
+    )
+
+    match = result.matched_edges[0]
+    residual = result.residual_edges[0]
+    assert match.edge.delta_w == aggregate_delta_w
+    assert match.explained_delta_w == transition_delta_w
+    assert match.edge.delta_w == match.explained_delta_w + match.residual_delta_w
+    assert residual.delta_w == expected_residual_w
+    assert residual.direction == ("on" if expected_residual_w > 0.0 else "off")
+    assert residual.origin == "known_load_residual"
+    assert residual.parent_edge_id == nilm_domain._nilm_edge_id(aggregate)
+    assert residual.explained_known_circuit_ids == ("variable-speed-load",)
+
+
+@pytest.mark.parametrize(
     (
         "aggregate_delta_w",
         "event_type",

@@ -24,6 +24,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitConfig,
     CircuitEvent,
     CircuitMode,
+    CircuitSample,
     EventType,
     NilmSourceKind,
     PowerFlowMode,
@@ -132,6 +133,13 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
 
 def test_nilm_controller_keeps_detector_transition_for_masking_but_not_helpers(
 ) -> None:
+    from custom_components.circuitsetup_energy_analyzer.operating_detection import (
+        OperatingDetectionProfile,
+        OperatingStateMachine,
+        OperatingThresholdSource,
+        ResolvedOperatingDetection,
+    )
+
     mains_config = SimpleNamespace(
         mode=CircuitMode.MAINS_NILM,
         appliance_profile=ApplianceProfile.MAINS_NILM,
@@ -147,14 +155,48 @@ def test_nilm_controller_keeps_detector_transition_for_masking_but_not_helpers(
             ),
         )
     )
-    transition = CircuitEvent(
-        datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
-        "variable-speed-load",
-        EventType.POWER_TRANSITION,
-        features={"transition_delta_w": 100.0},
+    machine = OperatingStateMachine(
+        ResolvedOperatingDetection(
+            profile=OperatingDetectionProfile(25.0, 10.0, 10.0, 20.0, 60.0, 600.0),
+            source=OperatingThresholdSource.PROFILE_DEFAULT,
+            appliance_profile=ApplianceProfile.HVAC_BLOWER,
+            circuit_mode=CircuitMode.SINGLE_PHASE,
+        )
+    )
+    timestamp = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 900.0),
+        (40, 900.0),
+    ):
+        events.extend(
+            machine.process(
+                CircuitSample(
+                    timestamp=timestamp + timedelta(seconds=seconds),
+                    circuit_id="variable-speed-load",
+                    real_power=watts,
+                    current=1.0,
+                    voltage=120.0,
+                    reactive_power=0.0,
+                    apparent_power=watts,
+                    power_factor=1.0,
+                    frequency=60.0,
+                    energy=0.0,
+                )
+            ).events
+        )
+    transition = next(
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
     )
 
-    assert tuple(controller.known_load_events("mains", [transition])) == (transition,)
+    masked_event = next(controller.known_load_events("mains", [transition]))
+    assert masked_event is transition
     assert tuple(controller.helper_candidate_events("mains", [transition])) == ()
 
 
