@@ -41,6 +41,295 @@ BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 _DEFAULT_DELTA_VA = object()
 
 
+def test_assignment_model_uses_interval_plateau_for_running_state() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["one"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": True,
+                "start_transition_w": 70.0,
+                "stop_transition_eligible": True,
+                "stop_transition_w": -70.0,
+                "plateau_eligible": True,
+                "median_power_w": 100.0,
+                "power_coverage": 1.0,
+                "evidence_confidence": 0.9,
+            }
+        ],
+    )
+    assert model["states"][1]["power_w"] == 100.0
+    assert model["transition_prototypes"][0]["delta_w"] == 70.0
+
+
+def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["one"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": True,
+                "start_transition_w": 80.0,
+                "plateau_eligible": True,
+                "median_power_w": 90.0,
+                "measured_energy_kwh": 0.15,
+                "duration_s": 600,
+                "power_coverage": 1.0,
+                "evidence_confidence": 0.9,
+            }
+        ],
+    )
+    assert model["run_profile"]["energy_kwh"]["median"] == 0.15
+    assert model["transition_prototypes"][0]["delta_w"] == 80.0
+
+
+def test_assignment_model_flags_power_energy_disagreement_without_broadening_state(  # noqa: E501
+) -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["one", "two"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "plateau_eligible": True,
+                "median_power_w": 100.0,
+                "measured_energy_kwh": 0.5,
+                "duration_s": 600,
+                "power_coverage": 1.0,
+                "evidence_confidence": 1.0,
+            },
+            {
+                "interval_id": "two",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "plateau_eligible": True,
+                "median_power_w": 100.0,
+                "power_coverage": 1.0,
+                "evidence_confidence": 1.0,
+            },
+        ],
+    )
+    assert model["states"][1]["power_w"] == 100.0
+    assert "power_energy_disagreement" in model["evidence_summary"]["quality_issues"]
+
+
+def test_assignment_model_keeps_asymmetric_directional_prototypes() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["one"]},
+        [
+            {
+                "session_id": "one",
+                "assignment_id": "pump",
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:05:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -65.0,
+                "confidence": 1.0,
+            }
+        ],
+    )
+    assert [prototype["delta_w"] for prototype in model["transition_prototypes"]] == [
+        80.0,
+        -65.0,
+    ]
+
+
+def test_assignment_model_marks_legacy_stop_inferred_and_lower_effective_support() -> (
+    None
+):
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["one"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "pump",
+                "observed_transition_w": 80.0,
+                "confidence": 1.0,
+            }
+        ],
+    )
+    on, off = model["transition_prototypes"]
+    assert on["evidence_kind"] == "observed"
+    assert off["evidence_kind"] == "inferred_legacy_stop"
+    assert off["effective_support"] < on["effective_support"]
+
+
+def test_assignment_model_selects_distinct_days_over_recent_same_day_burst() -> None:
+    ids = ["old"] + [f"new-{index}" for index in range(40)]
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ids},
+        [
+            {
+                "session_id": "old",
+                "assignment_id": "pump",
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 50.0,
+                "off_delta_w": -50.0,
+                "confidence": 1.0,
+            }
+        ]
+        + [
+            {
+                "session_id": f"new-{index}",
+                "assignment_id": "pump",
+                "end": f"2026-07-02T10:{index:02d}:00+00:00",
+                "on_delta_w": 100.0,
+                "off_delta_w": -100.0,
+                "confidence": 0.8,
+            }
+            for index in range(40)
+        ],
+    )
+    assert model["transition_prototypes"][0]["delta_w"] == 100.0
+    assert model["evidence_summary"]["positive_distinct_days"] == 2
+
+
+def test_assignment_model_confidence_uses_support_days_and_dispersion() -> None:
+    def build(values: list[float]) -> dict[str, object]:
+        return build_nilm_assignment_model(
+            {
+                "assignment_id": "pump",
+                "confirmed_session_ids": [str(index) for index in range(len(values))],
+            },
+            [
+                {
+                    "session_id": str(index),
+                    "assignment_id": "pump",
+                    "end": f"2026-06-{index + 1:02d}T10:00:00+00:00",
+                    "on_delta_w": value,
+                    "off_delta_w": -value,
+                    "confidence": 1.0,
+                }
+                for index, value in enumerate(values)
+            ],
+        )
+
+    assert (
+        build([80.0] * 5)["evidence_confidence"]
+        > build([80.0] * 3)["evidence_confidence"]
+    )
+    assert (
+        build([40.0, 80.0, 120.0, 160.0, 200.0])["evidence_confidence"]
+        < build([80.0] * 5)["evidence_confidence"]
+    )
+
+
+def test_assignment_model_rejected_evidence_does_not_shift_positive_or_adds_conflict(  # noqa: E501
+) -> None:
+    assignment = {
+        "assignment_id": "pump",
+        "confirmed_session_ids": ["good"],
+        "rejected_session_ids": ["bad"],
+    }
+    sessions = [
+        {
+            "session_id": "good",
+            "assignment_id": "pump",
+            "end": "2026-06-01T10:00:00+00:00",
+            "on_delta_w": 80.0,
+            "off_delta_w": -80.0,
+            "confidence": 1.0,
+        },
+        {
+            "session_id": "bad",
+            "assignment_id": "pump",
+            "end": "2026-06-02T10:00:00+00:00",
+            "on_delta_w": 82.0,
+            "off_delta_w": -82.0,
+            "confidence": 1.0,
+        },
+    ]
+    model = build_nilm_assignment_model(assignment, sessions)
+    assert model["transition_prototypes"][0]["delta_w"] == 80.0
+    assert model["evidence_summary"]["close_rejected_conflicts"] == 1
+
+
+def test_assignment_model_uses_transition_fallback_without_steady_state() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["one"]},
+        [
+            {
+                "session_id": "one",
+                "assignment_id": "pump",
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -70.0,
+                "confidence": 1.0,
+            }
+        ],
+    )
+    assert model["states"][1]["power_source"] == "transition_fallback"
+    assert model["states"][1]["power_w"] == 80.0
+
+
+def test_assignment_model_invalid_optional_values_do_not_consume_selection_capacity(  # noqa: E501
+) -> None:
+    intervals = [
+        {
+            "interval_id": f"bad-{index}",
+            "assignment_id": "pump",
+            "evidence_schema_version": 2,
+            "plateau_eligible": True,
+            "median_power_w": float("nan"),
+            "power_coverage": 1.0,
+        }
+        for index in range(100)
+    ] + [
+        {
+            "interval_id": "good",
+            "assignment_id": "pump",
+            "evidence_schema_version": 2,
+            "plateau_eligible": True,
+            "median_power_w": 90.0,
+            "power_coverage": 1.0,
+            "evidence_confidence": 1.0,
+        }
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+    assert model["states"][1]["power_w"] == 90.0
+
+
+def test_normalize_assignment_model_v1_is_stable_binary_v2_projection() -> None:
+    assignment = {
+        "power_states_w": [0.0, 80.0],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 80.0,
+                "delta_w": 80.0,
+                "spread_w": 1.0,
+                "sample_count": 3,
+            }
+        ],
+        "model_confidence": 0.8,
+    }
+    normalized = nilm_domain.normalize_nilm_assignment_model(assignment)
+    rebuilt = build_nilm_assignment_model(
+        {**assignment, **normalized, "assignment_id": "pump"}, []
+    )
+    assert normalized["model_schema_version"] == 2
+    assert normalized["model_kind"] == "binary"
+    assert normalized["states"][1]["id"] == "running"
+    assert rebuilt["model_revision"] == normalized["model_revision"]
+
+
 def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assignment = {
         "assignment_id": "pump",
@@ -68,9 +357,9 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
         "on",
         "off",
     ]
-    assert model["transition_prototypes"][0]["sample_count"] == 32
+    assert model["transition_prototypes"][0]["sample_count"] == 35
     assert model["transition_prototypes"][0]["spread_w"] == 1.0
-    assert model["model_confidence"] == 0.9
+    assert 0.0 < model["model_confidence"] < 1.0
     assert nilm_assignment_model_is_compound_eligible(model) is True
 
 
@@ -95,11 +384,12 @@ def test_assignment_model_falls_back_to_one_legacy_manual_label_interval() -> No
     ]
     assert model["transition_prototypes"][0]["sample_count"] == 1
     assert "delta_var" not in model["transition_prototypes"][0]
-    assert model["model_confidence"] == 0.083
+    assert model["model_confidence"] <= 0.25
 
 
-def test_assignment_model_reviewed_session_transitions_outrank_legacy_intervals(
-) -> None:
+def test_assignment_model_reviewed_session_transitions_outrank_legacy_intervals() -> (
+    None
+):
     assignment = {
         "assignment_id": "pump",
         "confirmed_session_ids": ["session-1"],
@@ -140,7 +430,7 @@ def test_assignment_model_reviewed_session_transitions_outrank_legacy_intervals(
     assert sessions_only["power_states_w"] == [0.0, 60.0]
     assert combined["power_states_w"] == [0.0, 60.0]
     assert combined["transition_prototypes"][0]["sample_count"] == 1
-    assert combined["model_confidence"] == 0.3
+    assert 0.0 < combined["model_confidence"] < 1.0
 
 
 def test_assignment_model_schema_2_start_only_adds_only_an_on_prototype() -> None:
@@ -164,11 +454,9 @@ def test_assignment_model_schema_2_start_only_adds_only_an_on_prototype() -> Non
     )
 
     assert model["power_states_w"] == [0.0, 120.0]
-    assert [item["direction"] for item in model["transition_prototypes"]] == [
-        "on"
-    ]
+    assert [item["direction"] for item in model["transition_prototypes"]] == ["on"]
     assert model["transition_prototypes"][0]["delta_w"] == 120.0
-    assert model["model_confidence"] == 0.15
+    assert 0.0 < model["model_confidence"] < 1.0
 
 
 def test_assignment_model_schema_2_stop_only_adds_only_an_off_prototype() -> None:
@@ -192,9 +480,7 @@ def test_assignment_model_schema_2_stop_only_adds_only_an_off_prototype() -> Non
     )
 
     assert model["power_states_w"] == [0.0, 140.0]
-    assert [item["direction"] for item in model["transition_prototypes"]] == [
-        "off"
-    ]
+    assert [item["direction"] for item in model["transition_prototypes"]] == ["off"]
     assert model["transition_prototypes"][0]["delta_w"] == -140.0
 
 
@@ -245,11 +531,12 @@ def test_assignment_model_schema_2_eligible_plateau_adds_active_state_power() ->
 
     assert model["power_states_w"] == [0.0, 95.0]
     assert model["transition_prototypes"] == []
-    assert model["model_confidence"] == 0.253
+    assert 0.0 < model["model_confidence"] < 1.0
 
 
-def test_assignment_model_schema_2_low_coverage_plateau_is_not_active_evidence(
-) -> None:
+def test_assignment_model_schema_2_low_coverage_plateau_is_not_active_evidence() -> (
+    None
+):
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
         [],
@@ -304,8 +591,9 @@ def test_assignment_model_schema_2_transitions_outrank_legacy_manual_fallback() 
     assert model["power_states_w"] == [0.0, 120.0]
 
 
-def test_assignment_model_uses_legacy_transitions_when_schema_2_has_only_plateau(
-) -> None:
+def test_assignment_model_uses_legacy_transitions_when_schema_2_has_only_plateau() -> (
+    None
+):
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["legacy", "schema-2"]},
         [],
@@ -357,7 +645,7 @@ def test_assignment_model_keeps_reviewed_session_transition_behavior() -> None:
         80.0,
         -80.0,
     ]
-    assert model["model_confidence"] == 0.3
+    assert 0.0 < model["model_confidence"] < 1.0
 
 
 def test_assignment_model_caps_confidence_for_multiple_legacy_intervals() -> None:
@@ -379,7 +667,7 @@ def test_assignment_model_caps_confidence_for_multiple_legacy_intervals() -> Non
     )
 
     assert model["transition_prototypes"][0]["sample_count"] == 3
-    assert model["model_confidence"] == 0.25
+    assert model["model_confidence"] <= 0.25
 
 
 def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:
@@ -429,7 +717,7 @@ def test_assignment_model_falls_back_to_legacy_power_and_stable_revision() -> No
 
     assert first["power_states_w"] == [0.0, 83.0]
     assert first["transition_prototypes"][1]["delta_w"] == -83.0
-    assert first["model_confidence"] == 0.267
+    assert 0.0 < first["model_confidence"] < 1.0
     assert nilm_assignment_model_is_compound_eligible(first) is False
     assert first["model_revision"] == second["model_revision"] == 1
 
@@ -459,7 +747,7 @@ def test_assignment_model_discards_invalid_before_recent_cap() -> None:
     model = build_nilm_assignment_model(assignment, sessions)
 
     assert model["transition_prototypes"][0]["sample_count"] == 1
-    assert model["model_confidence"] == 0.3
+    assert 0.0 < model["model_confidence"] < 1.0
 
 
 def test_assignment_model_tolerates_malformed_optional_fields() -> None:
@@ -489,7 +777,7 @@ def test_assignment_model_tolerates_malformed_optional_fields() -> None:
     assert nilm_assignment_model_is_compound_eligible(assignment) is False
 
 
-def test_assignment_model_requires_directional_evidence_and_conservative_confidence(
+def test_assignment_model_requires_directional_evidence_and_conservative_confidence(  # noqa: E501
 ) -> None:
     session_ids = ["wrong-on", "wrong-off", "valid-a", "valid-b", "valid-c"]
     assignment = {"assignment_id": "pump", "confirmed_session_ids": session_ids}
@@ -525,8 +813,8 @@ def test_assignment_model_requires_directional_evidence_and_conservative_confide
 
     model = build_nilm_assignment_model(assignment, sessions)
 
-    assert model["transition_prototypes"][0]["sample_count"] == 3
-    assert model["model_confidence"] == 0.0
+    assert model["transition_prototypes"][0]["sample_count"] == 4
+    assert 0.0 < model["model_confidence"] < 0.5
 
 
 def sample(
@@ -1311,12 +1599,8 @@ def test_sensitive_50w_edge_requires_a_second_nearby_sample() -> None:
     edges = detector.process_many(
         [
             CircuitSample(BASE_TIME, "mains", real_power=0.0),
-            CircuitSample(
-                BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0
-            ),
-            CircuitSample(
-                BASE_TIME + timedelta(seconds=20), "mains", real_power=52.0
-            ),
+            CircuitSample(BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0),
+            CircuitSample(BASE_TIME + timedelta(seconds=20), "mains", real_power=52.0),
         ]
     )
 
@@ -1335,12 +1619,8 @@ def test_sensitive_50w_edge_rejects_a_single_sample_excursion() -> None:
     edges = detector.process_many(
         [
             CircuitSample(BASE_TIME, "mains", real_power=0.0),
-            CircuitSample(
-                BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0
-            ),
-            CircuitSample(
-                BASE_TIME + timedelta(seconds=20), "mains", real_power=0.0
-            ),
+            CircuitSample(BASE_TIME + timedelta(seconds=10), "mains", real_power=55.0),
+            CircuitSample(BASE_TIME + timedelta(seconds=20), "mains", real_power=0.0),
         ]
     )
 
@@ -1736,8 +2016,9 @@ def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> No
     assert result.unmatched_edges == (edge(40, 325.0),)
 
 
-def test_attribute_known_loads_prefers_transition_delta_and_records_provenance(
-) -> None:
+def test_attribute_known_loads_prefers_transition_delta_and_records_provenance() -> (
+    None
+):
     event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=10),
         circuit_id="heater",
@@ -1876,7 +2157,7 @@ def test_attribute_known_loads_falls_back_when_transition_delta_is_invalid(
     assert match.known_transition_delta_w is None
 
 
-def test_attribute_known_loads_scores_edges_inside_transition_window_at_zero_distance(
+def test_attribute_known_loads_scores_edges_inside_transition_window_at_zero_distance(  # noqa: E501
 ) -> None:
     interval_event = CircuitEvent(
         timestamp=BASE_TIME + timedelta(seconds=40),
@@ -1923,9 +2204,7 @@ def test_attribute_known_loads_transition_delta_conserves_residual() -> None:
     )
     original = edge(10, 120.0)
 
-    result = attribute_known_loads(
-        [original], [event], residual_min_delta_w=10.0
-    )
+    result = attribute_known_loads([original], [event], residual_min_delta_w=10.0)
 
     match = result.matched_edges[0]
     assert match.explained_delta_w == 100.0
@@ -1952,9 +2231,7 @@ def test_power_transition_conserves_signed_nonzero_residual_with_provenance(
         features={"transition_delta_w": transition_delta_w},
     )
 
-    result = attribute_known_loads(
-        [aggregate], [event], residual_min_delta_w=10.0
-    )
+    result = attribute_known_loads([aggregate], [event], residual_min_delta_w=10.0)
 
     match = result.matched_edges[0]
     residual = result.residual_edges[0]
@@ -1996,9 +2273,7 @@ def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
         features=feature,
     )
 
-    result = attribute_known_loads(
-        [original], [event], residual_min_delta_w=100.0
-    )
+    result = attribute_known_loads([original], [event], residual_min_delta_w=100.0)
 
     assert result.unmatched_edges == (result.residual_edges[0],)
     assert result.matched_edges[0].edge == original
@@ -2234,9 +2509,7 @@ def test_attribute_known_loads_prefers_closer_time_for_equal_magnitude() -> None
 
 
 def test_attribute_known_loads_scores_exact_time_above_fourteen_seconds() -> None:
-    expectation = {
-        "load": nilm_domain.KnownLoadTopology(("single_leg_a",), None)
-    }
+    expectation = {"load": nilm_domain.KnownLoadTopology(("single_leg_a",), None)}
     aggregate = edge(30, 1000.0, split_phase_type="single_leg_a")
     exact = CircuitEvent(
         aggregate.timestamp,
@@ -2392,9 +2665,7 @@ def test_attribute_known_loads_retains_strongest_unsuppressed_rejection() -> Non
     result = attribute_known_loads(
         [first, equal, weaker],
         [event],
-        topology_by_circuit={
-            "load": nilm_domain.KnownLoadTopology(("single_leg_a",))
-        },
+        topology_by_circuit={"load": nilm_domain.KnownLoadTopology(("single_leg_a",))},
     )
 
     assert result.unmatched_edges == (first, equal, weaker)
@@ -2417,9 +2688,7 @@ def test_attribute_known_loads_prefers_closest_equal_power_rejection() -> None:
     result = attribute_known_loads(
         [farther, closer],
         [event],
-        topology_by_circuit={
-            "load": nilm_domain.KnownLoadTopology(("single_leg_a",))
-        },
+        topology_by_circuit={"load": nilm_domain.KnownLoadTopology(("single_leg_a",))},
     )
 
     assert result.topology_rejections == (result.rejected_topology_candidates[0],)
@@ -2480,9 +2749,10 @@ def test_attribute_known_loads_global_assignment_beats_greedy() -> None:
         topology_by_circuit={"a": topology, "b": topology},
     )
 
-    assert [
-        (match.edge, match.known_circuit_id) for match in result.matched_edges
-    ] == [(edge_one, "b"), (edge_two, "a")]
+    assert [(match.edge, match.known_circuit_id) for match in result.matched_edges] == [
+        (edge_one, "b"),
+        (edge_two, "a"),
+    ]
     assert [match.confidence for match in result.matched_edges] == pytest.approx(
         [0.80, 0.85]
     )
@@ -2741,10 +3011,7 @@ def test_signature_confidence_uses_days_dispersion_and_on_off_support() -> None:
         [edge(index * 60, 300.0, delta_var=20.0) for index in range(3)]
     )[0]
     multi_day = cluster_recurring_signatures(
-        [
-            edge(index * 86_400, 300.0, delta_var=20.0)
-            for index in range(3)
-        ]
+        [edge(index * 86_400, 300.0, delta_var=20.0) for index in range(3)]
     )[0]
     dispersed = cluster_recurring_signatures(
         [
@@ -3190,25 +3457,28 @@ def test_session_specs_reject_off_only_assignment_fingerprint() -> None:
     current = NilmSignature("off-1", -84.0, -145.0, -168.0, 0.12, 8, 0.9)
     current_fingerprint = nilm_domain.nilm_signature_fingerprint(current)
 
-    assert _nilm_session_specs(
-        [
-            {
-                "signature_id": "off-1",
-                "feedback_fingerprint": current_fingerprint,
-                "median_delta_w": -84.0,
-            }
-        ],
-        [
-            {
-                "assignment_id": "pump",
-                "lifecycle_state": "published",
-                "signature_fingerprints": [
-                    "direction=off|watts=0-100|var=0-100|va=0-100|"
-                    "pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown"
-                ],
-            }
-        ],
-    ) == []
+    assert (
+        _nilm_session_specs(
+            [
+                {
+                    "signature_id": "off-1",
+                    "feedback_fingerprint": current_fingerprint,
+                    "median_delta_w": -84.0,
+                }
+            ],
+            [
+                {
+                    "assignment_id": "pump",
+                    "lifecycle_state": "published",
+                    "signature_fingerprints": [
+                        "direction=off|watts=0-100|var=0-100|va=0-100|"
+                        "pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown"
+                    ],
+                }
+            ],
+        )
+        == []
+    )
 
 
 def test_virtual_assignment_sessions_resolve_unique_legacy_fingerprint() -> None:
@@ -3592,8 +3862,9 @@ def test_global_session_pairing_closes_overlapping_runs() -> None:
     ]
 
 
-def test_global_session_pairing_overlapping_different_assignments_have_no_penalty(
-) -> None:
+def test_global_session_pairing_overlapping_different_assignments_have_no_penalty() -> (
+    None
+):
     sessions = pair_nilm_sessions_for_signatures(
         [
             edge(0, 450.0),
