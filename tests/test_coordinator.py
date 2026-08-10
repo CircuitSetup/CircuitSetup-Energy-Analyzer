@@ -13017,7 +13017,7 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "match_time_offset_seconds": 0.0,
         "magnitude_score": 1.0,
         "time_score": 1.0,
-        "topology_score": 0.5,
+        "topology_score": 1.0,
         "selection_method": "global_assignment",
         "known_power_source": "startup_power_w",
         "match_confidence": 1.0,
@@ -13126,13 +13126,15 @@ async def test_runtime_detects_known_load_configured_leg_mismatch(
     assert evidence["configured_leg"] == "b"
     assert evidence["observed_leg"] == "a"
     assert evidence["suggested_leg"] == "a"
+    assert evidence["attribution_rejected"] is True
+    assert evidence["aggregate_edge_retained"] is True
 
     leg_alerts = [
         alert for alert in notifications if alert.feature == "nilm_leg_mismatch"
     ]
     assert leg_alerts
     assert "configured on leg b" in leg_alerts[0].message
-    assert "mains NILM repeatedly matched it on leg a" in leg_alerts[0].message
+    assert "rejected a known-load attribution" in leg_alerts[0].message
 
 
 @pytest.mark.asyncio

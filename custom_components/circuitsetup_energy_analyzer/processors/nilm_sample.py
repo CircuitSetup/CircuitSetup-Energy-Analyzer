@@ -189,10 +189,9 @@ class NilmSampleProcessor:
                 excluded_assignment_ids=hidden_assignment_ids,
             )
         )
-        candidate_edges = list(
-            dict.fromkeys((*existing_unmatched, *recovered_edges, *edges))
-        )
+        candidate_edges = [*existing_unmatched, *recovered_edges, *edges]
         matched_edges = ()
+        rejected_topology_candidates = ()
         defer_known_events = detector.has_pending_transition and not edges
         if candidate_edges and known_events and not defer_known_events:
             topology_by_circuit = {
@@ -203,9 +202,11 @@ class NilmSampleProcessor:
             mask = attribute_known_loads(
                 candidate_edges,
                 known_events,
+                residual_min_delta_w=self._min_delta_w_for_circuit(circuit_id),
                 topology_by_circuit=topology_by_circuit,
             )
             matched_edges = mask.matched_edges
+            rejected_topology_candidates = mask.rejected_topology_candidates
             next_unmatched = list(mask.unmatched_edges)
         else:
             next_unmatched = candidate_edges
@@ -227,12 +228,12 @@ class NilmSampleProcessor:
                 sample.real_power, standby_w, detector.noise_spread_w,
                 assignments, runtime, sample.timestamp, signature_specs
             )
-            matches_by_edge: dict[NilmEdge, list[Any]] = defaultdict(list)
+            matches_by_edge_id: dict[int, list[Any]] = defaultdict(list)
             for match in matched_edges:
-                matches_by_edge[match.edge].append(match)
+                matches_by_edge_id[id(match.edge)].append(match)
             new_unmasked: list[NilmEdge] = []
             for edge in edges:
-                edge_matches = matches_by_edge.get(edge, [])
+                edge_matches = matches_by_edge_id.get(id(edge), [])
                 match = edge_matches.pop(0) if edge_matches else None
                 if match is None:
                     new_unmasked.append(edge)
@@ -316,11 +317,10 @@ class NilmSampleProcessor:
                     completed_sessions.extend(followup_completed)
             else:
                 accepted = ()
-            for accepted_edge in accepted:
-                try:
-                    next_unmatched.remove(accepted_edge)
-                except ValueError:
-                    continue
+            accepted_ids = {id(accepted_edge) for accepted_edge in accepted}
+            next_unmatched = [
+                edge for edge in next_unmatched if id(edge) not in accepted_ids
+            ]
             if completed_sessions:
                 history = (
                     context.store_data.nilm_session_history_by_circuit.setdefault(
@@ -356,6 +356,10 @@ class NilmSampleProcessor:
             store_dirty = True
 
         for match in matched_edges:
+            alerts.extend(
+                self._observe_topology(circuit_config, match, context),
+            )
+        for match in rejected_topology_candidates:
             alerts.extend(
                 self._observe_topology(circuit_config, match, context),
             )
@@ -1998,6 +2002,7 @@ def _recover_unassigned_session_edges(
                 delta_w=delta_w,
                 delta_var=_finite_float(session.get("on_delta_var")),
                 direction="on",
+                origin="recovered_session",
             )
         )
     return recovered

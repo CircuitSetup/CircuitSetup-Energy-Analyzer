@@ -3293,16 +3293,21 @@ def _nilm_known_load_confidence(
 
 
 def _nilm_edge_id(edge: NilmEdge) -> str:
-    return "|".join(
-        (
-            edge.direction,
-            edge.timestamp.isoformat(),
-            f"w={edge.delta_w:.3f}",
-            f"var={_optional_number_text(edge.delta_var)}",
-            edge.split_phase_type,
-            edge.dominant_leg,
-        )
+    fields = (
+        edge.direction,
+        edge.timestamp.isoformat(),
+        f"w={edge.delta_w:.3f}",
+        f"var={_optional_number_text(edge.delta_var)}",
+        edge.split_phase_type,
+        edge.dominant_leg,
     )
+    if edge.origin != "aggregate":
+        fields += (
+            f"origin={edge.origin}",
+            f"parent={edge.parent_edge_id or 'none'}",
+            "explained=" + ",".join(edge.explained_known_circuit_ids),
+        )
+    return "|".join(fields)
 
 
 def _optional_number_text(value: float | None) -> str:

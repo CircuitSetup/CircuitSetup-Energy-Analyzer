@@ -1551,6 +1551,23 @@ def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
     assert (residual.leg_a_delta_w, residual.leg_b_delta_w) == (None, None)
 
 
+def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
+    aggregate = edge(10, 200.0)
+    residual = NilmEdge(
+        timestamp=aggregate.timestamp,
+        delta_w=aggregate.delta_w,
+        delta_var=aggregate.delta_var,
+        delta_va=aggregate.delta_va,
+        delta_pf=aggregate.delta_pf,
+        direction=aggregate.direction,
+        origin="known_load_residual",
+        parent_edge_id="aggregate-edge",
+        explained_known_circuit_ids=("fridge",),
+    )
+
+    assert nilm_domain._nilm_edge_id(aggregate) != nilm_domain._nilm_edge_id(residual)
+
+
 @pytest.mark.parametrize("aggregate_delta_w", [1005.0, -1005.0])
 def test_attribute_known_loads_skips_residual_below_threshold(
     aggregate_delta_w: float,

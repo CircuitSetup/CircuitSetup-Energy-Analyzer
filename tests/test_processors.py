@@ -8092,7 +8092,10 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
         "explained_delta_w": 618.556,
         "residual_delta_w": 1.568,
         "residual_emitted": True,
-        "residual_edge_id": "mains:edge",
+        "residual_edge_id": (
+            "on|2026-06-11T12:00:00+00:00|w=1.568|var=unknown|unknown|unknown"
+            "|origin=known_load_residual|parent=mains:edge|explained=fridge"
+        ),
         "match_time_offset_seconds": 2.5,
         "magnitude_score": 0.92,
         "time_score": 0.83,
@@ -8336,6 +8339,7 @@ def test_placeholder_assignment_does_not_starve_three_recurring_load_groups() ->
 
     assert _runtime_assignment_model(assignment).transition_prototypes == ()
     assert all(isinstance(edge, NilmEdge) for edge in edges)
+    assert {edge.origin for edge in edges} == {"recovered_session"}
     assert hidden_edges == []
     assert [
         round(signature.median_delta_w)

@@ -9,6 +9,7 @@ from ..alerting import Observation
 from ..models import CircuitConfig, CircuitMode
 from ..nilm import (
     KnownLoadMatch,
+    _nilm_edge_id,
     evaluate_known_load_topology,
     expected_known_load_dominant_legs,
     known_load_topology_for_config,
@@ -56,6 +57,15 @@ class NilmTopologyProcessor:
         )
         if not evidence:
             return FeatureResult()
+
+        if match.selection_method == "topology_rejected":
+            evidence.update(
+                {
+                    "attribution_rejected": True,
+                    "aggregate_edge_retained": True,
+                    "rejection_reason": match.topology_status,
+                }
+            )
 
         match_confidence = float(evidence["match_confidence"])
         if match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
@@ -145,7 +155,7 @@ def nilm_topology_evidence_payload(
         "residual_delta_w": _round_number(match.residual_delta_w),
         "residual_emitted": match.residual_edge is not None,
         "residual_edge_id": (
-            match.residual_edge.parent_edge_id if match.residual_edge else None
+            _nilm_edge_id(match.residual_edge) if match.residual_edge else None
         ),
         "match_time_offset_seconds": _round_optional_number(
             match.time_offset_seconds
@@ -155,11 +165,7 @@ def nilm_topology_evidence_payload(
         "topology_score": _round_optional_number(match.topology_score),
         "selection_method": match.selection_method,
         "known_power_source": match.power_source,
-        "match_confidence": _round_number(
-            match.magnitude_score
-            if match.magnitude_score is not None
-            else match.confidence
-        ),
+        "match_confidence": _round_number(match.confidence),
     }
 
 
@@ -175,12 +181,19 @@ def nilm_topology_mismatch_message(
     evidence: dict[str, Any],
 ) -> str:
     """Build the user-facing NILM topology mismatch message."""
+    rejected = bool(evidence.get("attribution_rejected"))
     if evidence.get("status") == "leg_mismatch":
         configured_leg = evidence.get("configured_leg", "unknown")
         observed_leg = evidence.get("observed_leg", "unknown")
+        observation = (
+            "rejected a known-load attribution because it was observed"
+            if rejected
+            else "repeatedly matched it"
+        )
         return (
             f"Possible issue: {config.name} is configured on leg "
-            f"{configured_leg}, but mains NILM repeatedly matched it on leg "
+            f"{configured_leg}, but mains NILM "
+            f"{observation} on leg "
             f"{observed_leg}. Verify circuit mapping, CT orientation, and "
             "whether another appliance changed at the same time before "
             "treating this as an appliance problem."
@@ -188,10 +201,16 @@ def nilm_topology_mismatch_message(
 
     observed_type = evidence.get("observed_split_phase_type", "unknown")
     expected = ", ".join(evidence.get("expected_split_phase_types") or [])
+    observation = (
+        "rejected a known-load attribution because it was observed"
+        if rejected
+        else "repeatedly matched it"
+    )
     return (
         f"Possible issue: {config.name} is configured as "
-        f"{_circuit_mode_phrase(config.mode)}, but mains NILM repeatedly matched "
-        f"it as {observed_type}. Expected {expected or 'no topology check'} from "
+        f"{_circuit_mode_phrase(config.mode)}, but mains NILM "
+        f"{observation} as "
+        f"{observed_type}. Expected {expected or 'no topology check'} from "
         "the configured circuit mode. Verify circuit mapping, CT orientation, "
         "and whether another appliance changed at the same time before treating "
         "this as an appliance problem."
