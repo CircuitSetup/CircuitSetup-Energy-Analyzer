@@ -330,6 +330,118 @@ def test_normalize_assignment_model_v1_is_stable_binary_v2_projection() -> None:
     assert rebuilt["model_revision"] == normalized["model_revision"]
 
 
+def test_assignment_model_caps_source_before_daily_representatives() -> None:
+    ids = [str(index) for index in range(70)]
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ids},
+        [
+            {
+                "session_id": value,
+                "assignment_id": "pump",
+                "end": f"2026-05-{index + 1:02d}T00:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 1.0,
+            }
+            for index, value in enumerate(ids)
+        ],
+    )
+    assert model["transition_prototypes"][0]["sample_count"] == 64
+
+
+def test_assignment_model_keeps_legacy_on_when_modern_stop_exists() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["old", "new"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "old",
+                "assignment_id": "pump",
+                "observed_transition_w": 80.0,
+                "confidence": 1.0,
+            },
+            {
+                "interval_id": "new",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "stop_transition_eligible": True,
+                "stop_transition_w": -70.0,
+                "power_coverage": 1.0,
+                "evidence_confidence": 1.0,
+            },
+        ],
+    )
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [80.0, -70.0]
+    assert model["transition_prototypes"][1]["evidence_kind"] == "observed"
+
+
+def test_assignment_model_profiles_duration_and_energy_without_state_evidence() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["one"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "one",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "duration_s": 600,
+                "measured_energy_kwh": 0.15,
+                "power_coverage": 1.0,
+                "evidence_confidence": 1.0,
+            }
+        ],
+    )
+    assert model["power_states_w"] != [0.0, 0.0]
+    assert model["run_profile"]["duration_s"]["median"] == 600.0
+    assert model["run_profile"]["energy_kwh"]["median"] == 0.15
+
+
+def test_assignment_model_off_dispersion_reduces_confidence() -> None:
+    def build(off: list[float]) -> dict[str, object]:
+        return build_nilm_assignment_model(
+            {
+                "assignment_id": "pump",
+                "confirmed_session_ids": [str(i) for i in range(4)],
+            },
+            [
+                {
+                    "session_id": str(i),
+                    "assignment_id": "pump",
+                    "end": f"2026-06-{i + 1:02d}T00:00:00+00:00",
+                    "on_delta_w": 80.0,
+                    "off_delta_w": value,
+                    "confidence": 1.0,
+                }
+                for i, value in enumerate(off)
+            ],
+        )
+
+    assert (
+        build([-80.0, -80.0, -80.0, -160.0])["evidence_confidence"]
+        < build([-80.0] * 4)["evidence_confidence"]
+    )
+
+
+def test_normalize_assignment_model_preserves_valid_v2_nested_fields() -> None:
+    normalized = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "model_kind": "binary",
+            "power_states_w": [0, 80],
+            "states": [
+                {"id": "off", "kind": "off", "power_w": 0},
+                {"id": "running", "kind": "running", "power_w": 80, "spread_w": 2},
+            ],
+            "run_profile": {
+                "duration_s": {"median": 600, "mad": 20, "p10": 570, "p90": 640}
+            },
+            "evidence_summary": {"positive_count": 4, "quality_issues": ["x", 4]},
+        }
+    )
+    assert normalized["states"][1]["spread_w"] == 2.0
+    assert normalized["run_profile"]["duration_s"]["median"] == 600.0
+    assert normalized["evidence_summary"]["quality_issues"] == ["x"]
+
+
 def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assignment = {
         "assignment_id": "pump",

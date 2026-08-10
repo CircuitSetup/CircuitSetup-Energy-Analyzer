@@ -93,7 +93,25 @@ def build_nilm_assignment_model(
         for record in records
     ):
         records = [
-            record for record in records if record.source_type != "legacy_interval"
+            replace(
+                record,
+                on_delta_w=None
+                if any(
+                    other.source_type != "legacy_interval"
+                    and other.on_delta_w is not None
+                    for other in records
+                )
+                else record.on_delta_w,
+                off_delta_w=None,
+            )
+            if record.source_type == "legacy_interval"
+            and any(
+                other.source_type != "legacy_interval"
+                and (other.on_delta_w is not None or other.off_delta_w is not None)
+                for other in records
+            )
+            else record
+            for record in records
         ]
     positives = _select_positive_evidence(
         record for record in records if record.positive
@@ -366,10 +384,14 @@ def _select_positive_evidence(
     ordered = sorted(records, key=_evidence_sort_key)
     representatives: list[_NormalizedAssignmentEvidence] = []
     seen_days: set[str] = set()
+    source_counts: defaultdict[str, int] = defaultdict(int)
     for record in ordered:
         if record.local_day not in seen_days:
+            if source_counts[record.source_type] >= _MAX_EVIDENCE_PER_SOURCE:
+                continue
             representatives.append(record)
             seen_days.add(record.local_day)
+            source_counts[record.source_type] += 1
     selected = representatives[:_MAX_POSITIVE_EVIDENCE]
     day_counts = defaultdict(int)
     source_counts = defaultdict(int)
@@ -575,11 +597,40 @@ def _evidence_confidence(
     support = min(_effective_support(records) / 8, 1.0)
     days = min(_distinct_days(records) / 6, 1.0)
     directional = (bool(on) + bool(off)) / 2
-    spread = _weighted_mad([record.on_delta_w for record in on], on) if on else 0.0
-    center = (
-        abs(_weighted_median([record.on_delta_w for record in on], on)) if on else 1.0
-    )
-    dispersion = min(spread / max(center, 1.0), 1.0)
+    spreads = [
+        _weighted_mad([record.on_delta_w for record in on], on)
+        / max(abs(_weighted_median([record.on_delta_w for record in on], on)), 1.0)
+        if on
+        else 0.0,
+        _weighted_mad([record.off_delta_w for record in off], off)
+        / max(abs(_weighted_median([record.off_delta_w for record in off], off)), 1.0)
+        if off
+        else 0.0,
+        _weighted_mad(
+            [record.plateau_w for record in records if record.plateau_w is not None],
+            [record for record in records if record.plateau_w is not None],
+        )
+        / max(
+            _weighted_median(
+                [
+                    record.plateau_w
+                    for record in records
+                    if record.plateau_w is not None
+                ],
+                [record for record in records if record.plateau_w is not None],
+            ),
+            1.0,
+        )
+        if any(record.plateau_w is not None for record in records)
+        else 0.0,
+    ]
+    if off:
+        off_values = [abs(record.off_delta_w) for record in off]
+        spreads.append(
+            (_percentile(off_values, 0.9) - _percentile(off_values, 0.1))
+            / max(_weighted_median(off_values, off), 1.0)
+        )
+    dispersion = min(max(spreads), 1.0)
     inferred_only = bool(records) and all(record.inferred_stop for record in records)
     quality = sum(record.quality for record in records) / len(records)
     score = (
@@ -762,6 +813,26 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         if active is not None
         else []
     )
+    if isinstance(assignment.get("states"), list):
+        rich_states = []
+        for item in assignment["states"]:
+            if not isinstance(item, Mapping) or item.get("id") not in {
+                "off",
+                "running",
+            }:
+                continue
+            if (power := _model_number(item.get("power_w"))) is None:
+                continue
+            rich_states.append(
+                {
+                    "id": item["id"],
+                    "kind": "off" if item["id"] == "off" else "running",
+                    "power_w": power,
+                    "spread_w": max(_model_number(item.get("spread_w")) or 0.0, 0.0),
+                }
+            )
+        if {item["id"] for item in rich_states} == {"off", "running"}:
+            states = sorted(rich_states, key=lambda item: item["id"] != "off")
     normalized = {
         "model_schema_version": 2,
         "model_kind": str(assignment.get("model_kind") or "binary")
@@ -784,6 +855,27 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         "model_revision": _model_nonnegative_int(assignment.get("model_revision")),
         "model_fingerprint": str(assignment.get("model_fingerprint") or ""),
     }
+    if isinstance(assignment.get("run_profile"), Mapping):
+        normalized["run_profile"] = {
+            name: {
+                field: number
+                for field, raw in profile.items()
+                if (number := _model_number(raw)) is not None
+            }
+            for name, profile in assignment["run_profile"].items()
+            if isinstance(name, str) and isinstance(profile, Mapping)
+        }
+    if isinstance(assignment.get("evidence_summary"), Mapping):
+        normalized["evidence_summary"] = {
+            "positive_count": _model_nonnegative_int(
+                assignment["evidence_summary"].get("positive_count")
+            ),
+            "quality_issues": [
+                item
+                for item in assignment["evidence_summary"].get("quality_issues", ())
+                if isinstance(item, str)
+            ],
+        }
     if not normalized["model_fingerprint"] and state_values:
         normalized["model_fingerprint"] = _model_fingerprint(normalized)
     return normalized
