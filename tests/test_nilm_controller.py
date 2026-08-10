@@ -3437,6 +3437,91 @@ async def test_nilm_reference_link_persists_updates_and_removes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_reference_link_persists_canonical_settings_and_legacy_alias(
+) -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed",
+        "assignment-load",
+        power_entity_id="sensor.load_power",
+        on_threshold=20,
+        off_threshold=12,
+        on_dwell_seconds=3,
+        off_dwell_seconds=4,
+        minimum_interval_seconds=5,
+        merge_gap_seconds=6,
+        maximum_unknown_gap_seconds=7,
+        maximum_power_gap_seconds=8,
+    )
+
+    assert linked["reference_on_threshold"] == 20.0
+    assert linked["reference_off_threshold"] == 12.0
+    assert linked["reference_on_dwell_seconds"] == 3.0
+    assert linked["reference_off_dwell_seconds"] == 4.0
+    assert linked["reference_minimum_interval_seconds"] == 5.0
+    assert linked["reference_merge_gap_seconds"] == 6.0
+    assert linked["reference_maximum_unknown_gap_seconds"] == 7.0
+    assert linked["reference_maximum_power_gap_seconds"] == 8.0
+    assert linked["reference_threshold_w"] == 20.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ({"on_threshold": 10, "off_threshold": 11}, "ordered"),
+        ({"on_threshold": float("inf"), "off_threshold": 1}, "thresholds"),
+        ({"on_dwell_seconds": -1}, "durations"),
+    ],
+)
+async def test_nilm_reference_link_rejects_invalid_canonical_settings_before_mutation(
+    settings: dict[str, object], message: str
+) -> None:
+    controller, assignment = _helper_link_controller()
+    before = dict(assignment)
+
+    with pytest.raises(ValueError, match=message):
+        await controller.async_set_nilm_reference_link(
+            "mixed",
+            "assignment-load",
+            power_entity_id="sensor.load_power",
+            **settings,
+        )
+
+    assert assignment == before
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_uses_legacy_threshold_for_both_canonical_values(
+) -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed",
+        "assignment-load",
+        power_entity_id="sensor.load_power",
+        threshold_w=12.5,
+    )
+
+    assert linked["reference_on_threshold"] == 12.5
+    assert linked["reference_off_threshold"] == 12.5
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_binary_link_omits_numeric_thresholds() -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed", "assignment-load", state_entity_id="switch.load", on_dwell_seconds=5
+    )
+
+    assert "reference_on_threshold" not in linked
+    assert "reference_off_threshold" not in linked
+    assert linked["reference_on_dwell_seconds"] == 5.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("threshold", (-1, float("inf"), True))
 async def test_nilm_reference_link_rejects_invalid_values(threshold: object) -> None:
     controller, _ = _helper_link_controller()

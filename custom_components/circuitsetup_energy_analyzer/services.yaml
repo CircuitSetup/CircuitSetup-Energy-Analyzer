@@ -1067,6 +1067,73 @@ set_nilm_reference_link:
           min: 0
           max: 100000
           mode: box
+    reference_on_threshold:
+      name: Reference ON Threshold
+      description: Optional watts threshold to enter the active state for numeric references.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    reference_off_threshold:
+      name: Reference OFF Threshold
+      description: Optional watts threshold to leave the active state; it must not exceed the ON threshold.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    reference_on_dwell_seconds:
+      name: Reference ON Dwell Seconds
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_off_dwell_seconds:
+      name: Reference OFF Dwell Seconds
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_minimum_interval_seconds:
+      name: Reference Minimum Interval Seconds
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_merge_gap_seconds:
+      name: Reference Merge Gap Seconds
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_maximum_unknown_gap_seconds:
+      name: Reference Maximum Unknown Gap Seconds
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_maximum_power_gap_seconds:
+      name: Reference Maximum Power Gap Seconds
+      description: Optional maximum gap permitted when integrating reference power evidence.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
     entry_id:
       name: Entry ID
       description: Optional config entry that owns the source circuit and assignment.

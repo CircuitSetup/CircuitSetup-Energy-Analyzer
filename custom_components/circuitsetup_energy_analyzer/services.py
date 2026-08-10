@@ -16,6 +16,7 @@ from .models import SensorRole
 from .nilm_interval_evidence import (
     DEFAULT_THRESHOLDS,
     NilmPowerSample,
+    NilmReferenceExtractionSettings,
     derive_manual_interval_evidence,
     normalize_power_samples,
 )
@@ -168,6 +169,14 @@ ATTR_RELATIONSHIP = "relationship"
 ATTR_REFERENCE_STATE_ENTITY_ID = "reference_state_entity_id"
 ATTR_REFERENCE_POWER_ENTITY_ID = "reference_power_entity_id"
 ATTR_REFERENCE_THRESHOLD_W = "reference_threshold_w"
+ATTR_REFERENCE_ON_THRESHOLD = "reference_on_threshold"
+ATTR_REFERENCE_OFF_THRESHOLD = "reference_off_threshold"
+ATTR_REFERENCE_ON_DWELL_SECONDS = "reference_on_dwell_seconds"
+ATTR_REFERENCE_OFF_DWELL_SECONDS = "reference_off_dwell_seconds"
+ATTR_REFERENCE_MINIMUM_INTERVAL_SECONDS = "reference_minimum_interval_seconds"
+ATTR_REFERENCE_MERGE_GAP_SECONDS = "reference_merge_gap_seconds"
+ATTR_REFERENCE_MAXIMUM_UNKNOWN_GAP_SECONDS = "reference_maximum_unknown_gap_seconds"
+ATTR_REFERENCE_MAXIMUM_POWER_GAP_SECONDS = "reference_maximum_power_gap_seconds"
 ATTR_RECOMMENDATION_ID = "recommendation_id"
 ATTR_ENTRY_ID = "entry_id"
 
@@ -535,12 +544,83 @@ NILM_SET_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=True
 NILM_REMOVE_HELPER_LINK_SERVICE_SCHEMA = _nilm_helper_link_schema(relationship=False)
 
 
+def _reference_link_number(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"{field} must be a finite number") from err
+
+
+def _normalize_reference_link_settings(values: dict[str, Any]) -> None:
+    """Validate service inputs through the pure extraction settings policy."""
+    legacy = _reference_link_number(
+        values.get(ATTR_REFERENCE_THRESHOLD_W), ATTR_REFERENCE_THRESHOLD_W
+    )
+    on_present = ATTR_REFERENCE_ON_THRESHOLD in values
+    off_present = ATTR_REFERENCE_OFF_THRESHOLD in values
+    on_threshold = _reference_link_number(
+        values.get(ATTR_REFERENCE_ON_THRESHOLD), ATTR_REFERENCE_ON_THRESHOLD
+    )
+    off_threshold = _reference_link_number(
+        values.get(ATTR_REFERENCE_OFF_THRESHOLD), ATTR_REFERENCE_OFF_THRESHOLD
+    )
+    if not on_present and not off_present and legacy is not None:
+        on_threshold = off_threshold = legacy
+
+    duration_fields = (
+        (ATTR_REFERENCE_ON_DWELL_SECONDS, "on_dwell_seconds", 0.0),
+        (ATTR_REFERENCE_OFF_DWELL_SECONDS, "off_dwell_seconds", 0.0),
+        (ATTR_REFERENCE_MINIMUM_INTERVAL_SECONDS, "minimum_interval_seconds", 0.0),
+        (ATTR_REFERENCE_MERGE_GAP_SECONDS, "merge_gap_seconds", 0.0),
+        (
+            ATTR_REFERENCE_MAXIMUM_UNKNOWN_GAP_SECONDS,
+            "maximum_unknown_gap_seconds",
+            0.0,
+        ),
+        (
+            ATTR_REFERENCE_MAXIMUM_POWER_GAP_SECONDS,
+            "maximum_power_gap_seconds",
+            None,
+        ),
+    )
+    durations = {
+        setting: _reference_link_number(values.get(field, default), field)
+        for field, setting, default in duration_fields
+    }
+    NilmReferenceExtractionSettings(
+        on_threshold=on_threshold,
+        off_threshold=off_threshold,
+        **durations,
+    )
+    for field, setting, _ in duration_fields:
+        if field in values:
+            values[field] = durations[setting]
+    if legacy is not None:
+        values[ATTR_REFERENCE_THRESHOLD_W] = legacy
+    if on_present:
+        values[ATTR_REFERENCE_ON_THRESHOLD] = on_threshold
+    if off_present:
+        values[ATTR_REFERENCE_OFF_THRESHOLD] = off_threshold
+
+
 def _nilm_reference_link_schema(*, remove: bool) -> Callable:
     required = {ATTR_CIRCUIT_ID, ATTR_ASSIGNMENT_ID}
     reference_fields = {
         ATTR_REFERENCE_STATE_ENTITY_ID,
         ATTR_REFERENCE_POWER_ENTITY_ID,
         ATTR_REFERENCE_THRESHOLD_W,
+        ATTR_REFERENCE_ON_THRESHOLD,
+        ATTR_REFERENCE_OFF_THRESHOLD,
+        ATTR_REFERENCE_ON_DWELL_SECONDS,
+        ATTR_REFERENCE_OFF_DWELL_SECONDS,
+        ATTR_REFERENCE_MINIMUM_INTERVAL_SECONDS,
+        ATTR_REFERENCE_MERGE_GAP_SECONDS,
+        ATTR_REFERENCE_MAXIMUM_UNKNOWN_GAP_SECONDS,
+        ATTR_REFERENCE_MAXIMUM_POWER_GAP_SECONDS,
     }
     allowed = required | {ATTR_ENTRY_ID} | (set() if remove else reference_fields)
 
@@ -561,18 +641,7 @@ def _nilm_reference_link_schema(*, remove: bool) -> Callable:
             )
         ):
             raise ValueError("Select a reference state or power entity.")
-        threshold = values.get(ATTR_REFERENCE_THRESHOLD_W, 0.0)
-        if isinstance(threshold, bool):
-            raise ValueError("reference_threshold_w must be a non-negative number")
-        try:
-            threshold_number = float(threshold)
-        except (TypeError, ValueError) as err:
-            raise ValueError(
-                "reference_threshold_w must be a non-negative number"
-            ) from err
-        if not math.isfinite(threshold_number) or threshold_number < 0:
-            raise ValueError("reference_threshold_w must be a non-negative number")
-        values[ATTR_REFERENCE_THRESHOLD_W] = threshold_number
+        _normalize_reference_link_settings(values)
         return values
 
     return validate
@@ -1382,14 +1451,36 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             data.get(ATTR_ENTRY_ID),
         )
         if service == SERVICE_SET_NILM_REFERENCE_LINK:
+            kwargs = {
+                "state_entity_id": data.get(ATTR_REFERENCE_STATE_ENTITY_ID),
+                "power_entity_id": data.get(ATTR_REFERENCE_POWER_ENTITY_ID),
+                "threshold_w": data.get(ATTR_REFERENCE_THRESHOLD_W),
+            }
+            reference_settings = {
+                ATTR_REFERENCE_ON_THRESHOLD: "on_threshold",
+                ATTR_REFERENCE_OFF_THRESHOLD: "off_threshold",
+                ATTR_REFERENCE_ON_DWELL_SECONDS: "on_dwell_seconds",
+                ATTR_REFERENCE_OFF_DWELL_SECONDS: "off_dwell_seconds",
+                ATTR_REFERENCE_MINIMUM_INTERVAL_SECONDS: "minimum_interval_seconds",
+                ATTR_REFERENCE_MERGE_GAP_SECONDS: "merge_gap_seconds",
+                ATTR_REFERENCE_MAXIMUM_UNKNOWN_GAP_SECONDS: (
+                    "maximum_unknown_gap_seconds"
+                ),
+                ATTR_REFERENCE_MAXIMUM_POWER_GAP_SECONDS: "maximum_power_gap_seconds",
+            }
+            kwargs.update(
+                {
+                    argument: data[field]
+                    for field, argument in reference_settings.items()
+                    if field in data
+                }
+            )
             await _call_if_present(
                 target,
                 "async_set_nilm_reference_link",
                 circuit_id,
                 assignment_id,
-                state_entity_id=data.get(ATTR_REFERENCE_STATE_ENTITY_ID),
-                power_entity_id=data.get(ATTR_REFERENCE_POWER_ENTITY_ID),
-                threshold_w=data.get(ATTR_REFERENCE_THRESHOLD_W, 0.0),
+                **kwargs,
             )
         else:
             await _call_if_present(

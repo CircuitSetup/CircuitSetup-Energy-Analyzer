@@ -1497,7 +1497,15 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         *,
         state_entity_id: str | None = None,
         power_entity_id: str | None = None,
-        threshold_w: float = 0.0,
+        threshold_w: float | None = None,
+        on_threshold: float | None = None,
+        off_threshold: float | None = None,
+        on_dwell_seconds: float | None = None,
+        off_dwell_seconds: float | None = None,
+        minimum_interval_seconds: float | None = None,
+        merge_gap_seconds: float | None = None,
+        maximum_unknown_gap_seconds: float | None = None,
+        maximum_power_gap_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Persist reference state and optional power evidence."""
         return await self.nilm_controller.async_set_nilm_reference_link(
@@ -1506,6 +1514,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             state_entity_id=state_entity_id,
             power_entity_id=power_entity_id,
             threshold_w=threshold_w,
+            on_threshold=on_threshold,
+            off_threshold=off_threshold,
+            on_dwell_seconds=on_dwell_seconds,
+            off_dwell_seconds=off_dwell_seconds,
+            minimum_interval_seconds=minimum_interval_seconds,
+            merge_gap_seconds=merge_gap_seconds,
+            maximum_unknown_gap_seconds=maximum_unknown_gap_seconds,
+            maximum_power_gap_seconds=maximum_power_gap_seconds,
         )
 
     async def async_remove_nilm_reference_link(

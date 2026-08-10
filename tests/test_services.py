@@ -5203,6 +5203,39 @@ def test_nilm_reference_link_service_schemas_are_exact() -> None:
         set_schema({**data, "reference_threshold_w": -1})
 
 
+def test_nilm_reference_link_service_schema_validates_canonical_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    set_schema = services._SERVICE_SCHEMAS[services.SERVICE_SET_NILM_REFERENCE_LINK]
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "reference_power_entity_id": "sensor.load_power",
+        "reference_on_threshold": 20,
+        "reference_off_threshold": 12,
+        "reference_on_dwell_seconds": 3,
+        "reference_off_dwell_seconds": 4,
+        "reference_minimum_interval_seconds": 5,
+        "reference_merge_gap_seconds": 6,
+        "reference_maximum_unknown_gap_seconds": 7,
+        "reference_maximum_power_gap_seconds": 8,
+    }
+
+    expected = dict(data)
+    expected.update(
+        {
+            key: float(value)
+            for key, value in data.items()
+            if key.startswith("reference_") and key != "reference_power_entity_id"
+        }
+    )
+    assert set_schema(data) == expected
+    with pytest.raises(ValueError, match="ordered"):
+        set_schema({**data, "reference_off_threshold": 21})
+    with pytest.raises(ValueError, match="durations"):
+        set_schema({**data, "reference_on_dwell_seconds": -1})
+
+
 @pytest.mark.asyncio
 async def test_nilm_reference_link_services_are_entry_isolated() -> None:
     from custom_components.circuitsetup_energy_analyzer import services
@@ -5259,6 +5292,49 @@ async def test_nilm_reference_link_services_are_entry_isolated() -> None:
     )
     second.async_remove_nilm_reference_link.assert_awaited_once_with(
         "mixed", "assignment-load"
+    )
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_service_dispatches_canonical_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [{"assignment_id": "assignment-load"}]
+            }
+        ),
+        async_set_nilm_reference_link=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    data = {
+        "circuit_id": "mixed",
+        "assignment_id": "assignment-load",
+        "entry_id": "entry-1",
+        "reference_power_entity_id": "sensor.load_power",
+        "reference_on_threshold": 20.0,
+        "reference_off_threshold": 12.0,
+        "reference_on_dwell_seconds": 3.0,
+        "reference_maximum_unknown_gap_seconds": 7.0,
+    }
+
+    await services._dispatch_service(
+        hass, services.SERVICE_SET_NILM_REFERENCE_LINK, data
+    )
+
+    coordinator.async_set_nilm_reference_link.assert_awaited_once_with(
+        "mixed",
+        "assignment-load",
+        state_entity_id=None,
+        power_entity_id="sensor.load_power",
+        threshold_w=None,
+        on_threshold=20.0,
+        off_threshold=12.0,
+        on_dwell_seconds=3.0,
+        maximum_unknown_gap_seconds=7.0,
     )
 
 
