@@ -440,8 +440,10 @@ def _weighted_median(
     )
     target = sum(weight for _, weight in pairs) / 2
     total = 0.0
-    for value, weight in pairs:
+    for index, (value, weight) in enumerate(pairs):
         total += weight
+        if total == target and index + 1 < len(pairs):
+            return (value + pairs[index + 1][0]) / 2
         if total >= target:
             return value
     return pairs[-1][0]

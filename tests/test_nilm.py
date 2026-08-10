@@ -508,6 +508,31 @@ def test_normalize_assignment_model_orders_prototypes_and_backfills_power_states
     assert first == second
 
 
+def test_assignment_model_uses_midpoint_for_two_equal_weight_transitions() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["a", "b"]},
+        [
+            {
+                "session_id": "a",
+                "assignment_id": "pump",
+                "end": "2026-06-01T00:00:00+00:00",
+                "on_delta_w": 100.0,
+                "off_delta_w": -100.0,
+                "confidence": 0.9,
+            },
+            {
+                "session_id": "b",
+                "assignment_id": "pump",
+                "end": "2026-06-02T00:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 0.9,
+            },
+        ],
+    )
+    assert model["power_states_w"] == [0.0, 90.0]
+
+
 def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assignment = {
         "assignment_id": "pump",
