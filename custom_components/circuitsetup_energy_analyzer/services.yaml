@@ -442,7 +442,7 @@ generate_nilm_sensor_label_intervals:
     ground_truth_entity_id:
       name: Reference Entity
       description: On/off entity or directly metered real-power entity used to generate reference intervals.
-      required: true
+      required: false
       example: sensor.dishwasher_power
       selector:
         entity:

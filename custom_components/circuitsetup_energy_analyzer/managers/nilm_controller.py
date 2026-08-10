@@ -824,6 +824,113 @@ class NilmController:
             raise ValueError("Invalid schema-2 evidence quality_flags.")
         normalized["quality_flags"] = list(flags)
 
+        if source == "reference_backend" and any(
+            key in evidence
+            for key in (
+                "state_coverage", "unknown_duration_seconds", "merged_gap_count",
+                "left_censored", "right_censored", "resolved_reference_settings",
+            )
+        ):
+            for key in ("ground_truth_entity_id", "reference_power_entity_id"):
+                value = evidence.get(key, "")
+                if not isinstance(value, str) or len(value) > 255:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                if value:
+                    normalized[key] = value
+            for key in ("state_coverage",):
+                value = evidence.get(key)
+                if isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError) as err:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+                if not math.isfinite(parsed) or not 0.0 <= parsed <= 1.0:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized[key] = parsed
+            value = evidence.get("unknown_duration_seconds")
+            if isinstance(value, bool):
+                raise ValueError(
+                    "Invalid schema-2 evidence unknown_duration_seconds."
+                )
+            try:
+                parsed_unknown = float(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(
+                    "Invalid schema-2 evidence unknown_duration_seconds."
+                ) from err
+            if not math.isfinite(parsed_unknown) or parsed_unknown < 0.0:
+                raise ValueError("Invalid schema-2 evidence unknown_duration_seconds.")
+            normalized["unknown_duration_seconds"] = parsed_unknown
+            merged = evidence.get("merged_gap_count")
+            if (
+                isinstance(merged, bool)
+                or not isinstance(merged, int)
+                or not 0 <= merged <= 10_000
+            ):
+                raise ValueError("Invalid schema-2 evidence merged_gap_count.")
+            normalized["merged_gap_count"] = merged
+            for key in ("left_censored", "right_censored"):
+                value = evidence.get(key)
+                if not isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized[key] = value
+            settings = evidence.get("resolved_reference_settings")
+            if not isinstance(settings, Mapping):
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                )
+            expected_settings = {
+                "on_threshold",
+                "off_threshold",
+                "on_dwell_seconds",
+                "off_dwell_seconds",
+                "minimum_interval_seconds",
+                "merge_gap_seconds",
+                "maximum_unknown_gap_seconds",
+                "maximum_power_gap_seconds",
+            }
+            if set(settings) != expected_settings:
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                )
+            normalized_settings: dict[str, float | None] = {}
+            for key, value in settings.items():
+                if value is None:
+                    normalized_settings[key] = None
+                    continue
+                if isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError) as err:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+                if not math.isfinite(parsed) or parsed < 0.0:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized_settings[key] = parsed
+            try:
+                NilmReferenceExtractionSettings(
+                    on_threshold=normalized_settings["on_threshold"],
+                    off_threshold=normalized_settings["off_threshold"],
+                    on_dwell_seconds=normalized_settings["on_dwell_seconds"] or 0.0,
+                    off_dwell_seconds=normalized_settings["off_dwell_seconds"] or 0.0,
+                    minimum_interval_seconds=(
+                        normalized_settings["minimum_interval_seconds"] or 0.0
+                    ),
+                    merge_gap_seconds=normalized_settings["merge_gap_seconds"] or 0.0,
+                    maximum_unknown_gap_seconds=(
+                        normalized_settings["maximum_unknown_gap_seconds"] or 0.0
+                    ),
+                    maximum_power_gap_seconds=normalized_settings[
+                        "maximum_power_gap_seconds"
+                    ],
+                )
+            except ValueError as err:
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                ) from err
+            normalized["resolved_reference_settings"] = normalized_settings
+
         if not normalized["plateau_eligible"]:
             normalized.pop("median_power_w", None)
             normalized.pop("average_power_w", None)
@@ -832,6 +939,48 @@ class NilmController:
         for key in tuple(numeric_fields):
             if normalized.get(key) is None:
                 normalized.pop(key, None)
+        return normalized
+
+    @staticmethod
+    def _validated_reference_import_summary(
+        summary: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Retain a bounded, UI-safe summary of one reference import."""
+        if summary is None:
+            return None
+        if not isinstance(summary, Mapping):
+            raise ValueError("Invalid reference import summary.")
+        count_keys = {
+            "candidate_interval_count",
+            "imported_interval_count",
+            "discarded_minimum_duration_count",
+            "bridged_unknown_gap_count",
+            "merged_inactive_gap_count",
+            "low_coverage_interval_count",
+        }
+        if set(summary) - (count_keys | {"warnings"}):
+            raise ValueError("Invalid reference import summary.")
+        normalized: dict[str, Any] = {}
+        for key in count_keys:
+            value = summary.get(key, 0)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= 10_000
+            ):
+                raise ValueError("Invalid reference import summary.")
+            normalized[key] = value
+        warnings = summary.get("warnings", [])
+        if (
+            not isinstance(warnings, list)
+            or len(warnings) > 16
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 128
+                for item in warnings
+            )
+        ):
+            raise ValueError("Invalid reference import summary.")
+        normalized["warnings"] = list(warnings)
         return normalized
 
     async def async_label_nilm_interval(
@@ -1132,6 +1281,7 @@ class NilmController:
         assignment_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
+        reference_import_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically save a NILM assignment's interval membership."""
         async with self._review_transaction_lock:
@@ -1143,6 +1293,7 @@ class NilmController:
                 assignment_id=assignment_id,
                 appliance_id=appliance_id,
                 appliance_profile=appliance_profile,
+                reference_import_summary=reference_import_summary,
             )
 
     async def _async_save_nilm_interval_changes(
@@ -1155,10 +1306,14 @@ class NilmController:
         assignment_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
+        reference_import_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
+        normalized_import_summary = self._validated_reference_import_summary(
+            reference_import_summary
+        )
         drafts = list(intervals)
         if not all(isinstance(draft, Mapping) for draft in drafts):
             raise ValueError("Each NILM interval must be a mapping.")
@@ -1364,6 +1519,8 @@ class NilmController:
             assignment["label_interval_ids"] = self._clean_string_list(
                 assignment.get("label_interval_ids")
             ) + [interval["interval_id"] for interval in payloads]
+            if normalized_import_summary is not None:
+                assignment["reference_import_summary"] = normalized_import_summary
             assignment["updated_at"] = now
             updated_by_id = {payload["interval_id"]: payload for payload in payloads}
             stored_intervals = []

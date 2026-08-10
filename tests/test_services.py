@@ -921,6 +921,22 @@ def test_nilm_sensor_label_interval_schema_accepts_generation_fields() -> None:
     assert data["threshold_w"] == 25
 
 
+def test_nilm_sensor_label_interval_schema_accepts_stored_assignment_link() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA,
+    )
+
+    assert NILM_SENSOR_LABEL_INTERVAL_SERVICE_SCHEMA(
+        {
+            "circuit_id": "mains",
+            "assignment_id": "assignment-dishwasher",
+            "label": "Dishwasher",
+            "start": "2026-06-02T12:00:00+00:00",
+            "end": "2026-06-02T14:00:00+00:00",
+        }
+    )["assignment_id"] == "assignment-dishwasher"
+
+
 def test_nilm_label_interval_schema_raises_for_missing_required_field() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         NILM_LABEL_INTERVAL_SERVICE_SCHEMA,
@@ -1022,7 +1038,8 @@ def test_nilm_reference_intervals_generate_from_on_off_history() -> None:
     ]
 
 
-def test_nilm_reference_intervals_close_on_unknown_history_gaps() -> None:
+def test_nilm_reference_intervals_do_not_fabricate_a_boundary_across_unknown_history(
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         _nilm_reference_intervals_from_history,
     )
@@ -1063,7 +1080,6 @@ def test_nilm_reference_intervals_close_on_unknown_history_gaps() -> None:
     )
 
     assert [(item["start"], item["end"]) for item in intervals] == [
-        ("2026-08-01T00:10:00+00:00", "2026-08-01T00:20:00+00:00"),
         ("2026-08-01T00:40:00+00:00", "2026-08-01T00:50:00+00:00"),
     ]
 
@@ -1098,13 +1114,15 @@ def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
         ]
     ]
 
-    assert _nilm_reference_power_metrics(
+    metrics = _nilm_reference_power_metrics(
         rows,
         "sensor.pump_power",
         start="2026-08-01T00:10:00+00:00",
         end="2026-08-01T00:40:00+00:00",
         unit="W",
-    ) == {"median_power_w": 80.0, "measured_energy_kwh": 0.045}
+    )
+    assert metrics["power_coverage"] == 0.0
+    assert "measured_energy_kwh" not in metrics
     interval_id = _nilm_reference_interval_id(
         "mixed",
         "assignment-pump",
@@ -1121,7 +1139,7 @@ def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
     )
     assert interval_id.startswith("reference-")
 
-    assert _nilm_reference_power_metrics(
+    metrics = _nilm_reference_power_metrics(
         [
             [
                 {
@@ -1140,7 +1158,9 @@ def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
         start="2026-08-01T00:10:00+00:00",
         end="2026-08-01T00:40:00+00:00",
         unit="W",
-    ) == {"median_power_w": 80.0, "measured_energy_kwh": 0.0}
+    )
+    assert metrics["power_coverage"] == 0.0
+    assert "measured_energy_kwh" not in metrics
 
 
 @pytest.mark.asyncio
@@ -1187,10 +1207,16 @@ async def test_nilm_reference_history_service_attaches_measured_evidence(
         circuit_configs=[SimpleNamespace(circuit_id="mixed")],
         store_data=FeatureStoreData(
             nilm_appliance_assignments_by_circuit={
-                "mixed": [{"assignment_id": "assignment-pump"}]
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_threshold_w": 25.0,
+                        "reference_maximum_power_gap_seconds": 3600.0,
+                    }
+                ]
             }
         ),
-        async_label_nilm_interval=AsyncMock(),
+        async_save_nilm_interval_changes=AsyncMock(),
     )
     other = SimpleNamespace(
         circuit_configs=[SimpleNamespace(circuit_id="mixed")],
@@ -1199,7 +1225,7 @@ async def test_nilm_reference_history_service_attaches_measured_evidence(
                 "mixed": [{"assignment_id": "assignment-other"}]
             }
         ),
-        async_label_nilm_interval=AsyncMock(),
+        async_save_nilm_interval_changes=AsyncMock(),
     )
     power_state = SimpleNamespace(
         state="80",
@@ -1224,13 +1250,181 @@ async def test_nilm_reference_history_service_attaches_measured_evidence(
         },
     )
 
-    kwargs = coordinator.async_label_nilm_interval.await_args.kwargs
+    kwargs = coordinator.async_save_nilm_interval_changes.await_args.kwargs
+    draft = kwargs["intervals"][0]
     assert kwargs["assignment_id"] == "assignment-pump"
-    assert kwargs["source"] == "reference_sensor"
-    assert kwargs["median_power_w"] == 80.0
-    assert kwargs["measured_energy_kwh"] == 0.04
-    assert kwargs["interval_id"].startswith("reference-")
-    other.async_label_nilm_interval.assert_not_awaited()
+    assert draft["source"] == "reference_sensor"
+    assert draft["evidence"]["evidence_source"] == "reference_backend"
+    assert draft["evidence"]["median_power_w"] == 80.0
+    assert draft["evidence"]["measured_energy_kwh"] == 0.04
+    assert draft["evidence"]["state_coverage"] == 1.0
+    assert draft["evidence"]["resolved_reference_settings"] == {
+        "on_threshold": 25.0,
+        "off_threshold": 25.0,
+        "on_dwell_seconds": 0.0,
+        "off_dwell_seconds": 0.0,
+        "minimum_interval_seconds": 0.0,
+        "merge_gap_seconds": 0.0,
+        "maximum_unknown_gap_seconds": 0.0,
+        "maximum_power_gap_seconds": 3600.0,
+    }
+    assert draft["interval_id"].startswith("reference-")
+    other.async_save_nilm_interval_changes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_history_service_preserves_pre_window_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        return_value=[
+            [
+                {
+                    "entity_id": "switch.pump",
+                    "state": "on",
+                    "last_changed": "2026-07-31T23:55:00+00:00",
+                },
+                {
+                    "entity_id": "switch.pump",
+                    "state": "off",
+                    "last_changed": "2026-08-01T00:10:00+00:00",
+                },
+            ]
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_state_entity_id": "switch.pump",
+                    }
+                ]
+            }
+        ),
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+        },
+    )
+
+    assert history.await_args.kwargs["include_start_time_state"] is True
+    draft = coordinator.async_save_nilm_interval_changes.await_args.kwargs[
+        "intervals"
+    ][0]
+    assert draft["start"] == "2026-08-01T00:00:00+00:00"
+    assert draft["evidence"]["left_censored"] is True
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_import_explicit_fields_override_stored_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        side_effect=[
+            [
+                [
+                    {
+                        "entity_id": "switch.explicit",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.explicit",
+                        "state": "off",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+            [
+                [
+                    {
+                        "entity_id": "sensor.explicit_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.explicit_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_state_entity_id": "switch.stored",
+                        "reference_power_entity_id": "sensor.stored_power",
+                        "reference_on_threshold": 100.0,
+                        "reference_off_threshold": 80.0,
+                        "reference_maximum_power_gap_seconds": 3600.0,
+                    }
+                ]
+            }
+        ),
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    power_state = SimpleNamespace(
+        state="80",
+        attributes={"device_class": "power", "unit_of_measurement": "W"},
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        states=SimpleNamespace(get=lambda _entity_id: power_state),
+    )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+            "ground_truth_entity_id": "switch.explicit",
+            "reference_power_entity_id": "sensor.explicit_power",
+            "threshold_w": 25.0,
+        },
+    )
+
+    assert [call.args[1] for call in history.await_args_list] == [
+        "switch.explicit",
+        "sensor.explicit_power",
+    ]
+    evidence = coordinator.async_save_nilm_interval_changes.await_args.kwargs[
+        "intervals"
+    ][0]["evidence"]
+    assert evidence["ground_truth_entity_id"] == "switch.explicit"
+    assert evidence["reference_power_entity_id"] == "sensor.explicit_power"
+    assert evidence["resolved_reference_settings"]["on_threshold"] == 25.0
+    assert evidence["resolved_reference_settings"]["off_threshold"] == 25.0
 
 
 def _manual_evidence_config(*sensors: SensorRef) -> CircuitConfig:
@@ -3261,43 +3455,33 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
         def has_circuit(self, circuit_id: str) -> bool:
             return circuit_id == "mains"
 
-        async def async_label_nilm_interval(
+        async def async_save_nilm_interval_changes(
             self,
             circuit_id: str,
             *,
             label: str,
-            start,
-            end,
-            appliance_id: str | None = None,
-            mains_entity_id: str | None = None,
-            ground_truth_entity_id: str | None = None,
-            validation_start=None,
-            validation_end=None,
-            interval_id: str | None = None,
-            source: str = "manual",
-            confidence: float = 1.0,
+            intervals,
+            assignment_id=None,
+            appliance_id=None,
+            reference_import_summary=None,
         ) -> None:
             self.calls.append(
                 (
-                    "async_label_nilm_interval",
+                    "async_save_nilm_interval_changes",
                     (
                         circuit_id,
                         label,
-                        start,
-                        end,
+                        intervals,
+                        assignment_id,
                         appliance_id,
-                        mains_entity_id,
-                        ground_truth_entity_id,
-                        validation_start,
-                        validation_end,
-                        interval_id,
-                        source,
-                        confidence,
+                        reference_import_summary,
                     ),
                 )
             )
 
-    async def fake_history_rows(hass, entity_id, start, end):
+    async def fake_history_rows(
+        hass, entity_id, start, end, *, include_start_time_state=False
+    ):
         return [
             [
                 {
@@ -3343,31 +3527,281 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
         )
     )
 
-    assert coordinator.calls == [
-        (
-            "async_label_nilm_interval",
-            (
-                "mains",
-                "Dishwasher",
-                "2026-06-02T12:10:00+00:00",
-                "2026-06-02T12:40:00+00:00",
-                None,
-                None,
-                "sensor.dishwasher_power",
-                "2026-06-02T12:00:00+00:00",
-                "2026-06-02T13:00:00+00:00",
-                services._nilm_reference_interval_id(
-                    "mains",
-                    "",
-                    "sensor.dishwasher_power",
-                    "2026-06-02T12:10:00+00:00",
-                    "2026-06-02T12:40:00+00:00",
-                ),
-                "reference_sensor",
-                1.0,
-            ),
-        )
-    ]
+    assert len(coordinator.calls) == 1
+    name, args = coordinator.calls[0]
+    assert name == "async_save_nilm_interval_changes"
+    assert args[:2] == ("mains", "Dishwasher")
+    draft = args[2][0]
+    assert draft["start"] == "2026-06-02T12:10:00+00:00"
+    assert draft["end"] == "2026-06-02T12:40:00+00:00"
+    assert draft["interval_id"] == services._nilm_reference_interval_id(
+        "mains",
+        "",
+        "sensor.dishwasher_power",
+        "2026-06-02T12:10:00+00:00",
+        "2026-06-02T12:40:00+00:00",
+    )
+    assert draft["evidence"]["evidence_source"] == "reference_backend"
+    assert args[5]["imported_interval_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_reference_generation_preserves_brief_unknown_gap_and_complete_power(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A short unavailable gap lowers state confidence without discarding power."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        side_effect=[
+            [
+                [
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:15:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "unavailable",
+                        "last_changed": "2026-08-01T00:20:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:21:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "off",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+            [
+                [
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:25:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_state_entity_id": "switch.pump",
+                        "reference_power_entity_id": "sensor.pump_power",
+                        "reference_maximum_unknown_gap_seconds": 120.0,
+                        "reference_maximum_power_gap_seconds": 1800.0,
+                    }
+                ]
+            }
+        ),
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    power_state = SimpleNamespace(
+        state="80",
+        attributes={"device_class": "power", "unit_of_measurement": "W"},
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        states=SimpleNamespace(get=lambda _: power_state),
+    )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+        },
+    )
+
+    drafts = coordinator.async_save_nilm_interval_changes.await_args.kwargs["intervals"]
+    assert len(drafts) == 1
+    evidence = drafts[0]["evidence"]
+    assert 0.0 < evidence["state_coverage"] < 1.0
+    assert evidence["power_coverage"] == 1.0
+    assert evidence["measured_energy_kwh"] == pytest.approx(0.04)
+    assert evidence["evidence_confidence"] < 1.0
+
+
+@pytest.mark.asyncio
+async def test_reference_generation_long_power_gap_retains_partial_energy_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cadence fallback must not bridge a later long power-history gap."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        side_effect=[
+            [
+                [
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "on",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "switch.pump",
+                        "state": "off",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+            [
+                [
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:10:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:11:00+00:00",
+                    },
+                    {
+                        "entity_id": "sensor.pump_power",
+                        "state": "80",
+                        "last_changed": "2026-08-01T00:40:00+00:00",
+                    },
+                ]
+            ],
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_state_entity_id": "switch.pump",
+                        "reference_power_entity_id": "sensor.pump_power",
+                    }
+                ]
+            }
+        ),
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    power_state = SimpleNamespace(
+        state="80",
+        attributes={"device_class": "power", "unit_of_measurement": "W"},
+    )
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        states=SimpleNamespace(get=lambda _: power_state),
+    )
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+        },
+    )
+
+    evidence = coordinator.async_save_nilm_interval_changes.await_args.kwargs[
+        "intervals"
+    ][0]["evidence"]
+    assert 0.0 < evidence["power_coverage"] < 1.0
+    assert evidence["partial_energy_kwh"] == pytest.approx(80 / 60_000)
+    assert evidence["measured_energy_kwh"] is None
+    assert evidence["energy_complete"] is False
+    assert "long_power_gap" in evidence["quality_flags"]
+
+
+@pytest.mark.asyncio
+async def test_reference_generation_censored_horizon_has_no_directional_transition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Horizon-censored reference activity is never presented as an observed edge."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        return_value=[
+            [
+                {
+                    "entity_id": "switch.pump",
+                    "state": "on",
+                    "last_changed": "2026-08-01T00:00:00+00:00",
+                }
+            ]
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mixed": [
+                    {
+                        "assignment_id": "assignment-pump",
+                        "reference_state_entity_id": "switch.pump",
+                    }
+                ]
+            }
+        ),
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS,
+        {
+            "circuit_id": "mixed",
+            "assignment_id": "assignment-pump",
+            "label": "Pump",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T01:00:00+00:00",
+        },
+    )
+
+    evidence = coordinator.async_save_nilm_interval_changes.await_args.kwargs[
+        "intervals"
+    ][0]["evidence"]
+    assert evidence["left_censored"] is True
+    assert evidence["right_censored"] is True
+    assert evidence["start_transition_eligible"] is False
+    assert evidence["stop_transition_eligible"] is False
+    assert evidence.get("start_transition_w") is None
+    assert evidence.get("stop_transition_w") is None
 
 
 @pytest.mark.asyncio

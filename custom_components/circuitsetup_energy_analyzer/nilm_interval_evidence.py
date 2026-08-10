@@ -465,6 +465,12 @@ def _reference_value(value: object) -> tuple[ReferenceActivityState, float | Non
             return ReferenceActivityState.ACTIVE, None
         if text in {"off", "false", "inactive"}:
             return ReferenceActivityState.INACTIVE, None
+        try:
+            numeric = float(text)
+        except ValueError:
+            return ReferenceActivityState.UNKNOWN, None
+        if isfinite(numeric):
+            return ReferenceActivityState.UNKNOWN, numeric
     return ReferenceActivityState.UNKNOWN, None
 
 
