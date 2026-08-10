@@ -9962,6 +9962,263 @@ def test_nilm_reconciliation_counts_only_equal_candidates_as_ambiguous(
     assert reconciliation["ambiguous_event_count"] == expected_ambiguous
 
 
+def test_nilm_runtime_duration_breaks_equal_stop_tie_from_session_age() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    observed_at = started_at + timedelta(seconds=100)
+
+    def assignment(assignment_id: str, p10: float, p90: float) -> dict[str, object]:
+        return {
+            **_reconciliation_assignment(assignment_id, 100.0),
+            "run_profile": {"duration_s": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": (p10 + p90) / 2,
+                "p10_seconds": p10,
+                "p90_seconds": p90,
+            }},
+            "transition_prototypes": [{
+                "id": f"{assignment_id}-stop",
+                "kind": "stop",
+                "direction": "off",
+                "from_state_id": "running",
+                "to_state_id": "off",
+                "from_state_w": 100.0,
+                "to_state_w": 0.0,
+                "delta_w": -100.0,
+                "spread_w": 2.0,
+                "sample_count": 3,
+            }],
+        }
+
+    assignments = (
+        assignment("on-time", 90.0, 110.0),
+        assignment("too-long", 10.0, 20.0),
+    )
+    runtime = {
+        assignment_id: {
+            "status": "on",
+            "state_power_w": 100.0,
+            "estimated_power_w": 100.0,
+            "session_id": f"{assignment_id}-session",
+            "session_start": started_at.isoformat(),
+            "consistent": True,
+            "energy_kwh": 0.0,
+        }
+        for assignment_id in ("on-time", "too-long")
+    }
+    edge = NilmEdge(observed_at, -100.0, 0.0, -100.0, 0.0, "off")
+
+    runtime, reconciliation, completed, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=observed_at,
+        assignments=assignments,
+        runtime=runtime,
+        edges=(edge,),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == [edge]
+    assert runtime["on-time"]["status"] == "off"
+    assert runtime["too-long"]["status"] == "on"
+    assert completed[0]["assignment_id"] == "on-time"
+    assert reconciliation["ambiguous_event_count"] == 0
+    assert reconciliation["duration_channel_available_count"] == 1
+    assert reconciliation["duration_rank_impact_count"] == 1
+
+
+def test_nilm_runtime_validation_breaks_equal_tie_for_current_revision() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+
+    def assignment(assignment_id: str, outcome: str) -> dict[str, object]:
+        return {
+            **_reconciliation_assignment(assignment_id, 100.0),
+            "model_revision": 7,
+            "model_fingerprint": f"{assignment_id}-model-seven",
+            "validation_schema_version": 2,
+            "validation_method": "one_to_one_iou",
+            "validation_outcomes": [
+                {
+                    "outcome_id": f"{assignment_id}-{index}",
+                    "source": "ground_truth",
+                    "outcome": outcome,
+                    "timestamp": (now - timedelta(days=index % 3)).isoformat(),
+                    "model_revision": 7,
+                    "model_fingerprint": f"{assignment_id}-model-seven",
+                }
+                for index in range(200)
+            ],
+            "transition_prototypes": [{
+                "id": f"{assignment_id}-start",
+                "kind": "start",
+                "direction": "on",
+                "from_state_id": "off",
+                "to_state_id": "running",
+                "from_state_w": 0.0,
+                "to_state_w": 100.0,
+                "delta_w": 100.0,
+                "spread_w": 2.0,
+                "sample_count": 3,
+            }],
+        }
+
+    assignments = (
+        assignment("reliable", "correct"),
+        assignment("unreliable", "wrong"),
+    )
+    runtime = {
+        assignment_id: {
+            "status": "off",
+            "state_power_w": 0.0,
+            "estimated_power_w": 0.0,
+            "consistent": True,
+            "energy_kwh": 0.0,
+        }
+        for assignment_id in ("reliable", "unreliable")
+    }
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+
+    runtime, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=now,
+        assignments=assignments,
+        runtime=runtime,
+        edges=(edge,),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == [edge]
+    assert runtime["reliable"]["status"] == "on"
+    assert runtime["unreliable"]["status"] == "off"
+    assert reconciliation["ambiguous_event_count"] == 0
+    assert reconciliation["validation_channel_available_count"] == 1
+    assert reconciliation["validation_rank_impact_count"] == 1
+
+
+def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    stopped_at = started_at + timedelta(minutes=5)
+    assignment = {
+        **_reconciliation_assignment("dryer", 100.0),
+        "model_schema_version": 2,
+        "model_revision": 7,
+        "model_fingerprint": "dryer-model-seven",
+        "transition_prototypes": [
+            {
+                "id": "dryer-start-v7",
+                "kind": "start",
+                "direction": "on",
+                "from_state_id": "off",
+                "to_state_id": "running",
+                "from_state_w": 0.0,
+                "to_state_w": 100.0,
+                "delta_w": 100.0,
+                "spread_w": 2.0,
+                "sample_count": 3,
+            },
+            {
+                "id": "dryer-stop-v7",
+                "kind": "stop",
+                "direction": "off",
+                "from_state_id": "running",
+                "to_state_id": "off",
+                "from_state_w": 100.0,
+                "to_state_w": 0.0,
+                "delta_w": -100.0,
+                "spread_w": 2.0,
+                "sample_count": 3,
+            },
+        ],
+    }
+    runtime = {
+        "dryer": {
+            "status": "off",
+            "state_power_w": 0.0,
+            "estimated_power_w": 0.0,
+            "consistent": True,
+            "energy_kwh": 0.0,
+        }
+    }
+
+    runtime, first, _, _ = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=started_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(started_at, 100.0, 0.0, 100.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert runtime["dryer"]["current_state_id"] == "running"
+    assert runtime["dryer"]["state_since"] == started_at.isoformat()
+    assert runtime["dryer"]["start_prediction"]["prototype_id"] == (
+        "dryer-start-v7"
+    )
+    assert runtime["dryer"]["accepted_predictions"][0] == {
+        "prediction_timestamp": started_at.isoformat(),
+        "model_schema_version": 2,
+        "model_revision": 7,
+        "model_fingerprint": "dryer-model-seven",
+        "prototype_id": "dryer-start-v7",
+        "transition_kind": "start",
+        "candidate_score": 1.0,
+        "winner_margin": None,
+        "channel_breakdown": {
+            "electrical": 1.0,
+            "helper": None,
+            "duration": None,
+            "validation": None,
+        },
+        "unavailable_channels": ["helper", "duration", "validation"],
+        "state_id": "running",
+        "state_power_w": 100.0,
+    }
+
+    runtime, _, completed, _ = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=stopped_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(stopped_at, -100.0, 0.0, -100.0, 0.0, "off"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation=first,
+    )
+
+    session = completed[0]
+    assert session["start_prototype_id"] == "dryer-start-v7"
+    assert session["stop_prototype_id"] == "dryer-stop-v7"
+    assert session["start_model_revision"] == session["stop_model_revision"] == 7
+    assert [item["state_id"] for item in session["state_path"]] == [
+        "running",
+        "off",
+    ]
+    assert [item["prototype_id"] for item in session["accepted_predictions"]] == [
+        "dryer-start-v7",
+        "dryer-stop-v7",
+    ]
+    assert runtime["dryer"]["last_stop"] == stopped_at.isoformat()
+    assert runtime["dryer"]["state_path"] == []
+    assert runtime["dryer"]["accepted_predictions"] == []
+
+
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
@@ -10919,6 +11176,44 @@ def test_runtime_assignment_model_discards_malformed_values() -> None:
     assert model.power_states_w == ()
     assert model.transition_prototypes == ()
     assert model.model_confidence == 0.0
+
+
+def test_runtime_assignment_model_preserves_prediction_identity() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _runtime_assignment_model,
+    )
+
+    model = _runtime_assignment_model({
+        **_reconciliation_assignment("dryer", 100.0),
+        "model_schema_version": 2,
+        "model_revision": 7,
+        "model_fingerprint": "dryer-model-seven",
+        "transition_prototypes": [{
+            "id": "dryer-start-v7",
+            "kind": "start",
+            "direction": "on",
+            "from_state_id": "off",
+            "to_state_id": "running",
+            "from_state_w": 0.0,
+            "to_state_w": 100.0,
+            "delta_w": 100.0,
+            "spread_w": 2.0,
+            "sample_count": 3,
+        }],
+    })
+
+    prototype = model.transition_prototypes[0]
+    assert (
+        prototype.prototype_id,
+        prototype.transition_kind,
+        prototype.from_state_id,
+        prototype.to_state_id,
+    ) == ("dryer-start-v7", "start", "off", "running")
+    assert (
+        model.model_schema_version,
+        model.model_revision,
+        model.model_fingerprint,
+    ) == (2, 7, "dryer-model-seven")
 
 
 def test_confirmed_helper_scores_use_relationship_availability_and_learned_lag(
