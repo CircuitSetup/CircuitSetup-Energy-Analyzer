@@ -6,8 +6,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.circuitsetup_energy_analyzer.nilm_interval_evidence import (
+    NilmPowerSample,
     NilmReferenceExtractionSettings,
     ReferenceActivityState,
+    calculate_reference_power_metrics,
     extract_reference_intervals,
     normalize_reference_samples,
 )
@@ -217,6 +219,151 @@ def test_binary_state_persists_between_rows_and_prestart_is_censored() -> None:
         (BASE + timedelta(seconds=10), BASE + timedelta(seconds=50))
     ]
     assert prestart.intervals[0].left_censored is True
+
+
+def power_sample(
+    seconds: int, value: float | None, unit: str = "W", quality: str = "valid"
+) -> NilmPowerSample:
+    return NilmPowerSample(
+        BASE + timedelta(seconds=seconds), value, "sensor.reference", quality, unit
+    )
+
+
+def test_reference_power_metrics_normalize_compatible_units() -> None:
+    metrics = calculate_reference_power_metrics(
+        (
+            power_sample(0, 1, "kW"),
+            power_sample(30, 1_000_000, "mW"),
+            power_sample(60, 0.001, "MW"),
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=60),
+    )
+
+    assert metrics.average_power_w == 1000
+    assert metrics.median_power_w == 1000
+    assert metrics.measured_energy_kwh == pytest.approx(1 / 60)
+    assert metrics.energy_complete is True
+
+
+def test_reference_power_metrics_preserve_missing_and_invalid_samples() -> None:
+    metrics = calculate_reference_power_metrics(
+        (
+            power_sample(0, 100),
+            power_sample(10, None, quality="unavailable"),
+            power_sample(20, 100, "V"),
+            power_sample(30, float("nan")),
+            power_sample(60, 100),
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=60),
+    )
+
+    assert metrics.valid_sample_count == 2
+    assert metrics.invalid_sample_count == 3
+    assert metrics.partial_energy_kwh is None
+    assert metrics.measured_energy_kwh is None
+    assert "invalid_power_samples" in metrics.quality_flags
+
+
+def test_reference_power_metrics_does_not_integrate_long_gaps() -> None:
+    metrics = calculate_reference_power_metrics(
+        (
+            power_sample(0, 100),
+            power_sample(10, 100),
+            power_sample(120, 100),
+            power_sample(130, 100),
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=130),
+        maximum_power_gap_seconds=30,
+    )
+
+    assert metrics.covered_duration_seconds == 20
+    assert metrics.power_coverage == pytest.approx(20 / 130)
+    assert metrics.longest_power_gap_seconds == 110
+    assert metrics.partial_energy_kwh == pytest.approx(2000 / 3_600_000)
+    assert metrics.measured_energy_kwh is None
+
+
+def test_reference_power_confidence_penalizes_the_longest_uncovered_gap() -> None:
+    fragmented = calculate_reference_power_metrics(
+        (
+            power_sample(0, 100),
+            power_sample(25, 100),
+            power_sample(55, 100),
+            power_sample(80, 100),
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+        maximum_power_gap_seconds=25,
+    )
+    trailing_gap = calculate_reference_power_metrics(
+        (power_sample(0, 100), power_sample(25, 100), power_sample(50, 100)),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+        maximum_power_gap_seconds=25,
+    )
+
+    assert fragmented.power_coverage == trailing_gap.power_coverage == 0.5
+    assert fragmented.longest_power_gap_seconds == 30
+    assert trailing_gap.longest_power_gap_seconds == 50
+    assert fragmented.power_confidence > trailing_gap.power_confidence
+
+
+def test_reference_power_metrics_distinguish_partial_from_complete_energy() -> None:
+    complete = calculate_reference_power_metrics(
+        (power_sample(0, 100), power_sample(50, 100), power_sample(100, 100)),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+    )
+    partial = calculate_reference_power_metrics(
+        (
+            power_sample(0, 100),
+            power_sample(25, 100),
+            power_sample(50, None, quality="unknown"),
+            power_sample(75, 100),
+            power_sample(100, 100),
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+    )
+
+    assert complete.partial_energy_kwh == pytest.approx(10_000 / 3_600_000)
+    assert complete.measured_energy_kwh == complete.partial_energy_kwh
+    assert partial.partial_energy_kwh == pytest.approx(5000 / 3_600_000)
+    assert partial.measured_energy_kwh is None
+    assert partial.energy_complete is False
+
+
+def test_reference_power_metrics_use_time_weighted_statistics_for_irregular_samples(
+) -> None:
+    metrics = calculate_reference_power_metrics(
+        (power_sample(0, 0), power_sample(10, 100), power_sample(100, 100)),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+    )
+
+    assert metrics.average_power_w == 95
+    assert metrics.median_power_w == 100
+
+
+def test_reference_power_metrics_account_for_negative_power_quality() -> None:
+    clipped = calculate_reference_power_metrics(
+        (power_sample(0, -1), power_sample(10, 10)),
+        start=BASE,
+        end=BASE + timedelta(seconds=10),
+    )
+    material = calculate_reference_power_metrics(
+        (power_sample(0, -5), power_sample(10, 10)),
+        start=BASE,
+        end=BASE + timedelta(seconds=10),
+    )
+
+    assert clipped.clipped_negative_sample_count == 1
+    assert "negative_power_clipped" in clipped.quality_flags
+    assert material.energy_complete is False
+    assert "material_negative_power" in material.quality_flags
 
 
 def test_unknown_resets_pending_dwell_and_unknown_splits_never_merge() -> None:

@@ -593,14 +593,7 @@ def normalize_power_samples(
     """Normalize units, retain missing boundaries, and keep the last duplicate."""
     latest: dict[tuple[str, datetime], tuple[int, NilmPowerSample]] = {}
     for index, sample in enumerate(samples):
-        unit = sample.unit.strip().lower()
-        factor = {
-            "w": 1.0,
-            "watt": 1.0,
-            "watts": 1.0,
-            "kw": 1000.0,
-            "kilowatt": 1000.0,
-        }.get(unit)
+        factor = _power_unit_factor(sample.unit)
         value = sample.value_w
         quality = sample.quality
         if factor is None:
@@ -622,6 +615,193 @@ def normalize_power_samples(
             key=lambda item: (item[1].timestamp, item[1].source_entity_id, item[0]),
         )
     )
+
+
+@dataclass(frozen=True)
+class NilmReferencePowerMetrics:
+    """Gap-aware, time-weighted power evidence for a reference interval."""
+
+    interval_duration_seconds: float
+    covered_duration_seconds: float
+    power_coverage: float
+    longest_power_gap_seconds: float | None
+    valid_sample_count: int
+    invalid_sample_count: int
+    clipped_negative_sample_count: int
+    median_power_w: float | None
+    average_power_w: float | None
+    partial_energy_kwh: float | None
+    measured_energy_kwh: float | None
+    energy_complete: bool
+    power_confidence: float
+    quality_flags: tuple[str, ...]
+
+
+def calculate_reference_power_metrics(
+    samples: Iterable[NilmPowerSample],
+    *,
+    start: datetime,
+    end: datetime,
+    maximum_power_gap_seconds: float | None = None,
+    thresholds: NilmEvidenceThresholds = DEFAULT_THRESHOLDS,
+) -> NilmReferencePowerMetrics:
+    """Calculate time-weighted power evidence without bridging missing samples."""
+    if end <= start:
+        raise ValueError("end must be after start")
+    if maximum_power_gap_seconds is not None and (
+        not isfinite(maximum_power_gap_seconds) or maximum_power_gap_seconds < 0
+    ):
+        raise ValueError("maximum power gap must be finite and non-negative")
+    series = tuple(
+        sample
+        for sample in normalize_power_samples(samples)
+        if start <= sample.timestamp <= end
+    )
+    duration = (end - start).total_seconds()
+    cadence = _cadence(
+        tuple(sample for sample in series if _valid_power_sample(sample))
+    )
+    maximum_gap = (
+        maximum_power_gap_seconds
+        if maximum_power_gap_seconds is not None
+        else _freshness_seconds(cadence, thresholds)
+    )
+    flags: set[str] = set()
+    valid_count = 0
+    invalid_count = 0
+    clipped_negative_count = 0
+    values: list[tuple[datetime, float | None]] = []
+    material_negative = False
+    for sample in series:
+        if not _valid_power_sample(sample):
+            invalid_count += 1
+            values.append((sample.timestamp, None))
+            continue
+        value = sample.value_w
+        assert value is not None
+        valid_count += 1
+        if value < 0 and value >= -thresholds.numerical_noise_w:
+            value = 0.0
+            clipped_negative_count += 1
+        elif value < -thresholds.numerical_noise_w:
+            material_negative = True
+        values.append((sample.timestamp, value))
+    if invalid_count:
+        flags.update({"missing_power_samples", "invalid_power_samples"})
+    if clipped_negative_count:
+        flags.add("negative_power_clipped")
+    if material_negative:
+        flags.add("material_negative_power")
+    covered = 0.0
+    energy_ws = 0.0
+    weighted_segments: list[tuple[float, float]] = []
+    covered_spans: list[tuple[datetime, datetime]] = []
+    for (left_time, left_power), (right_time, right_power) in zip(
+        values, values[1:], strict=False
+    ):
+        seconds = (right_time - left_time).total_seconds()
+        if (
+            left_power is None
+            or right_power is None
+            or seconds <= 0
+            or seconds > maximum_gap
+        ):
+            continue
+        segment_power = (left_power + right_power) / 2
+        covered += seconds
+        energy_ws += segment_power * seconds
+        weighted_segments.append((segment_power, seconds))
+        covered_spans.append((left_time, right_time))
+    longest_gap = _longest_uncovered_power_gap(covered_spans, start, end)
+    coverage = covered / duration
+    if coverage < thresholds.complete_energy_coverage:
+        flags.add("incomplete_power_coverage")
+    if longest_gap and longest_gap > maximum_gap:
+        flags.add("long_power_gap")
+    partial_energy = energy_ws / 3_600_000 if covered else None
+    complete = coverage >= thresholds.complete_energy_coverage and not material_negative
+    measured_energy = partial_energy if complete else None
+    average = energy_ws / covered if covered else None
+    median_power = _weighted_median(weighted_segments)
+    sample_factor = min(1.0, valid_count / 2)
+    invalid_factor = valid_count / (valid_count + invalid_count) if series else 0.0
+    longest_gap_factor = max(0.0, 1.0 - (longest_gap or 0.0) / duration)
+    negative_factor = (
+        0.5 if material_negative else 0.95 if clipped_negative_count else 1.0
+    )
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            coverage
+            * sample_factor
+            * invalid_factor
+            * longest_gap_factor
+            * negative_factor,
+        ),
+    )
+    return NilmReferencePowerMetrics(
+        duration,
+        covered,
+        coverage,
+        longest_gap,
+        valid_count,
+        invalid_count,
+        clipped_negative_count,
+        median_power,
+        average,
+        partial_energy,
+        measured_energy,
+        complete,
+        confidence,
+        tuple(sorted(flags)),
+    )
+
+
+def _power_unit_factor(unit: str) -> float | None:
+    text = unit.strip()
+    if text == "MW":
+        return 1_000_000.0
+    return {
+        "w": 1.0,
+        "watt": 1.0,
+        "watts": 1.0,
+        "kw": 1_000.0,
+        "kilowatt": 1_000.0,
+        "mw": 0.001,
+    }.get(text.casefold())
+
+
+def _valid_power_sample(sample: NilmPowerSample) -> bool:
+    return sample.quality == "valid" and sample.value_w is not None
+
+
+def _longest_uncovered_power_gap(
+    covered_spans: Sequence[tuple[datetime, datetime]],
+    start: datetime,
+    end: datetime,
+) -> float | None:
+    if not covered_spans:
+        return (end - start).total_seconds()
+    longest = (covered_spans[0][0] - start).total_seconds()
+    previous_end = covered_spans[0][1]
+    for span_start, span_end in covered_spans[1:]:
+        longest = max(longest, (span_start - previous_end).total_seconds())
+        previous_end = max(previous_end, span_end)
+    return max(longest, (end - previous_end).total_seconds()) or None
+
+
+def _weighted_median(segments: Sequence[tuple[float, float]]) -> float | None:
+    if not segments:
+        return None
+    ordered = sorted(segments)
+    midpoint = sum(weight for _, weight in ordered) / 2
+    cumulative = 0.0
+    for value, weight in ordered:
+        cumulative += weight
+        if cumulative >= midpoint:
+            return value
+    return ordered[-1][0]
 
 
 def aggregate_power_samples(
