@@ -34,6 +34,7 @@ from ..nilm import (
     nilm_signature_fingerprint_v1,
     nilm_signature_is_assignable,
     nilm_signature_is_off_direction,
+    nilm_transition_tolerance_w,
     normalize_nilm_assignment_model,
     pair_nilm_sessions_for_signatures,
     reconcile_nilm_edge,
@@ -938,14 +939,23 @@ def reconcile_component_runtime(
             model := _runtime_assignment_model(item, signature_specs)
         ).transition_prototypes
     )
-    validation_scores = _runtime_validation_scores(assignments, models)
+    validation_profiles = _runtime_validation_profiles(assignments, models)
+    validation_scores = {
+        assignment_id: profile["runtime_score"]
+        for assignment_id, profile in validation_profiles.items()
+    }
+    assignments_by_id = {
+        str(item.get("assignment_id") or ""): item for item in assignments
+    }
     next_runtime = {key: dict(value) for key, value in runtime.items()}
     for payload in next_runtime.values():
         _runtime_provenance_defaults(payload)
     before_sample = {key: dict(value) for key, value in next_runtime.items()}
     accepted: list[NilmEdge] = []
     completed: list[dict[str, Any]] = []
-    session_closes: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
+    session_closes: list[
+        tuple[str, NilmTransitionPrototype, NilmEdge, dict[str, Any]]
+    ] = []
     conflict: str | None = None
     ambiguous_event_increment = 0
     evidence_diagnostics: defaultdict[str, int] = defaultdict(int)
@@ -979,8 +989,12 @@ def reconcile_component_runtime(
             assignments, helper_events, edge, available_helper_ids
         )
         duration_scores = _runtime_duration_state_scores(
-            assignments, models, next_runtime, edge.timestamp
+            assignments, models, next_runtime, edge, current
         )
+        candidates = _runtime_candidate_transitions(models, current, edge)
+        candidate_assignment_ids = {
+            prototype.assignment_id for prototype in candidates
+        }
         helper_conflict = _confirmed_helper_conflict(
             assignments,
             helper_events,
@@ -990,10 +1004,12 @@ def reconcile_component_runtime(
             current,
         )
         duration_available = any(
-            value is not None for value in duration_scores.values()
+            _runtime_transition_score(duration_scores, prototype) is not None
+            for prototype in candidates
         )
         validation_available = any(
-            value is not None for value in validation_scores.values()
+            validation_scores.get(assignment_id) is not None
+            for assignment_id in candidate_assignment_ids
         )
         evidence_diagnostics["duration_channel_available_count"] += int(
             duration_available
@@ -1001,12 +1017,17 @@ def reconcile_component_runtime(
         evidence_diagnostics["validation_channel_available_count"] += int(
             validation_available
         )
-        if not duration_available:
+        if candidates and not duration_available:
             unavailable_reasons["duration_unavailable"] += 1
-        if not validation_available:
-            unavailable_reasons[
-                _runtime_validation_unavailable_reason(assignments)
-            ] += 1
+        for reason in {
+            _runtime_validation_unavailable_reason(
+                assignments_by_id[assignment_id],
+                validation_profiles[assignment_id],
+            )
+            for assignment_id in candidate_assignment_ids
+            if validation_scores.get(assignment_id) is None
+        }:
+            unavailable_reasons[reason] += 1
         result = reconcile_nilm_edge(
             edge,
             models,
@@ -1136,11 +1157,19 @@ def reconcile_component_runtime(
             conflict = "over_allocation"
             continue
         accepted.append(edge)
-        session_closes.extend(pending_sessions)
         for assignment_id, prediction, is_start in pending_predictions:
             _record_runtime_prediction(
                 next_runtime[assignment_id], prediction, is_start=is_start
             )
+        session_closes.extend(
+            (
+                assignment_id,
+                transition,
+                close_edge,
+                _runtime_session_snapshot(next_runtime[assignment_id]),
+            )
+            for assignment_id, transition, close_edge in pending_sessions
+        )
 
     tolerance = conservation_tolerance_w(source_power_w, noise_spread_w)
     _scale_runtime_estimates(
@@ -1186,26 +1215,42 @@ def reconcile_component_runtime(
         completed.clear()
     elif conflict is None:
         for assignment_id, increment in increments.items():
-            next_runtime[assignment_id]["energy_kwh"] = (
-                _finite_float(next_runtime[assignment_id].get("energy_kwh")) or 0.0
+            closing_snapshot = next((
+                snapshot
+                for close_id, _, _, snapshot in session_closes
+                if close_id == assignment_id
+                and snapshot.get("session_id")
+                == before_sample.get(assignment_id, {}).get("session_id")
+            ), None)
+            target = closing_snapshot or next_runtime[assignment_id]
+            target["energy_kwh"] = (
+                _finite_float(target.get("energy_kwh")) or 0.0
             ) + increment
         session_closes.extend(
-            (assignment_id, transition, NilmEdge(
-                timestamp, transition.delta_w, 0.0, 0.0, 0.0, "off"
-            ))
+            (
+                assignment_id,
+                transition,
+                NilmEdge(timestamp, transition.delta_w, 0.0, 0.0, 0.0, "off"),
+                _runtime_session_snapshot(next_runtime[assignment_id]),
+            )
             for assignment_id, transition in direct_closes
         )
         completed.extend(
             _completed_runtime_session(
                 assignment_id,
-                next_runtime[assignment_id],
+                session_runtime,
                 transition,
                 close_edge,
                 assignments,
             )
-            for assignment_id, transition, close_edge in session_closes
+            for assignment_id, transition, close_edge, session_runtime
+            in session_closes
         )
-        for assignment_id, _, _ in session_closes:
+        for assignment_id, _, _, session_runtime in session_closes:
+            if next_runtime[assignment_id].get("session_id") != session_runtime.get(
+                "session_id"
+            ):
+                continue
             next_runtime[assignment_id].update({
                 "session_id": None,
                 "session_start": None,
@@ -1288,6 +1333,18 @@ def _runtime_provenance_defaults(payload: dict[str, Any]) -> None:
     ][-_NILM_RUNTIME_PREDICTION_LIMIT:]
     if not isinstance(payload.get("start_prediction"), Mapping):
         payload["start_prediction"] = None
+
+
+def _runtime_session_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
+    snapshot = dict(payload)
+    for name in ("state_path", "accepted_predictions", "helper_evidence"):
+        snapshot[name] = [
+            dict(item) if isinstance(item, Mapping) else item
+            for item in _list_items(payload.get(name))
+        ]
+    if isinstance(payload.get("start_prediction"), Mapping):
+        snapshot["start_prediction"] = dict(payload["start_prediction"])
+    return snapshot
 
 
 def _runtime_transition_is_stop(transition: NilmTransitionPrototype) -> bool:
@@ -1501,6 +1558,9 @@ def _restore_unique_component_state(
         runtime[model.assignment_id].update({
             "status": NilmComponentStatus.ON if power else NilmComponentStatus.OFF,
             "state_power_w": power,
+            "current_state_id": "running" if power else "off",
+            "current_state_power_w": power,
+            "state_since": timestamp.isoformat(),
             "estimated_power_w": power,
             "confidence": model.model_confidence,
             "consistent": True,
@@ -1621,6 +1681,10 @@ def _apply_direct_component_sample(
                 "session_start": timestamp.isoformat(),
                 "energy_kwh": 0.0,
                 "on_delta_w": power - previous_power,
+                "start_prediction": None,
+                "last_prediction": None,
+                "accepted_predictions": [],
+                "state_path": [],
             })
         elif has_open_session and not is_on:
             closes.append((assignment_id, NilmTransitionPrototype(
@@ -1737,7 +1801,7 @@ def _runtime_assignment_model(
             delta_var=item.get("delta_var"),
             spread_var=item.get("spread_var"),
             prototype_id=item.get("id", ""),
-            transition_kind=item.get("kind", ""),
+            transition_kind=_runtime_transition_kind(assignment, item),
             from_state_id=item.get("from_state_id", ""),
             to_state_id=item.get("to_state_id", ""),
         )
@@ -1758,44 +1822,120 @@ def _runtime_assignment_model(
     )
 
 
+def _runtime_transition_kind(
+    assignment: Mapping[str, Any], normalized: Mapping[str, Any]
+) -> str:
+    return next(
+        (
+            str(item.get("kind") or "")
+            for item in _list_items(assignment.get("transition_prototypes"))
+            if isinstance(item, Mapping)
+            and item.get("direction") == normalized.get("direction")
+            and _finite_float(item.get("delta_w")) == normalized.get("delta_w")
+            and _finite_float(item.get("from_state_w"))
+            == normalized.get("from_state_w")
+            and _finite_float(item.get("to_state_w")) == normalized.get("to_state_w")
+        ),
+        "",
+    )
+
+
 def _runtime_duration_state_scores(
     assignments: Iterable[Mapping[str, Any]],
     models: Iterable[NilmAssignmentModel],
     runtime: Mapping[str, Mapping[str, Any]],
-    timestamp: datetime,
+    edge: NilmEdge,
+    current_states_w: Mapping[str, float | None],
 ) -> dict[str, float | None]:
     """Build prototype-specific duration scores for one observed edge."""
     assignments_by_id = {
         str(item.get("assignment_id") or ""): item for item in assignments
     }
-    return {
-        prototype.prototype_id or prototype.assignment_id: (
-            duration_state_score_for_transition(
-                prototype,
-                assignments_by_id[prototype.assignment_id],
-                {
-                    **runtime.get(prototype.assignment_id, {}),
-                    "session_started_at": runtime.get(
-                        prototype.assignment_id, {}
-                    ).get("session_start"),
-                },
-                timestamp,
-            )
+    candidates = _runtime_legal_transitions(models, current_states_w)
+    prototype_counts: defaultdict[str, int] = defaultdict(int)
+    for prototype in candidates:
+        prototype_counts[prototype.prototype_id] += 1
+    assignment_ids = set(assignments_by_id)
+    scores: dict[str, float | None] = {}
+    for prototype in candidates:
+        prototype_id = prototype.prototype_id
+        key = (
+            prototype_id
+            if prototype_id
+            and prototype_counts[prototype_id] == 1
+            and prototype_id not in assignment_ids
+            else prototype.assignment_id
         )
+        component_runtime = runtime.get(prototype.assignment_id, {})
+        scores[key] = duration_state_score_for_transition(
+            prototype,
+            assignments_by_id[prototype.assignment_id],
+            {
+                **component_runtime,
+                "session_started_at": component_runtime.get("session_start"),
+            },
+            edge.timestamp,
+        )
+    return scores
+
+
+def _runtime_candidate_transitions(
+    models: Iterable[NilmAssignmentModel],
+    current_states_w: Mapping[str, float | None],
+    edge: NilmEdge,
+) -> tuple[NilmTransitionPrototype, ...]:
+    return tuple(
+        prototype
+        for prototype in _runtime_legal_transitions(models, current_states_w)
+        if abs(edge.delta_w - prototype.delta_w)
+        <= nilm_transition_tolerance_w(prototype)
+    )
+
+
+def _runtime_legal_transitions(
+    models: Iterable[NilmAssignmentModel],
+    current_states_w: Mapping[str, float | None],
+) -> tuple[NilmTransitionPrototype, ...]:
+    return tuple(
+        prototype
         for model in models
         for prototype in model.transition_prototypes
-        if prototype.assignment_id in assignments_by_id
-    }
+        if model.lifecycle_state.strip().lower()
+        not in {"hidden", "ignored", "rejected", "converted"}
+        if not (
+            model.lifecycle_state.strip().lower() == "retired"
+            and not (
+                prototype.direction == "off"
+                and current_states_w.get(model.assignment_id)
+            )
+        )
+        if (current := current_states_w.get(model.assignment_id)) is not None
+        if isfinite(current)
+        if prototype.direction == ("on" if prototype.delta_w > 0 else "off")
+        if all(
+            any(abs(state - expected) <= 1e-6 for state in model.power_states_w)
+            for expected in (prototype.from_state_w, prototype.to_state_w)
+        )
+        if abs(current - prototype.from_state_w) <= 1e-6
+    )
 
 
-def _runtime_validation_scores(
+def _runtime_transition_score(
+    scores: Mapping[str, float | None], prototype: NilmTransitionPrototype
+) -> float | None:
+    if prototype.prototype_id and prototype.prototype_id in scores:
+        return scores[prototype.prototype_id]
+    return scores.get(prototype.assignment_id)
+
+
+def _runtime_validation_profiles(
     assignments: Iterable[Mapping[str, Any]],
     models: Iterable[NilmAssignmentModel],
-) -> dict[str, float | None]:
-    """Build assignment validation scores once for one runtime update."""
+) -> dict[str, dict[str, Any]]:
+    """Build assignment validation profiles once for one runtime update."""
     model_ids = {model.assignment_id for model in models}
     return {
-        assignment_id: build_nilm_validation_profile(assignment)["runtime_score"]
+        assignment_id: build_nilm_validation_profile(assignment)
         for assignment in assignments
         if (assignment_id := str(assignment.get("assignment_id") or ""))
         in model_ids
@@ -1803,16 +1943,45 @@ def _runtime_validation_scores(
 
 
 def _runtime_validation_unavailable_reason(
-    assignments: Iterable[Mapping[str, Any]],
+    assignment: Mapping[str, Any], profile: Mapping[str, Any]
 ) -> str:
+    method = str(assignment.get("validation_method") or "").strip().lower()
+    if method and method != "one_to_one_iou":
+        return "legacy_validation_method"
+    records = [
+        item
+        for item in _list_items(assignment.get("validation_outcomes"))
+        if isinstance(item, Mapping)
+    ]
+    if not _nonnegative_int(profile.get("sample_count")) and any(
+        _runtime_validation_record_revision_mismatch(assignment, record)
+        for record in records
+    ):
+        return "validation_revision_mismatch"
+    return "insufficient_validation_support"
+
+
+def _runtime_validation_record_revision_mismatch(
+    assignment: Mapping[str, Any], record: Mapping[str, Any]
+) -> bool:
+    expected_revision = _nonnegative_int(assignment.get("model_revision"))
+    recorded_revision = _finite_float(
+        record.get("model_revision", record.get("prediction_model_revision"))
+    )
+    expected_fingerprint = str(assignment.get("model_fingerprint") or "").strip()
+    recorded_fingerprint = str(
+        record.get("model_fingerprint")
+        or record.get("prediction_model_fingerprint")
+        or ""
+    ).strip()
     return (
-        "legacy_validation_method"
-        if any(
-            assignment.get("validation_method")
-            and assignment.get("validation_method") != "one_to_one_iou"
-            for assignment in assignments
-        )
-        else "insufficient_validation_support"
+        recorded_revision is not None
+        and expected_revision > 0
+        and recorded_revision != expected_revision
+    ) or bool(
+        recorded_fingerprint
+        and expected_fingerprint
+        and recorded_fingerprint != expected_fingerprint
     )
 
 
