@@ -1516,6 +1516,11 @@ def _add_nilm_reference_evidence(
             "state_entity_id": state_entity_id or None,
             "power_entity_id": power_entity_id or None,
             **reference_settings,
+            **({"import_summary": summary} if (
+                summary := _nilm_reference_import_summary(
+                    assignment.get("reference_import_summary")
+                )
+            ) is not None else {}),
             **runtime,
             "state_options": state_options,
             "power_options": power_options,
@@ -2537,6 +2542,38 @@ def _nilm_reference_settings_payload(
         "maximum_unknown_gap_seconds": settings.maximum_unknown_gap_seconds,
         "maximum_power_gap_seconds": settings.maximum_power_gap_seconds,
     }
+
+
+def _nilm_reference_import_summary(value: Any) -> dict[str, Any] | None:
+    """Return a bounded, display-only summary for the latest reference import."""
+    if not isinstance(value, Mapping):
+        return None
+    count_keys = (
+        "candidate_interval_count",
+        "imported_interval_count",
+        "discarded_minimum_duration_count",
+        "bridged_unknown_gap_count",
+        "merged_inactive_gap_count",
+        "low_coverage_interval_count",
+    )
+    summary: dict[str, Any] = {}
+    for key in count_keys:
+        count = value.get(key, 0)
+        summary[key] = (
+            min(count, 10_000)
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0
+            else 0
+        )
+    warnings = value.get("warnings")
+    if isinstance(warnings, list):
+        summary["warnings"] = [
+            warning.strip()[:128]
+            for warning in warnings
+            if isinstance(warning, str) and warning.strip()
+        ][:16]
+    else:
+        summary["warnings"] = []
+    return summary
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:

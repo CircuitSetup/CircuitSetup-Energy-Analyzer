@@ -6360,6 +6360,15 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
     merge_gap_seconds: 5,
     maximum_unknown_gap_seconds: 60,
     maximum_power_gap_seconds: 120,
+    import_summary: {
+      candidate_interval_count: 5,
+      imported_interval_count: 3,
+      discarded_minimum_duration_count: 1,
+      bridged_unknown_gap_count: 2,
+      merged_inactive_gap_count: 1,
+      low_coverage_interval_count: 1,
+      warnings: ["coverage_below_target", "<unsafe warning>"],
+    },
     suggested_power_entity_id: "sensor.pump_power",
     state_options: [
       { entity_id: "switch.pump", name: "Pump switch", device_id: "device-1" },
@@ -6400,6 +6409,10 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   assert.ok(!html.includes('data-nilm-reference-input="onThreshold"'));
   assert.ok(html.includes('data-nilm-reference-input="onDwellSeconds"'));
   assert.ok(html.includes("UNKNOWN is neither OFF nor ON"));
+  assert.ok(html.includes('data-nilm-reference-import-summary'));
+  assert.ok(html.includes("Last import: 3 of 5 intervals imported."));
+  assert.ok(html.includes('data-nilm-reference-low-coverage'));
+  assert.ok(html.includes("&lt;unsafe warning&gt;"));
 
   panel._nilmReferenceDrafts.set("pump", {
     stateEntityId: "",

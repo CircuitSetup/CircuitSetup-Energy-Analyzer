@@ -1929,6 +1929,26 @@ export function createNilmWorkspaceMethods({
     return draft;
   }
 
+  _renderNilmReferenceImportSummary(reference) {
+    const summary = reference && reference.import_summary;
+    if (!summary) return "";
+    const count = (key) => Number.isInteger(summary[key]) && summary[key] >= 0 ? summary[key] : 0;
+    const candidate = count("candidate_interval_count");
+    const imported = count("imported_interval_count");
+    const discarded = count("discarded_minimum_duration_count");
+    const bridged = count("bridged_unknown_gap_count");
+    const merged = count("merged_inactive_gap_count");
+    const lowCoverage = count("low_coverage_interval_count");
+    const warnings = Array.isArray(summary.warnings) ? summary.warnings.slice(0, 16) : [];
+    return `<section class="nilm-reference-import-summary" data-nilm-reference-import-summary>
+      <p>${this._escape(this._panelTextFormat("nilm_workspace.reference_import_summary", { imported, candidate }))}</p>
+      ${discarded ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.reference_import_discarded", { count: discarded }))}</p>` : ""}
+      ${(bridged || merged) ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.reference_import_gaps", { bridged, merged }))}</p>` : ""}
+      ${lowCoverage ? `<p class="warning" data-nilm-reference-low-coverage>${this._escape(this._panelTextFormat("nilm_workspace.reference_import_low_coverage", { count: lowCoverage }))}</p>` : ""}
+      ${warnings.length ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.reference_import_warnings"))}</p><ul>${warnings.map((warning) => `<li>${this._escape(String(warning))}</li>`).join("")}</ul>` : ""}
+    </section>`;
+  }
+
   _renderNilmReferenceSensors(assignment, index) {
     const reference = assignment && assignment.reference;
     if (!reference) return "";
@@ -1965,6 +1985,7 @@ export function createNilmWorkspaceMethods({
       ${reference.available ? `<p class="muted">${this._escape(reference.measured_power_w == null
         ? this._panelTextFormat("nilm_workspace.reference_live_state", { state: reference.is_running ? this._panelText("nilm_workspace.reference_on") : this._panelText("nilm_workspace.reference_off") })
         : this._panelTextFormat("nilm_workspace.reference_live", { state: reference.is_running ? this._panelText("nilm_workspace.reference_on") : this._panelText("nilm_workspace.reference_off"), power: this._formatMetricValue(reference.measured_power_w) }))}</p>` : ""}
+      ${this._renderNilmReferenceImportSummary(reference)}
       ${draft.error ? `<p class="error" role="alert">${this._escape(draft.error)}</p>` : ""}
       <div class="actions">
         <button type="button" data-nilm-reference-action="link_import" data-nilm-reference-index="${index}" ${busy ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.reference_link_import"))}</button>
