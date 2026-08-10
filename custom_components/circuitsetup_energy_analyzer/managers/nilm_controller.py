@@ -437,25 +437,24 @@ class NilmController:
             )
             for assignment in assignments:
                 normalized = normalize_nilm_assignment_model(assignment)
-                model = build_nilm_assignment_model(
-                    assignment,
-                    history,
-                    label_intervals=label_intervals,
-                )
-                if (
-                    model["transition_prototypes"]
-                    and (
-                        model["power_states_w"] != normalized["power_states_w"]
-                        or model["transition_prototypes"]
-                        != normalized["transition_prototypes"]
+                model = (
+                    build_nilm_assignment_model(
+                        assignment,
+                        history,
+                        label_intervals=label_intervals,
                     )
-                ):
+                    if self._has_retained_assignment_evidence(
+                        assignment, history, label_intervals
+                    )
+                    else normalized
+                )
+                if self._assignment_model_changed(assignment, normalized, model):
                     assignment.update(model)
                     rebuilt = True
-                else:
-                    assignment.update(normalized)
         if rebuilt:
-            coordinator.store_persistence.mark_dirty()
+            persistence = getattr(coordinator, "store_persistence", None)
+            if persistence is not None:
+                persistence.mark_dirty()
         for circuit_id, signatures in coordinator.store_data.nilm_signatures.items():
             for signature in signatures:
                 if signature.get("ignored") is True:
@@ -463,6 +462,42 @@ class NilmController:
                         (circuit_id, str(signature.get("signature_id", "")))
                     )
             self.refresh_state(circuit_id)
+
+    @staticmethod
+    def _has_retained_assignment_evidence(
+        assignment: Mapping[str, Any],
+        history: Iterable[Mapping[str, Any]],
+        label_intervals: Iterable[Mapping[str, Any]],
+    ) -> bool:
+        """Return whether retained records can rebuild this assignment's model."""
+        assignment_id = str(assignment.get("assignment_id") or "").strip()
+        session_ids = {
+            *_clean_string_list(assignment.get("confirmed_session_ids")),
+            *_clean_string_list(assignment.get("rejected_session_ids")),
+        }
+        interval_ids = set(_clean_string_list(assignment.get("label_interval_ids")))
+        return any(
+            str(session.get("session_id") or "").strip() in session_ids
+            and str(session.get("assignment_id") or "").strip()
+            in {"", assignment_id}
+            for session in history
+        ) or any(
+            str(interval.get("interval_id") or "").strip() in interval_ids
+            and str(interval.get("assignment_id") or "").strip()
+            in {"", assignment_id}
+            for interval in label_intervals
+        )
+
+    @staticmethod
+    def _assignment_model_changed(
+        assignment: Mapping[str, Any],
+        normalized: Mapping[str, Any],
+        model: Mapping[str, Any],
+    ) -> bool:
+        """Compare canonical runtime model content without order-only churn."""
+        return any(key not in assignment for key in model) or normalized != (
+            normalize_nilm_assignment_model(model)
+        )
 
     def _normalize_legacy_expected_records(self) -> bool:
         """Reopen persisted NILM records that used the removed Expected state."""
