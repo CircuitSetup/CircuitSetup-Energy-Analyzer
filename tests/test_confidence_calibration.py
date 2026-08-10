@@ -13,11 +13,13 @@ from custom_components.circuitsetup_energy_analyzer.models import EventType
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
+    CalibrationExpectations,
     CalibrationFixtureError,
     _maximum_weight_assignment,
     assert_fixture_expectations,
     evaluate_nilm_replay_gate,
     evaluate_replay_result,
+    fixture_expectation_failures,
     load_calibration_fixture,
     load_calibration_scenarios,
     replay_fixture_processors,
@@ -698,6 +700,8 @@ def test_nilm_replay_gate_scores_chronological_multistate_evidence() -> None:
     assert metrics.false_assignment_rate == 0.0
     assert metrics.nilm_confidence_bins["0.8-1.0"]["prediction_count"] > 0
     assert metrics.nilm_confidence_bins["0.8-1.0"]["observed_accuracy"] == 1.0
+    assert metrics.nilm_brier_score == 0.007
+    assert metrics.nilm_expected_calibration_error == 0.038
 
     baseline_components = dict(metrics.component_metrics)
     baseline_components["multistate"] = replace(
@@ -717,6 +721,86 @@ def test_nilm_replay_gate_scores_chronological_multistate_evidence() -> None:
 
     assert gate.passed
     assert gate.violations == ()
+
+
+def test_nilm_replay_expectations_reject_accuracy_regressions() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    expectations = CalibrationExpectations(
+        min_component_session_f1=0.9,
+        max_residual_energy_kwh=0.0,
+        max_false_assignment_rate=0.0,
+        max_conservation_violations=0,
+        require_replay_split=True,
+    )
+    degraded_components = dict(metrics.component_metrics)
+    degraded_components["multistate"] = replace(
+        degraded_components["multistate"],
+        session_f1=0.5,
+    )
+    degraded = replace(
+        metrics,
+        component_metrics=degraded_components,
+        residual_energy_kwh=0.001,
+        false_assignment_rate=0.1,
+        conservation_violations=1,
+    )
+
+    failures = fixture_expectation_failures(
+        replace(fixture, expectations=expectations),
+        degraded,
+    )
+
+    assert "multistate session F1 0.5 < 0.9" in failures
+    assert "residual energy 0.001 > 0.0" in failures
+    assert "false assignment rate 0.1 > 0.0" in failures
+    assert "conservation violations 1 > 0" in failures
+
+
+def test_nilm_replay_expectations_require_frozen_pre_split_models() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    assignments = {
+        circuit_id: [
+            {
+                key: value
+                for key, value in assignment.items()
+                if key != "model_provenance"
+            }
+            for assignment in values
+        ]
+        for circuit_id, values in fixture.assignments_by_circuit.items()
+    }
+
+    failures = fixture_expectation_failures(
+        replace(fixture, assignments_by_circuit=assignments),
+        metrics,
+    )
+
+    assert "frozen pre-split NILM model provenance is required" in failures
+
+
+def test_nilm_replay_expectations_reject_unavailable_edge_and_state_metrics() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = evaluate_replay_result(fixture, result)
+    components = dict(metrics.component_metrics)
+    components["multistate"] = replace(
+        components["multistate"],
+        edge_precision=None,
+        edge_recall=None,
+        state_accuracy=None,
+    )
+
+    failures = fixture_expectation_failures(
+        fixture,
+        replace(metrics, component_metrics=components),
+    )
+
+    assert "multistate edge F1 was not available" in failures
+    assert "multistate state accuracy was not available" in failures
 
 
 def test_nilm_replay_split_rejects_training_overlap(tmp_path: Path) -> None:

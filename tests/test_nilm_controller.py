@@ -4324,9 +4324,9 @@ def _validation_feedback_controller(
 
 
 @pytest.mark.asyncio
-async def test_history_validation_builds_current_provenanced_ground_truth_profile(
+async def test_history_validation_does_not_score_model_training_examples(
 ) -> None:
-    """Skipping trusted workflow outcomes or inventing provenance must fail."""
+    """A session cannot validate the model that was trained on it."""
     base = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
     sessions = [
         {
@@ -4410,22 +4410,8 @@ async def test_history_validation_builds_current_provenanced_ground_truth_profil
     assert assignment["model_fingerprint"] == model["model_fingerprint"]
     assert assignment["validation_schema_version"] == 2
     assert assignment["validation_method"] == "one_to_one_iou"
-    assert {
-        record["outcome_id"] for record in assignment["validation_outcomes"]
-    } == {f"session-{index}" for index in range(5)}
-    assert {
-        record["model_revision"] for record in assignment["validation_outcomes"]
-    } == {model["model_revision"]}
-    key = f"{model['model_revision']}:{model['model_fingerprint']}"
-    profile = assignment["validation_profiles_by_revision"][key]
-    assert profile["sample_count"] == 5
-    assert profile["distinct_days"] == 3
-    assert profile["runtime_eligible"] is True
-    runtime_profile = build_nilm_validation_profile(
-        assignment,
-        session_outcomes=assignment["validation_outcomes"],
-    )
-    assert runtime_profile["runtime_score"] is not None
+    assert "validation_outcomes" not in assignment
+    assert "validation_profiles_by_revision" not in assignment
 
 
 @pytest.mark.asyncio

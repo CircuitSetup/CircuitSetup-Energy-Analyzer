@@ -26,6 +26,7 @@ assignments:
     - assignment_id: multistate
       lifecycle_state: validated
       model_confidence: 0.9
+      model_provenance: {frozen: true, training_end_t: 999, training_example_count: 24}
       model_kind: multi_state
       power_states_w: [0, 100, 200, 300]
       states:
@@ -44,6 +45,7 @@ assignments:
     - assignment_id: variable_envelope
       lifecycle_state: validated
       model_confidence: 0.9
+      model_provenance: {frozen: true, training_end_t: 999, training_example_count: 12}
       model_kind: variable_envelope
       power_states_w: [0, 110]
       states:
@@ -57,6 +59,7 @@ assignments:
       assignment_id: on_time
       lifecycle_state: validated
       model_confidence: 0.9
+      model_provenance: {frozen: true, training_end_t: 999, training_example_count: 15}
       power_states_w: [0, 100]
       run_profile:
         duration_s: {effective_support: 5, distinct_days: 3, median_seconds: 200, p10_seconds: 190, p90_seconds: 210}
@@ -66,6 +69,7 @@ assignments:
       assignment_id: too_long
       lifecycle_state: validated
       model_confidence: 0.9
+      model_provenance: {frozen: true, training_end_t: 999, training_example_count: 15}
       power_states_w: [0, 100]
       run_profile:
         duration_s: {effective_support: 5, distinct_days: 3, median_seconds: 15, p10_seconds: 10, p90_seconds: 20}
@@ -144,4 +148,15 @@ labels:
     too_long:
       edges: [{event_type: start, around_t: 1000}, {event_type: stop, around_t: 1230}]
       sessions: [{start_t: 1000, end_t: 1230}]
-calibration_expectations: {}
+calibration_expectations:
+  min_component_session_f1: 1.0
+  min_component_edge_f1: 1.0
+  min_component_state_accuracy: 1.0
+  max_residual_energy_kwh: 0.001
+  max_false_assignment_rate: 0.0
+  max_conservation_violations: 0
+  max_nilm_brier_score: 0.01
+  max_nilm_expected_calibration_error: 0.05
+  require_replay_split: true
+  require_frozen_pre_split_models: true
+  require_duration_decision_benefit: true

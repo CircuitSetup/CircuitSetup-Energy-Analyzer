@@ -2321,6 +2321,7 @@ class NilmController:
         energy_errors: list[float] = []
         confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
+        model_training_session_ids = {*confirmed, *rejected}
         previous_history_ids = self._history_validation_session_ids(
             assignment,
             sessions=sessions,
@@ -2454,6 +2455,7 @@ class NilmController:
             session_by_id=session_by_id,
             matched_session_ids=matched_session_ids,
             conflicting_session_ids=conflicting_session_ids,
+            excluded_session_ids=model_training_session_ids,
         )
         self._rebuild_validation_profiles(assignment)
         self._update_assignment_duration_bounds(circuit_id, assignment)
@@ -2767,8 +2769,9 @@ class NilmController:
         session_by_id: Mapping[str, Mapping[str, Any]],
         matched_session_ids: Iterable[str],
         conflicting_session_ids: Iterable[str],
+        excluded_session_ids: Iterable[str] = (),
     ) -> None:
-        """Replace one-to-one ground-truth outcomes with provenanced results."""
+        """Store only prediction-time held-out ground-truth outcomes."""
         outcomes = [
             dict(item)
             for item in assignment.get("validation_outcomes", ())
@@ -2779,7 +2782,10 @@ class NilmController:
             **{session_id: "correct" for session_id in matched_session_ids},
             **{session_id: "wrong" for session_id in conflicting_session_ids},
         }
+        excluded = set(excluded_session_ids)
         for session_id, outcome in sorted(decisions.items()):
+            if session_id in excluded:
+                continue
             provenance = self._session_prediction_provenance(circuit_id, session_id)
             if provenance is None or provenance[0] is None:
                 continue

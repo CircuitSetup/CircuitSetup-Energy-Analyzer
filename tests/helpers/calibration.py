@@ -175,6 +175,17 @@ class CalibrationExpectations:
     max_detection_latency_seconds: float | None = None
     expected_precision_at_least: float | None = None
     expected_recall_at_least: float | None = None
+    min_component_session_f1: float | None = None
+    min_component_edge_f1: float | None = None
+    min_component_state_accuracy: float | None = None
+    max_residual_energy_kwh: float | None = None
+    max_false_assignment_rate: float | None = None
+    max_conservation_violations: int | None = None
+    max_nilm_brier_score: float | None = None
+    max_nilm_expected_calibration_error: float | None = None
+    require_replay_split: bool = False
+    require_frozen_pre_split_models: bool = False
+    require_duration_decision_benefit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +248,8 @@ class CalibrationMetrics:
     conservation_violations: int = 0
     false_assignment_rate: float | None = None
     nilm_confidence_bins: dict[str, dict[str, float]] = field(default_factory=dict)
+    nilm_brier_score: float | None = None
+    nilm_expected_calibration_error: float | None = None
     decision_impacts: ReplayDecisionImpacts = field(
         default_factory=lambda: ReplayDecisionImpacts()
     )
@@ -686,6 +699,10 @@ def evaluate_replay_result(
     )
     reconciliation = _combined_reconciliation(result)
     component_metrics = _component_metrics(fixture, result)
+    nilm_confidence_bins, nilm_brier, nilm_ece = _nilm_confidence_calibration(
+        fixture,
+        result,
+    )
     return CalibrationMetrics(
         fixture_id=fixture.id,
         true_positive_alerts=true_positive_alerts,
@@ -712,7 +729,9 @@ def evaluate_replay_result(
         or 0.0,
         conservation_violations=int(reconciliation.get("conservation_violations", 0)),
         false_assignment_rate=_false_assignment_rate(fixture, result),
-        nilm_confidence_bins=_nilm_confidence_calibration(fixture, result),
+        nilm_confidence_bins=nilm_confidence_bins,
+        nilm_brier_score=nilm_brier,
+        nilm_expected_calibration_error=nilm_ece,
         decision_impacts=_decision_impacts(fixture, result),
         replay_split=fixture.labels.replay_split,
     )
@@ -779,6 +798,109 @@ def fixture_expectation_failures(
         )
     if metrics.event_miss_count:
         failures.append(f"missed expected events: {metrics.event_miss_count}")
+    if expectations.min_component_session_f1 is not None:
+        if not metrics.component_metrics:
+            failures.append("component replay metrics were not available")
+        for component_id, component in metrics.component_metrics.items():
+            if not _meets_floor(
+                component.session_f1,
+                expectations.min_component_session_f1,
+            ):
+                failures.append(
+                    f"{component_id} session F1 {component.session_f1} < "
+                    f"{expectations.min_component_session_f1}"
+                )
+    if expectations.min_component_edge_f1 is not None:
+        for component_id, truth in fixture.labels.component_truth.items():
+            if not truth.edges:
+                continue
+            component = metrics.component_metrics.get(component_id)
+            if component is None:
+                failures.append(f"{component_id} edge F1 was not available")
+                continue
+            edge_f1 = _f1(component.edge_precision, component.edge_recall)
+            if edge_f1 is None:
+                failures.append(f"{component_id} edge F1 was not available")
+            elif not _meets_floor(edge_f1, expectations.min_component_edge_f1):
+                failures.append(
+                    f"{component_id} edge F1 {edge_f1} < "
+                    f"{expectations.min_component_edge_f1}"
+                )
+    if expectations.min_component_state_accuracy is not None:
+        for component_id, truth in fixture.labels.component_truth.items():
+            if not truth.state_segments:
+                continue
+            component = metrics.component_metrics.get(component_id)
+            if component is None or component.state_accuracy is None:
+                failures.append(f"{component_id} state accuracy was not available")
+            elif not _meets_floor(
+                component.state_accuracy, expectations.min_component_state_accuracy
+            ):
+                failures.append(
+                    f"{component_id} state accuracy {component.state_accuracy} < "
+                    f"{expectations.min_component_state_accuracy}"
+                )
+    if (
+        expectations.max_residual_energy_kwh is not None
+        and metrics.residual_energy_kwh > expectations.max_residual_energy_kwh
+    ):
+        failures.append(
+            f"residual energy {metrics.residual_energy_kwh} > "
+            f"{expectations.max_residual_energy_kwh}"
+        )
+    if (
+        expectations.max_false_assignment_rate is not None
+        and (
+            metrics.false_assignment_rate is None
+            or metrics.false_assignment_rate > expectations.max_false_assignment_rate
+        )
+    ):
+        failures.append(
+            f"false assignment rate {metrics.false_assignment_rate} > "
+            f"{expectations.max_false_assignment_rate}"
+        )
+    if (
+        expectations.max_conservation_violations is not None
+        and metrics.conservation_violations > expectations.max_conservation_violations
+    ):
+        failures.append(
+            f"conservation violations {metrics.conservation_violations} > "
+            f"{expectations.max_conservation_violations}"
+        )
+    if expectations.require_replay_split and not _valid_replay_split(
+        metrics.replay_split
+    ):
+        failures.append("replay split provenance is required")
+    if (
+        expectations.require_frozen_pre_split_models
+        and not _has_frozen_pre_split_models(fixture)
+    ):
+        failures.append("frozen pre-split NILM model provenance is required")
+    if expectations.max_nilm_brier_score is not None and (
+        metrics.nilm_brier_score is None
+        or metrics.nilm_brier_score > expectations.max_nilm_brier_score
+    ):
+        failures.append(
+            f"NILM Brier score {metrics.nilm_brier_score} > "
+            f"{expectations.max_nilm_brier_score}"
+        )
+    if expectations.max_nilm_expected_calibration_error is not None and (
+        metrics.nilm_expected_calibration_error is None
+        or metrics.nilm_expected_calibration_error
+        > expectations.max_nilm_expected_calibration_error
+    ):
+        failures.append(
+            "NILM expected calibration error "
+            f"{metrics.nilm_expected_calibration_error} > "
+            f"{expectations.max_nilm_expected_calibration_error}"
+        )
+    if expectations.require_duration_decision_benefit:
+        impact = metrics.decision_impacts.duration
+        if (
+            impact.changed_count == 0
+            or impact.changed_correct_count <= impact.changed_incorrect_count
+        ):
+            failures.append("duration score decisions did not demonstrate net benefit")
     return tuple(failures)
 
 
@@ -1070,6 +1192,31 @@ def _parse_expectations(raw: Mapping[str, Any]) -> CalibrationExpectations:
             raw.get("expected_precision_at_least")
         ),
         expected_recall_at_least=_optional_float(raw.get("expected_recall_at_least")),
+        min_component_session_f1=_optional_float(
+            raw.get("min_component_session_f1")
+        ),
+        min_component_edge_f1=_optional_float(raw.get("min_component_edge_f1")),
+        min_component_state_accuracy=_optional_float(
+            raw.get("min_component_state_accuracy")
+        ),
+        max_residual_energy_kwh=_optional_float(raw.get("max_residual_energy_kwh")),
+        max_false_assignment_rate=_optional_float(
+            raw.get("max_false_assignment_rate")
+        ),
+        max_conservation_violations=_optional_int(
+            raw.get("max_conservation_violations")
+        ),
+        max_nilm_brier_score=_optional_float(raw.get("max_nilm_brier_score")),
+        max_nilm_expected_calibration_error=_optional_float(
+            raw.get("max_nilm_expected_calibration_error")
+        ),
+        require_replay_split=raw.get("require_replay_split") is True,
+        require_frozen_pre_split_models=(
+            raw.get("require_frozen_pre_split_models") is True
+        ),
+        require_duration_decision_benefit=(
+            raw.get("require_duration_decision_benefit") is True
+        ),
     )
 
 
@@ -1476,6 +1623,27 @@ def _valid_replay_split(split: ReplaySplit | None) -> bool:
     return split is not None and split.training_end_t < split.evaluation_start_t
 
 
+def _has_frozen_pre_split_models(fixture: CalibrationFixture) -> bool:
+    """Require explicit, non-empty model snapshots from before evaluation."""
+    split = fixture.labels.replay_split
+    assignments = [
+        assignment
+        for items in fixture.assignments_by_circuit.values()
+        for assignment in items
+    ]
+    if not _valid_replay_split(split) or not assignments:
+        return False
+    return all(
+        isinstance(provenance := assignment.get("model_provenance"), Mapping)
+        and provenance.get("frozen") is True
+        and (_optional_int(provenance.get("training_end_t")) is not None)
+        and _optional_int(provenance.get("training_end_t"))
+        <= split.training_end_t
+        and (_optional_int(provenance.get("training_example_count")) or 0) > 0
+        for assignment in assignments
+    )
+
+
 def _interval_iou(
     expected_start: float,
     expected_end: float,
@@ -1789,7 +1957,7 @@ def _prediction_matches_truth(
 
 def _nilm_confidence_calibration(
     fixture: CalibrationFixture, result: ReplayResult
-) -> dict[str, dict[str, float]]:
+) -> tuple[dict[str, dict[str, float]], float | None, float | None]:
     bins = {
         label: {
             "prediction_count": 0.0,
@@ -1800,6 +1968,7 @@ def _nilm_confidence_calibration(
         }
         for label in CALIBRATION_CONFIDENCE_BINS
     }
+    scored: list[tuple[float, float]] = []
     for session in _completed_nilm_sessions(result):
         component_id = str(
             session.get("assignment_id") or session.get("appliance_id") or ""
@@ -1811,17 +1980,32 @@ def _nilm_confidence_calibration(
             score = _optional_float(prediction.get("candidate_score"))
             if outcome is None or score is None:
                 continue
-            bucket = bins[_bin_label(max(0.0, min(score, 1.0)))]
+            bounded_score = max(0.0, min(score, 1.0))
+            outcome_value = float(outcome)
+            scored.append((bounded_score, outcome_value))
+            bucket = bins[_bin_label(bounded_score)]
             bucket["prediction_count"] += 1.0
-            bucket["correct_count"] += float(outcome)
-            bucket["incorrect_count"] += float(not outcome)
-            bucket["average_score"] += score
+            bucket["correct_count"] += outcome_value
+            bucket["incorrect_count"] += 1.0 - outcome_value
+            bucket["average_score"] += bounded_score
     for bucket in bins.values():
         count = bucket["prediction_count"]
         if count:
             bucket["average_score"] = round(bucket["average_score"] / count, 3)
             bucket["observed_accuracy"] = round(bucket["correct_count"] / count, 3)
-    return bins
+    if not scored:
+        return bins, None, None
+    brier = round(
+        sum((score - outcome) ** 2 for score, outcome in scored) / len(scored),
+        3,
+    )
+    ece = sum(
+        (bucket["prediction_count"] / len(scored))
+        * abs(bucket["average_score"] - bucket["observed_accuracy"])
+        for bucket in bins.values()
+        if bucket["prediction_count"]
+    )
+    return bins, brier, round(ece, 3)
 
 
 def _decision_impacts(

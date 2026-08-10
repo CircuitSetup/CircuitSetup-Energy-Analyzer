@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, MutableSet
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
@@ -67,6 +68,130 @@ type TopologyObserver = Callable[
 ]
 
 
+def _nilm_stable_snapshot(value: Any) -> object:
+    """Return a deterministic, comparison-safe snapshot of stored NILM inputs."""
+    if isinstance(value, Mapping):
+        return tuple(
+            (str(key), _nilm_stable_snapshot(item))
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_nilm_stable_snapshot(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return tuple(sorted((_nilm_stable_snapshot(item) for item in value), key=repr))
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, float) and not isfinite(value):
+        return repr(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return repr(value)
+
+
+def _nilm_inventory_time_context(
+    sessions: Iterable[object],
+    existing_inventory: Mapping[str, Any],
+    *,
+    now: datetime,
+    time_zone: str,
+) -> object:
+    """Return only the clock inputs that can change a derived inventory.
+
+    Closed sessions are stable except when a local-day or trailing-window
+    boundary crosses them.  Open sessions (and an already-active edge-derived
+    inventory) need a fresh presentation on every source sample.
+    """
+    now_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
+    try:
+        local_zone = ZoneInfo(time_zone)
+    except (TypeError, ZoneInfoNotFoundError):
+        local_zone = UTC
+
+    window_positions: list[tuple[str, str, str]] = []
+    time_varying = bool(existing_inventory.get("active_unknown_load_count", 0))
+    for raw_session in sessions:
+        if not isinstance(raw_session, Mapping):
+            continue
+        try:
+            start_value = raw_session.get("start")
+            start = (
+                datetime.fromisoformat(start_value.replace("Z", "+00:00"))
+                if isinstance(start_value, str)
+                else start_value
+            )
+            if not isinstance(start, datetime):
+                continue
+            start = (
+                start.replace(tzinfo=UTC)
+                if start.tzinfo is None
+                else start.astimezone(UTC)
+            )
+            end_value = raw_session.get("end")
+            if end_value is None:
+                time_varying = True
+                continue
+            end = (
+                datetime.fromisoformat(end_value.replace("Z", "+00:00"))
+                if isinstance(end_value, str)
+                else end_value
+            )
+            if not isinstance(end, datetime):
+                continue
+            end = (
+                end.replace(tzinfo=UTC)
+                if end.tzinfo is None
+                else end.astimezone(UTC)
+            )
+        except (TypeError, ValueError, OverflowError):
+            continue
+
+        session_id = str(raw_session.get("session_id") or start.isoformat())
+        for name, horizon in (
+            ("7_days", timedelta(days=7)),
+            ("30_days", timedelta(days=30)),
+        ):
+            starts_expiring = start + horizon
+            ends_expiring = end + horizon
+            if now_utc < starts_expiring:
+                position = "inside"
+            elif now_utc <= ends_expiring:
+                position = "expiring"
+                time_varying = True
+            else:
+                position = "expired"
+            window_positions.append((session_id, name, position))
+
+    return (
+        time_zone,
+        now_utc.astimezone(local_zone).date().isoformat(),
+        tuple(sorted(window_positions)),
+        now_utc.isoformat() if time_varying else None,
+    )
+
+
+def _nilm_residual_trace_power(
+    circuit_id: str,
+    sample: NormalizedCircuitSample,
+    context: ProcessingContext,
+) -> float | None:
+    """Remove currently measured known loads before retaining mains trace evidence."""
+    mains_power_w = _finite_float(sample.real_power)
+    if mains_power_w is None:
+        return None
+    known_power_w = sum(
+        max(power_w, 0.0)
+        for known_circuit_id in context.known_load_circuit_ids
+        if known_circuit_id != circuit_id
+        if (
+            power_w := _finite_float(
+                context.state.latest_real_power_w_by_circuit.get(known_circuit_id)
+            )
+        )
+        is not None
+    )
+    return mains_power_w - known_power_w
+
+
 @dataclass(frozen=True, slots=True)
 class _RuntimeAssignmentModel(NilmAssignmentModel):
     """Runtime model with stable prediction provenance."""
@@ -123,6 +248,15 @@ class NilmSampleProcessor:
         self._session_history_max_items = max(int(session_history_max_items), 0)
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
         self._hydrated_unmatched_edge_circuits: set[str] = set()
+        self._evaluated_signature_circuits: set[str] = set()
+        self._session_history_context_by_circuit: dict[str, object] = {}
+        self._inventory_context_by_circuit: dict[str, object] = {}
+        self._residual_power_trace_by_circuit: dict[
+            str, deque[tuple[datetime, float]]
+        ] = {}
+        self._residual_power_trace_max_items = min(
+            max(self._session_history_max_items, 256), 4_096
+        )
 
     def process(
         self,
@@ -138,6 +272,22 @@ class NilmSampleProcessor:
             return FeatureResult()
 
         self._seed_demo_nilm_state(circuit_config, sample.timestamp)
+
+        if (
+            residual_power_w := _nilm_residual_trace_power(
+                circuit_id,
+                sample,
+                context,
+            )
+        ) is not None:
+            trace = self._residual_power_trace_by_circuit.setdefault(
+                circuit_id,
+                deque(maxlen=self._residual_power_trace_max_items),
+            )
+            if trace and trace[-1][0] == sample.timestamp:
+                trace[-1] = (sample.timestamp, residual_power_w)
+            else:
+                trace.append((sample.timestamp, residual_power_w))
 
         min_delta_w = self._min_delta_w_for_circuit(circuit_id)
         detector = self.detectors.setdefault(
@@ -392,20 +542,37 @@ class NilmSampleProcessor:
         )
         signatures: list[NilmSignature] = []
         payloads = list(signature_specs)
-        if next_unmatched or evidence_changed:
-            signatures = cluster_recurring_signatures(
-                self.unmatched_edges_by_circuit[circuit_id],
-            )
+        # Clustering retained edges on every steady source sample grows with
+        # history and runs synchronously on Home Assistant's event loop.  An
+        # empty clustering result is still an evaluated revision, so retain
+        # that fact separately from the persisted (possibly empty) payload.
+        if evidence_changed or circuit_id not in self._evaluated_signature_circuits:
+            if next_unmatched:
+                signatures = cluster_recurring_signatures(
+                    self.unmatched_edges_by_circuit[circuit_id],
+                )
             payloads = self._nilm_signature_payloads(circuit_id, signatures, context)
+            self._evaluated_signature_circuits.add(circuit_id)
             if self._helper_links_dirty:
                 store_dirty = True
                 self._helper_links_dirty = False
             if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
                 context.store_data.nilm_signatures[circuit_id] = payloads
                 store_dirty = True
-        session_history_changed = self.refresh_session_history(
-            circuit_id, context.store_data
+        session_history_changed = False
+        session_context = self._session_history_context(
+            circuit_id,
+            context.store_data,
         )
+        if (
+            evidence_changed
+            or self._session_history_context_by_circuit.get(circuit_id)
+            != session_context
+        ):
+            session_history_changed = self.refresh_session_history(
+                circuit_id,
+                context.store_data,
+            )
         if session_history_changed:
             store_dirty = True
 
@@ -417,7 +584,22 @@ class NilmSampleProcessor:
             circuit_id, ()
         )
         current_inventory = existing_inventory
-        if next_unmatched or sessions or evidence_changed or inventory_stale:
+        inventory_context = self._inventory_context(
+            circuit_id,
+            context.store_data,
+            existing_inventory=existing_inventory,
+            now=sample.timestamp,
+            time_zone=context.time_zone or "UTC",
+        )
+        inventory_inputs_changed = (
+            self._inventory_context_by_circuit.get(circuit_id) != inventory_context
+        )
+        if (
+            evidence_changed
+            or session_history_changed
+            or inventory_stale
+            or inventory_inputs_changed
+        ):
             if signatures:
                 inventory = build_unknown_load_inventory(
                     circuit_id=circuit_id,
@@ -450,6 +632,13 @@ class NilmSampleProcessor:
                     inventory
                 )
                 store_dirty = True
+            self._inventory_context_by_circuit[circuit_id] = self._inventory_context(
+                circuit_id,
+                context.store_data,
+                existing_inventory=current_inventory,
+                now=sample.timestamp,
+                time_zone=context.time_zone or "UTC",
+            )
 
         return FeatureResult(
             alerts=alerts,
@@ -500,6 +689,7 @@ class NilmSampleProcessor:
             self.unmatched_edges_by_circuit[circuit_id],
             store_data.nilm_signatures.get(circuit_id, []),
             assignments,
+            power_trace=self._residual_power_trace_by_circuit.get(circuit_id, ()),
         )
         if session_payloads:
             next_sessions = _merge_nilm_session_history(
@@ -509,9 +699,48 @@ class NilmSampleProcessor:
             )
         next_sessions = next_sessions[: self._session_history_max_items]
         if next_sessions == existing_sessions:
+            self._session_history_context_by_circuit[circuit_id] = (
+                self._session_history_context(circuit_id, store_data)
+            )
             return False
         store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
+        self._session_history_context_by_circuit[circuit_id] = (
+            self._session_history_context(circuit_id, store_data)
+        )
         return True
+
+    @staticmethod
+    def _session_history_context(circuit_id: str, store_data: Any) -> object:
+        """Return the assignment and signature inputs that affect pairing."""
+        return _nilm_stable_snapshot(
+            (
+                store_data.nilm_signatures.get(circuit_id, ()),
+                store_data.nilm_appliance_assignments_by_circuit.get(circuit_id, ()),
+            )
+        )
+
+    @staticmethod
+    def _inventory_context(
+        circuit_id: str,
+        store_data: Any,
+        *,
+        existing_inventory: Mapping[str, Any],
+        now: datetime,
+        time_zone: str,
+    ) -> object:
+        """Return derived-session inputs that affect unknown-load inventory."""
+        return _nilm_stable_snapshot(
+            (
+                store_data.nilm_signatures.get(circuit_id, ()),
+                store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+                _nilm_inventory_time_context(
+                    store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
+                    existing_inventory,
+                    now=now,
+                    time_zone=time_zone,
+                ),
+            )
+        )
 
     def refresh_state(
         self,
@@ -3211,6 +3440,7 @@ def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
         "delta_va": _finite_float(edge.delta_va),
         "delta_pf": _finite_float(edge.delta_pf),
         "direction": direction,
+        "transition_kind": str(edge.transition_kind or "step"),
         "leg_a_delta_w": _finite_float(edge.leg_a_delta_w),
         "leg_b_delta_w": _finite_float(edge.leg_b_delta_w),
         "leg_balance_ratio": _finite_float(edge.leg_balance_ratio),
@@ -3246,6 +3476,9 @@ def _nilm_edges_from_storage(
             or direction not in {"on", "off"}
         ):
             continue
+        transition_kind = str(value.get("transition_kind") or "step").strip().casefold()
+        if transition_kind not in {"step", "ramp", "compound", "uncertain"}:
+            transition_kind = "step"
         edges.append(
             NilmEdge(
                 timestamp=timestamp,
@@ -3254,6 +3487,7 @@ def _nilm_edges_from_storage(
                 delta_va=_finite_float(value.get("delta_va")),
                 delta_pf=_finite_float(value.get("delta_pf")),
                 direction=direction,
+                transition_kind=transition_kind,
                 leg_a_delta_w=_finite_float(value.get("leg_a_delta_w")),
                 leg_b_delta_w=_finite_float(value.get("leg_b_delta_w")),
                 leg_balance_ratio=_finite_float(value.get("leg_balance_ratio")),
@@ -3377,6 +3611,8 @@ def _nilm_session_history_payloads(
     edges: Iterable[NilmEdge],
     signatures: list[dict[str, Any]],
     assignments: Iterable[Any],
+    *,
+    power_trace: Iterable[tuple[datetime, float]] = (),
 ) -> list[dict[str, Any]]:
     edge_list = list(edges)
     if not edge_list:
@@ -3401,6 +3637,15 @@ def _nilm_session_history_payloads(
         for key in ("min_duration_seconds", "max_duration_seconds"):
             if key in assignment:
                 spec[key] = assignment[key]
+        run_profile = assignment.get("run_profile")
+        if isinstance(run_profile, Mapping) and isinstance(
+            run_profile.get("duration_s"), Mapping
+        ):
+            spec["duration_profile"] = dict(run_profile["duration_s"])
+        if isinstance(run_profile, Mapping) and isinstance(
+            run_profile.get("energy_kwh"), Mapping
+        ):
+            spec["energy_profile"] = dict(run_profile["energy_kwh"])
         matcher_specs.append(spec)
     return [
         nilm_session_to_dict(session)
@@ -3408,6 +3653,7 @@ def _nilm_session_history_payloads(
             edge_list,
             mains_circuit_id=circuit_id,
             signature_specs=matcher_specs,
+            power_trace=power_trace,
         )
     ]
 
