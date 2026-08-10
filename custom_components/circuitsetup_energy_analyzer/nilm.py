@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from itertools import combinations
 from math import isclose, isfinite
-from statistics import median, multimode
+from statistics import median
 from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -1482,6 +1482,68 @@ class NilmSignature:
     leg_balance_ratio: float | None = None
     dominant_leg: str = "unknown"
     split_phase_type: str = "unknown"
+    unique_day_count: int = 0
+    observation_span_seconds: float = 0.0
+    dispersion_w: float = 0.0
+    dispersion_var: float | None = None
+    dispersion_va: float | None = None
+    dispersion_pf: float | None = None
+    normalized_cluster_radius: float = 1.0
+    feature_coverage: float = 0.0
+    topology_consistency: float = 0.0
+    paired_occurrence_count: int = 0
+    on_off_support: float = 0.0
+    evidence_strength: float = 0.0
+    model_fit: float = 0.0
+    intrinsic_confidence: float = 0.0
+    validated_precision: float | None = None
+    confidence_kind: str = "evidence"
+
+
+@dataclass(frozen=True, slots=True)
+class NilmClusteringPolicy:
+    """Bounded, deterministic tolerances for recurring edge signatures."""
+
+    min_occurrences: int = 3
+    max_refinement_passes: int = 3
+    watts_ratio: float = 0.20
+    watts_floor: float = 25.0
+    var_ratio: float = 0.25
+    var_floor: float = 25.0
+    va_ratio: float = 0.20
+    va_floor: float = 40.0
+    pf_ratio: float = 0.25
+    pf_floor: float = 0.03
+    leg_watts_ratio: float = 0.20
+    leg_watts_floor: float = 25.0
+    balance_ratio: float = 0.25
+    balance_floor: float = 0.10
+    max_centroid_distance: float = 1.0
+    max_complete_link_distance: float = 1.0
+    ambiguous_best_fit_margin: float = 0.15
+
+
+@dataclass(frozen=True, slots=True)
+class _NilmFeatureStats:
+    """Robust numeric descriptor for one cluster feature."""
+
+    count: int
+    median: float | None
+    mad: float | None
+    minimum: float | None
+    maximum: float | None
+    coverage: float
+
+
+@dataclass(slots=True)
+class _NilmEdgeCluster:
+    """Mutable working cluster retaining members for diagnostics and pairing."""
+
+    members: list[NilmEdge]
+    direction: str
+    split_phase_type: str
+    dominant_leg: str
+    feature_stats: dict[str, _NilmFeatureStats]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1538,8 +1600,8 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
     }
 
 
-def nilm_signature_fingerprint(signature: NilmSignature) -> str:
-    """Return a stable review key for a recurring NILM signature shape."""
+def nilm_signature_fingerprint_v1(signature: NilmSignature) -> str:
+    """Return the pre-v2 review key retained only as a migration alias."""
     return "|".join(
         (
             f"direction={_signature_direction(signature.signature_id)}",
@@ -1554,10 +1616,33 @@ def nilm_signature_fingerprint(signature: NilmSignature) -> str:
     )
 
 
+def nilm_signature_fingerprint(signature: NilmSignature) -> str:
+    """Return the versioned durable review key for one signature shape."""
+    return "|".join(
+        (
+            "revision=2",
+            f"direction={_signature_direction(signature.signature_id)}",
+            f"watts={_abs_value_bucket(signature.median_delta_w, 50.0)}",
+            f"var={_optional_value_bucket_v2(signature.median_delta_var, 25.0)}",
+            f"va={_optional_value_bucket_v2(signature.median_delta_va, 50.0)}",
+            f"pf={_optional_value_bucket_v2(signature.median_delta_pf, 0.025)}",
+            f"split={signature.split_phase_type or 'unknown'}",
+            f"leg={signature.dominant_leg or 'unknown'}",
+            f"leg_a={_optional_value_bucket_v2(signature.median_leg_a_delta_w, 50.0)}",
+            f"leg_b={_optional_value_bucket_v2(signature.median_leg_b_delta_w, 50.0)}",
+            f"balance={_optional_value_bucket_v2(signature.leg_balance_ratio, 0.10)}",
+        )
+    )
+
+
 def nilm_signature_is_off_direction(value: Any) -> bool:
     """Return whether a signature direction or fingerprint is OFF-only."""
     text = str(value or "").strip().casefold()
-    return text == "off" or text.startswith(("off-", "direction=off|"))
+    return (
+        text == "off"
+        or text.startswith(("off-", "direction=off|"))
+        or "direction=off" in text.split("|")
+    )
 
 
 def nilm_signature_is_assignable(value: Any) -> bool:
@@ -1574,31 +1659,41 @@ def resolve_nilm_signature_fingerprint(
     saved_fingerprint: str,
     signatures: Iterable[Mapping[str, Any]],
 ) -> str | None:
-    """Resolve a stale review fingerprint only when one current shape wins."""
+    """Resolve v2 keys or a uniquely represented legacy review key."""
     saved = str(saved_fingerprint or "").strip()
-    current = list(
-        dict.fromkeys(
-            value
-            for signature in signatures
-            for value in (
-                str(signature.get("feedback_fingerprint") or "").strip(),
-                str(signature.get("signature_fingerprint") or "").strip(),
-                str(signature.get("signature_id") or "").strip(),
-            )
-            if value
-        )
-    )
-    if saved in current:
-        return saved
+    current_by_value: dict[str, Mapping[str, Any]] = {}
+    legacy_aliases: dict[str, list[str]] = defaultdict(list)
+    for signature in signatures:
+        primary = str(
+            signature.get("feedback_fingerprint")
+            or signature.get("signature_fingerprint")
+            or signature.get("signature_id")
+            or ""
+        ).strip()
+        if not primary:
+            continue
+        current_by_value.setdefault(primary, signature)
+        for alias in _nilm_signature_legacy_aliases(signature):
+            legacy_aliases[alias].append(primary)
     saved_parts = _nilm_fingerprint_parts(saved)
+    if saved in current_by_value and (
+        "=" not in saved or saved_parts.get("revision") == "2"
+    ):
+        return saved
+    aliases = tuple(dict.fromkeys(legacy_aliases.get(saved, ())))
+    if len(aliases) == 1:
+        return aliases[0]
     if not saved_parts.get("direction") or not saved_parts.get("watts"):
         return saved or None
     candidates = [
         value
-        for value in current
+        for value in current_by_value
         if (parts := _nilm_fingerprint_parts(value)).get("direction")
         == saved_parts["direction"]
-        and parts.get("watts") == saved_parts["watts"]
+        and _nilm_fingerprint_bucket_compatible(
+            saved_parts.get("watts"),
+            parts.get("watts"),
+        )
         and _nilm_fingerprint_topology_compatible(saved_parts, parts)
     ]
     if len(candidates) == 1:
@@ -1627,6 +1722,60 @@ def _nilm_fingerprint_parts(value: str) -> dict[str, str]:
         if "=" in token
         for key, item in (token.split("=", 1),)
     }
+
+
+def _nilm_signature_legacy_aliases(signature: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return stored or reconstructable v1 aliases without broad matching."""
+    aliases = [
+        str(signature.get("legacy_feedback_fingerprint") or "").strip(),
+    ]
+    fingerprint = str(signature.get("feedback_fingerprint") or "").strip()
+    if fingerprint and not _nilm_fingerprint_parts(fingerprint).get("revision"):
+        aliases.append(fingerprint)
+    try:
+        aliases.append(
+            nilm_signature_fingerprint_v1(
+                NilmSignature(
+                    signature_id=str(signature.get("signature_id") or ""),
+                    median_delta_w=float(signature.get("median_delta_w") or 0.0),
+                    median_delta_var=_nilm_number(signature.get("median_delta_var")),
+                    median_delta_va=_nilm_number(signature.get("median_delta_va")),
+                    median_delta_pf=_nilm_number(signature.get("median_delta_pf")),
+                    median_leg_a_delta_w=_nilm_number(
+                        signature.get("median_leg_a_delta_w")
+                    ),
+                    median_leg_b_delta_w=_nilm_number(
+                        signature.get("median_leg_b_delta_w")
+                    ),
+                    leg_balance_ratio=_nilm_number(signature.get("leg_balance_ratio")),
+                    dominant_leg=str(signature.get("dominant_leg") or "unknown"),
+                    split_phase_type=str(
+                        signature.get("split_phase_type") or "unknown"
+                    ),
+                )
+            )
+        )
+    except (TypeError, ValueError):
+        pass
+    return tuple(alias for alias in dict.fromkeys(aliases) if alias)
+
+
+def _nilm_fingerprint_bucket_compatible(
+    saved: str | None,
+    current: str | None,
+) -> bool:
+    if saved == current:
+        return True
+    if not saved or not current or "unknown" in {saved, current}:
+        return False
+    try:
+        saved_start, saved_end = (float(value) for value in saved.split("-", 1))
+        current_start, current_end = (
+            float(value) for value in current.split("-", 1)
+        )
+    except (TypeError, ValueError):
+        return False
+    return max(saved_start, current_start) < min(saved_end, current_end)
 
 
 def _nilm_fingerprint_topology_compatible(
@@ -2478,73 +2627,567 @@ def _known_load_residual_edge(
     )
 
 
-def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignature]:
-    """Cluster similar recurring edges into conservative NILM signatures."""
+_CLUSTER_FEATURES: tuple[tuple[str, str, str, str], ...] = (
+    ("delta_w", "delta_w", "watts_ratio", "watts_floor"),
+    ("delta_var", "delta_var", "var_ratio", "var_floor"),
+    ("delta_va", "delta_va", "va_ratio", "va_floor"),
+    ("delta_pf", "delta_pf", "pf_ratio", "pf_floor"),
+    ("leg_a", "leg_a_delta_w", "leg_watts_ratio", "leg_watts_floor"),
+    ("leg_b", "leg_b_delta_w", "leg_watts_ratio", "leg_watts_floor"),
+    ("balance", "leg_balance_ratio", "balance_ratio", "balance_floor"),
+)
+_MISSING_FEATURE_DISTANCE_PENALTY = 0.10
 
-    sorted_edges = sorted(
+
+def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignature]:
+    """Cluster recurring edges without allowing transitive similarity bridges."""
+    policy = NilmClusteringPolicy()
+    clusters = _cluster_recurring_edges(
         edges,
-        key=lambda edge: (
-            edge.direction,
-            abs(edge.delta_w),
-            edge.delta_w,
-            _optional_sort_key(edge.delta_var),
-            _optional_sort_key(edge.delta_va),
-            _optional_sort_key(edge.delta_pf),
-            edge.timestamp,
-        ),
+        policy=policy,
+        day_key=lambda value: value.astimezone(UTC).date(),
+    )
+    support = _cluster_on_off_support(clusters, policy=policy)
+    signatures: list[NilmSignature] = []
+    for cluster in clusters:
+        if len(cluster.members) < policy.min_occurrences:
+            continue
+        signature = _signature_from_cluster(
+            cluster,
+            index=len(signatures) + 1,
+            policy=policy,
+            day_key=lambda value: value.astimezone(UTC).date(),
+            paired_occurrence_count=support.get(id(cluster), (0, 0.0))[0],
+            on_off_support=support.get(id(cluster), (0, 0.0))[1],
+        )
+        signatures.append(signature)
+    return signatures
+
+
+def _cluster_recurring_edges(
+    edges: Iterable[NilmEdge],
+    *,
+    policy: NilmClusteringPolicy,
+    day_key: Callable[[datetime], date],
+) -> tuple[_NilmEdgeCluster, ...]:
+    """Return deterministic, topology-partitioned clusters for recurring edges."""
+    del day_key  # The core remains timezone-free; callers use it when emitting data.
+    ordered_edges = tuple(sorted(edges, key=_nilm_cluster_edge_key))
+    clusters = _assign_recurring_edges(ordered_edges, policy=policy)
+    previous_membership = _cluster_membership_key(clusters)
+    for _ in range(policy.max_refinement_passes):
+        refined = _refine_recurring_clusters(
+            clusters,
+            ordered_edges=ordered_edges,
+            policy=policy,
+        )
+        membership = _cluster_membership_key(refined)
+        clusters = refined
+        if membership == previous_membership:
+            break
+        previous_membership = membership
+    return tuple(sorted(clusters, key=_nilm_cluster_sort_key))
+
+
+def _assign_recurring_edges(
+    edges: Iterable[NilmEdge],
+    *,
+    policy: NilmClusteringPolicy,
+) -> list[_NilmEdgeCluster]:
+    by_partition: dict[tuple[str, str, str], list[_NilmEdgeCluster]] = {}
+    for edge in edges:
+        partition = _nilm_cluster_partition(edge)
+        candidates = by_partition.setdefault(partition, [])
+        fits = [
+            (distance, cluster)
+            for cluster in candidates
+            if (distance := _cluster_fit_distance(edge, cluster, policy=policy))
+            is not None
+        ]
+        fits.sort(key=lambda item: (item[0], _nilm_cluster_sort_key(item[1])))
+        if not fits or _missing_feature_best_fit_is_ambiguous(
+            edge,
+            fits,
+            policy=policy,
+        ):
+            candidates.append(_new_nilm_edge_cluster(edge))
+            continue
+        selected = fits[0][1]
+        selected.members.append(edge)
+        selected.feature_stats = _cluster_feature_stats(selected.members)
+    return [cluster for clusters in by_partition.values() for cluster in clusters]
+
+
+def _refine_recurring_clusters(
+    clusters: Iterable[_NilmEdgeCluster],
+    *,
+    ordered_edges: Iterable[NilmEdge],
+    policy: NilmClusteringPolicy,
+) -> list[_NilmEdgeCluster]:
+    """Reassign each edge once against the current robust descriptors.
+
+    This intentionally works from the complete-link-safe initial assignment,
+    rather than restarting first-fit clustering.  Removing an edge before its
+    decision means it is judged against the descriptors established by the
+    other observations, then added back only when it is a unique admissible
+    fit.  The caller bounds how often this pass runs.
+    """
+    working = [
+        _NilmEdgeCluster(
+            members=list(cluster.members),
+            direction=cluster.direction,
+            split_phase_type=cluster.split_phase_type,
+            dominant_leg=cluster.dominant_leg,
+            feature_stats=_cluster_feature_stats(cluster.members),
+        )
+        for cluster in clusters
+    ]
+    for edge in ordered_edges:
+        _remove_edge_from_clusters(working, edge)
+        partition = _nilm_cluster_partition(edge)
+        candidates = [
+            cluster
+            for cluster in working
+            if (
+                cluster.direction,
+                cluster.split_phase_type,
+                cluster.dominant_leg,
+            )
+            == partition
+        ]
+        fits = [
+            (distance, cluster)
+            for cluster in candidates
+            if (distance := _cluster_fit_distance(edge, cluster, policy=policy))
+            is not None
+        ]
+        fits.sort(key=lambda item: (item[0], _nilm_cluster_sort_key(item[1])))
+        if not fits or _missing_feature_best_fit_is_ambiguous(
+            edge,
+            fits,
+            policy=policy,
+        ):
+            working.append(_new_nilm_edge_cluster(edge))
+            continue
+        selected = fits[0][1]
+        selected.members.append(edge)
+        selected.feature_stats = _cluster_feature_stats(selected.members)
+    return working
+
+
+def _remove_edge_from_clusters(
+    clusters: list[_NilmEdgeCluster],
+    edge: NilmEdge,
+) -> None:
+    """Remove one exact working member and refresh only its cluster."""
+    for index, cluster in enumerate(clusters):
+        for member_index, member in enumerate(cluster.members):
+            if member is not edge:
+                continue
+            del cluster.members[member_index]
+            if cluster.members:
+                cluster.feature_stats = _cluster_feature_stats(cluster.members)
+            else:
+                del clusters[index]
+            return
+    raise ValueError("NILM clustering refinement lost an edge")
+
+
+def _new_nilm_edge_cluster(edge: NilmEdge) -> _NilmEdgeCluster:
+    return _NilmEdgeCluster(
+        members=[edge],
+        direction=edge.direction,
+        split_phase_type=_nilm_cluster_split_phase_type(edge),
+        dominant_leg=_nilm_cluster_dominant_leg(edge),
+        feature_stats=_cluster_feature_stats((edge,)),
     )
 
-    clusters: list[list[NilmEdge]] = []
-    for edge in sorted_edges:
-        for cluster in clusters:
-            if _edge_similar_to_cluster(edge, cluster):
-                cluster.append(edge)
-                break
-        else:
-            clusters.append([edge])
 
-    signatures: list[NilmSignature] = []
-    for index, cluster in enumerate(clusters, start=1):
-        if len(cluster) < 3:
+def _nilm_cluster_partition(edge: NilmEdge) -> tuple[str, str, str]:
+    split_phase_type = _nilm_cluster_split_phase_type(edge)
+    dominant_leg = _nilm_cluster_dominant_leg(edge)
+    return edge.direction, split_phase_type, dominant_leg
+
+
+def _nilm_cluster_split_phase_type(edge: NilmEdge) -> str:
+    value = str(edge.split_phase_type or "unknown").strip().casefold()
+    return value or "unknown"
+
+
+def _nilm_cluster_dominant_leg(edge: NilmEdge) -> str:
+    split_phase_type = _nilm_cluster_split_phase_type(edge)
+    if split_phase_type in {"unknown", "missing_leg_data"}:
+        return split_phase_type
+    return str(edge.dominant_leg or "unknown").strip().casefold() or "unknown"
+
+
+def _cluster_fit_distance(
+    edge: NilmEdge,
+    cluster: _NilmEdgeCluster,
+    *,
+    policy: NilmClusteringPolicy,
+) -> float | None:
+    if _nilm_cluster_partition(edge) != (
+        cluster.direction,
+        cluster.split_phase_type,
+        cluster.dominant_leg,
+    ):
+        return None
+    distances: list[float] = []
+    for name, attribute, ratio_name, floor_name in _CLUSTER_FEATURES:
+        value = _nilm_cluster_feature_value(edge, attribute)
+        stats = cluster.feature_stats[name]
+        if value is None:
+            if stats.median is not None:
+                distances.append(_MISSING_FEATURE_DISTANCE_PENALTY)
             continue
+        if stats.median is None:
+            distances.append(_MISSING_FEATURE_DISTANCE_PENALTY)
+            continue
+        distance = _nilm_normalized_feature_distance(
+            value,
+            stats.median,
+            ratio=getattr(policy, ratio_name),
+            floor=getattr(policy, floor_name),
+        )
+        if distance > policy.max_centroid_distance:
+            return None
+        projected_minimum = min(stats.minimum, value)
+        projected_maximum = max(stats.maximum, value)
+        complete_link_distance = _nilm_normalized_feature_distance(
+            projected_minimum,
+            projected_maximum,
+            ratio=getattr(policy, ratio_name),
+            floor=getattr(policy, floor_name),
+        )
+        if complete_link_distance > policy.max_complete_link_distance:
+            return None
+        distances.append(distance)
+    return sum(distances) / len(distances) if distances else None
 
-        median_w = float(median(candidate.delta_w for candidate in cluster))
-        median_var = _median_optional(candidate.delta_var for candidate in cluster)
-        median_va = _median_optional(candidate.delta_va for candidate in cluster)
-        median_pf = _median_optional(candidate.delta_pf for candidate in cluster)
-        median_leg_a = _median_optional(
-            candidate.leg_a_delta_w for candidate in cluster
+
+def _missing_feature_best_fit_is_ambiguous(
+    edge: NilmEdge,
+    fits: list[tuple[float, _NilmEdgeCluster]],
+    *,
+    policy: NilmClusteringPolicy,
+) -> bool:
+    if len(fits) < 2 or fits[1][0] - fits[0][0] > policy.ambiguous_best_fit_margin:
+        return False
+    first = fits[0][1]
+    second = fits[1][1]
+    for name, attribute, ratio_name, floor_name in _CLUSTER_FEATURES[1:]:
+        if _nilm_cluster_feature_value(edge, attribute) is not None:
+            continue
+        first_value = first.feature_stats[name].median
+        second_value = second.feature_stats[name].median
+        if first_value is None or second_value is None:
+            continue
+        if (
+            _nilm_normalized_feature_distance(
+                first_value,
+                second_value,
+                ratio=getattr(policy, ratio_name),
+                floor=getattr(policy, floor_name),
+            )
+            > policy.max_centroid_distance
+        ):
+            return True
+    return False
+
+
+def _cluster_feature_stats(
+    edges: Iterable[NilmEdge],
+) -> dict[str, _NilmFeatureStats]:
+    members = tuple(edges)
+    total = len(members)
+    stats: dict[str, _NilmFeatureStats] = {}
+    for name, attribute, _ratio_name, _floor_name in _CLUSTER_FEATURES:
+        values = sorted(
+            value
+            for edge in members
+            if (value := _nilm_cluster_feature_value(edge, attribute)) is not None
         )
-        median_leg_b = _median_optional(
-            candidate.leg_b_delta_w for candidate in cluster
+        if not values:
+            stats[name] = _NilmFeatureStats(0, None, None, None, None, 0.0)
+            continue
+        center = float(median(values))
+        stats[name] = _NilmFeatureStats(
+            count=len(values),
+            median=center,
+            mad=float(median(abs(value - center) for value in values)),
+            minimum=values[0],
+            maximum=values[-1],
+            coverage=len(values) / total if total else 0.0,
         )
-        split_phase_type = _dominant_text(
-            candidate.split_phase_type for candidate in cluster
+    return stats
+
+
+def _nilm_cluster_feature_value(edge: NilmEdge, attribute: str) -> float | None:
+    value = _nilm_number(getattr(edge, attribute))
+    return value if value is not None and isfinite(value) else None
+
+
+def _nilm_normalized_feature_distance(
+    first: float,
+    second: float,
+    *,
+    ratio: float,
+    floor: float,
+) -> float:
+    tolerance = max(floor, ratio * max(abs(first), abs(second)))
+    return abs(first - second) / tolerance
+
+
+def _nilm_cluster_edge_key(edge: NilmEdge) -> tuple[Any, ...]:
+    return (
+        *_nilm_cluster_partition(edge),
+        abs(edge.delta_w),
+        edge.delta_w,
+        _optional_sort_key(edge.delta_var),
+        _optional_sort_key(edge.delta_va),
+        _optional_sort_key(edge.delta_pf),
+        _optional_sort_key(edge.leg_a_delta_w),
+        _optional_sort_key(edge.leg_b_delta_w),
+        _optional_sort_key(edge.leg_balance_ratio),
+        edge.timestamp,
+        edge.origin,
+        edge.parent_edge_id or "",
+    )
+
+
+def _nilm_cluster_sort_key(cluster: _NilmEdgeCluster) -> tuple[Any, ...]:
+    return (
+        cluster.direction,
+        cluster.split_phase_type,
+        cluster.dominant_leg,
+        _optional_sort_key(cluster.feature_stats["delta_w"].median),
+        _optional_sort_key(cluster.feature_stats["delta_var"].median),
+        _optional_sort_key(cluster.feature_stats["delta_va"].median),
+        _optional_sort_key(cluster.feature_stats["delta_pf"].median),
+        _nilm_cluster_edge_key(min(cluster.members, key=_nilm_cluster_edge_key)),
+    )
+
+
+def _cluster_membership_key(
+    clusters: Iterable[_NilmEdgeCluster],
+) -> tuple[tuple[tuple[Any, ...], ...], ...]:
+    return tuple(
+        tuple(
+            _nilm_cluster_edge_key(edge)
+            for edge in sorted(cluster.members, key=_nilm_cluster_edge_key)
         )
-        dominant_leg = _dominant_text(candidate.dominant_leg for candidate in cluster)
-        leg_balance_ratio = _median_optional(
-            candidate.leg_balance_ratio for candidate in cluster
+        for cluster in sorted(clusters, key=_nilm_cluster_sort_key)
+    )
+
+
+def _cluster_on_off_support(
+    clusters: tuple[_NilmEdgeCluster, ...],
+    *,
+    policy: NilmClusteringPolicy,
+) -> dict[int, tuple[int, float]]:
+    support: dict[int, tuple[int, float]] = {}
+    used_edges: set[tuple[int, int]] = set()
+    indexed = list(enumerate(clusters))
+    for on_index, on_cluster in indexed:
+        if on_cluster.direction != "on":
+            continue
+        candidates = [
+            (distance, off_index, off_cluster)
+            for off_index, off_cluster in indexed
+            if off_cluster.direction == "off"
+            if (distance := _opposite_cluster_distance(on_cluster, off_cluster, policy))
+            is not None
+        ]
+        candidates.sort(key=lambda item: (item[0], _nilm_cluster_sort_key(item[2])))
+        if not candidates or (
+            len(candidates) > 1
+            and candidates[1][0] - candidates[0][0] <= policy.ambiguous_best_fit_margin
+        ):
+            continue
+        _distance, off_index, off_cluster = candidates[0]
+        pairs = 0
+        for member_index, on_edge in enumerate(
+            sorted(on_cluster.members, key=_nilm_cluster_edge_key)
+        ):
+            if (on_index, member_index) in used_edges:
+                continue
+            available = [
+                (candidate_index, off_edge)
+                for candidate_index, off_edge in enumerate(
+                    sorted(off_cluster.members, key=_nilm_cluster_edge_key)
+                )
+                if (off_index, candidate_index) not in used_edges
+                if timedelta(seconds=30)
+                <= off_edge.timestamp - on_edge.timestamp
+                <= timedelta(hours=12)
+            ]
+            if not available:
+                continue
+            candidate_index, _off_edge = min(
+                available,
+                key=lambda item: (item[1].timestamp, _nilm_cluster_edge_key(item[1])),
+            )
+            used_edges.add((on_index, member_index))
+            used_edges.add((off_index, candidate_index))
+            pairs += 1
+        if not pairs:
+            continue
+        on_support = (2.0 * pairs) / (
+            len(on_cluster.members) + len(off_cluster.members)
         )
-        confidence = min(0.95, 0.6 + ((len(cluster) - 3) * 0.1))
-        direction = cluster[0].direction
-        signatures.append(
-            NilmSignature(
-                signature_id=f"{direction}-{index}",
-                median_delta_w=median_w,
-                median_delta_var=median_var,
-                median_delta_va=median_va,
-                median_delta_pf=median_pf,
-                occurrence_count=len(cluster),
-                confidence=confidence,
-                median_leg_a_delta_w=median_leg_a,
-                median_leg_b_delta_w=median_leg_b,
-                leg_balance_ratio=leg_balance_ratio,
-                dominant_leg=dominant_leg,
-                split_phase_type=split_phase_type,
+        support[id(on_cluster)] = (pairs, on_support)
+        support[id(off_cluster)] = (pairs, on_support)
+    return support
+
+
+def _opposite_cluster_distance(
+    on_cluster: _NilmEdgeCluster,
+    off_cluster: _NilmEdgeCluster,
+    policy: NilmClusteringPolicy,
+) -> float | None:
+    if (
+        on_cluster.split_phase_type != off_cluster.split_phase_type
+        or on_cluster.dominant_leg != off_cluster.dominant_leg
+    ):
+        return None
+    distances: list[float] = []
+    for name, _attribute, ratio_name, floor_name in _CLUSTER_FEATURES:
+        on_value = on_cluster.feature_stats[name].median
+        off_value = off_cluster.feature_stats[name].median
+        if on_value is None or off_value is None:
+            if on_value is not None or off_value is not None:
+                distances.append(_MISSING_FEATURE_DISTANCE_PENALTY)
+            continue
+        distance = _nilm_normalized_feature_distance(
+            abs(on_value),
+            abs(off_value),
+            ratio=getattr(policy, ratio_name),
+            floor=getattr(policy, floor_name),
+        )
+        if distance > policy.max_centroid_distance:
+            return None
+        distances.append(distance)
+    return sum(distances) / len(distances) if distances else None
+
+
+def _signature_from_cluster(
+    cluster: _NilmEdgeCluster,
+    *,
+    index: int,
+    policy: NilmClusteringPolicy,
+    day_key: Callable[[datetime], date],
+    paired_occurrence_count: int,
+    on_off_support: float,
+) -> NilmSignature:
+    stats = cluster.feature_stats
+    members = tuple(cluster.members)
+    day_count = len({day_key(edge.timestamp) for edge in members})
+    span_seconds = (
+        (
+            max(edge.timestamp for edge in members)
+            - min(edge.timestamp for edge in members)
+        ).total_seconds()
+        if len(members) > 1
+        else 0.0
+    )
+    radii = [
+        _nilm_normalized_feature_distance(
+            feature.minimum,
+            feature.maximum,
+            ratio=getattr(policy, ratio_name),
+            floor=getattr(policy, floor_name),
+        )
+        for name, _attribute, ratio_name, floor_name in _CLUSTER_FEATURES
+        if (feature := stats[name]).minimum is not None
+        and feature.maximum is not None
+    ]
+    radius = max(radii, default=0.0)
+    feature_coverage = (
+        sum(
+            stats[name].coverage
+            for name in (
+                "delta_var",
+                "delta_va",
+                "delta_pf",
+                "leg_a",
+                "leg_b",
+                "balance",
             )
         )
+        + _cluster_topology_coverage(members)
+    ) / 7.0
+    topology_consistency = _cluster_topology_consistency(members)
+    count_score = min(1.0, len(members) / 8.0)
+    day_score = min(1.0, day_count / 4.0)
+    span_score = min(1.0, span_seconds / timedelta(days=7).total_seconds())
+    dispersion_score = max(0.0, 1.0 - radius)
+    data_quality_score = (feature_coverage + topology_consistency) / 2.0
+    evidence_strength = (0.5 * count_score) + (0.4 * day_score) + (0.1 * span_score)
+    model_fit = (0.7 * dispersion_score) + (0.3 * data_quality_score)
+    intrinsic_confidence = (
+        (0.25 * count_score)
+        + (0.20 * day_score)
+        + (0.05 * span_score)
+        + (0.25 * dispersion_score)
+        + (0.10 * data_quality_score)
+        + (0.15 * on_off_support)
+    )
+    if day_count <= 1:
+        intrinsic_confidence = min(intrinsic_confidence, 0.65)
+    if on_off_support <= 0.0:
+        intrinsic_confidence = min(intrinsic_confidence, 0.75)
+    intrinsic_confidence = min(intrinsic_confidence, 0.95)
+    return NilmSignature(
+        signature_id=f"{cluster.direction}-{index}",
+        median_delta_w=round(stats["delta_w"].median or 0.0, 3),
+        median_delta_var=_round_optional(stats["delta_var"].median),
+        median_delta_va=_round_optional(stats["delta_va"].median),
+        median_delta_pf=_round_optional(stats["delta_pf"].median),
+        occurrence_count=len(members),
+        confidence=round(min(intrinsic_confidence, 0.90), 3),
+        median_leg_a_delta_w=_round_optional(stats["leg_a"].median),
+        median_leg_b_delta_w=_round_optional(stats["leg_b"].median),
+        leg_balance_ratio=_round_optional(stats["balance"].median),
+        dominant_leg=cluster.dominant_leg,
+        split_phase_type=cluster.split_phase_type,
+        unique_day_count=day_count,
+        observation_span_seconds=round(span_seconds, 3),
+        dispersion_w=round(stats["delta_w"].mad or 0.0, 3),
+        dispersion_var=_round_optional(stats["delta_var"].mad),
+        dispersion_va=_round_optional(stats["delta_va"].mad),
+        dispersion_pf=_round_optional(stats["delta_pf"].mad),
+        normalized_cluster_radius=round(radius, 3),
+        feature_coverage=round(feature_coverage, 3),
+        topology_consistency=round(topology_consistency, 3),
+        paired_occurrence_count=paired_occurrence_count,
+        on_off_support=round(on_off_support, 3),
+        evidence_strength=round(evidence_strength, 3),
+        model_fit=round(model_fit, 3),
+        intrinsic_confidence=round(intrinsic_confidence, 3),
+        confidence_kind="evidence",
+    )
 
-    return signatures
+
+def _cluster_topology_consistency(edges: Iterable[NilmEdge]) -> float:
+    values = [
+        (_nilm_cluster_split_phase_type(edge), _nilm_cluster_dominant_leg(edge))
+        for edge in edges
+    ]
+    if not values:
+        return 0.0
+    return max(values.count(value) for value in set(values)) / len(values)
+
+
+def _cluster_topology_coverage(edges: Iterable[NilmEdge]) -> float:
+    values = tuple(edges)
+    if not values:
+        return 0.0
+    return sum(
+        _nilm_cluster_split_phase_type(edge)
+        not in {"unknown", "missing_leg_data"}
+        for edge in values
+    ) / len(values)
 
 
 def classify_signature(signature: NilmSignature) -> str:
@@ -2998,6 +3641,18 @@ def _optional_value_bucket(value: float | None, step: float) -> str:
     return "unknown" if value is None else _abs_value_bucket(value, step)
 
 
+def _optional_value_bucket_v2(value: float | None, step: float) -> str:
+    """Return a v2 bucket without losing 0.025 PF precision."""
+    if value is None:
+        return "unknown"
+    bucket_start = (abs(float(value)) // step) * step
+    bucket_end = bucket_start + step
+    if step >= 1.0:
+        return f"{bucket_start:.0f}-{bucket_end:.0f}"
+    precision = 3 if step < 0.05 else 2
+    return f"{bucket_start:.{precision}f}-{bucket_end:.{precision}f}"
+
+
 def _optional_sort_key(value: float | None) -> tuple[int, float]:
     return (value is None, float(value or 0.0))
 
@@ -3154,68 +3809,6 @@ def _event_power_w_with_source(event: CircuitEvent) -> tuple[float, str] | None:
     return None
 
 
-def _edge_similar(edge: NilmEdge, reference: NilmEdge) -> bool:
-    if edge.direction != reference.direction:
-        return False
-    if not _split_phase_types_compatible(edge, reference):
-        return False
-    if not _within_ratio(edge.delta_w, reference.delta_w, 0.2):
-        return False
-    return _optional_edge_features_compatible(edge, reference)
-
-
-def _optional_edge_features_compatible(
-    edge: NilmEdge,
-    reference: NilmEdge,
-) -> bool:
-    for value, expected, tolerance_ratio, floor in (
-        (edge.delta_var, reference.delta_var, 0.5, 75.0),
-        (edge.delta_va, reference.delta_va, 0.35, 75.0),
-        (edge.delta_pf, reference.delta_pf, 0.5, 0.1),
-    ):
-        score = _nilm_optional_magnitude_score(
-            value,
-            expected,
-            tolerance_ratio=tolerance_ratio,
-            floor=floor,
-        )
-        if (
-            score is None
-            and value is not None
-            and expected is not None
-            and (abs(float(value)) >= floor or abs(float(expected)) >= floor)
-        ):
-            return False
-    return True
-
-
-def _edge_similar_to_cluster(edge: NilmEdge, cluster: list[NilmEdge]) -> bool:
-    reference = NilmEdge(
-        timestamp=cluster[0].timestamp,
-        delta_w=float(median(candidate.delta_w for candidate in cluster)),
-        delta_var=_median_optional(candidate.delta_var for candidate in cluster),
-        delta_va=_median_optional(candidate.delta_va for candidate in cluster),
-        delta_pf=_median_optional(candidate.delta_pf for candidate in cluster),
-        direction=cluster[0].direction,
-        split_phase_type=_dominant_text(
-            candidate.split_phase_type for candidate in cluster
-        ),
-        dominant_leg=_dominant_text(candidate.dominant_leg for candidate in cluster),
-    )
-    if not _split_phase_types_compatible(edge, reference):
-        return False
-    if not _optional_edge_features_compatible(edge, reference):
-        return False
-    return _edge_similar(edge, reference) or any(
-        _edge_similar(edge, candidate) for candidate in cluster
-    )
-
-
-def _within_ratio(value: float, reference: float, tolerance_ratio: float) -> bool:
-    tolerance = max(abs(reference) * tolerance_ratio, 25.0)
-    return abs(value - reference) <= tolerance
-
-
 def _split_phase_topology(
     leg_a_delta_w: float | None,
     leg_b_delta_w: float | None,
@@ -3284,20 +3877,6 @@ def _dominant_leg(
     if abs_b > abs_a:
         return "b"
     return "balanced"
-
-
-def _median_optional(values: Iterable[float | None]) -> float | None:
-    usable = [float(value) for value in values if value is not None]
-    if not usable:
-        return None
-    return round(float(median(usable)), 3)
-
-
-def _dominant_text(values: Iterable[str]) -> str:
-    usable = [value for value in values if value and value != "unknown"]
-    if not usable:
-        return "unknown"
-    return sorted(multimode(usable))[0]
 
 
 def _split_phase_types_compatible(edge: NilmEdge, reference: NilmEdge) -> bool:

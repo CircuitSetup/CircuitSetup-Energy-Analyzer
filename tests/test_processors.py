@@ -8654,6 +8654,30 @@ def test_assignment_drift_retains_all_reviewed_fingerprints_across_restart() -> 
     assert restored["model_status"] == "needs_review"
 
 
+def test_legacy_assignment_v2_alias_retains_model_drift() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _ensure_nilm_assignment_fingerprint,
+        _record_assignment_model_drift,
+    )
+
+    assignment = {
+        "signature_fingerprints": ["legacy-pump"],
+        "transition_prototypes": [{
+            "direction": "on", "delta_w": 80.0, "spread_w": 2.0,
+        }],
+    }
+    assert _ensure_nilm_assignment_fingerprint(assignment, "revision=2|pump")
+    start = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+    for index in range(3):
+        _record_assignment_model_drift(assignment, "revision=2|pump", [
+            NilmEdge(start + timedelta(minutes=index), 140.0, 0.0, 140.0, 0.0, "on")
+        ])
+
+    assert assignment["model_status"] == "needs_review"
+    assert "revision=2|pump" in assignment["model_drift_edges_by_fingerprint"]
+
+
 def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
@@ -10451,6 +10475,216 @@ def test_signature_payload_rebinds_confirmed_placeholder_owner() -> None:
     assert payload["assignment_id"] == "pump"
     assert "unassigned" not in owner["signature_fingerprints"]
     assert payload["feedback_fingerprint"] in owner["signature_fingerprints"]
+
+
+def test_nilm_signature_payload_migrates_unique_v1_metadata() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint_v1,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    signature = NilmSignature("on-2", 500.0, 100.0, occurrence_count=3)
+    context = ProcessingContext(
+        now=datetime(2026, 8, 4, 12, 5, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "pool-pump",
+                        "signature_fingerprints": [
+                            nilm_signature_fingerprint_v1(signature)
+                        ],
+                    }
+                ]
+            },
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-1",
+                        "feedback_fingerprint": nilm_signature_fingerprint_v1(
+                            signature
+                        ),
+                        "median_delta_w": 500.0,
+                        "median_delta_var": 100.0,
+                        "user_label": "Pool pump",
+                        "ignored": True,
+                    }
+                ]
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+
+    payloads = processor._nilm_signature_payloads("mains", [signature], context)
+
+    assert len(payloads) == 1
+    assert payloads[0]["signature_id"] == "on-2"
+    assert payloads[0]["user_label"] == "Pool pump"
+    assert payloads[0]["ignored"] is True
+    assert payloads[0]["fingerprint_revision"] == 2
+    assert payloads[0]["legacy_feedback_fingerprint"] == (
+        nilm_signature_fingerprint_v1(signature)
+    )
+    assert payloads[0]["feedback_fingerprint"] in (
+        context.store_data.nilm_appliance_assignments_by_circuit["mains"][0][
+            "signature_fingerprints"
+        ]
+    )
+
+
+def test_nilm_signature_payload_retains_ambiguous_legacy_split_for_review() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint_v1,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    children = [
+        NilmSignature("on-1", 500.0, 100.0, occurrence_count=3),
+        NilmSignature("on-2", 500.0, 150.0, occurrence_count=3),
+    ]
+    legacy = nilm_signature_fingerprint_v1(children[0])
+    assert legacy == nilm_signature_fingerprint_v1(children[1])
+    context = ProcessingContext(
+        now=datetime(2026, 8, 4, 12, 5, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-old",
+                        "feedback_fingerprint": legacy,
+                        "median_delta_w": 500.0,
+                        "median_delta_var": 125.0,
+                        "user_label": "Do not duplicate me",
+                        "ignored": True,
+                    }
+                ]
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+
+    payloads = processor._nilm_signature_payloads("mains", children, context)
+    by_id = {payload["signature_id"]: payload for payload in payloads}
+
+    assert "user_label" not in by_id["on-1"]
+    assert "ignored" not in by_id["on-2"]
+    assert by_id["on-1"]["migration_status"] == "ambiguous_split"
+    assert by_id["on-2"]["review_state"] == "needs_review"
+    retained = by_id["on-old"]
+    assert retained["user_label"] == "Do not duplicate me"
+    assert retained["ignored"] is True
+    assert retained["migration_status"] == "ambiguous_split"
+    assert retained["review_state"] == "needs_review"
+    assert len(retained["split_into_fingerprints"]) == 2
+
+
+def test_nilm_signature_payload_enriches_confidence_from_validation_precision() -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSignature,
+        nilm_signature_fingerprint,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    signature = NilmSignature(
+        "on-1",
+        500.0,
+        occurrence_count=3,
+        unique_day_count=3,
+        on_off_support=0.8,
+        intrinsic_confidence=0.5,
+        confidence=0.5,
+    )
+    fingerprint = nilm_signature_fingerprint(signature)
+    context = ProcessingContext(
+        now=datetime(2026, 8, 4, 12, 5, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "pool-pump",
+                        "signature_fingerprints": [fingerprint],
+                        "validation_evaluable_session_count": 3,
+                        "validation_precision": 0.9,
+                    }
+                ]
+            }
+        ),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _id: 20.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+    )
+
+    payload = processor._nilm_signature_payloads("mains", [signature], context)[0]
+
+    assert payload["validated_precision"] == 0.9
+    assert payload["confidence"] == 0.54
+    assert payload["confidence_kind"] == "evidence"
 
 
 def test_assigned_signature_drives_w_var_component_runtime() -> None:
