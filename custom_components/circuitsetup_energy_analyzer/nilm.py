@@ -42,6 +42,7 @@ _NILM_STATE_SPLIT_MIN_EFFECTIVE_SUPPORT = 8.0
 _NILM_STATE_MIN_EFFECTIVE_SUPPORT = 3.0
 _NILM_STATE_MIN_DISTINCT_DAYS = 2
 _NILM_STATE_MIN_DISPERSION_REDUCTION = 0.30
+_NILM_ENERGY_MEAN_MIN_QUALITY = 0.70
 NILM_DURATION_MIN_EFFECTIVE_SUPPORT = 5.0
 NILM_DURATION_MIN_DISTINCT_DAYS = 3
 NILM_DURATION_MAX_CENTRAL_RATIO = 100.0
@@ -74,6 +75,7 @@ class _NormalizedAssignmentEvidence:
     issues: tuple[str, ...] = ()
     on_delta_var: float | None = None
     off_delta_var: float | None = None
+    power_coverage: float | None = None
 
 
 def build_nilm_assignment_model(
@@ -574,6 +576,7 @@ def _evidence_record(
     local_day_key: Callable[[datetime], str] | None = None,
 ) -> _NormalizedAssignmentEvidence:
     timestamp = _nilm_datetime(source.get("end") or source.get("start"))
+    coverage = _model_number(source.get("power_coverage"))
     return _NormalizedAssignmentEvidence(
         evidence_id,
         source_type,
@@ -594,6 +597,9 @@ def _evidence_record(
         quality,
         inferred_stop,
         issues,
+        power_coverage=(
+            min(max(coverage, 0.0), 1.0) if coverage is not None else None
+        ),
     )
 
 
@@ -811,6 +817,13 @@ def _state_evidence_records(
         and record.energy_kwh is not None
         and record.duration_s is not None
         and record.duration_s > 0
+        and record.energy_source == "measured"
+        and record.quality >= _NILM_ENERGY_MEAN_MIN_QUALITY
+        and (
+            record.power_coverage is None
+            or record.power_coverage >= DEFAULT_THRESHOLDS.complete_energy_coverage
+        )
+        and "power_energy_disagreement" not in record.issues
     ]
     return [*plateau, *derived]
 

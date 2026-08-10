@@ -10749,10 +10749,14 @@ def test_nilm_runtime_retired_assignment_can_only_return_to_off() -> None:
              "from_state_id": "active_2", "to_state_id": "active_1",
              "from_state_w": 200.0, "to_state_w": 100.0,
              "delta_w": -100.0, "spread_w": 2.0, "sample_count": 4},
+            {"id": "load-stop", "kind": "stop", "direction": "off",
+             "from_state_id": "active_2", "to_state_id": "off",
+             "from_state_w": 200.0, "to_state_w": 0.0,
+             "delta_w": -200.0, "spread_w": 2.0, "sample_count": 4},
         ],
     }
     runtime, _, completed, accepted = reconcile_component_runtime(
-        source_power_w=100.0,
+        source_power_w=200.0,
         timestamp=now,
         assignments=(assignment,),
         runtime={
@@ -10771,6 +10775,102 @@ def test_nilm_runtime_retired_assignment_can_only_return_to_off() -> None:
     assert accepted == []
     assert completed == []
     assert runtime["load"]["current_state_id"] == "active_2"
+
+    _, _, completed, accepted = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=now + timedelta(minutes=1),
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(
+            NilmEdge(
+                now + timedelta(minutes=1), -200.0, 0.0, -200.0, 0.0, "off"
+            ),
+        ),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert len(accepted) == 1
+    assert len(completed) == 1
+
+
+def test_nilm_runtime_bootstraps_reviewable_active_state_path_from_observed_edge() -> (
+    None
+):
+    """A reviewed session can seed real active transitions before a prototype exists."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "dryer",
+        "lifecycle_state": "validated",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 100.0, 200.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 100.0, "spread_w": 2.0},
+            {"id": "active_2", "kind": "active", "power_w": 200.0, "spread_w": 2.0},
+        ],
+        "transition_prototypes": [
+            {"kind": "start", "direction": "on", "from_state_id": "off",
+             "to_state_id": "active_1", "from_state_w": 0.0,
+             "to_state_w": 100.0, "delta_w": 100.0, "spread_w": 2.0,
+             "sample_count": 4},
+            {"kind": "stop", "direction": "off", "from_state_id": "active_2",
+             "to_state_id": "off", "from_state_w": 200.0,
+             "to_state_w": 0.0, "delta_w": -200.0, "spread_w": 2.0,
+             "sample_count": 4},
+        ],
+    }
+    runtime: dict[str, dict[str, object]] = {
+        "dryer": {"status": "off", "state_power_w": 0.0,
+                  "estimated_power_w": 0.0, "consistent": True}
+    }
+
+    runtime, previous, _, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=started_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(started_at, 100.0, 0.0, 100.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+    assert accepted
+
+    raised_at = started_at + timedelta(minutes=1)
+    runtime, previous, _, accepted = reconcile_component_runtime(
+        source_power_w=200.0,
+        timestamp=raised_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(raised_at, 100.0, 0.0, 100.0, 0.0, "on"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation=previous,
+    )
+    assert accepted == []
+    assert runtime["dryer"]["current_state_id"] == "active_2"
+
+    stopped_at = started_at + timedelta(minutes=2)
+    _, _, completed, accepted = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=stopped_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(stopped_at, -200.0, 0.0, -200.0, 0.0, "off"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation=previous,
+    )
+
+    assert accepted
+    assert [item["state_id"] for item in completed[0]["state_path"]] == [
+        "active_1", "active_2"
+    ]
 
 
 def test_nilm_runtime_keeps_full_dwell_summary_when_state_path_is_bounded() -> None:

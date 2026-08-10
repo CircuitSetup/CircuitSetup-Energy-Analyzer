@@ -61,7 +61,8 @@ def _multistate_intervals(values: list[tuple[str, float]]) -> list[dict[str, obj
     ]
 
 
-def test_assignment_model_learns_two_deterministic_active_plateau_states() -> None:
+def test_assignment_model_does_not_synthesize_active_transitions_from_plateaus(
+) -> None:
     intervals = _multistate_intervals(
         [
             (f"{day:02}", power)
@@ -373,6 +374,47 @@ def test_assignment_model_learns_states_from_qualified_energy_mean_evidence() ->
 
     assert model["model_kind"] == "multi_state"
     assert [state["id"] for state in model["states"]] == ["off", "active_1", "active_2"]
+
+
+def test_assignment_model_rejects_low_coverage_energy_means_for_state_learning() -> (
+    None
+):
+    intervals = [
+        {
+            "interval_id": f"energy-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "evidence_schema_version": 2,
+            "duration_s": 600,
+            "measured_energy_kwh": power * 600 / 3_600_000,
+            "power_coverage": 0.10,
+            "evidence_confidence": 1.0,
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    assert model["model_kind"] == "binary"
+    assert [state["id"] for state in model["states"]] == ["off", "running"]
 
 
 def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -> None:

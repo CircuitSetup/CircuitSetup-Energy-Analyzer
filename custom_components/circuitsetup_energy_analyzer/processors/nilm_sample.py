@@ -1068,6 +1068,15 @@ def reconcile_component_runtime(
             helper_conflict=helper_conflict,
         )
         if not result.accepted:
+            if _bootstrap_observed_active_state_transition(
+                models,
+                next_runtime,
+                edge,
+                source_power_w,
+                standby_w,
+                candidates,
+            ):
+                continue
             if result.reason == "ambiguous":
                 ambiguous_event_increment += 1
                 evidence_diagnostics[
@@ -2077,9 +2086,9 @@ def _runtime_legal_transitions(
         for prototype in model.transition_prototypes
         if model.lifecycle_state.strip().lower()
         not in {"hidden", "ignored", "rejected", "converted"}
-        if not (
-            model.lifecycle_state.strip().lower() == "retired"
-            and prototype.to_state_id == "off"
+        if (
+            model.lifecycle_state.strip().lower() != "retired"
+            or prototype.to_state_id == "off"
         )
         if (current := current_states_w.get(model.assignment_id)) is not None
         if isfinite(current)
@@ -2101,6 +2110,107 @@ def _runtime_legal_transitions(
             )
         )
         if abs(current - prototype.from_state_w) <= 1e-6
+    )
+
+
+def _bootstrap_observed_active_state_transition(
+    models: Iterable[NilmAssignmentModel],
+    runtime: dict[str, dict[str, Any]],
+    edge: NilmEdge,
+    source_power_w: Any,
+    standby_w: float,
+    candidates: Iterable[NilmTransitionPrototype],
+) -> bool:
+    """Record one unambiguous observed state change before it has a prototype."""
+    if tuple(candidates):
+        return False
+    source_power = _finite_float(source_power_w)
+    if source_power is None:
+        return False
+    active = [
+        model
+        for model in models
+        if runtime.get(model.assignment_id, {}).get("status")
+        == NilmComponentStatus.ON
+    ]
+    if len(active) != 1:
+        return False
+    model = active[0]
+    lifecycle = model.lifecycle_state.strip().lower()
+    payload = runtime[model.assignment_id]
+    if (
+        lifecycle not in {"assigned", "validated", "published"}
+        or model.model_confidence < 0.70
+        or not payload.get("session_id")
+        or not payload.get("session_start")
+        or len(model.state_powers_by_id) < 3
+    ):
+        return False
+    current_id = str(payload.get("current_state_id") or "").strip()
+    current_power = _finite_float(payload.get("current_state_power_w"))
+    expected_current = model.state_powers_by_id.get(current_id)
+    if (
+        not current_id
+        or current_id == "off"
+        or current_power is None
+        or expected_current is None
+        or abs(current_power - expected_current) > 1e-6
+    ):
+        return False
+    matches = [
+        (state_id, state_power)
+        for state_id, state_power in model.state_powers_by_id.items()
+        if state_id != "off"
+        and state_id != current_id
+        and _runtime_observed_state_edge_matches(
+            edge,
+            current_power,
+            state_power,
+            source_power - standby_w,
+        )
+    ]
+    if len(matches) != 1:
+        return False
+    target_id, target_power = matches[0]
+    _record_runtime_state_dwell(payload, edge.timestamp)
+    payload.update({
+        "state_power_w": target_power,
+        "current_state_id": target_id,
+        "current_state_power_w": target_power,
+        "state_since": edge.timestamp.isoformat(),
+        "estimated_power_w": target_power,
+        "consistent": True,
+        "last_observed": edge.timestamp.isoformat(),
+    })
+    state_path = [
+        dict(item)
+        for item in _list_items(payload.get("state_path"))
+        if isinstance(item, Mapping)
+    ]
+    if not state_path or state_path[-1].get("state_id") != target_id:
+        state_path.append({
+            "state_id": target_id,
+            "started_at": edge.timestamp.isoformat(),
+            "power_w": target_power,
+            "source": "observed_bootstrap",
+        })
+    payload["state_path"] = state_path[-_NILM_RUNTIME_STATE_PATH_LIMIT:]
+    return True
+
+
+def _runtime_observed_state_edge_matches(
+    edge: NilmEdge,
+    current_power: float,
+    target_power: float,
+    observed_power: float,
+) -> bool:
+    expected_delta = target_power - current_power
+    if expected_delta == 0 or edge.delta_w * expected_delta <= 0:
+        return False
+    tolerance = max(15.0, 0.15 * max(abs(current_power), abs(target_power)))
+    return (
+        abs(edge.delta_w - expected_delta) <= tolerance
+        and abs(observed_power - target_power) <= tolerance
     )
 
 
