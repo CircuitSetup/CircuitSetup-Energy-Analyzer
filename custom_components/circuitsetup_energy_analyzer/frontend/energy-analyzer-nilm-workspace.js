@@ -2600,7 +2600,7 @@ export function createNilmWorkspaceMethods({
         <div class="metric">
           <span>${this._escape(item.timestamp || "")}</span>
           <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatMetricValue(item.delta_w))} W</strong>
-          <p class="muted">${this._escape(item.split_phase_type || this._panelText("common.unknown"))}</p>
+          <p class="muted">${this._escape(item.split_phase_type || this._panelText("common.unknown"))} · ${this._escape(this._panelText("nilm_workspace.fact_dominant_leg"))}: ${this._escape(String(item.dominant_leg || "").trim() || this._panelText("nilm_workspace.no_dominant_leg"))}</p>
         </div>
         `, this._panelText("nilm_workspace.edges_description"))}
     </section>`;

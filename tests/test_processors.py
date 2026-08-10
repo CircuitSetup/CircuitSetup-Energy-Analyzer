@@ -8303,6 +8303,7 @@ def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
         parent_edge_id="mains:2026-06-11T12:00:00+00:00:500",
         explained_known_circuit_ids=("fridge",),
         transition_kind="ramp",
+        dominant_leg=None,
     )
 
     payload = _nilm_edge_to_storage(residual)
@@ -8312,6 +8313,7 @@ def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
     assert payload["parent_edge_id"] == residual.parent_edge_id
     assert payload["explained_known_circuit_ids"] == ["fridge"]
     assert payload["transition_kind"] == "ramp"
+    assert payload["dominant_leg"] is None
     assert _nilm_edges_from_storage([payload], max_items=10) == [residual]
 
     legacy = dict(payload)

@@ -1931,6 +1931,7 @@
         "fact_seen_count": "Seen count",
         "fact_voltage_class": "Voltage class",
         "fact_dominant_leg": "Dominant leg",
+        "no_dominant_leg": "No dominant leg",
         "fact_known_load_overlap": "Known-load overlap",
         "fact_why_grouped": "Why grouped",
         "fact_last_seen": "Last seen",

@@ -3444,7 +3444,11 @@ def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
         "leg_a_delta_w": _finite_float(edge.leg_a_delta_w),
         "leg_b_delta_w": _finite_float(edge.leg_b_delta_w),
         "leg_balance_ratio": _finite_float(edge.leg_balance_ratio),
-        "dominant_leg": str(edge.dominant_leg or "unknown"),
+        "dominant_leg": (
+            None
+            if edge.dominant_leg is None
+            else str(edge.dominant_leg or "unknown")
+        ),
         "split_phase_type": str(edge.split_phase_type or "unknown"),
     }
     if edge.origin != "aggregate":
@@ -3491,7 +3495,11 @@ def _nilm_edges_from_storage(
                 leg_a_delta_w=_finite_float(value.get("leg_a_delta_w")),
                 leg_b_delta_w=_finite_float(value.get("leg_b_delta_w")),
                 leg_balance_ratio=_finite_float(value.get("leg_balance_ratio")),
-                dominant_leg=str(value.get("dominant_leg") or "unknown"),
+                dominant_leg=(
+                    None
+                    if "dominant_leg" in value and value["dominant_leg"] is None
+                    else str(value.get("dominant_leg") or "unknown")
+                ),
                 split_phase_type=str(value.get("split_phase_type") or "unknown"),
                 origin=str(value.get("origin") or "aggregate"),
                 parent_edge_id=(
